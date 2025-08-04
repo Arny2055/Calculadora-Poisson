@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <title>Calculadora Poisson de Apuestas</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      padding: 20px;
+      background: #121212;
+      color: #f0f0f0;
+    }
+
+    .container {
+      max-width: 900px;
+      margin: auto;
+      background: #1e1e1e;
+      padding: 20px;
+      border-radius: 12px;
+      box-shadow: 0 0 15px rgba(0, 0, 0, 0.7);
+    }
+
+    h2 {
+      text-align: center;
+      color: #ffffff;
+    }
+
+    input,
+    button,
+    select {
+      padding: 8px;
+      margin: 5px 10px 10px 0;
+      font-size: 14px;
+      background: #2c2c2c;
+      color: #f0f0f0;
+      border: 1px solid #444;
+      border-radius: 5px;
+    }
+
+    input::placeholder {
+      color: #aaa;
+    }
+
+    button:hover {
+      background-color: #444;
+      cursor: pointer;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+      margin-bottom: 20px;
+      color: #f0f0f0;
+    }
+
+    th,
+    td {
+      padding: 6px;
+      border: 1px solid #333;
+      text-align: center;
+    }
+
+    th {
+      background: #2a2a2a;
+    }
+
+    td {
+      background: #222;
+    }
+
+    /* Verde fosforescente para resaltar la celda con la probabilidad más alta */
+    .highlight {
+      background-color: #39FF14 !important; /* verde fosforescente */
+      font-weight: 900;
+      color: #000 !important; /* texto negro para contraste */
+    }
+
+    .small-input {
+      width: 60px;
+      background: #2c2c2c;
+      color: #f0f0f0;
+      border: 1px solid #444;
+      border-radius: 5px;
+    }
+
+    .btn-group {
+      margin-bottom: 15px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h2>Calculadora Poisson de Apuestas</h2>
+    <button onclick="window.location.href='historial.html'">Ver historial</button><br />
+    <input type="text" id="nombreLocal" placeholder="Nombre equipo Local" style="width:200px" />
+    <input type="number" id="golesLocal" placeholder="Promedio Local" step="0.01" />
+    <input type="text" id="nombreVisita" placeholder="Nombre equipo Visitante" style="width:200px" />
+    <input type="number" id="golesVisita" placeholder="Promedio Visita" step="0.01" /><br />
+    <input type="number" id="bankroll" placeholder="Bankroll ($)" step="0.01" style="width:120px" value="100" />
+    <button onclick="calcular()">Calcular</button>
+    <button onclick="agregarAlHistorial()">Agregar al historial</button>
+    <button onclick="exportarHistorial()">Exportar historial</button>
+    <button onclick="borrarHistorial()">Borrar historial</button><br />
+
+    <label>
+      <input type="checkbox" id="toggleEV" onchange="calcular()" /> Mostrar Valor Esperado (EV) y Kelly
+    </label>
+    <label for="kellyFrac"> Kelly fraccional:</label>
+    <select id="kellyFrac" onchange="calcular()">
+      <option value="0.05">5%</option>
+      <option value="0.10">10%</option>
+      <option value="0.15">15%</option>
+      <option value="0.20">20%</option>
+      <option value="0.30">30%</option>
+      <option value="0.35">35%</option>
+      <option value="0.40">40%</option>
+      <option value="0.45">45%</option>
+      <option value="0.25" selected>25%</option>
+    </select>
+
+    <div id="resultado"></div>
+  </div>
+
+  <script>
+    function factorial(n) {
+      return n === 0 ? 1 : n * factorial(n - 1);
+    }
+
+    function poisson(k, lambda) {
+      return (Math.pow(lambda, k) * Math.exp(-lambda)) / factorial(k);
+    }
+
+    function cuotaImplicita(p) {
+      return p > 0 ? (1 / p).toFixed(2) : "-";
+    }
+
+    function valueBet(prob, cuota) {
+      return ((prob * cuota) - 1).toFixed(2);
+    }
+
+    function kelly(prob, cuota, fraction = 1) {
+      const raw = ((cuota - 1) * prob - (1 - prob)) / (cuota - 1);
+      return raw > 0 ? raw * fraction : 0;
+    }
+
+    let cuotasGuardadas = {};
+    let exportData = [];
+
+    function calcular() {
+      const nombreLocal = document.getElementById("nombreLocal").value.trim();
+      const nombreVisita = document.getElementById("nombreVisita").value.trim();
+      const lambdaL = parseFloat(document.getElementById("golesLocal").value);
+      const lambdaV = parseFloat(document.getElementById("golesVisita").value);
+      const showEV = document.getElementById("toggleEV").checked;
+      const kellyFrac = parseFloat(document.getElementById("kellyFrac").value);
+      const bankroll = parseFloat(document.getElementById("bankroll").value);
+
+      if (!nombreLocal) {
+        alert("Por favor, ingresa el nombre del equipo local.");
+        return;
+      }
+      if (!nombreVisita) {
+        alert("Por favor, ingresa el nombre del equipo visitante.");
+        return;
+      }
+      if (isNaN(lambdaL)) {
+        alert("Por favor, ingresa el promedio de goles del equipo local.");
+        return;
+      }
+      if (isNaN(lambdaV)) {
+        alert("Por favor, ingresa el promedio de goles del equipo visitante.");
+        return;
+      }
+      if (isNaN(bankroll) || bankroll <= 0) {
+        alert("Por favor, ingresa un bankroll válido mayor a cero.");
+        return;
+      }
+
+      let pLocal = [],
+        pVisita = [];
+      for (let i = 0; i <= 5; i++) {
+        pLocal[i] = poisson(i, lambdaL);
+        pVisita[i] = poisson(i, lambdaV);
+      }
+
+      let winL = 0,
+        draw = 0,
+        winV = 0;
+      for (let i = 0; i <= 5; i++) {
+        for (let j = 0; j <= 5; j++) {
+          if (i > j) winL += pLocal[i] * pVisita[j];
+          else if (i === j) draw += pLocal[i] * pVisita[j];
+          else winV += pLocal[i] * pVisita[j];
+        }
+      }
+
+      let prob1x2 = [winL, draw, winV];
+      let max1x2 = Math.max(...prob1x2);
+
+      let overU = { 0.5: 0, 1.5: 0, 2.5: 0, 3.5: 0 };
+      for (let i = 0; i <= 5; i++) {
+        for (let j = 0; j <= 5; j++) {
+          let total = i + j;
+          for (let th in overU) {
+            if (total <= parseFloat(th)) overU[th] += pLocal[i] * pVisita[j];
+          }
+        }
+      }
+      let overs = [0.5, 1.5, 2.5, 3.5].map((th) => 1 - overU[th]);
+      let maxOver = Math.max(...overs);
+
+      let btts = 0;
+      for (let i = 1; i <= 5; i++) {
+        for (let j = 1; j <= 5; j++) {
+          btts += pLocal[i] * pVisita[j];
+        }
+      }
+      let probBTTS = [btts];
+      let maxBTTS = btts;
+
+      exportData = []; // Reset exportData before filling
+
+      let html = "<table><tr><th>Grupo</th><th>Opción</th><th>Prob (%)</th><th>Cuota Implícita</th>";
+      if (showEV)
+        html +=
+          "<th>Cuota de la Bookie</th><th>EV</th><th>Kelly (" +
+          kellyFrac * 100 +
+          "%)</th><th>Apostar ($)</th>";
+      html += "</tr>";
+
+      const filas = [
+        ["1X2", [nombreLocal, "Empate", nombreVisita], prob1x2, max1x2],
+        ["Over/Under", ["Over 0.5", "Over 1.5", "Over 2.5", "Over 3.5"], overs, maxOver],
+        ["Ambos Anotan", ["Sí"], probBTTS, maxBTTS],
+      ];
+
+      filas.forEach(([grupo, labels, probs, max], grupoIndex) => {
+        labels.forEach((label, idx) => {
+          const p = probs[idx];
+          const isMax = p === max ? "highlight" : "";
+
+          const id = `bookie_${grupoIndex}_${idx}`;
+          let cuotaGuardada = cuotasGuardadas[id] || "";
+
+          if (isMax) {
+            html += `<tr>
+              <td class="highlight">${grupo}</td>
+              <td class="highlight">${label}</td>
+              <td class="highlight">${(p * 100).toFixed(2)}</td>
+              <td class="highlight">${cuotaImplicita(p)}</td>`;
+          } else {
+            html += `<tr>
+              <td>${grupo}</td>
+              <td>${label}</td>
+              <td>${(p * 100).toFixed(2)}</td>
+              <td>${cuotaImplicita(p)}</td>`;
+          }
+
+          if (showEV) {
+            html += `<td class="${isMax}"><input type='text' inputmode='decimal' pattern='[0-9]+(\\.[0-9]{1,2})?' id='${id}' class='small-input' value='${cuotaGuardada}' onkeydown='guardarCuotaEnter(event, "${id}")'></td>`;
+
+            const cuotaBookie = parseFloat(cuotasGuardadas[id]);
+            const ev = !isNaN(cuotaBookie) ? valueBet(p, cuotaBookie) : "-";
+            const k = !isNaN(cuotaBookie) ? kelly(p, cuotaBookie, kellyFrac) : 0;
+            const apuesta = !isNaN(bankroll) && k > 0 ? (bankroll * k).toFixed(2) : "-";
+
+            html += `<td class="${isMax}">${ev}</td><td class="${isMax}">${(k * 100).toFixed(1)}%</td><td class="${isMax}">${apuesta}</td>`;
+
+            if (!isNaN(cuotaBookie)) {
+              exportData.push([
+                grupo,
+                label,
+                (p * 100).toFixed(2),
+                cuotaBookie,
+                ev,
+                (k * 100).toFixed(1) + "%",
+                apuesta,
+                nombreLocal,
+                nombreVisita,
+              ]);
+            }
+          }
+          html += "</tr>";
+        });
+
+        html += '<tr><td colspan="9" style="height:8px; background:#121212; border:none"></td></tr>';
+      });
+
+      document.getElementById("resultado").innerHTML = html;
+    }
+
+    function guardarCuotaEnter(e, id) {
+      cuotasGuardadas[id] = e.target.value;
+      if (e.key === "Enter") calcular();
+    }
+
+    function agregarAlHistorial() {
+      calcular();
+
+      if (!exportData || exportData.length === 0) {
+        alert("No hay mercados con cuota de la bookie para agregar.");
+        return;
+      }
+
+      let historial = JSON.parse(localStorage.getItem("poissonHistorial")) || [];
+
+      exportData.forEach((row) => {
+        historial.push(row);
+      });
+
+      localStorage.setItem("poissonHistorial", JSON.stringify(historial));
+      alert("Mercados agregados al historial.");
+    }
+
+    function exportarHistorial() {
+      let historial = JSON.parse(localStorage.getItem("poissonHistorial")) || [];
+      if (historial.length === 0) {
+        alert("No hay historial para exportar.");
+        return;
+      }
+      let csv = "Grupo,Opción,Prob %,Cuota Bookie,EV,Kelly %,Apostar $,Local,Visitante\n";
+      historial.forEach((row) => {
+        csv += row.join(",") + "\n";
+      });
+      const blob = new Blob([csv], { type: "text/csv" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "historial_poisson.csv";
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    function borrarHistorial() {
+      if (confirm("¿Seguro quieres borrar todo el historial guardado?")) {
+        localStorage.removeItem("poissonHistorial");
+        alert("Historial borrado.");
+      }
+    }
+  </script>
+</body>
+</html>
