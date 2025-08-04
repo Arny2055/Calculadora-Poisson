@@ -241,16 +241,34 @@
 
       // Monte Carlo
       let mcWinL=0,mcDraw=0,mcWinV=0,mcBTTS=0,mcBTTSNo=0,mcOvers=[0,0,0,0];
+      const ahMC = Array(21).fill(0);
+      const handicaps = [-2.5,-2.25,-2,-1.75,-1.5,-1.25,-1,-0.75,-0.5,-0.25,0,
+                          0.25,0.5,0.75,1,1.25,1.5,1.75,2,2.25,2.5];
+
       for(let s=0;s<sims;s++){
         const gL=samplePoisson(lambdaL),gV=samplePoisson(lambdaV);
         if(gL>gV) mcWinL++; else if(gL===gV) mcDraw++; else mcWinV++;
         if(gL>0&&gV>0) mcBTTS++; else mcBTTSNo++;
         thresholds.forEach((th,idx)=>{ if(gL+gV>th) mcOvers[idx]++; });
+        const diff = gL - gV;
+        handicaps.forEach((h,idx)=>{ if(diff+h>0) ahMC[idx]++; });
       }
 
       const probPoisson=[winL,draw,winV];
       const probMC=[mcWinL,mcDraw,mcWinV].map(x=>x/sims);
       const probOversPoisson=overs, probOversMC=mcOvers.map(x=>x/sims);
+
+      // --- Probabilidades AH con Poisson ---
+      const probAH = handicaps.map(h=>{
+        let p=0;
+        for(let i=0;i<=maxGoals;i++){
+          for(let j=0;j<=maxGoals;j++){
+            const diff=i-j;
+            if(diff+h>0) p+=pLocal[i]*pVisita[j];
+          }
+        }
+        return p;
+      });
 
       exportData=[];
       let html=`<table>
@@ -260,7 +278,8 @@
       const filas=[
         ["1X2 ⚽",[nombreLocal,"Empate",nombreVisita],probPoisson,probMC],
         ["Over/Under 🎯",thresholds.map(t=>`Over ${t}`),probOversPoisson,probOversMC],
-        ["BTTS 🔔",["Sí","No"],[btts,bttsNo],[mcBTTS/sims, mcBTTSNo/sims]]
+        ["BTTS 🔔",["Sí","No"],[btts,bttsNo],[mcBTTS/sims, mcBTTSNo/sims]],
+        ["Hándicap Asiático 🥢",handicaps.map(h=>(h>0?"+":"")+h.toFixed(2)),probAH,ahMC.map(x=>x/sims)]
       ];
 
       filas.forEach(([grupo,labels,probs,probsMC],gi)=>{
