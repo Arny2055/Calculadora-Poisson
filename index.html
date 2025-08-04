@@ -108,6 +108,7 @@
     <img src="https://cdn-icons-png.flaticon.com/512/287/287221.png" alt="Logo Fútbol" class="logo" />
     <h2>Calculadora Poisson + Monte Carlo</h2>
 
+    <button onclick="window.location.href='historial.html'">Ver historial</button><br />
     <input type="text" id="nombreLocal" placeholder="Nombre equipo Local" style="width:200px" />
     <input type="number" id="golesLocal" placeholder="Promedio Local" step="0.01" />
     <input type="text" id="nombreVisita" placeholder="Nombre equipo Visitante" style="width:200px" />
@@ -115,8 +116,9 @@
     <input type="number" id="bankroll" placeholder="Bankroll ($)" step="0.01" style="width:120px" value="100" />
     <input type="number" id="simulaciones" placeholder="Simulaciones" value="10000" style="width:120px" />
     <button onclick="calcular()">Calcular</button>
-
-    <br><br>
+    <button onclick="agregarAlHistorial()">Agregar al historial</button>
+    <button onclick="exportarHistorial()">Exportar historial</button>
+    <button onclick="borrarHistorial()">Borrar historial</button><br />
 
     <label>
       <input type="checkbox" id="toggleEV" onchange="calcular()" /> Mostrar Valor Esperado (EV) y Kelly
@@ -144,20 +146,17 @@
       const raw = ((cuota-1)*prob-(1-prob))/(cuota-1);
       return raw>0 ? raw*fraction : 0;
     }
-
-    let cuotasGuardadas = {};
-
     function samplePoisson(lambda) {
-      // Algoritmo Knuth para Poisson
       let L = Math.exp(-lambda), k=0, p=1;
-      do {
-        k++;
-        p *= Math.random();
-      } while (p > L);
+      do { k++; p*=Math.random(); } while(p>L);
       return k-1;
     }
 
+    let cuotasGuardadas={}, exportData=[];
+
     function calcular() {
+      const nombreLocal = document.getElementById("nombreLocal").value.trim();
+      const nombreVisita = document.getElementById("nombreVisita").value.trim();
       const lambdaL = parseFloat(document.getElementById("golesLocal").value);
       const lambdaV = parseFloat(document.getElementById("golesVisita").value);
       const bankroll = parseFloat(document.getElementById("bankroll").value);
@@ -165,11 +164,11 @@
       const showEV = document.getElementById("toggleEV").checked;
       const kellyFrac = parseFloat(document.getElementById("kellyFrac").value);
 
-      if (isNaN(lambdaL)||isNaN(lambdaV)||isNaN(bankroll)||isNaN(sims)) {
+      if (!nombreLocal || !nombreVisita || isNaN(lambdaL)||isNaN(lambdaV)||isNaN(bankroll)||isNaN(sims)) {
         alert("Completa correctamente todos los campos."); return;
       }
 
-      // --- Poisson Analítico ---
+      // --- Poisson ---
       const maxGoals=5;
       const pLocal = Array.from({length:maxGoals+1},(_,i)=>poisson(i,lambdaL));
       const pVisita= Array.from({length:maxGoals+1},(_,i)=>poisson(i,lambdaV));
@@ -204,25 +203,92 @@
         thresholds.forEach((th,idx)=>{ if(gL+gV>th) mcOvers[idx]++; });
       }
 
-      const probPoisson=[winL,draw,winV].map(x=>x*100);
-      const probMC=[mcWinL,mcDraw,mcWinV].map(x=>x/sims*100);
-      const probOversPoisson=overs.map(x=>x*100);
-      const probOversMC=mcOvers.map(x=>x/sims*100);
-      const probBttsPoisson=(btts*100).toFixed(2);
-      const probBttsMC=(mcBTTS/sims*100).toFixed(2);
+      const probPoisson=[winL,draw,winV];
+      const probMC=[mcWinL,mcDraw,mcWinV].map(x=>x/sims);
+      const probOversPoisson=overs;
+      const probOversMC=mcOvers.map(x=>x/sims);
+      const probBttsPoisson=btts;
+      const probBttsMC=mcBTTS/sims;
 
-      // --- Render Tabla Comparativa ---
-      let html=`<h3 class="montecarlo-title">Probabilidades (%) Poisson vs Monte Carlo (${sims} sims)</h3>
-      <table>
-      <tr><th>Mercado</th><th>Opción</th><th>Poisson %</th><th>Monte Carlo %</th></tr>
-      <tr><td>1X2</td><td>Local</td><td>${probPoisson[0].toFixed(2)}</td><td>${probMC[0].toFixed(2)}</td></tr>
-      <tr><td>1X2</td><td>Empate</td><td>${probPoisson[1].toFixed(2)}</td><td>${probMC[1].toFixed(2)}</td></tr>
-      <tr><td>1X2</td><td>Visitante</td><td>${probPoisson[2].toFixed(2)}</td><td>${probMC[2].toFixed(2)}</td></tr>
-      ${thresholds.map((th,idx)=>`<tr><td>Over ${th}</td><td>-</td><td>${probOversPoisson[idx].toFixed(2)}</td><td>${probOversMC[idx].toFixed(2)}</td></tr>`).join('')}
-      <tr><td>BTTS</td><td>Sí</td><td>${probBttsPoisson}</td><td>${probBttsMC}</td></tr>
-      </table>`;
+      // --- Tabla Probabilidades + EV/Kelly ---
+      exportData=[];
+      let html=`<table>
+        <tr><th>Grupo</th><th>Opción</th><th>Poisson %</th><th>MC %</th><th>Cuota Implícita</th>
+        ${showEV?`<th>Cuota Bookie</th><th>EV</th><th>Kelly (${kellyFrac*100}%)</th><th>Apostar $</th>`:""}
+        </tr>`;
 
+      const filas = [
+        ["1X2 ⚽", [nombreLocal,"Empate",nombreVisita], probPoisson, probMC],
+        ["Over/Under 🎯", thresholds.map(t=>`Over ${t}`), probOversPoisson, probOversMC],
+        ["BTTS 🔔", ["Sí"], [probBttsPoisson], [probBttsMC]]
+      ];
+
+      filas.forEach(([grupo,labels,probs,probsMC],grupoIndex)=>{
+        labels.forEach((label,idx)=>{
+          const p=probs[idx];
+          const mc=probsMC[idx];
+          const id=`bookie_${grupoIndex}_${idx}`;
+          const cuotaGuardada=cuotasGuardadas[id]||"";
+          let row=`<tr>
+            <td>${grupo}</td>
+            <td>${label}</td>
+            <td>${(p*100).toFixed(2)}</td>
+            <td>${(mc*100).toFixed(2)}</td>
+            <td>${cuotaImplicita(p)}</td>`;
+
+          if(showEV){
+            row+=`<td><input type="text" class="small-input" id="${id}" value="${cuotaGuardada}"
+            oninput="cuotasGuardadas['${id}']=this.value.replace(',','.');"
+            onblur="calcular()" onkeydown="if(event.key==='Enter'){this.blur();}"></td>`;
+            const cuotaBookie=parseFloat(cuotasGuardadas[id]);
+            const ev=!isNaN(cuotaBookie)?valueBet(p,cuotaBookie):"-";
+            const k=!isNaN(cuotaBookie)?kelly(p,cuotaBookie,kellyFrac):0;
+            const apuesta=k>0?(bankroll*k).toFixed(2):"-";
+            const evClass=(!isNaN(ev)&&ev>0)?"highlight":"";
+            const kellyClass=(k>0)?"highlight":"";
+            row+=`<td class="${evClass}">${ev}</td>
+                   <td class="${kellyClass}">${(k*100).toFixed(1)}%</td>
+                   <td class="${kellyClass}">${apuesta}</td>`;
+            if(!isNaN(cuotaBookie)){
+              exportData.push([grupo,label,(p*100).toFixed(2),cuotaBookie,ev,(k*100).toFixed(1)+"%",apuesta,nombreLocal,nombreVisita]);
+            }
+          }
+          row+="</tr>";
+          html+=row;
+        });
+        html+=`<tr><td colspan="9" style="height:8px; background:#121212; border:none"></td></tr>`;
+      });
+
+      html+="</table>";
       document.getElementById("resultado").innerHTML=html;
+    }
+
+    function agregarAlHistorial(){
+      calcular();
+      if(!exportData||exportData.length===0) return alert("No hay mercados con cuota de la bookie para agregar.");
+      let historial=JSON.parse(localStorage.getItem("poissonHistorial"))||[];
+      exportData.forEach(row=>historial.push(row));
+      localStorage.setItem("poissonHistorial",JSON.stringify(historial));
+      alert("Mercados agregados al historial.");
+    }
+
+    function exportarHistorial(){
+      let historial=JSON.parse(localStorage.getItem("poissonHistorial"))||[];
+      if(historial.length===0) return alert("No hay historial para exportar.");
+      let csv="Grupo,Opción,Prob %,Cuota Bookie,EV,Kelly %,Apostar $,Local,Visitante\n";
+      historial.forEach(row=>{csv+=row.join(",")+"\n";});
+      const blob=new Blob([csv],{type:"text/csv"});
+      const url=URL.createObjectURL(blob);
+      const a=document.createElement("a");
+      a.href=url;a.download="historial_poisson.csv";a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    function borrarHistorial(){
+      if(confirm("¿Seguro quieres borrar todo el historial guardado?")){
+        localStorage.removeItem("poissonHistorial");
+        alert("Historial borrado.");
+      }
     }
   </script>
 </body>
