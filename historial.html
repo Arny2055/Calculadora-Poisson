@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <title>Historial de Apuestas Mejorado</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #121212;
+      color: #f0f0f0;
+      padding: 20px;
+    }
+
+    .container {
+      max-width: 1000px;
+      margin: auto;
+      background: #1e1e1e;
+      padding: 20px;
+      border-radius: 10px;
+      box-shadow: 0 0 15px rgba(0,0,0,0.6);
+    }
+
+    h2 {
+      text-align: center;
+      margin-bottom: 20px;
+    }
+
+    .filtros {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      justify-content: center;
+      margin-bottom: 15px;
+    }
+
+    .filtros input,
+    .filtros label,
+    .filtros button {
+      font-size: 14px;
+      padding: 5px;
+      border-radius: 5px;
+      border: 1px solid #444;
+      background-color: #2c2c2c;
+      color: #f0f0f0;
+    }
+
+    .filtros button {
+      cursor: pointer;
+      border-color: #555;
+      transition: background-color 0.3s;
+    }
+
+    .filtros button:hover {
+      background-color: #444;
+    }
+
+    input[type="text"], input[type="number"] {
+      min-width: 150px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 20px;
+      font-size: 14px;
+      table-layout: fixed;
+      word-wrap: break-word;
+    }
+
+    th, td {
+      border: 1px solid #333;
+      padding: 8px;
+      text-align: center;
+    }
+
+    th {
+      background: #2a2a2a;
+    }
+
+    td {
+      background: #222;
+    }
+
+    select {
+      background: #2c2c2c;
+      color: #f0f0f0;
+      border: 1px solid #444;
+      border-radius: 5px;
+      padding: 4px;
+      min-width: 80px;
+      font-weight: bold;
+      transition: border-color 0.3s;
+    }
+
+    select.ganado {
+      border-color: #4CAF50;
+      color: #4CAF50;
+      background-color: #193d19;
+    }
+
+    select.perdido {
+      border-color: #E53935;
+      color: #E53935;
+      background-color: #4a1c1c;
+    }
+
+    button {
+      padding: 10px 15px;
+      margin: 10px 5px;
+      font-size: 14px;
+      background-color: #333;
+      color: #fff;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      transition: background-color 0.3s;
+    }
+
+    button:hover {
+      background-color: #444;
+    }
+
+    #resumenROI {
+      margin-top: 20px;
+      font-size: 16px;
+      text-align: center;
+      color: #f0f0f0;
+      user-select: none;
+    }
+
+    /* Scroll horizontal si la tabla es muy ancha */
+    .table-wrapper {
+      overflow-x: auto;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h2>Historial de Apuestas Guardadas</h2>
+
+    <div class="filtros">
+      <input type="text" id="filtroLocal" placeholder="Filtrar por Local" />
+      <input type="text" id="filtroVisita" placeholder="Filtrar por Visitante" />
+      <input type="number" id="filtroProb" placeholder="Probabilidad mínima (%)" step="0.01" min="0" />
+      <button id="btnAplicarFiltros">Aplicar filtros</button>
+      <button id="btnLimpiarFiltros" title="Limpiar filtros">Limpiar filtros</button>
+    </div>
+
+    <button onclick="volver()">Volver a la Calculadora</button>
+    <button onclick="guardarResultados()">Guardar resultados</button>
+    <button onclick="borrarHistorial()" style="background-color:#b32e2e; margin-left:10px;">Borrar historial</button>
+
+    <div class="table-wrapper">
+      <table id="tablaHistorial" aria-label="Tabla de historial de apuestas">
+        <thead>
+          <tr>
+            <th>Grupo</th>
+            <th>Opción</th>
+            <th>Prob (%)</th>
+            <th>Cuota</th>
+            <th>EV</th>
+            <th>Kelly (%)</th>
+            <th>Apostar ($)</th>
+            <th>Local</th>
+            <th>Visitante</th>
+            <th>Resultado</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <div id="resumenROI" aria-live="polite"></div>
+  </div>
+
+  <script>
+    let historial = [];
+
+    // Carga historial y renderiza tabla + resumen
+    function cargarHistorial() {
+      try {
+        historial = JSON.parse(localStorage.getItem("poissonHistorial")) || [];
+        // Asegurar que cada fila tenga 10 elementos (resultado)
+        historial = historial.map(row => {
+          while (row.length < 10) row.push("");
+          return row;
+        });
+        localStorage.setItem("poissonHistorial", JSON.stringify(historial));
+      } catch(e) {
+        alert("Error al cargar historial: datos corruptos, se reiniciará.");
+        historial = [];
+        localStorage.removeItem("poissonHistorial");
+      }
+      renderizarTabla(historial);
+      actualizarResumen(historial);
+    }
+
+    // Renderiza la tabla con datos dados
+    function renderizarTabla(datos) {
+      const tbody = document.querySelector("#tablaHistorial tbody");
+      tbody.innerHTML = "";
+
+      datos.forEach((row, i) => {
+        const tr = document.createElement("tr");
+
+        for (let j = 0; j < 9; j++) {
+          const td = document.createElement("td");
+          td.textContent = row[j];
+          tr.appendChild(td);
+        }
+
+        // Celda Resultado con select para marcar ganado/perdido
+        const selectTd = document.createElement("td");
+        const select = document.createElement("select");
+        select.setAttribute("aria-label", `Resultado apuesta fila ${i + 1}`);
+        select.innerHTML = `
+          <option value="">--</option>
+          <option value="ganado">Ganado</option>
+          <option value="perdido">Perdido</option>
+        `;
+        select.value = row[9] || "";
+        actualizarClaseSelect(select);
+
+        select.addEventListener("change", () => {
+          row[9] = select.value;
+          historial[i][9] = select.value;
+          actualizarClaseSelect(select);
+          guardarHistorial();
+          actualizarResumen(historial);
+        });
+
+        selectTd.appendChild(select);
+        tr.appendChild(selectTd);
+        tbody.appendChild(tr);
+      });
+    }
+
+    // Cambia clase para colores de select resultado
+    function actualizarClaseSelect(select) {
+      select.classList.remove("ganado", "perdido");
+      if (select.value === "ganado") select.classList.add("ganado");
+      else if (select.value === "perdido") select.classList.add("perdido");
+    }
+
+    // Guarda historial actualizado en localStorage
+    function guardarHistorial() {
+      localStorage.setItem("poissonHistorial", JSON.stringify(historial));
+    }
+
+    // Filtra el historial basado en filtros de inputs
+    function filtrarHistorial() {
+      const local = document.getElementById("filtroLocal").value.toLowerCase();
+      const visita = document.getElementById("filtroVisita").value.toLowerCase();
+      const probMin = parseFloat(document.getElementById("filtroProb").value);
+
+      const filtrado = historial.filter(row => {
+        const prob = parseFloat(row[2]);
+        const cumpleLocal = !local || row[7].toLowerCase().includes(local);
+        const cumpleVisita = !visita || row[8].toLowerCase().includes(visita);
+        const cumpleProb = isNaN(probMin) || prob >= probMin;
+        return cumpleLocal && cumpleVisita && cumpleProb;
+      });
+
+      renderizarTabla(filtrado);
+      actualizarResumen(filtrado);
+    }
+
+    // Actualiza el resumen ROI, yield, ganancias y conteo
+    function actualizarResumen(datos) {
+      let gananciaNeta = 0;
+      let totalInvertido = 0;
+      let apuestasGanadas = 0;
+      let apuestasPerdidas = 0;
+
+      datos.forEach(row => {
+        const resultado = row[9];
+        const stake = parseFloat(row[6]) || 0;
+        const cuota = parseFloat(row[3]) || 0;
+
+        if (stake <= 0) return;
+
+        if (resultado === "ganado") {
+          gananciaNeta += stake * (cuota - 1);
+          apuestasGanadas++;
+        } else if (resultado === "perdido") {
+          gananciaNeta -= stake;
+          apuestasPerdidas++;
+        }
+        totalInvertido += stake;
+      });
+
+      const roi = totalInvertido > 0 ? (gananciaNeta / totalInvertido) * 100 : 0;
+      const yieldValue = roi;
+
+      const divResumen = document.getElementById("resumenROI");
+      divResumen.innerHTML = `
+        <p>
+          <strong>ROI:</strong> ${roi.toFixed(2)}% &nbsp; | &nbsp; 
+          <strong>Yield:</strong> ${yieldValue.toFixed(2)}% &nbsp; | &nbsp;
+          <strong>Ganancia Neta:</strong> $${gananciaNeta.toFixed(2)} &nbsp; | &nbsp;
+          <strong>Total Apostado:</strong> $${totalInvertido.toFixed(2)} <br/>
+          <strong>Apuestas Ganadas:</strong> ${apuestasGanadas} &nbsp; | &nbsp;
+          <strong>Apuestas Perdidas:</strong> ${apuestasPerdidas}
+        </p>
+      `;
+    }
+
+    // Alertar y guardar resultados (placeholder, ya se guarda automático)
+    function guardarResultados() {
+      alert("Los resultados se guardan automáticamente al modificar.");
+    }
+
+    // Botón volver a calculadora (cambiar ruta si necesario)
+    function volver() {
+      window.location.href = "index.html";
+    }
+
+    // Confirmación para borrar historial completo
+    function borrarHistorial() {
+      if (confirm("¿Seguro quieres borrar todo el historial guardado? Esta acción no se puede deshacer.")) {
+        historial = [];
+        guardarHistorial();
+        renderizarTabla(historial);
+        actualizarResumen(historial);
+        alert("Historial borrado.");
+      }
+    }
+
+    // Configuración de eventos al cargar la página
+    window.onload = () => {
+      cargarHistorial();
+
+      // Filtrado automático al escribir
+      document.getElementById("filtroLocal").addEventListener("input", filtrarHistorial);
+      document.getElementById("filtroVisita").addEventListener("input", filtrarHistorial);
+      document.getElementById("filtroProb").addEventListener("input", filtrarHistorial);
+
+      // Botón aplicar filtro (por si se prefiere botón)
+      document.getElementById("btnAplicarFiltros").addEventListener("click", filtrarHistorial);
+
+      // Botón limpiar filtros
+      document.getElementById("btnLimpiarFiltros").addEventListener("click", () => {
+        document.getElementById("filtroLocal").value = "";
+        document.getElementById("filtroVisita").value = "";
+        document.getElementById("filtroProb").value = "";
+        renderizarTabla(historial);
+        actualizarResumen(historial);
+      });
+    };
+  </script>
+</body>
+</html>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
