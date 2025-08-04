@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8" />
-  <title>Calculadora Poisson de Apuestas</title>
+  <title>Calculadora Poisson + Monte Carlo</title>
   <style>
     body {
       font-family: Arial, sans-serif;
@@ -13,7 +13,7 @@
     }
 
     .container {
-      max-width: 900px;
+      max-width: 950px;
       margin: auto;
       background: #1e1e1e;
       padding: 20px 30px 30px 30px;
@@ -95,23 +95,28 @@
       border-radius: 5px;
       text-align: center;
     }
+
+    .montecarlo-title {
+      color: #39FF14;
+      text-align: center;
+      margin: 15px 0 5px 0;
+    }
   </style>
 </head>
 <body>
   <div class="container">
     <img src="https://cdn-icons-png.flaticon.com/512/287/287221.png" alt="Logo Fútbol" class="logo" />
-    <h2>Calculadora Poisson de Apuestas</h2>
+    <h2>Calculadora Poisson + Monte Carlo</h2>
 
-    <button onclick="window.location.href='historial.html'">Ver historial</button><br />
     <input type="text" id="nombreLocal" placeholder="Nombre equipo Local" style="width:200px" />
     <input type="number" id="golesLocal" placeholder="Promedio Local" step="0.01" />
     <input type="text" id="nombreVisita" placeholder="Nombre equipo Visitante" style="width:200px" />
     <input type="number" id="golesVisita" placeholder="Promedio Visita" step="0.01" /><br />
     <input type="number" id="bankroll" placeholder="Bankroll ($)" step="0.01" style="width:120px" value="100" />
+    <input type="number" id="simulaciones" placeholder="Simulaciones" value="10000" style="width:120px" />
     <button onclick="calcular()">Calcular</button>
-    <button onclick="agregarAlHistorial()">Agregar al historial</button>
-    <button onclick="exportarHistorial()">Exportar historial</button>
-    <button onclick="borrarHistorial()">Borrar historial</button><br />
+
+    <br><br>
 
     <label>
       <input type="checkbox" id="toggleEV" onchange="calcular()" /> Mostrar Valor Esperado (EV) y Kelly
@@ -131,167 +136,93 @@
   </div>
 
   <script>
-    function factorial(n) {
-      if (n === 0 || n === 1) return 1;
-      let res = 1;
-      for (let i = 2; i <= n; i++) res *= i;
-      return res;
-    }
-
-    function poisson(k, lambda) {
-      return (Math.pow(lambda, k) * Math.exp(-lambda)) / factorial(k);
-    }
-
-    function cuotaImplicita(p) { return p > 0 ? (1 / p).toFixed(2) : "-"; }
-    function valueBet(prob, cuota) { return ((prob * cuota) - 1).toFixed(2); }
-    function kelly(prob, cuota, fraction = 1) {
-      const raw = ((cuota - 1) * prob - (1 - prob)) / (cuota - 1);
-      return raw > 0 ? raw * fraction : 0;
+    function factorial(n) { return n <= 1 ? 1 : n * factorial(n-1); }
+    function poisson(k, lambda) { return (Math.pow(lambda, k) * Math.exp(-lambda)) / factorial(k); }
+    function cuotaImplicita(p) { return p > 0 ? (1/p).toFixed(2) : "-"; }
+    function valueBet(prob, cuota) { return ((prob*cuota)-1).toFixed(2); }
+    function kelly(prob, cuota, fraction=1) {
+      const raw = ((cuota-1)*prob-(1-prob))/(cuota-1);
+      return raw>0 ? raw*fraction : 0;
     }
 
     let cuotasGuardadas = {};
-    let exportData = [];
+
+    function samplePoisson(lambda) {
+      // Algoritmo Knuth para Poisson
+      let L = Math.exp(-lambda), k=0, p=1;
+      do {
+        k++;
+        p *= Math.random();
+      } while (p > L);
+      return k-1;
+    }
 
     function calcular() {
-      const nombreLocal = document.getElementById("nombreLocal").value.trim();
-      const nombreVisita = document.getElementById("nombreVisita").value.trim();
       const lambdaL = parseFloat(document.getElementById("golesLocal").value);
       const lambdaV = parseFloat(document.getElementById("golesVisita").value);
+      const bankroll = parseFloat(document.getElementById("bankroll").value);
+      const sims = parseInt(document.getElementById("simulaciones").value);
       const showEV = document.getElementById("toggleEV").checked;
       const kellyFrac = parseFloat(document.getElementById("kellyFrac").value);
-      const bankroll = parseFloat(document.getElementById("bankroll").value);
 
-      if (!nombreLocal || !nombreVisita || isNaN(lambdaL) || isNaN(lambdaV) || isNaN(bankroll) || bankroll <= 0) {
-        alert("Por favor, completa todos los campos correctamente.");
-        return;
+      if (isNaN(lambdaL)||isNaN(lambdaV)||isNaN(bankroll)||isNaN(sims)) {
+        alert("Completa correctamente todos los campos."); return;
       }
 
-      const maxGoals = 5;
-      const pLocal = Array.from({ length: maxGoals + 1 }, (_, i) => poisson(i, lambdaL));
-      const pVisita = Array.from({ length: maxGoals + 1 }, (_, i) => poisson(i, lambdaV));
-      const joint = Array.from({ length: maxGoals + 1 }, () => Array(maxGoals + 1).fill(0));
+      // --- Poisson Analítico ---
+      const maxGoals=5;
+      const pLocal = Array.from({length:maxGoals+1},(_,i)=>poisson(i,lambdaL));
+      const pVisita= Array.from({length:maxGoals+1},(_,i)=>poisson(i,lambdaV));
+      const joint = Array.from({length:maxGoals+1},()=>Array(maxGoals+1).fill(0));
 
-      for (let i = 0; i <= maxGoals; i++) {
-        for (let j = 0; j <= maxGoals; j++) joint[i][j] = pLocal[i] * pVisita[j];
-      }
+      let winL=0,draw=0,winV=0,btts=0;
+      const thresholds=[0.5,1.5,2.5,3.5];
+      const under={0.5:0,1.5:0,2.5:0,3.5:0};
 
-      // 1X2
-      let winL = 0, draw = 0, winV = 0;
-      for (let i = 0; i <= maxGoals; i++) {
-        for (let j = 0; j <= maxGoals; j++) {
-          if (i > j) winL += joint[i][j];
-          else if (i === j) draw += joint[i][j];
-          else winV += joint[i][j];
+      for(let i=0;i<=maxGoals;i++){
+        for(let j=0;j<=maxGoals;j++){
+          joint[i][j]=pLocal[i]*pVisita[j];
+          if(i>j) winL+=joint[i][j];
+          else if(i===j) draw+=joint[i][j];
+          else winV+=joint[i][j];
+          if(i>0&&j>0) btts+=joint[i][j];
+          thresholds.forEach(th=>{ if(i+j<=th) under[th]+=joint[i][j]; });
         }
       }
-      const prob1x2 = [winL, draw, winV];
-      const max1x2 = Math.max(...prob1x2);
+      const overs = thresholds.map(th=>1-under[th]);
 
-      // Over/Under
-      const thresholds = [0.5, 1.5, 2.5, 3.5];
-      const under = Object.fromEntries(thresholds.map(t => [t, 0]));
-      for (let i = 0; i <= maxGoals; i++) {
-        for (let j = 0; j <= maxGoals; j++) {
-          const total = i + j;
-          thresholds.forEach(th => { if (total <= th) under[th] += joint[i][j]; });
-        }
-      }
-      const overs = thresholds.map(t => 1 - under[t]);
-      const maxOver = Math.max(...overs);
-
-      // Ambos anotan
-      let btts = 0;
-      for (let i = 1; i <= maxGoals; i++) {
-        for (let j = 1; j <= maxGoals; j++) btts += joint[i][j];
+      // --- Monte Carlo ---
+      let mcWinL=0, mcDraw=0, mcWinV=0, mcBTTS=0;
+      let mcOvers = [0,0,0,0];
+      for(let s=0;s<sims;s++){
+        let gL = samplePoisson(lambdaL);
+        let gV = samplePoisson(lambdaV);
+        if(gL>gV) mcWinL++;
+        else if(gL===gV) mcDraw++;
+        else mcWinV++;
+        if(gL>0 && gV>0) mcBTTS++;
+        thresholds.forEach((th,idx)=>{ if(gL+gV>th) mcOvers[idx]++; });
       }
 
-      exportData = [];
-      let html = `<table>
-        <tr><th>Grupo</th><th>Opción</th><th>Prob (%)</th><th>Cuota Implícita</th>
-        ${showEV ? `<th>Cuota Bookie</th><th>EV</th><th>Kelly (${kellyFrac*100}%)</th><th>Apostar ($)</th>` : ""}
-        </tr>`;
+      const probPoisson=[winL,draw,winV].map(x=>x*100);
+      const probMC=[mcWinL,mcDraw,mcWinV].map(x=>x/sims*100);
+      const probOversPoisson=overs.map(x=>x*100);
+      const probOversMC=mcOvers.map(x=>x/sims*100);
+      const probBttsPoisson=(btts*100).toFixed(2);
+      const probBttsMC=(mcBTTS/sims*100).toFixed(2);
 
-      const filas = [
-        ["1X2 ⚽", [nombreLocal, "Empate", nombreVisita], prob1x2, max1x2],
-        ["Over/Under 🎯", thresholds.map(t => `Over ${t}`), overs, maxOver],
-        ["Ambos Anotan 🔔", ["Sí"], [btts], btts],
-      ];
+      // --- Render Tabla Comparativa ---
+      let html=`<h3 class="montecarlo-title">Probabilidades (%) Poisson vs Monte Carlo (${sims} sims)</h3>
+      <table>
+      <tr><th>Mercado</th><th>Opción</th><th>Poisson %</th><th>Monte Carlo %</th></tr>
+      <tr><td>1X2</td><td>Local</td><td>${probPoisson[0].toFixed(2)}</td><td>${probMC[0].toFixed(2)}</td></tr>
+      <tr><td>1X2</td><td>Empate</td><td>${probPoisson[1].toFixed(2)}</td><td>${probMC[1].toFixed(2)}</td></tr>
+      <tr><td>1X2</td><td>Visitante</td><td>${probPoisson[2].toFixed(2)}</td><td>${probMC[2].toFixed(2)}</td></tr>
+      ${thresholds.map((th,idx)=>`<tr><td>Over ${th}</td><td>-</td><td>${probOversPoisson[idx].toFixed(2)}</td><td>${probOversMC[idx].toFixed(2)}</td></tr>`).join('')}
+      <tr><td>BTTS</td><td>Sí</td><td>${probBttsPoisson}</td><td>${probBttsMC}</td></tr>
+      </table>`;
 
-      filas.forEach(([grupo, labels, probs, max], grupoIndex) => {
-        labels.forEach((label, idx) => {
-          const p = probs[idx];
-          const isMax = p === max ? "highlight" : "";
-          const id = `bookie_${grupoIndex}_${idx}`;
-          const cuotaGuardada = cuotasGuardadas[id] || "";
-
-          let row = `<tr class="${isMax}">
-            <td class="${isMax}">${grupo}</td>
-            <td class="${isMax}">${label}</td>
-            <td class="${isMax}">${(p * 100).toFixed(2)}</td>
-            <td class="${isMax}">${cuotaImplicita(p)}</td>`;
-
-          if (showEV) {
-            row += `<td>
-              <input type="text" inputmode="decimal" class="small-input"
-              id="${id}" value="${cuotaGuardada}"
-              oninput="cuotasGuardadas['${id}'] = this.value.replace(',', '.');"
-              onblur="calcular()"
-              onkeydown="if(event.key==='Enter'){this.blur();}">
-            </td>`;
-
-            const cuotaBookie = parseFloat(cuotasGuardadas[id]);
-            const ev = !isNaN(cuotaBookie) ? valueBet(p, cuotaBookie) : "-";
-            const k = !isNaN(cuotaBookie) ? kelly(p, cuotaBookie, kellyFrac) : 0;
-            const apuesta = k > 0 ? (bankroll * k).toFixed(2) : "-";
-
-            const evClass = (!isNaN(ev) && ev > 0) ? "highlight" : "";
-            const kellyClass = (k > 0) ? "highlight" : "";
-
-            row += `<td class="${evClass}">${ev}</td>
-                    <td class="${kellyClass}">${(k * 100).toFixed(1)}%</td>
-                    <td class="${kellyClass}">${apuesta}</td>`;
-
-            if (!isNaN(cuotaBookie)) {
-              exportData.push([grupo, label, (p*100).toFixed(2), cuotaBookie, ev, (k*100).toFixed(1)+"%", apuesta, nombreLocal, nombreVisita]);
-            }
-          }
-          row += "</tr>";
-          html += row;
-        });
-        html += `<tr><td colspan="9" style="height:8px; background:#121212; border:none"></td></tr>`;
-      });
-
-      document.getElementById("resultado").innerHTML = html;
-    }
-
-    function agregarAlHistorial() {
-      calcular();
-      if (!exportData || exportData.length === 0) return alert("No hay mercados con cuota de la bookie para agregar.");
-      let historial = JSON.parse(localStorage.getItem("poissonHistorial")) || [];
-      exportData.forEach((row) => historial.push(row));
-      localStorage.setItem("poissonHistorial", JSON.stringify(historial));
-      alert("Mercados agregados al historial.");
-    }
-
-    function exportarHistorial() {
-      let historial = JSON.parse(localStorage.getItem("poissonHistorial")) || [];
-      if (historial.length === 0) return alert("No hay historial para exportar.");
-      let csv = "Grupo,Opción,Prob %,Cuota Bookie,EV,Kelly %,Apostar $,Local,Visitante\n";
-      historial.forEach((row) => { csv += row.join(",") + "\n"; });
-      const blob = new Blob([csv], { type: "text/csv" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = "historial_poisson.csv";
-      a.click();
-      URL.revokeObjectURL(url);
-    }
-
-    function borrarHistorial() {
-      if (confirm("¿Seguro quieres borrar todo el historial guardado?")) {
-        localStorage.removeItem("poissonHistorial");
-        alert("Historial borrado.");
-      }
+      document.getElementById("resultado").innerHTML=html;
     }
   </script>
 </body>
