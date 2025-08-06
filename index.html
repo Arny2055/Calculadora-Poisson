@@ -109,7 +109,7 @@ const samplePoisson=lambda=>{
 
 let cuotasGuardadas={}, exportData=[];
 
-/* ------------ FUNCION CALCULADORA PREPARTIDO -------------- */
+/* ------------ FUNCION PREPARTIDO COMPLETA ------------ */
 function calcular(){
   const nombreLocal=document.getElementById("nombreLocal").value.trim();
   const nombreVisita=document.getElementById("nombreVisita").value.trim();
@@ -154,6 +154,18 @@ function calcular(){
   const probMC=[mcWinL,mcDraw,mcWinV].map(x=>x/sims);
   const probOversPoisson=overs, probOversMC=mcOvers.map(x=>x/sims);
 
+  const equipoAH=document.getElementById("equipoHandicap").value;
+  const lineaAH=parseFloat(document.getElementById("lineaHandicap").value);
+  let probAH=0;
+  if(!isNaN(lineaAH)){
+    for(let i=0;i<=maxGoals;i++){
+      for(let j=0;j<=maxGoals;j++){
+        const diff=(equipoAH==="local"?i-j:j-i);
+        if(diff+lineaAH>0) probAH+=pLocal[i]*pVisita[j];
+      }
+    }
+  }
+
   exportData=[];
   let html=`<table>
     <tr><th>Grupo</th><th>Opción</th><th>Poisson %</th><th>MC %</th><th>Cuota Implícita</th>
@@ -188,6 +200,30 @@ function calcular(){
     });
   });
 
+  if(!isNaN(lineaAH)){
+    const labelAH=`${equipoAH==="local"?nombreLocal:nombreVisita} AH ${lineaAH>0?"+":""}${lineaAH}`;
+    const p=probAH;
+    const mc=p;
+    const id="bookie_AH";
+    const cuotaGuardada=cuotasGuardadas[id]||"";
+    let row=`<tr><td>Hándicap Asiático 🥢</td><td>${labelAH}</td>
+             <td>${(p*100).toFixed(2)}</td><td>${(mc*100).toFixed(2)}</td>
+             <td>${cuotaImplicita(p)}</td>`;
+    if(showEV){
+      row+=`<td><input type="text" class="small-input" id="${id}" value="${cuotaGuardada}"
+              oninput="cuotasGuardadas['${id}']=this.value.replace(',','.');"
+              onblur="calcular()" onkeydown="if(event.key==='Enter'){this.blur();}"></td>`;
+      const cuotaBookie=parseFloat(cuotasGuardadas[id]);
+      const ev=!isNaN(cuotaBookie)?valueBet(p,cuotaBookie):"-";
+      const k=!isNaN(cuotaBookie)?kelly(p,cuotaBookie,kellyFrac):0;
+      const apuesta=k>0?(bankroll*k).toFixed(2):"-";
+      const highlight=(!isNaN(ev)&&ev>0)||(k>0)?"highlight":"";
+      row+=`<td>${ev}</td><td>${(k*100).toFixed(1)}%</td><td>${apuesta}</td></tr>`;
+      html+=row.replace("<tr>",`<tr class="${highlight}">`);
+      if(!isNaN(cuotaBookie)) exportData.push(["Hándicap Asiático",labelAH,(p*100).toFixed(2),cuotaBookie,ev,(k*100).toFixed(1)+"%",apuesta,nombreLocal,nombreVisita]);
+    }else html+=row+"</tr>";
+  }
+
   html+="</table>";
   document.getElementById("resultado").innerHTML=html;
 }
@@ -212,61 +248,54 @@ function exportarHistorial(){
   a.click();
 }
 
-/* ---------------- NUEVA CALCULADORA LIVE ----------------- */
+/* ------------ CALCULADORA LIVE ------------ */
 function calcularLive(){
-  const gL=parseInt(document.getElementById("liveGolesLocal").value);
-  const gV=parseInt(document.getElementById("liveGolesVisita").value);
-  const min=parseInt(document.getElementById("liveMinuto").value);
+  const gL=parseInt(document.getElementById("liveGolesLocal").value)||0;
+  const gV=parseInt(document.getElementById("liveGolesVisita").value)||0;
+  const min=parseInt(document.getElementById("liveMinuto").value)||0;
   const lambdaL=parseFloat(document.getElementById("golesLocal").value);
   const lambdaV=parseFloat(document.getElementById("golesVisita").value);
-  const bankroll=parseFloat(document.getElementById("bankroll").value);
   const showEV=document.getElementById("toggleEV").checked;
   const kellyFrac=parseFloat(document.getElementById("kellyFrac").value);
+  const bankroll=parseFloat(document.getElementById("bankroll").value);
 
-  if(isNaN(gL)||isNaN(gV)||isNaN(min)||isNaN(lambdaL)||isNaN(lambdaV)){
-    return mostrarNotificacion("⚠ Completa todos los campos Live");
+  if(isNaN(lambdaL)||isNaN(lambdaV)){
+    return mostrarNotificacion("⚠ Ingresa los promedios de goles en la calculadora prepartido primero.");
   }
 
-  const tiempoRestante=Math.max(0,90-min);
-  const factorTiempo=tiempoRestante/90;
-  const lambdaRestanteL=lambdaL*factorTiempo;
-  const lambdaRestanteV=lambdaV*factorTiempo;
+  const tiempoRestante=Math.max(0,90-min)/90;
+  const lambdaLRest= lambdaL*tiempoRestante;
+  const lambdaVRest= lambdaV*tiempoRestante;
 
   const maxGoals=5;
-  const pLocal=Array.from({length:maxGoals+1},(_,i)=>poisson(i,lambdaRestanteL));
-  const pVisita=Array.from({length:maxGoals+1},(_,i)=>poisson(i,lambdaRestanteV));
+  const pLocal=Array.from({length:maxGoals+1},(_,i)=>poisson(i,lambdaLRest));
+  const pVisita=Array.from({length:maxGoals+1},(_,i)=>poisson(i,lambdaVRest));
 
-  let winL=0,draw=0,winV=0,btts=0,bttsNo=0;
+  let btts=0,bttsNo=0;
   const thresholds=[0.5,1.5,2.5,3.5], under={};
   thresholds.forEach(t=>under[t]=0);
 
   for(let i=0;i<=maxGoals;i++){
     for(let j=0;j<=maxGoals;j++){
       const joint=pLocal[i]*pVisita[j];
-      const golesTotales=gL+i+gV+j;
-      if(gL+i>gV+j) winL+=joint;
-      else if(gL+i===gV+j) draw+=joint;
-      else winV+=joint;
-      if(gL+i>0&&gV+j>0) btts+=joint; else bttsNo+=joint;
-      thresholds.forEach(th=>{ if(golesTotales<=th) under[th]+=joint; });
+      if(i>0&&j>0) btts+=joint; else bttsNo+=joint;
+      thresholds.forEach(th=>{ if(gL+gV+i+j<=th) under[th]+=joint; });
     }
   }
   const overs=thresholds.map(th=>1-under[th]);
 
   let html=`<table>
     <tr><th>Grupo</th><th>Opción</th><th>Prob %</th><th>Cuota Implícita</th>
-    ${showEV?`<th>Cuota Bookie</th><th>EV</th><th>Kelly (${kellyFrac*100}%)</th><th>Apostar $</th>`:""}</tr>`;
+    ${showEV?`<th>Cuota Bookie</th><th>EV</th><th>Kelly ${kellyFrac*100}%</th><th>Apostar $</th>`:""}</tr>`;
 
   const filas=[
-    ["1X2 ⚽",[document.getElementById("nombreLocal").value||"Local","Empate",document.getElementById("nombreVisita").value||"Visita"],[winL,draw,winV]],
     ["Over/Under 🎯",thresholds.map(t=>`Over ${t}`),overs],
     ["BTTS 🔔",["Sí","No"],[btts,bttsNo]]
   ];
 
   filas.forEach(([grupo,labels,probs],gi)=>{
     labels.forEach((label,idx)=>{
-      const p=probs[idx];
-      const id=`live_${gi}_${idx}`;
+      const p=probs[idx], id=`live_${gi}_${idx}`;
       const cuotaGuardada=cuotasGuardadas[id]||"";
       let row=`<tr><td>${grupo}</td><td>${label}</td>
                <td>${(p*100).toFixed(2)}</td><td>${cuotaImplicita(p)}</td>`;
@@ -289,30 +318,43 @@ function calcularLive(){
   document.getElementById("resultadoLive").innerHTML=html;
 }
 
+/* --- AGREGAR LIVE SOLO SI TIENE APOSTAR $ --- */
 function agregarAlHistorialLive(){
   calcularLive();
   const filas=document.querySelectorAll("#resultadoLive table tr");
   if(filas.length<=1) return mostrarNotificacion("⚠ Calcula Live antes de agregar al historial.");
   
   const historial=JSON.parse(localStorage.getItem("poissonHistorial"))||[];
+  let agregadas=0;
+
   filas.forEach((tr,i)=>{
     if(i===0) return; 
     const tds=tr.querySelectorAll("td");
+    if(tds.length<8) return;  
+    const apuesta=tds[7]?.innerText || "-";
+    if(apuesta==="-"||apuesta.trim()==="") return;
+
     const grupo=tds[0].innerText;
     const opcion=tds[1].innerText;
     const prob=tds[2].innerText;
     const cuotaBookie=tds[4]?tds[4].querySelector("input")?.value || "-" : "-";
     const ev=tds[5]?.innerText || "-";
-    const kelly=tds[6]?.innerText || "-";
-    const apuesta=tds[7]?.innerText || "-";
+    const kellyVal=tds[6]?.innerText || "-";
     const local=document.getElementById("nombreLocal").value;
     const visita=document.getElementById("nombreVisita").value;
-    historial.push([grupo+" (Live)",opcion,prob,cuotaBookie,ev,kelly,apuesta,local,visita]);
+    historial.push([grupo+" (Live)",opcion,prob,cuotaBookie,ev,kellyVal,apuesta,local,visita]);
+    agregadas++;
   });
-  localStorage.setItem("poissonHistorial",JSON.stringify(historial));
-  mostrarNotificacion("✅ Mercados Live agregados al historial");
+
+  if(agregadas>0){
+    localStorage.setItem("poissonHistorial",JSON.stringify(historial));
+    mostrarNotificacion(`✅ ${agregadas} mercados Live agregados`);
+  }else{
+    mostrarNotificacion("⚠ Ninguna fila tiene valor en Apostar $");
+  }
 }
 
+/* -------- Notificación -------- */
 function mostrarNotificacion(msg){
   const n=document.getElementById("notificacion");
   n.textContent=msg;
