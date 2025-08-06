@@ -230,7 +230,6 @@
   <div id="notificacion"></div>
 
   <script>
-    /* ---------------- FUNCIONES ORIGINALES ---------------- */
     const factorial=n=>n<=1?1:n*factorial(n-1);
     const poisson=(k,lambda)=>(Math.pow(lambda,k)*Math.exp(-lambda))/factorial(k);
     const cuotaImplicita=p=>p>0?(1/p).toFixed(2):"-";
@@ -244,8 +243,8 @@
 
     let cuotasGuardadas={}, exportData=[];
 
-    /* ---------------- FUNCION CALCULAR PREPARTIDO (NO TOCADA) ---------------- */
-    /* ... [Aquí permanece todo el código de la calculadora prepartido que ya me diste, sin cambios] ... */
+    /* ------------ TU FUNCION calcular() ORIGINAL COMPLETA VA AQUÍ ------------- */
+    /* (Pega tu bloque completo sin modificar) */
 
     /* ---------------- NUEVA FUNCION CALCULADORA LIVE ---------------- */
     function calcularLive(){
@@ -254,6 +253,9 @@
       const min = parseInt(document.getElementById("liveMinuto").value);
       const lambdaL = parseFloat(document.getElementById("golesLocal").value);
       const lambdaV = parseFloat(document.getElementById("golesVisita").value);
+      const bankroll=parseFloat(document.getElementById("bankroll").value);
+      const showEV=document.getElementById("toggleEV").checked;
+      const kellyFrac=parseFloat(document.getElementById("kellyFrac").value);
 
       if(isNaN(gL)||isNaN(gV)||isNaN(min)||isNaN(lambdaL)||isNaN(lambdaV)){
         return mostrarNotificacion("⚠ Completa todos los campos Live");
@@ -269,25 +271,56 @@
       const pLocal=Array.from({length:maxGoals+1},(_,i)=>poisson(i,lambdaRestanteL));
       const pVisita=Array.from({length:maxGoals+1},(_,i)=>poisson(i,lambdaRestanteV));
 
-      let winL=0,draw=0,winV=0;
+      let winL=0,draw=0,winV=0,btts=0,bttsNo=0;
+      const thresholds=[0.5,1.5,2.5,3.5], under={};
+      thresholds.forEach(t=>under[t]=0);
+
       for(let i=0;i<=maxGoals;i++){
         for(let j=0;j<=maxGoals;j++){
           const joint=pLocal[i]*pVisita[j];
+          const golesTotales=gL+i+gV+j;
           if(gL+i>gV+j) winL+=joint;
           else if(gL+i===gV+j) draw+=joint;
           else winV+=joint;
+          if(gL+i>0 && gV+j>0) btts+=joint; else bttsNo+=joint;
+          thresholds.forEach(th=>{ if(golesTotales<=th) under[th]+=joint; });
         }
       }
+      const overs=thresholds.map(th=>1-under[th]);
 
-      const html=`
-        <table>
-          <tr><th>Opción</th><th>Probabilidad %</th></tr>
-          <tr><td>🏠 ${document.getElementById("nombreLocal").value||"Local"}</td><td>${(winL*100).toFixed(2)}</td></tr>
-          <tr><td>🤝 Empate</td><td>${(draw*100).toFixed(2)}</td></tr>
-          <tr><td>🚀 ${document.getElementById("nombreVisita").value||"Visita"}</td><td>${(winV*100).toFixed(2)}</td></tr>
-        </table>
-      `;
+      let html=`<table>
+        <tr><th>Grupo</th><th>Opción</th><th>Prob %</th><th>Cuota Implícita</th>
+        ${showEV?`<th>Cuota Bookie</th><th>EV</th><th>Kelly (${kellyFrac*100}%)</th><th>Apostar $</th>`:""}</tr>`;
 
+      const filas=[
+        ["1X2 ⚽",[document.getElementById("nombreLocal").value||"Local","Empate",document.getElementById("nombreVisita").value||"Visita"],[winL,draw,winV]],
+        ["Over/Under 🎯",thresholds.map(t=>`Over ${t}`),overs],
+        ["BTTS 🔔",["Sí","No"],[btts,bttsNo]]
+      ];
+
+      filas.forEach(([grupo,labels,probs],gi)=>{
+        labels.forEach((label,idx)=>{
+          const p=probs[idx];
+          const id=`live_${gi}_${idx}`;
+          const cuotaGuardada=cuotasGuardadas[id]||"";
+          let row=`<tr><td>${grupo}</td><td>${label}</td>
+                   <td>${(p*100).toFixed(2)}</td><td>${cuotaImplicita(p)}</td>`;
+          if(showEV){
+            row+=`<td><input type="text" class="small-input" id="${id}" value="${cuotaGuardada}"
+                    oninput="cuotasGuardadas['${id}']=this.value.replace(',','.');"
+                    onblur="calcularLive()" onkeydown="if(event.key==='Enter'){this.blur();}"></td>`;
+            const cuotaBookie=parseFloat(cuotasGuardadas[id]);
+            const ev=!isNaN(cuotaBookie)?valueBet(p,cuotaBookie):"-";
+            const k=!isNaN(cuotaBookie)?kelly(p,cuotaBookie,kellyFrac):0;
+            const apuesta=k>0?(bankroll*k).toFixed(2):"-";
+            const highlight=(!isNaN(ev)&&ev>0)||(k>0)?"highlight":"";
+            row+=`<td>${ev}</td><td>${(k*100).toFixed(1)}%</td><td>${apuesta}</td></tr>`;
+            html+=row.replace("<tr>",`<tr class="${highlight}">`);
+          }else html+=row+"</tr>";
+        });
+      });
+
+      html+="</table>";
       document.getElementById("resultadoLive").innerHTML=html;
     }
 
