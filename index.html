@@ -101,7 +101,7 @@
 <div id="notificacion"></div>
 
 <script>
-/* -------- Funciones base -------- */
+/* ---------------- FUNCIONES BASE ---------------- */
 const factorial=n=>n<=1?1:n*factorial(n-1);
 const poisson=(k,lambda)=>(Math.pow(lambda,k)*Math.exp(-lambda))/factorial(k);
 const cuotaImplicita=p=>p>0?(1/p).toFixed(2):"-";
@@ -115,7 +115,7 @@ const samplePoisson=lambda=>{
 
 let cuotasGuardadas={}, exportData=[];
 
-/* ------------ FUNCIÓN PREPARTIDO COMPLETA ------------ */
+/* ------------ FUNCIÓN PREPARTIDO ------------ */
 function calcular(){
   const nombreLocal=document.getElementById("nombreLocal").value.trim();
   const nombreVisita=document.getElementById("nombreVisita").value.trim();
@@ -254,7 +254,7 @@ function exportarHistorial(){
   a.click();
 }
 
-/* ------------ FUNCIÓN LIVE MEJORADA (con tiros) ------------ */
+/* ------------ FUNCIÓN LIVE ------------ */
 function calcularLive(){
   const gL=parseInt(document.getElementById("liveGolesLocal").value)||0;
   const gV=parseInt(document.getElementById("liveGolesVisita").value)||0;
@@ -266,116 +266,58 @@ function calcularLive(){
   const tirosV=parseInt(document.getElementById("tirosVisita").value)||0;
   const tirosPV=parseInt(document.getElementById("tirosPuertaVisita").value)||0;
 
-  if(isNaN(lambdaL)||isNaN(lambdaV)){
-    return mostrarNotificacion("⚠ Ingresa los promedios de goles en la calculadora prepartido primero.");
-  }
+  if(isNaN(lambdaL)||isNaN(lambdaV)) return mostrarNotificacion("⚠ Ingresa los promedios prepartido");
 
-  const showEV=document.getElementById("toggleEV").checked;
-  const kellyFrac=parseFloat(document.getElementById("kellyFrac").value);
-  const bankroll=parseFloat(document.getElementById("bankroll").value);
+  const factorTiempo=(90-min)/90;
+  const factorTiros=(tirosL+tirosV>0)?(1+(tirosPL+tirosPV)/(tirosL+tirosV)/2):1;
 
-  const tiempoRestante=Math.max(0,90-min)/90;
-  const expTiros=10, expTirosPuerta=3, pesoTiros=0.4, pesoPuerta=0.6;
-
-  const factorLocal = (pesoTiros*(tirosL/expTiros) + pesoPuerta*(tirosPL/expTirosPuerta))/(pesoTiros+pesoPuerta);
-  const factorVisita = (pesoTiros*(tirosV/expTiros) + pesoPuerta*(tirosPV/expTirosPuerta))/(pesoTiros+pesoPuerta);
-
-  const lambdaLRest= lambdaL*tiempoRestante*factorLocal;
-  const lambdaVRest= lambdaV*tiempoRestante*factorVisita;
+  const lambdaRestL=Math.max(0,(lambdaL-gL)*factorTiempo*factorTiros);
+  const lambdaRestV=Math.max(0,(lambdaV-gV)*factorTiempo*factorTiros);
 
   const maxGoals=5;
-  const pLocal=Array.from({length:maxGoals+1},(_,i)=>poisson(i,lambdaLRest));
-  const pVisita=Array.from({length:maxGoals+1},(_,i)=>poisson(i,lambdaVRest));
-
-  let btts=0,bttsNo=0;
-  const thresholds=[0.5,1.5,2.5,3.5], under={};
-  thresholds.forEach(t=>under[t]=0);
-
+  const pLocal=Array.from({length:maxGoals+1},(_,i)=>poisson(i,lambdaRestL));
+  const pVisita=Array.from({length:maxGoals+1},(_,i)=>poisson(i,lambdaRestV));
+  let probLocal=0,probDraw=0,probVisita=0;
   for(let i=0;i<=maxGoals;i++){
     for(let j=0;j<=maxGoals;j++){
       const joint=pLocal[i]*pVisita[j];
-      if(i>0&&j>0) btts+=joint; else bttsNo+=joint;
-      thresholds.forEach(th=>{ if(gL+gV+i+j<=th) under[th]+=joint; });
+      const gTotalL=i+gL, gTotalV=j+gV;
+      if(gTotalL>gTotalV) probLocal+=joint;
+      else if(gTotalL===gTotalV) probDraw+=joint;
+      else probVisita+=joint;
     }
   }
-  const overs=thresholds.map(th=>1-under[th]);
 
-  let html=`<table>
-    <tr><th>Grupo</th><th>Opción</th><th>Prob %</th><th>Cuota Implícita</th>
-    ${showEV?`<th>Cuota Bookie</th><th>EV</th><th>Kelly ${kellyFrac*100}%</th><th>Apostar $</th>`:""}</tr>`;
-
-  const filas=[
-    ["Over/Under 🎯",thresholds.map(t=>`Over ${t}`),overs],
-    ["BTTS 🔔",["Sí","No"],[btts,bttsNo]]
-  ];
-
-  filas.forEach(([grupo,labels,probs],gi)=>{
-    labels.forEach((label,idx)=>{
-      const p=probs[idx], id=`live_${gi}_${idx}`;
-      const cuotaGuardada=cuotasGuardadas[id]||"";
-      let row=`<tr><td>${grupo}</td><td>${label}</td>
-               <td>${(p*100).toFixed(2)}</td><td>${cuotaImplicita(p)}</td>`;
-      if(showEV){
-        row+=`<td><input type="text" class="small-input" id="${id}" value="${cuotaGuardada}"
-                oninput="cuotasGuardadas['${id}']=this.value.replace(',','.');"
-                onblur="calcularLive()" onkeydown="if(event.key==='Enter'){this.blur();}"></td>`;
-        const cuotaBookie=parseFloat(cuotasGuardadas[id]);
-        const ev=!isNaN(cuotaBookie)?valueBet(p,cuotaBookie):"-";
-        const k=!isNaN(cuotaBookie)?kelly(p,cuotaBookie,kellyFrac):0;
-        const apuesta=k>0?(bankroll*k).toFixed(2):"-";
-        const highlight=(!isNaN(ev)&&ev>0)||(k>0)?"highlight":"";
-        row+=`<td>${ev}</td><td>${(k*100).toFixed(1)}%</td><td>${apuesta}</td></tr>`;
-        html+=row.replace("<tr>",`<tr class="${highlight}">`);
-      }else html+=row+"</tr>";
-    });
-  });
-
-  html+="</table>";
-  document.getElementById("resultadoLive").innerHTML=html;
+  document.getElementById("resultadoLive").innerHTML=`
+    <table>
+      <tr><th>Mercado</th><th>Probabilidad</th><th>Cuota Implícita</th></tr>
+      <tr><td>${document.getElementById("nombreLocal").value} Gana</td><td>${(probLocal*100).toFixed(2)}%</td><td>${cuotaImplicita(probLocal)}</td></tr>
+      <tr><td>Empate</td><td>${(probDraw*100).toFixed(2)}%</td><td>${cuotaImplicita(probDraw)}</td></tr>
+      <tr><td>${document.getElementById("nombreVisita").value} Gana</td><td>${(probVisita*100).toFixed(2)}%</td><td>${cuotaImplicita(probVisita)}</td></tr>
+    </table>
+  `;
 }
 
-/* --- AGREGAR LIVE SOLO SI TIENE APOSTAR $ --- */
 function agregarAlHistorialLive(){
   calcularLive();
-  const filas=document.querySelectorAll("#resultadoLive table tr");
-  if(filas.length<=1) return mostrarNotificacion("⚠ Calcula Live antes de agregar al historial.");
-  
+  const tabla=document.getElementById("resultadoLive").querySelectorAll("tr");
+  if(tabla.length<2) return;
   const historial=JSON.parse(localStorage.getItem("poissonHistorial"))||[];
-  let agregadas=0;
-
-  filas.forEach((tr,i)=>{
-    if(i===0) return; 
-    const tds=tr.querySelectorAll("td");
-    if(tds.length<8) return;  
-    const apuesta=tds[7]?.innerText || "-";
-    if(apuesta==="-"||apuesta.trim()==="") return;
-
-    const grupo=tds[0].innerText;
-    const opcion=tds[1].innerText;
-    const prob=tds[2].innerText;
-    const cuotaBookie=tds[4]?tds[4].querySelector("input")?.value || "-" : "-";
-    const ev=tds[5]?.innerText || "-";
-    const kellyVal=tds[6]?.innerText || "-";
-    const local=document.getElementById("nombreLocal").value;
-    const visita=document.getElementById("nombreVisita").value;
-    historial.push([grupo+" (Live)",opcion,prob,cuotaBookie,ev,kellyVal,apuesta,local,visita]);
-    agregadas++;
-  });
-
-  if(agregadas>0){
-    localStorage.setItem("poissonHistorial",JSON.stringify(historial));
-    mostrarNotificacion(`✅ ${agregadas} mercados Live agregados`);
-  }else{
-    mostrarNotificacion("⚠ Ninguna fila tiene valor en Apostar $");
+  for(let i=1;i<tabla.length;i++){
+    const cols=tabla[i].querySelectorAll("td");
+    const row=["Live",cols[0].innerText,cols[1].innerText,"-","-","-","-",document.getElementById("nombreLocal").value,document.getElementById("nombreVisita").value];
+    historial.push(row);
   }
+  localStorage.setItem("poissonHistorial",JSON.stringify(historial));
+  mostrarNotificacion("✅ Mercados Live agregados al historial");
 }
 
-/* -------- Notificación -------- */
+/* ------------ NOTIFICACIÓN ------------ */
 function mostrarNotificacion(msg){
-  const n=document.getElementById("notificacion");
-  n.textContent=msg;
-  n.classList.add("visible");
-  setTimeout(()=>n.classList.remove("visible"),2500);
+  const notif=document.getElementById("notificacion");
+  notif.innerText=msg;
+  notif.classList.add("visible");
+  setTimeout(()=>notif.classList.remove("visible"),3500);
 }
 </script>
 </body>
