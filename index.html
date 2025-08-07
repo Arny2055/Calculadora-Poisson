@@ -99,6 +99,7 @@
 </div>
 
 <div id="notificacion"></div>
+
 <script>
 /* -------- Funciones base -------- */
 const factorial=n=>n<=1?1:n*factorial(n-1);
@@ -232,8 +233,28 @@ function calcular(){
   html+="</table>";
   document.getElementById("resultado").innerHTML=html;
 }
-<script>
-/* ------------ FUNCIÓN LIVE MEJORADA ------------ */
+
+/* ------------ HISTORIAL ------------ */
+function agregarAlHistorial(){
+  calcular();
+  if(!exportData.length) return mostrarNotificacion("⚠ No hay mercados con cuota de la bookie para agregar.");
+  const historial=JSON.parse(localStorage.getItem("poissonHistorial"))||[];
+  exportData.forEach(r=>historial.push(r));
+  localStorage.setItem("poissonHistorial",JSON.stringify(historial));
+  mostrarNotificacion("✅ Mercados agregados al historial");
+}
+function exportarHistorial(){
+  const historial=JSON.parse(localStorage.getItem("poissonHistorial"))||[];
+  if(!historial.length) return mostrarNotificacion("⚠ No hay historial para exportar");
+  const csv="Grupo,Opción,Prob %,Cuota Bookie,EV,Kelly %,Apostar $,Local,Visitante\n"+historial.map(r=>r.join(",")).join("\n");
+  const blob=new Blob([csv],{type:"text/csv"});
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(blob);
+  a.download="historial_poisson.csv";
+  a.click();
+}
+
+/* ------------ FUNCIÓN LIVE MEJORADA (con tiros) ------------ */
 function calcularLive(){
   const gL=parseInt(document.getElementById("liveGolesLocal").value)||0;
   const gV=parseInt(document.getElementById("liveGolesVisita").value)||0;
@@ -253,13 +274,12 @@ function calcularLive(){
   const kellyFrac=parseFloat(document.getElementById("kellyFrac").value);
   const bankroll=parseFloat(document.getElementById("bankroll").value);
 
-  /* Tiempo y factor ofensivo */
   const tiempoRestante=Math.max(0,90-min)/90;
   const expTiros=10, expTirosPuerta=3, pesoTiros=0.4, pesoPuerta=0.6;
+
   const factorLocal = (pesoTiros*(tirosL/expTiros) + pesoPuerta*(tirosPL/expTirosPuerta))/(pesoTiros+pesoPuerta);
   const factorVisita = (pesoTiros*(tirosV/expTiros) + pesoPuerta*(tirosPV/expTirosPuerta))/(pesoTiros+pesoPuerta);
 
-  /* Ajuste Poisson para goles restantes */
   const lambdaLRest= lambdaL*tiempoRestante*factorLocal;
   const lambdaVRest= lambdaV*tiempoRestante*factorVisita;
 
@@ -267,34 +287,20 @@ function calcularLive(){
   const pLocal=Array.from({length:maxGoals+1},(_,i)=>poisson(i,lambdaLRest));
   const pVisita=Array.from({length:maxGoals+1},(_,i)=>poisson(i,lambdaVRest));
 
-  let winL=0,draw=0,winV=0,btts=0,bttsNo=0;
+  let btts=0,bttsNo=0;
   const thresholds=[0.5,1.5,2.5,3.5], under={};
   thresholds.forEach(t=>under[t]=0);
 
   for(let i=0;i<=maxGoals;i++){
     for(let j=0;j<=maxGoals;j++){
       const joint=pLocal[i]*pVisita[j];
-      const finalL=gL+i, finalV=gV+j;
-
-      if(finalL>finalV) winL+=joint;
-      else if(finalL===finalV) draw+=joint;
-      else winV+=joint;
-
-      if(finalL>0&&finalV>0) btts+=joint; else bttsNo+=joint;
-      thresholds.forEach(th=>{ if(finalL+finalV<=th) under[th]+=joint; });
+      if(i>0&&j>0) btts+=joint; else bttsNo+=joint;
+      thresholds.forEach(th=>{ if(gL+gV+i+j<=th) under[th]+=joint; });
     }
   }
   const overs=thresholds.map(th=>1-under[th]);
 
-  /* Expectativa de goles restantes */
-  const expGolesRest = (lambdaLRest+lambdaVRest).toFixed(2);
-
-  let html=`<p><b>Probabilidades de Victoria:</b> 
-    ${document.getElementById("nombreLocal").value}: ${(winL*100).toFixed(1)}% | 
-    Empate: ${(draw*100).toFixed(1)}% | 
-    ${document.getElementById("nombreVisita").value}: ${(winV*100).toFixed(1)}%</p>
-    <p><b>Goles esperados restantes:</b> ${expGolesRest}</p>
-    <table>
+  let html=`<table>
     <tr><th>Grupo</th><th>Opción</th><th>Prob %</th><th>Cuota Implícita</th>
     ${showEV?`<th>Cuota Bookie</th><th>EV</th><th>Kelly ${kellyFrac*100}%</th><th>Apostar $</th>`:""}</tr>`;
 
@@ -372,3 +378,5 @@ function mostrarNotificacion(msg){
   setTimeout(()=>n.classList.remove("visible"),2500);
 }
 </script>
+</body>
+</html>
