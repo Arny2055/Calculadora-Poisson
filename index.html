@@ -1,474 +1,174 @@
 <!doctype html>
 <html lang="es">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Pronosticador de Fútbol — Poisson + Monte Carlo</title>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Pronosticador Poisson — Leer Excel (SheetJS)</title>
 
-  <!-- Google Font -->
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+<!-- SheetJS for client-side Excel parsing -->
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<!-- Chart.js for charts -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 
-  <!-- Chart.js (CDN) -->
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-
-  <style>
-    :root{
-      --bg:#0f1724; --card:#0b1220; --muted:#9aa6bf; --accent:#3b82f6; --glass: rgba(255,255,255,0.03);
-      --radius:12px;
-    }
-    *{box-sizing:border-box}
-    body{
-      font-family:'Inter',system-ui,-apple-system,Segoe UI,Roboto,"Helvetica Neue",Arial;
-      margin:0; padding:28px; background:linear-gradient(180deg,#071029 0%, #051226 100%); color:#e6eef8;
-      min-height:100vh;
-    }
-    .wrap{max-width:1100px;margin:0 auto;display:grid;gap:18px;grid-template-columns:1fr 420px;}
-    header{grid-column:1/-1;display:flex;align-items:center;gap:16px;}
-    h1{margin:0;font-size:20px}
-    .card{background:var(--card);border-radius:var(--radius);padding:16px;border:1px solid rgba(255,255,255,0.03);box-shadow:0 6px 24px rgba(2,6,23,0.6)}
-    label{display:block;font-size:13px;color:var(--muted);margin-bottom:6px}
-    input[type="text"], input[type="number"], select{
-      width:100%;padding:10px;border-radius:8px;border:1px solid rgba(255,255,255,0.04);
-      background:var(--glass); color:inherit; font-size:14px;
-    }
-    .grid-2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-    .btn{background:var(--accent);color:white;padding:10px 12px;border-radius:8px;border:none;cursor:pointer;font-weight:600}
-    .muted{color:var(--muted);font-size:13px}
-    .result-box{background:linear-gradient(180deg, rgba(59,130,246,0.08), transparent);padding:12px;border-radius:10px}
-    small{color:var(--muted)}
-    table{width:100%;border-collapse:collapse;font-size:13px}
-    th,td{padding:6px;text-align:left;border-bottom:1px dashed rgba(255,255,255,0.03)}
-    .footer{grid-column:1/-1;text-align:center;color:var(--muted);font-size:13px;padding-top:6px}
-    @media(max-width:980px){ .wrap{grid-template-columns:1fr} }
-  </style>
+<style>
+  /* Minimal, programmer-friendly UI */
+  :root{
+    --bg:#0b1220; --card:#0f1724; --muted:#9aa6bf; --accent:#3b82f6; --glass:rgba(255,255,255,0.03);
+    --radius:10px; --mono: "Fira Mono", "Courier New", monospace;
+  }
+  *{box-sizing:border-box}
+  body{font-family:Inter, system-ui, Arial; margin:0; padding:20px; background:linear-gradient(180deg,#061021,#081428); color:#dbe9fb;}
+  header{display:flex;gap:12px;align-items:center;margin-bottom:12px}
+  h1{font-size:18px;margin:0}
+  .panel{background:var(--card);padding:14px;border-radius:var(--radius);border:1px solid rgba(255,255,255,0.03);box-shadow:0 8px 30px rgba(2,6,23,0.6)}
+  .layout{display:grid;grid-template-columns:360px 1fr;gap:16px;align-items:start}
+  label{display:block;color:var(--muted);font-size:13px;margin-bottom:6px}
+  input[type=file], input[type=number], input[type=text], select{width:100%;padding:8px;border-radius:8px;border:1px solid rgba(255,255,255,0.04);background:transparent;color:inherit}
+  button{background:var(--accent);border:none;color:white;padding:8px 10px;border-radius:8px;cursor:pointer;font-weight:600}
+  small{color:var(--muted)}
+  table{width:100%;border-collapse:collapse;font-size:13px;margin-top:10px}
+  th, td{padding:8px;border-bottom:1px dashed rgba(255,255,255,0.03);text-align:left}
+  th.sortable{cursor:pointer}
+  tr.selected{background:linear-gradient(90deg, rgba(59,130,246,0.08), transparent)}
+  .muted{color:var(--muted)}
+  .controls{display:grid;gap:8px;margin-bottom:8px}
+  .flex{display:flex;gap:8px;align-items:center}
+  .mini{padding:6px 8px;font-size:13px}
+  .kpi{display:flex;gap:12px;flex-wrap:wrap;margin-top:8px}
+  .kpi div{background:rgba(255,255,255,0.02);padding:8px;border-radius:8px;min-width:120px}
+  .chart-wrap{background:linear-gradient(180deg,#081426,#081428);padding:8px;border-radius:8px;margin-top:8px}
+  footer{margin-top:12px;color:var(--muted);font-size:13px;text-align:center}
+  @media(max-width:980px){ .layout{grid-template-columns:1fr} }
+</style>
 </head>
 <body>
-  <div class="wrap">
-    <header>
-      <div>
-        <h1>Pronosticador: Poisson + Monte Carlo</h1>
-        <div class="muted">Introduce parámetros rápidos y obtén probabilidades 1X2, Over/Under 2.5 y BTTS. Opcional: añade cuotas para ver EV y stake por Kelly.</div>
-      </div>
-    </header>
 
-    <!-- Left: Controls + Results -->
-    <div class="card">
-      <h3>Entradas del partido</h3>
+<header>
+  <h1>Pronosticador Poisson — Excel → 1X2 • EV • Kelly</h1>
+  <small class="muted">Cliente (no server). Sube un Excel/CSV con partidos y calcula pronósticos.</small>
+</header>
 
-      <div class="grid-2">
-        <div>
-          <label>Equipo local</label>
-          <input id="homeName" type="text" placeholder="Ej. Real Madrid" value="Local FC">
-        </div>
-        <div>
-          <label>Equipo visitante</label>
-          <input id="awayName" type="text" placeholder="Ej. Barcelona" value="Visitante United">
-        </div>
-      </div>
+<div class="layout">
+  <!-- LEFT: controls -->
+  <div class="panel" aria-label="Controles">
+    <div class="controls">
+      <label>Sube archivo Excel (.xlsx/.xls) o CSV</label>
+      <input id="fileInput" type="file" accept=".xlsx,.xls,.csv" />
 
-      <div style="height:12px"></div>
-
-      <div class="grid-2">
-        <div>
-          <label>Goles esperados (λ) — local</label>
-          <input id="lambdaHome" type="number" min="0" step="0.01" value="1.6">
-        </div>
-        <div>
-          <label>Goles esperados (λ) — visitante</label>
-          <input id="lambdaAway" type="number" min="0" step="0.01" value="1.1">
-        </div>
+      <label>Mapea columnas (si tu hoja tiene nombres distintos)</label>
+      <div style="display:grid;gap:6px">
+        <input id="colHome" placeholder="Columna equipo local (ej. Local, Home)" />
+        <input id="colAway" placeholder="Columna equipo visitante (ej. Away, Visitante)" />
+        <input id="colLambdaHome" placeholder="Columna λ local (ej. LambdaHome, AvgHomeGoals)" />
+        <input id="colLambdaAway" placeholder="Columna λ visitante (ej. LambdaAway, AvgAwayGoals)" />
+        <input id="colOddsHome" placeholder="Columna cuota local (opcional)" />
+        <input id="colOddsDraw" placeholder="Columna cuota empate (opcional)" />
+        <input id="colOddsAway" placeholder="Columna cuota visitante (opcional)" />
       </div>
 
-      <div style="height:10px"></div>
-
-      <label>Opciones de simulación</label>
-      <div class="grid-2">
-        <div>
-          <label>Nº simulaciones (Monte Carlo)</label>
-          <input id="sims" type="number" min="100" step="100" value="5000">
-        </div>
-        <div>
-          <label>Max goles mostrados (tabla)</label>
-          <input id="maxGoals" type="number" min="1" max="10" value="6">
-        </div>
+      <div class="flex" style="margin-top:8px">
+        <button id="processBtn" class="mini">Procesar archivo</button>
+        <button id="autoLambdaBtn" class="mini" title="Estimar λ si tienes historical goals columns">Auto-λ</button>
       </div>
 
-      <div style="height:12px"></div>
+      <hr style="border:none;border-top:1px solid rgba(255,255,255,0.03);margin:8px 0">
 
-      <h4>Cuotas (opcional)</h4>
-      <div class="grid-2">
-        <div>
-          <label>Cuota Local (decimal)</label>
-          <input id="oddsHome" type="number" min="1" step="0.01" placeholder="Ej. 1.85">
+      <label>Opciones globales</label>
+      <div style="display:grid;gap:8px">
+        <div class="flex">
+          <label style="flex:1"><small class="muted">Max goles tabla</small>
+            <input id="maxGoals" type="number" value="6" min="1" style="width:84px;margin-left:8px"/>
+          </label>
+          <label style="flex:1"><small class="muted">Simulaciones MC (por partido)</small>
+            <input id="mcSims" type="number" value="2000" min="100" style="width:120px;margin-left:8px"/>
+          </label>
         </div>
-        <div>
-          <label>Cuota Empate</label>
-          <input id="oddsDraw" type="number" min="1" step="0.01" placeholder="Ej. 3.70">
-        </div>
-      </div>
-      <div style="height:8px"></div>
-      <div class="grid-2" style="margin-bottom:10px">
-        <div>
-          <label>Cuota Visitante</label>
-          <input id="oddsAway" type="number" min="1" step="0.01" placeholder="Ej. 4.20">
-        </div>
-        <div>
-          <label>Bankroll (unidades) para Kelly</label>
-          <input id="bankroll" type="number" min="1" step="1" value="100">
+
+        <label><small class="muted">Bankroll (unidades, para mostrar stake Kelly)</small>
+          <input id="bankroll" type="number" value="100" min="1" />
+        </label>
+
+        <div class="flex">
+          <button id="runAllBtn" class="mini">Calcular pronósticos (Poisson + MC)</button>
+          <button id="exportCsvBtn" class="mini" title="Exportar resultados a CSV">Exportar CSV</button>
         </div>
       </div>
 
-      <div style="display:flex;gap:10px;margin-top:10px">
-        <button class="btn" id="runBtn">Calcular pronóstico</button>
-        <button class="btn" id="simBtn" style="background:#0ea5a4">Ejecutar sólo Monte Carlo</button>
+      <hr style="border:none;border-top:1px solid rgba(255,255,255,0.03);margin:8px 0">
+
+      <div class="muted"><strong>Formato recomendado hoja:</strong> columnas con nombres parecidos a <code>Local, Away, LambdaHome, LambdaAway, OddsHome, OddsDraw, OddsAway</code>. Si faltan λ puedes usar "Auto-λ" con histórico (ver botón).</div>
+    </div>
+  </div>
+
+  <!-- RIGHT: results -->
+  <div>
+    <div class="panel" style="margin-bottom:10px">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div><strong>Partidos detectados</strong> <span id="count" class="muted">0</span></div>
+        <div class="muted">Haz click en una fila para ver detalles</div>
       </div>
 
-      <hr style="border:none;border-top:1px solid rgba(255,255,255,0.04);margin:14px 0" />
-
-      <div id="summaryArea">
-        <h3>Resultados</h3>
-        <div class="result-box" id="mainResults">
-          <div style="display:flex;gap:8px;flex-wrap:wrap">
-            <div style="min-width:180px">
-              <small>Prob. Local</small>
-              <div id="pHome" style="font-weight:700;font-size:18px">—</div>
-            </div>
-            <div style="min-width:160px">
-              <small>Prob. Empate</small>
-              <div id="pDraw" style="font-weight:700;font-size:18px">—</div>
-            </div>
-            <div style="min-width:160px">
-              <small>Prob. Visitante</small>
-              <div id="pAway" style="font-weight:700;font-size:18px">—</div>
-            </div>
-            <div style="min-width:160px">
-              <small>Prob. Over 2.5</small>
-              <div id="pOver" style="font-weight:700;font-size:18px">—</div>
-            </div>
-            <div style="min-width:160px">
-              <small>Prob. BTTS (ambos marcan)</small>
-              <div id="pBTTS" style="font-weight:700;font-size:18px">—</div>
-            </div>
-          </div>
-
-          <div style="height:8px"></div>
-          <div id="evArea" style="display:flex;gap:10px;flex-wrap:wrap;margin-top:8px"></div>
-        </div>
-
-        <div style="height:12px"></div>
-
-        <h4>Distribución de goles (probabilidades teóricas)</h4>
-        <canvas id="goalsChart" height="180"></canvas>
-
-        <div style="height:12px"></div>
-
-        <h4>Tabla de probabilidades 0..N goles (local x visitante)</h4>
-        <div style="overflow:auto;max-height:280px">
-          <table id="probTable"><thead></thead><tbody></tbody></table>
-        </div>
-
-        <div style="height:10px"></div>
-
-        <h4>Monte Carlo (simulación)</h4>
-        <div class="muted">Si ejecutas la simulación, verás probabilidades empíricas basadas en <span id="simsCountText">—</span> partidas simuladas.</div>
-        <div style="height:8px"></div>
-        <div id="mcResults" class="muted" style="font-size:14px"></div>
+      <div style="overflow:auto;max-height:360px;margin-top:10px">
+        <table id="resultsTable">
+          <thead><tr>
+            <th class="sortable">#</th>
+            <th class="sortable">Local</th>
+            <th class="sortable">Visitante</th>
+            <th class="sortable">λLocal</th>
+            <th class="sortable">λAway</th>
+            <th class="sortable">P(Home)</th>
+            <th class="sortable">P(Draw)</th>
+            <th class="sortable">P(Away)</th>
+            <th class="sortable">EV best</th>
+            <th>Kelly%</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
       </div>
     </div>
 
-    <!-- Right: Info + Tips -->
-    <aside class="card">
-      <h3>Cómo usar</h3>
-      <ul class="muted" style="padding-left:16px">
-        <li>Introduce λ (goles esperados). Si no sabes, usa tus modelos o promedios de la temporada.</li>
-        <li>Haz click en "Calcular pronóstico" para ver las probabilidades teóricas (Poisson).</li>
-        <li>Introduce cuotas para ver EV y stake recomendado por Kelly.</li>
-        <li>Usa Monte Carlo para estimaciones empíricas (útil si quieres modelar factores no-Poisson).</li>
-      </ul>
-
-      <hr style="border:none;border-top:1px solid rgba(255,255,255,0.04)" />
-
-      <h4>Explicaciones rápidas</h4>
-      <div class="muted" style="font-size:13px">
-        <strong>Poisson:</strong> modela el número de goles como Poisson(λ).  
-        <strong>Monte Carlo:</strong> simula goles aleatorios con media λ para estimar probabilidades empíricas.  
-        <strong>Kelly:</strong> fracción sugerida de tu bankroll: f = (bp - q) / b, donde b = odds-1, p = prob. estimada, q = 1-p.
+    <div class="panel">
+      <div style="display:flex;gap:12px;align-items:center;justify-content:space-between">
+        <div>
+          <strong id="selTitle">Selecciona un partido</strong><br>
+          <small id="selSubtitle" class="muted">Verás distribución de goles, tabla y opciones de MC</small>
+        </div>
+        <div>
+          <button id="runMcForSelected" class="mini">Correr MC (selected)</button>
+          <button id="downloadMatrix" class="mini">Descargar matriz CSV</button>
+        </div>
       </div>
 
-      <div style="height:12px"></div>
+      <div class="kpi" id="kpiArea" style="margin-top:10px"></div>
 
-      <h4>Consejos</h4>
-      <ol class="muted" style="padding-left:16px">
-        <li>Calibra tus λ con datos reales (promedios por rivalidad/liga/cuotas).</li>
-        <li>Limita stake por Kelly (por ejemplo usar 10%-50% de Kelly para reducir varianza).</li>
-        <li>Combina Poisson con ajustes por forma, lesiones y localía.</li>
-      </ol>
+      <div class="chart-wrap">
+        <canvas id="distChart" height="120"></canvas>
+      </div>
 
-      <div style="height:12px"></div>
-      <small class="muted">Hecho con ❤️ — modelo simple para explorar ideas, no una recomendación de apuestas.</small>
-    </aside>
-
-    <div class="footer">© Pronosticador Poisson — ejemplo educativo</div>
+      <div style="margin-top:8px">
+        <div class="muted">Tabla probabilidades (Local x Visitante)</div>
+        <div style="overflow:auto;max-height:220px;margin-top:6px">
+          <table id="matrixTable"><thead></thead><tbody></tbody></table>
+        </div>
+      </div>
+    </div>
   </div>
+</div>
+
+<footer>Hecho con ❤️ — cliente. Archivo cargado y procesado sólo en tu navegador.</footer>
 
 <script>
-/* ---------- Utilidades matemáticas ---------- */
-function poissonProb(lambda, k){
-  // P(X=k) = e^-λ * λ^k / k!
-  if (k < 0) return 0;
-  return Math.exp(-lambda) * Math.pow(lambda, k) / factorial(k);
-}
+/* ========== UTILIDADES MATEMÁTICAS (rápidas y robustas) ========== */
 function factorial(n){
   if (n <= 1) return 1;
   let f = 1;
-  for (let i=2;i<=n;i++) f *= i;
+  for (let i=2;i<=n;i++) f*=i;
   return f;
 }
-function cumulativePoissonGreater(lambda, threshold){
-  // P(X > threshold) = 1 - sum_{k=0..threshold} P(X=k)
-  let sum = 0;
-  for (let k=0;k<=threshold;k++) sum += poissonProb(lambda,k);
-  return Math.max(0, 1 - sum);
+function poissonProb(lambda, k){
+  if (k < 0) return 0;
+  return Math.exp(-lambda) * Math.pow(lambda, k) / factorial(k);
 }
-
-/* Monte Carlo: genera goles aleatorios Poisson usando aproximación de Knuth */
-function samplePoisson(lambda){
-  // Si lambda < 30 usaremos el algoritmo clásico; para lambda grande, usar aproximación normal
-  if (lambda < 30) {
-    let L = Math.exp(-lambda);
-    let k = 0, p = 1;
-    do {
-      k++;
-      p *= Math.random();
-    } while (p > L);
-    return k - 1;
-  } else {
-    // aproximación normal con corrección (no perfecto pero evita loops)
-    let val = Math.round(randn_bm() * Math.sqrt(lambda) + lambda);
-    return Math.max(0, val);
-  }
-}
-function randn_bm() {
-  // Box-Muller
-  let u = 0, v = 0;
-  while(u === 0) u = Math.random();
-  while(v === 0) v = Math.random();
-  return Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
-}
-
-/* ---------- Lógica principal ---------- */
-document.getElementById('runBtn').addEventListener('click', runAll);
-document.getElementById('simBtn').addEventListener('click', runMonteCarloOnly);
-
-function runAll(){
-  // obtiene inputs
-  const lambdaH = parseFloat(document.getElementById('lambdaHome').value) || 0;
-  const lambdaA = parseFloat(document.getElementById('lambdaAway').value) || 0;
-  const maxG = parseInt(document.getElementById('maxGoals').value) || 6;
-  const sims = parseInt(document.getElementById('sims').value) || 5000;
-  const oddsH = parseFloat(document.getElementById('oddsHome').value) || null;
-  const oddsD = parseFloat(document.getElementById('oddsDraw').value) || null;
-  const oddsA = parseFloat(document.getElementById('oddsAway').value) || null;
-  const bankroll = parseFloat(document.getElementById('bankroll').value) || 0;
-
-  // matriz de probabilidades teóricas (0..maxG)
-  let probMatrix = [];
-  for (let i=0;i<=maxG;i++){
-    probMatrix[i] = [];
-    for (let j=0;j<=maxG;j++){
-      probMatrix[i][j] = poissonProb(lambdaH, i) * poissonProb(lambdaA, j);
-    }
-  }
-
-  // Probabilidades 1X2 teóricas
-  let pHome = 0, pDraw = 0, pAway = 0;
-  for (let i=0;i<=maxG;i++){
-    for (let j=0;j<=maxG;j++){
-      const p = probMatrix[i][j];
-      if (i>j) pHome += p;
-      else if (i===j) pDraw += p;
-      else pAway += p;
-    }
-  }
-  // Resto de probabilidad por eventos fuera de la tabla (goles mayores a maxG)
-  // Para mayor exactitud, ajustamos con colas:
-  const tailProbH = 1 - sumPoissonTo(lambdaH, maxG);
-  const tailProbA = 1 - sumPoissonTo(lambdaA, maxG);
-  // Probabilidad aproximada de home wins por colas (aprox: when either side > maxG)
-  // La matriz truncada subestima escenarios donde alguno marca >maxG. Compensamos aproximando:
-  // Añadimos P(local > maxG, away <= maxG) * approxProb + P(local>maxG, away>maxG)*0.5
-  // pero para simplicidad añadimos la masa de cola marginal de cada lado as empate neutrally distributed.
-  // Esto is approximate; user can increase maxGoals for precision.
-  const remainingMass = (1 - matrixSum(probMatrix));
-  // renormalizamos (simple) para que pHome+pDraw+pAway sumen ~1
-  const sum3 = pHome + pDraw + pAway;
-  if (sum3 > 0) {
-    pHome /= sum3; pDraw /= sum3; pAway /= sum3;
-  }
-
-  // Over 2.5 (teórico): P(home_goals + away_goals > 2.5)
-  let pOver25 = 0;
-  for (let i=0;i<=maxG;i++){
-    for (let j=0;j<=maxG;j++){
-      if (i + j > 2) pOver25 += probMatrix[i][j];
-    }
-  }
-  // approximate tail: if remainingMass > 0 and expectation suggests more goals, adjust slightly (skip complex)
-  // BTTS (ambos marcan)
-  let pBTTS = 0;
-  for (let i=1;i<=maxG;i++){
-    for (let j=1;j<=maxG;j++){
-      pBTTS += probMatrix[i][j];
-    }
-  }
-
-  // Mostrar resultados teóricos
-  showMainResults(pHome, pDraw, pAway, pOver25, pBTTS, oddsH, oddsD, oddsA, bankroll);
-
-  // dibujar matriz y distribuciones
-  renderProbTable(probMatrix, maxG);
-  renderGoalsChart(lambdaH, lambdaA, maxG);
-
-  // correr Monte Carlo (async para no bloquear UI cuando sims grandes)
-  runMonteCarlo(lambdaH, lambdaA, sims).then(mc => {
-    displayMC(mc, sims);
-  });
-}
-
-function runMonteCarloOnly(){
-  const lambdaH = parseFloat(document.getElementById('lambdaHome').value) || 0;
-  const lambdaA = parseFloat(document.getElementById('lambdaAway').value) || 0;
-  const sims = parseInt(document.getElementById('sims').value) || 5000;
-  document.getElementById('simsCountText').textContent = sims;
-  document.getElementById('mcResults').textContent = 'Simulando... (esto puede tardar unos segundos)';
-  runMonteCarlo(lambdaH, lambdaA, sims).then(mc => {
-    displayMC(mc, sims);
-  });
-}
-
-function runMonteCarlo(lambdaH, lambdaA, sims){
-  document.getElementById('simsCountText').textContent = sims;
-  return new Promise((resolve) => {
-    // run in slices to keep UI responsive
-    let simDone = 0;
-    let result = {home:0, draw:0, away:0, over25:0, btts:0};
-    const chunk = 1000;
-    function workBatch(){
-      const limit = Math.min(chunk, sims - simDone);
-      for (let s=0;s<limit;s++){
-        const gH = samplePoisson(lambdaH);
-        const gA = samplePoisson(lambdaA);
-        if (gH > gA) result.home++;
-        else if (gH === gA) result.draw++;
-        else result.away++;
-        if (gH + gA > 2) result.over25++;
-        if (gH > 0 && gA > 0) result.btts++;
-      }
-      simDone += limit;
-      if (simDone < sims){
-        // yield to event loop
-        setTimeout(workBatch, 0);
-      } else {
-        // normalize
-        for (let k in result) result[k] = result[k] / sims;
-        resolve(result);
-      }
-    }
-    workBatch();
-  });
-}
-
-/* ---------- Visualización y helpers ---------- */
-function showMainResults(pH, pD, pA, pOver, pBTTS, oddsH, oddsD, oddsA, bankroll){
-  document.getElementById('pHome').textContent = (pH*100).toFixed(2) + '%';
-  document.getElementById('pDraw').textContent = (pD*100).toFixed(2) + '%';
-  document.getElementById('pAway').textContent = (pA*100).toFixed(2) + '%';
-  document.getElementById('pOver').textContent = (pOver*100).toFixed(2) + '%';
-  document.getElementById('pBTTS').textContent = (pBTTS*100).toFixed(2) + '%';
-
-  // EV and Kelly if odds provided
-  const evArea = document.getElementById('evArea');
-  evArea.innerHTML = '';
-  const addEV = (label, prob, odds) => {
-    if (!odds || odds <= 0) return;
-    const ev = prob * odds - 1;
-    const b = odds - 1;
-    const q = 1 - prob;
-    let kelly = (prob * b - q) / b;
-    // cap sane values
-    if (!isFinite(kelly)) kelly = 0;
-    // suggestion: use fraction of Kelly, e.g., 20-50% recommended in practice — we show full Kelly
-    const unitStake = bankroll ? (kelly * bankroll) : kelly;
-    const div = document.createElement('div');
-    div.style.minWidth = '220px';
-    div.innerHTML = `<small>${label}</small>
-      <div style="font-weight:700">${(ev*100).toFixed(2)}% EV — Kelly: ${(kelly*100).toFixed(2)}% ${bankroll?'- stake: '+unitStake.toFixed(2)+' u':''}</div>`;
-    evArea.appendChild(div);
-  };
-
-  addEV('Local', pH, oddsH);
-  addEV('Empate', pD, oddsD);
-  addEV('Visitante', pA, oddsA);
-}
-
-let goalsChart = null;
-function renderGoalsChart(lambdaH, lambdaA, maxG){
-  const labels = [];
-  const dataH = [];
-  const dataA = [];
-  for (let k=0;k<=maxG;k++){
-    labels.push(String(k));
-    dataH.push(poissonProb(lambdaH, k));
-    dataA.push(poissonProb(lambdaA, k));
-  }
-  const ctx = document.getElementById('goalsChart').getContext('2d');
-  if (goalsChart) goalsChart.destroy();
-  goalsChart = new Chart(ctx, {
-    type: 'bar',
-    data: {
-      labels,
-      datasets: [
-        { label: 'Local (λ='+lambdaH+')', data: dataH, stack: 's1' },
-        { label: 'Visitante (λ='+lambdaA+')', data: dataA, stack: 's2' }
-      ]
-    },
-    options: {
-      responsive:true,
-      scales:{
-        x:{ stacked:true, ticks:{color:'#cbd5e1'} },
-        y:{ stacked:false, beginAtZero:true, ticks:{color:'#cbd5e1'} }
-      },
-      plugins:{
-        legend:{labels:{color:'#cbd5e1'}}
-      }
-    }
-  });
-}
-
-function renderProbTable(matrix, maxG){
-  const table = document.getElementById('probTable');
-  const thead = table.querySelector('thead');
-  const tbody = table.querySelector('tbody');
-  thead.innerHTML = '';
-  tbody.innerHTML = '';
-
-  // header
-  let headRow = '<tr><th>Local \\ Visitante</th>';
-  for (let j=0;j<=maxG;j++) headRow += `<th>${j}</th>`;
-  headRow += '</tr>';
-  thead.innerHTML = headRow;
-
-  for (let i=0;i<=maxG;i++){
-    let row = `<tr><th>${i}</th>`;
-    for (let j=0;j<=maxG;j++){
-      row += `<td>${(matrix[i][j]*100).toFixed(2)}%</td>`;
-    }
-    row += '</tr>';
-    tbody.innerHTML += row;
-  }
-}
-
-/* ---------- Utilities ---------- */
 function sumPoissonTo(lambda, maxG){
   let s = 0;
   for (let k=0;k<=maxG;k++) s += poissonProb(lambda,k);
@@ -476,20 +176,467 @@ function sumPoissonTo(lambda, maxG){
 }
 function matrixSum(mat){
   let s = 0;
-  for (let i=0;i<mat.length;i++){
-    for (let j=0;j<mat[i].length;j++) s += mat[i][j];
-  }
+  for (let i=0;i<mat.length;i++) for (let j=0;j<mat[i].length;j++) s+=mat[i][j];
   return s;
 }
-
-function displayMC(mc, sims){
-  const el = document.getElementById('mcResults');
-  el.innerHTML = `Simulación (${sims}): <strong>Local ${(mc.home*100).toFixed(2)}%</strong> — <strong>Empate ${(mc.draw*100).toFixed(2)}%</strong> — <strong>Visit ${(mc.away*100).toFixed(2)}%</strong>
-  <br> Over 2.5: ${(mc.over25*100).toFixed(2)}% — BTTS: ${(mc.btts*100).toFixed(2)}%`;
+/* Kelly fraction (decimal odds) */
+function kellyFraction(p, odds){
+  if (!isFinite(p) || p<=0 || odds<=1) return 0;
+  const b = odds - 1;
+  const q = 1 - p;
+  const f = (p * b - q) / b;
+  return Math.max(0, f); // no negative kelly returned
 }
 
-/* run initial demo once */
-runAll();
+/* Small CSV helper */
+function arrayToCSV(rows){
+  return rows.map(r => r.map(c => {
+    if (c === null || c === undefined) return '';
+    const s = String(c);
+    if (s.includes(',') || s.includes('"') || s.includes('\n')) return `"${s.replace(/"/g,'""')}"`;
+    return s;
+  }).join(',')).join('\n');
+}
+
+/* ========== UI state ========== */
+let rawRows = [];            // objects as read from excel
+let normalized = [];        // processed match objects
+let selectedIndex = -1;
+let distChart = null;
+let sortState = {col:null, asc:true};
+
+/* ========== FILE / MAPPING / PARSING ========== */
+const fileInput = document.getElementById('fileInput');
+const processBtn = document.getElementById('processBtn');
+const autoLambdaBtn = document.getElementById('autoLambdaBtn');
+const processMapping = () => {
+  const f = fileInput.files[0];
+  if (!f){ alert('Sube un archivo primero.'); return; }
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    const data = e.target.result;
+    let workbook;
+    try {
+      // try xlsx first; SheetJS can parse CSV as well
+      workbook = XLSX.read(data, {type: 'binary'});
+    } catch(err){
+      // try CSV fallback
+      workbook = XLSX.read(data, {type:'binary', raw:true});
+    }
+    const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+    const json = XLSX.utils.sheet_to_json(firstSheet, {defval: ''});
+    rawRows = json;
+    document.getElementById('count').textContent = json.length;
+    inferAndNormalize();
+  };
+  reader.readAsBinaryString(f);
+};
+
+processBtn.addEventListener('click', processMapping);
+fileInput.addEventListener('change', ()=>{/* noop - wait for process */});
+
+/* Try to infer columns and create normalized dataset */
+function inferAndNormalize(){
+  if (!rawRows || rawRows.length === 0) { alert('No hay filas detectadas.'); return; }
+  // mapping inputs (user can type custom names; if blank we'll try to infer)
+  const mHome = document.getElementById('colHome').value.trim().toLowerCase();
+  const mAway = document.getElementById('colAway').value.trim().toLowerCase();
+  const mLH = document.getElementById('colLambdaHome').value.trim().toLowerCase();
+  const mLA = document.getElementById('colLambdaAway').value.trim().toLowerCase();
+  const mOH = document.getElementById('colOddsHome').value.trim().toLowerCase();
+  const mOD = document.getElementById('colOddsDraw').value.trim().toLowerCase();
+  const mOA = document.getElementById('colOddsAway').value.trim().toLowerCase();
+
+  // helper to find first column name that matches expected patterns
+  const sample = rawRows[0];
+  const cols = Object.keys(sample);
+  function find(colHintList){
+    // colHintList: array of possible substrings to match
+    for (const c of cols){
+      const lc = c.trim().toLowerCase();
+      for (const hint of colHintList){
+        if (lc === hint) return c;
+        if (lc.includes(hint)) return c;
+        // allow small variations
+        if (hint.length > 3 && hint.startsWith(lc)) return c;
+      }
+    }
+    return null;
+  }
+
+  // auto discovery if user didn't provide mapping
+  const homeCol = mHome || find(['local','home','equipo local','team home','team']) || cols[0];
+  const awayCol = mAway || find(['away','visit','visitante','away team']) || cols[1] || cols[0];
+  const lambdaHomeCol = mLH || find(['lambda','avg','avg home','lambdahome','meanhome','homexp','xg home','xgh']) || null;
+  const lambdaAwayCol = mLA || find(['lambdaaway','avg away','avgaway','xga','away mean','xg away','xga']) || null;
+  const oddsHomeCol = mOH || find(['odds home','odds_home','odds','cuota local','cuotalocal','home odds']) || null;
+  const oddsDrawCol = mOD || find(['odds draw','cuota empate','draw','draw odds','odds_draw']) || null;
+  const oddsAwayCol = mOA || find(['odds away','odds_away','cuota visitante','away odds']) || null;
+
+  // Normaliza filas --> objeto con campos estandarizados
+  normalized = rawRows.map((r, idx)=> {
+    const home = r[homeCol] !== undefined ? String(r[homeCol]).trim() : '';
+    const away = r[awayCol] !== undefined ? String(r[awayCol]).trim() : '';
+    const lH = lambdaHomeCol && r[lambdaHomeCol] !== undefined ? Number(r[lambdaHomeCol]) : NaN;
+    const lA = lambdaAwayCol && r[lambdaAwayCol] !== undefined ? Number(r[lambdaAwayCol]) : NaN;
+    const oH = oddsHomeCol && r[oddsHomeCol] !== undefined ? Number(r[oddsHomeCol]) : NaN;
+    const oD = oddsDrawCol && r[oddsDrawCol] !== undefined ? Number(r[oddsDrawCol]) : NaN;
+    const oA = oddsAwayCol && r[oddsAwayCol] !== undefined ? Number(r[oddsAwayCol]) : NaN;
+    return {
+      __idx: idx,
+      raw: r,
+      home, away,
+      lambdaHome: isFinite(lH) ? lH : null,
+      lambdaAway: isFinite(lA) ? lA : null,
+      oddsHome: isFinite(oH) ? oH : null,
+      oddsDraw: isFinite(oD) ? oD : null,
+      oddsAway: isFinite(oA) ? oA : null,
+      // placeholders for computed
+      probHome: null, probDraw: null, probAway: null, probOver25: null, probBTTS: null,
+      bestEV: null, bestMarket: null, bestOdds: null, kellyPct: null,
+      matrix: null, cumulativeComputed: false
+    };
+  });
+
+  renderTable();
+}
+
+/* ========== CORE: Poisson calculations per match ========== */
+function computeForAll(){
+  const maxG = Number(document.getElementById('maxGoals').value) || 6;
+  const bankroll = Number(document.getElementById('bankroll').value) || 100;
+
+  normalized.forEach((m) => {
+    // if no lambda provided, fallback to small default to avoid NaNs
+    const lh = (m.lambdaHome !== null && m.lambdaHome !== undefined) ? m.lambdaHome : 1.0;
+    const la = (m.lambdaAway !== null && m.lambdaAway !== undefined) ? m.lambdaAway : 1.0;
+
+    // build matrix 0..maxG
+    const mat = [];
+    for (let i=0;i<=maxG;i++){
+      mat[i] = [];
+      for (let j=0;j<=maxG;j++){
+        mat[i][j] = poissonProb(lh, i) * poissonProb(la, j);
+      }
+    }
+    // basic 1X2
+    let pH=0,pD=0,pA=0;
+    for (let i=0;i<=maxG;i++){
+      for (let j=0;j<=maxG;j++){
+        const p = mat[i][j];
+        if (i>j) pH+=p;
+        else if (i===j) pD+=p;
+        else pA+=p;
+      }
+    }
+    // renormalize to account for truncation
+    const s = pH+pD+pA;
+    if (s>0){
+      pH/=s; pD/=s; pA/=s;
+    }
+
+    // Over25 and BTTS
+    let pOver=0, pBTTS=0;
+    for (let i=0;i<=maxG;i++){
+      for (let j=0;j<=maxG;j++){
+        const p = mat[i][j];
+        if (i+j>2) pOver+=p;
+        if (i>0 && j>0) pBTTS+=p;
+      }
+    }
+    // EVs & best
+    let bestEV = -Infinity, bestMarket = null, bestOdds = null, bestKellyPct = 0;
+    if (m.oddsHome) {
+      const ev = pH * m.oddsHome - 1;
+      const k = kellyFraction(pH, m.oddsHome);
+      if (ev > bestEV){ bestEV = ev; bestMarket='Home'; bestOdds=m.oddsHome; bestKellyPct=k; }
+    }
+    if (m.oddsDraw) {
+      const ev = pD * m.oddsDraw - 1;
+      const k = kellyFraction(pD, m.oddsDraw);
+      if (ev > bestEV){ bestEV = ev; bestMarket='Draw'; bestOdds=m.oddsDraw; bestKellyPct=k; }
+    }
+    if (m.oddsAway) {
+      const ev = pA * m.oddsAway - 1;
+      const k = kellyFraction(pA, m.oddsAway);
+      if (ev > bestEV){ bestEV = ev; bestMarket='Away'; bestOdds=m.oddsAway; bestKellyPct=k; }
+    }
+
+    m.matrix = mat;
+    m.probHome = pH; m.probDraw = pD; m.probAway = pA;
+    m.probOver25 = pOver; m.probBTTS = pBTTS;
+    m.bestEV = (bestEV===-Infinity?null:bestEV);
+    m.bestMarket = bestMarket; m.bestOdds = bestOdds;
+    m.kellyPct = bestKellyPct * 100; // percentage
+    m.kellyStake = bankroll ? bestKellyPct * bankroll : bestKellyPct; // units
+    m.cumulativeComputed = true;
+  });
+
+  renderTable();
+}
+
+/* ========== Monte Carlo per match (non-blocking slices) ========== */
+function samplePoisson(lambda){
+  if (lambda < 30){
+    let L = Math.exp(-lambda), k=0, p=1;
+    do { k++; p *= Math.random(); } while (p > L);
+    return k-1;
+  } else {
+    // normal approx for big lambda
+    const u1 = Math.random(), u2 = Math.random();
+    const z = Math.sqrt(-2*Math.log(u1))*Math.cos(2*Math.PI*u2);
+    return Math.max(0, Math.round(z*Math.sqrt(lambda) + lambda));
+  }
+}
+function runMonteCarloFor(matchIndex, sims){
+  return new Promise((resolve)=>{
+    const m = normalized[matchIndex];
+    if (!m) return resolve(null);
+    let done=0;
+    const chunk=1000;
+    const result = {home:0, draw:0, away:0, over25:0, btts:0};
+    function batch(){
+      const n = Math.min(chunk, sims-done);
+      for (let t=0;t<n;t++){
+        const gH = samplePoisson((m.lambdaHome!=null)?m.lambdaHome:1.0);
+        const gA = samplePoisson((m.lambdaAway!=null)?m.lambdaAway:1.0);
+        if (gH>gA) result.home++;
+        else if (gH===gA) result.draw++;
+        else result.away++;
+        if (gH+gA>2) result.over25++;
+        if (gH>0 && gA>0) result.btts++;
+      }
+      done += n;
+      if (done < sims) setTimeout(batch, 0);
+      else {
+        // normalize
+        Object.keys(result).forEach(k=> result[k] = result[k]/sims);
+        resolve(result);
+      }
+    }
+    batch();
+  });
+}
+
+/* ========== RENDER / UI ========== */
+const tbody = document.querySelector('#resultsTable tbody');
+function renderTable(){
+  tbody.innerHTML = '';
+  normalized.forEach((m, i) => {
+    const tr = document.createElement('tr');
+    tr.dataset.idx = i;
+    if (i === selectedIndex) tr.classList.add('selected');
+    tr.innerHTML = `
+      <td>${i+1}</td>
+      <td>${escapeHtml(m.home)}</td>
+      <td>${escapeHtml(m.away)}</td>
+      <td>${m.lambdaHome!=null?m.lambdaHome.toFixed(2):'<small class="muted">—</small>'}</td>
+      <td>${m.lambdaAway!=null?m.lambdaAway.toFixed(2):'<small class="muted">—</small>'}</td>
+      <td>${m.probHome!=null?(m.probHome*100).toFixed(2)+'%':'—'}</td>
+      <td>${m.probDraw!=null?(m.probDraw*100).toFixed(2)+'%':'—'}</td>
+      <td>${m.probAway!=null?(m.probAway*100).toFixed(2)+'%':'—'}</td>
+      <td>${m.bestEV!=null? ( (m.bestEV*100).toFixed(2)+'% ('+m.bestMarket+')' ) : '—'}</td>
+      <td>${m.kellyPct!=null?m.kellyPct.toFixed(2)+'%':'—'}</td>
+    `;
+    tr.addEventListener('click', ()=> selectRow(i));
+    tbody.appendChild(tr);
+  });
+}
+
+/* click selection: show chart + matrix */
+function selectRow(i){
+  selectedIndex = i;
+  // update selection highlight
+  document.querySelectorAll('#resultsTable tbody tr').forEach(tr => tr.classList.remove('selected'));
+  const tr = document.querySelector(`#resultsTable tbody tr[data-idx="${i}"]`);
+  if (tr) tr.classList.add('selected');
+  showDetails(i);
+}
+
+/* Render details for selected */
+async function showDetails(i){
+  const m = normalized[i];
+  if (!m) return;
+  document.getElementById('selTitle').textContent = `${m.home}  —  ${m.away}`;
+  document.getElementById('selSubtitle').textContent = `λ local: ${m.lambdaHome ?? '—'}  •  λ away: ${m.lambdaAway ?? '—'}`;
+
+  // KPIs
+  const kpi = document.getElementById('kpiArea');
+  kpi.innerHTML = '';
+  const pushK = (label, value) => {
+    const d = document.createElement('div'); d.innerHTML = `<small class="muted">${label}</small><div style="font-weight:700">${value}</div>`; kpi.appendChild(d);
+  };
+  pushK('P(Local)', m.probHome!=null? (m.probHome*100).toFixed(2)+'%':'—');
+  pushK('P(Empate)', m.probDraw!=null? (m.probDraw*100).toFixed(2)+'%':'—');
+  pushK('P(Visitante)', m.probAway!=null? (m.probAway*100).toFixed(2)+'%':'—');
+  pushK('Over 2.5', m.probOver25!=null? (m.probOver25*100).toFixed(2)+'%':'—');
+  pushK('BTTS', m.probBTTS!=null? (m.probBTTS*100).toFixed(2)+'%':'—');
+  pushK('Mejor EV', m.bestEV!=null? (m.bestEV*100).toFixed(2)+'% ('+m.bestMarket+')' : '—');
+  pushK('Kelly%', m.kellyPct!=null? m.kellyPct.toFixed(2)+'% — stake: '+(m.kellyStake?m.kellyStake.toFixed(2)+'u':'—') : '—');
+
+  // Chart: distribution of goals (marginal)
+  const maxG = Number(document.getElementById('maxGoals').value) || 6;
+  const labels = [], dataH = [], dataA = [];
+  for (let k=0;k<=maxG;k++){
+    labels.push(String(k));
+    dataH.push(poissonProb(m.lambdaHome!=null?m.lambdaHome:1.0,k));
+    dataA.push(poissonProb(m.lambdaAway!=null?m.lambdaAway:1.0,k));
+  }
+  const ctx = document.getElementById('distChart').getContext('2d');
+  if (distChart) distChart.destroy();
+  distChart = new Chart(ctx, {
+    type:'bar',
+    data:{
+      labels,
+      datasets:[
+        {label: m.home + ' (λ='+(m.lambdaHome!=null?m.lambdaHome.toFixed(2):'—')+')', data: dataH},
+        {label: m.away + ' (λ='+(m.lambdaAway!=null?m.lambdaAway.toFixed(2):'—')+')', data: dataA}
+      ]
+    },
+    options:{
+      responsive:true,
+      plugins:{legend:{labels:{color:'#cbd5e1'}}},
+      scales:{ x:{ticks:{color:'#cbd5e1'}}, y:{beginAtZero:true,ticks:{color:'#cbd5e1'}} }
+    }
+  });
+
+  // Render matrix table
+  const table = document.getElementById('matrixTable');
+  table.querySelector('thead').innerHTML = '';
+  table.querySelector('tbody').innerHTML = '';
+  const thead = `<tr><th>Local \\ Visit</th>${Array.from({length:maxG+1}, (_,j)=>`<th>${j}</th>`).join('')}</tr>`;
+  table.querySelector('thead').innerHTML = thead;
+  const tbodyM = table.querySelector('tbody');
+  for (let irow=0;irow<=maxG;irow++){
+    let r = `<tr><th>${irow}</th>`;
+    for (let jcol=0;jcol<=maxG;jcol++){
+      const p = (m.matrix && m.matrix[irow] && m.matrix[irow][jcol]) ? m.matrix[irow][jcol] : poissonProb(m.lambdaHome||1,irow)*poissonProb(m.lambdaAway||1,jcol);
+      r += `<td>${(p*100).toFixed(2)}%</td>`;
+    }
+    r += '</tr>';
+    tbodyM.innerHTML += r;
+  }
+}
+
+/* ========== ACTIONS: run all, run MC per selected, export ========== */
+document.getElementById('runAllBtn').addEventListener('click', async ()=>{
+  if (!normalized || normalized.length===0) return alert('No hay datos. Sube y procesa un archivo.');
+  computeForAll();
+  // optional: run MC for all (expensive) - here we skip by default; user can run per selected
+  alert('Cálculo Poisson completado. Haz click en un partido para ver detalles. Para Monte Carlo, usa "Correr MC (selected)".');
+});
+
+document.getElementById('runMcForSelected').addEventListener('click', async ()=>{
+  if (selectedIndex < 0) return alert('Selecciona un partido en la tabla primero.');
+  const sims = Number(document.getElementById('mcSims').value) || 1000;
+  const btn = document.getElementById('runMcForSelected');
+  btn.disabled = true; btn.textContent = 'Simulando...';
+  const res = await runMonteCarloFor(selectedIndex, sims);
+  btn.disabled = false; btn.textContent = 'Correr MC (selected)';
+  if (res){
+    // show MC results appended to KPI
+    const el = document.getElementById('kpiArea');
+    const d = document.createElement('div');
+    d.innerHTML = `<small class="muted">MC (${sims})</small><div style="font-weight:700">Home ${(res.home*100).toFixed(2)}% • Draw ${(res.draw*100).toFixed(2)}% • Away ${(res.away*100).toFixed(2)}%</div>`;
+    el.appendChild(d);
+  }
+});
+
+document.getElementById('exportCsvBtn').addEventListener('click', ()=>{
+  if (!normalized || normalized.length===0) return alert('No hay resultados para exportar.');
+  const rows = [
+    ['idx','home','away','lambdaHome','lambdaAway','probHome','probDraw','probAway','probOver25','probBTTS','bestMarket','bestOdds','bestEV','kellyPct','kellyStake']
+  ];
+  normalized.forEach((m,i)=>{
+    rows.push([i+1,m.home,m.away,m.lambdaHome,m.lambdaAway,m.probHome,m.probDraw,m.probAway,m.probOver25,m.probBTTS,m.bestMarket,m.bestOdds,m.bestEV,m.kellyPct,m.kellyStake]);
+  });
+  const csv = arrayToCSV(rows);
+  const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url; a.download = 'pronosticos.csv'; document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+});
+
+/* Download matrix for selected match */
+document.getElementById('downloadMatrix').addEventListener('click', ()=>{
+  if (selectedIndex < 0) return alert('Selecciona un partido primero.');
+  const m = normalized[selectedIndex];
+  if (!m || !m.matrix) return alert('Matrix no disponible. Ejecuta "Calcular pronósticos" primero.');
+  const maxG = m.matrix.length - 1;
+  const rows = [];
+  const header = ['Local \\ Visit'];
+  for (let j=0;j<=maxG;j++) header.push(j);
+  rows.push(header);
+  for (let i=0;i<=maxG;i++){
+    const row = [i];
+    for (let j=0;j<=maxG;j++) row.push((m.matrix[i][j]*100).toFixed(6));
+    rows.push(row);
+  }
+  const csv = arrayToCSV(rows);
+  const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url; a.download = `matrix_${m.home.replace(/\s+/g,'_')}_vs_${m.away.replace(/\s+/g,'_')}.csv`; document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+});
+
+/* ========== Auto-λ (simple estimation if you uploaded historical goals) ========== */
+/* This function tries to detect columns like HomeGoals/AwayGoals in rawRows and compute per-team mean goals. */
+autoLambdaBtn.addEventListener('click', ()=>{
+  if (!rawRows || rawRows.length === 0) return alert('Sube un Excel con histórico primero.');
+  // find goal columns
+  const cols = Object.keys(rawRows[0]);
+  const homeGoalsCol = cols.find(c=>/home.*goal|goles.*local|home_goals|hg/i.test(c)) || cols.find(c=>/home.*score|score.*home/i.test(c));
+  const awayGoalsCol = cols.find(c=>/away.*goal|goles.*visit|away_goals|ag/i.test(c)) || cols.find(c=>/away.*score|score.*away/i.test(c));
+  if (!homeGoalsCol || !awayGoalsCol) return alert('No se detectaron columnas de goles (HomeGoals/AwayGoals) en el archivo.');
+  // accumulate goals per team
+  const sums = {}; const counts = {};
+  rawRows.forEach(r=>{
+    const home = String(r[Object.keys(r)[0]] || '').trim(); // fallback may vary
+    const colsKeys = Object.keys(r);
+    // try to find team columns
+    const teamHome = colsKeys.find(c=>/home|local|team.*home|equipo.*local/i.test(c)) || colsKeys[0];
+    const teamAway = colsKeys.find(c=>/away|visitante|team.*away|equipo.*visitante/i.test(c)) || colsKeys[1] || colsKeys[0];
+    const hteam = String(r[teamHome] || '').trim();
+    const ateam = String(r[teamAway] || '').trim();
+    const hg = Number(r[homeGoalsCol]);
+    const ag = Number(r[awayGoalsCol]);
+    if (hteam){ sums[hteam] = (sums[hteam]||0) + (isFinite(hg)?hg:0); counts[hteam] = (counts[hteam]||0)+1; }
+    if (ateam){ sums[ateam] = (sums[ateam]||0) + (isFinite(ag)?ag:0); counts[ateam] = (counts[ateam]||0)+1; }
+  });
+  // set lambdas for normalized matches where team appears
+  let assigned = 0;
+  normalized.forEach(m=>{
+    if (sums[m.home] && counts[m.home]) m.lambdaHome = sums[m.home]/counts[m.home];
+    if (sums[m.away] && counts[m.away]) m.lambdaAway = sums[m.away]/counts[m.away];
+    if (m.lambdaHome || m.lambdaAway) assigned++;
+  });
+  alert(`Auto-λ estimadas para ${assigned} partidos (si los equipos aparecieron en el histórico).`);
+  renderTable();
+});
+
+/* ========== Sorting by clicking headers ========== */
+document.querySelectorAll('#resultsTable thead th.sortable').forEach((th, idx)=>{
+  th.addEventListener('click', ()=>{
+    // map idx to property
+    const map = {0:'__idx',1:'home',2:'away',3:'lambdaHome',4:'lambdaAway',5:'probHome',6:'probDraw',7:'probAway',8:'bestEV',9:'kellyPct'};
+    const key = map[idx] || null;
+    if (!key) return;
+    if (sortState.col === key) sortState.asc = !sortState.asc; else { sortState.col = key; sortState.asc = true; }
+    normalized.sort((a,b)=>{
+      const av = a[key] ?? 0, bv = b[key] ?? 0;
+      if (typeof av === 'string') return sortState.asc ? av.localeCompare(bv) : bv.localeCompare(av);
+      return sortState.asc ? (av - bv) : (bv - av);
+    });
+    renderTable();
+  });
+});
+
+/* ========== Helpers ========== */
+function escapeHtml(s){ if (s==null) return ''; return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+/* run initial no-op */
+console.log('Pronosticador listo. Sube un archivo Excel para comenzar.');
 </script>
+
 </body>
 </html>
