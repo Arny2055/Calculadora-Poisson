@@ -96,6 +96,12 @@
           <input id="oddsAway" type="number" step="0.01" value="3.10" />
         </div>
 
+        <label style="margin-top:12px">Cuotas Bookmaker (decimales) — Over 2.5 y BTTS Sí</label>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+          <input id="oddsOver25" type="number" step="0.01" value="1.85" placeholder="Cuota Over 2.5" />
+          <input id="oddsBTTS" type="number" step="0.01" value="1.90" placeholder="Cuota BTTS Sí" />
+        </div>
+
         <div class="row" style="margin-top:10px">
           <div style="flex:1">
             <label>Bankroll</label>
@@ -199,6 +205,8 @@ function readInputs(){
       parseFloat(document.getElementById('oddsDraw').value) || 0,
       parseFloat(document.getElementById('oddsAway').value) || 0
     ],
+    oddsOver25: parseFloat(document.getElementById('oddsOver25').value) || 0,  // *** NUEVO ***
+    oddsBTTS: parseFloat(document.getElementById('oddsBTTS').value) || 0,      // *** NUEVO ***
     bankroll: parseFloat(document.getElementById('bankroll').value) || 0,
     capKelly: parseFloat(document.getElementById('capKelly').value) || 100,
     evThreshold: parseFloat(document.getElementById('evThreshold').value) || 5
@@ -295,235 +303,230 @@ function probsFromMatrix(mat){
    -------------------------- */
 function removeVig(odds){
   // odds: array [home,draw,away] (decimales)
-  const imps = odds.map(o => (o>0? 1/o : 0));
+  const imps = odds.map(o=>o>0?1/o:0);
   const s = imps.reduce((a,b)=>a+b,0);
-  if(s===0) return [0,0,0];
-  return imps.map(x => x / s);
+  if(s <= 0) return imps;
+  return imps.map(i=>i/s);
 }
 
 /* --------------------------
-   EV, Kelly
+   EV y Kelly
+   EV = probModelo * cuota - 1
+   Kelly = (p*o - 1) / (o-1)
    -------------------------- */
-function evPercent(prob, odds){
-  // EV% = (odds * prob - 1) * 100
-  return (odds * prob - 1) * 100;
+function evPercent(pModel, odd){
+  if(!odd || odd <= 1) return null;
+  return (pModel * odd -1)*100;
 }
-function kellyFraction(prob, odds){
-  const b = odds - 1;
-  if(b <= 0) return 0;
-  const q = 1 - prob;
-  const f = (b*prob - q) / b;
-  return Math.max(0, f);
+function kellyFraction(pModel, odd){
+  if(!odd || odd <= 1) return 0;
+  const k = (pModel * (odd - 1) - (1 - pModel)) / (odd -1);
+  return k > 0 ? k : 0;
 }
 
 /* --------------------------
-   Formatea
-   -------------------------- */
-function pct(v){ return (v*100).toFixed(2) + '%'; }
-function n2(v){ return Number(v).toFixed(2); }
-
-/* --------------------------
-   Render UI resultados
-   -------------------------- */
-function renderBars(ph,pd,pa){
-  const max = Math.max(ph,pd,pa,0.01);
-  const h = Math.round((ph/max)*100);
-  const d = Math.round((pd/max)*100);
-  const a = Math.round((pa/max)*100);
-  document.getElementById('barHomeFill').style.height = (ph*100) + '%';
-  document.getElementById('barDrawFill').style.height = (pd*100) + '%';
-  document.getElementById('barAwayFill').style.height = (pa*100) + '%';
-  document.getElementById('barHomePct').innerText = pct(ph);
-  document.getElementById('barDrawPct').innerText = pct(pd);
-  document.getElementById('barAwayPct').innerText = pct(pa);
-}
-
-/* --------------------------
-   Calcular todo (principal)
+   Función principal: calcula y muestra
    -------------------------- */
 function calculateAll(){
   const inputs = readInputs();
-  document.getElementById('matchLabel').innerText = inputs.homeName + ' vs ' + inputs.awayName;
+
+  // mostrar nombres equipos
+  document.getElementById('matchLabel').textContent = `${inputs.homeName} vs ${inputs.awayName}`;
+
   // lambdas
   const lambdas = computeLambdas(inputs);
-  document.getElementById('lambdaLabel').innerText = `λ home: ${n2(lambdas.home)} — λ away: ${n2(lambdas.away)} (formFactors H:${n2(lambdas.fH)}, A:${n2(lambdas.fA)})`;
+  document.getElementById('lambdaLabel').textContent = `λ local: ${lambdas.home.toFixed(2)} — λ visita: ${lambdas.away.toFixed(2)}`;
 
-  // matriz y probabilidades
-  const mat = matrixProb(lambdas.home, lambdas.away, 7);
+  // matriz Poisson
+  const mat = matrixProb(lambdas.home, lambdas.away);
+
+  // probabilidades modelos
   const probs = probsFromMatrix(mat);
 
-  // remove vig del book
-  const bookNoVig = removeVig(inputs.odds);
+  // mostrar barras de prob
+  updateProbBars(probs);
 
-  // mercados: 1X2, Over25, BTTS (book proporciona solo 1X2 en esta versión)
+  // cuotas sin vig para 1X2
+  const bookImps = removeVig(inputs.odds);
+
+  // armado mercados con cálculo EV y Kelly para 1X2, Over 2.5 y BTTS
   const markets = [];
 
-  // 1X2
-  {
-    const modelP = [probs.home, probs.draw, probs.away];
-    for(let i=0;i<3;i++){
-      const odd = inputs.odds[i] || 0;
-      const bookP = bookNoVig[i] || 0;
-      const ev = evPercent(modelP[i], odd);
-      let kelly = kellyFraction(modelP[i], odd) * 100;
-      if(kelly > inputs.capKelly) kelly = inputs.capKelly;
-      const stake = (kelly/100) * inputs.bankroll;
-      markets.push({
-        name: i===0?'Local': i===1?'Empate':'Visitante',
-        modelP: modelP[i],
-        bookP: bookP,
-        odd: odd,
-        ev: ev,
-        kelly: kelly,
-        stake: stake
-      });
-    }
-  }
+  // 1X2 mercados
+  ['Local','Empate','Visita'].forEach((name,i)=>{
+    const modelP = probs[['home','draw','away'][i]];
+    const odd = inputs.odds[i];
+    const bookP = bookImps[i];
+    const ev = evPercent(modelP, odd);
+    let kelly = kellyFraction(modelP, odd) * 100;
+    if(kelly > inputs.capKelly) kelly = inputs.capKelly;
+    const stake = (kelly/100) * inputs.bankroll;
+    markets.push({name, modelP, bookP, odd, ev, kelly, stake});
+  });
 
   // Over 2.5
   {
     const modelP = probs.over25;
-    // estimate book implied for over25 from 1X2 odds? Can't robustly; show model only.
+    const odd = inputs.oddsOver25 || 0;
+    const bookP = odd > 0 ? 1/odd : 0;
+    const ev = odd > 0 ? evPercent(modelP, odd) : null;
+    let kelly = odd > 0 ? kellyFraction(modelP, odd) * 100 : null;
+    if(kelly !== null && kelly > inputs.capKelly) kelly = inputs.capKelly;
+    const stake = (kelly !== null) ? (kelly/100) * inputs.bankroll : null;
+
     markets.push({
       name: 'Over 2.5',
-      modelP: modelP,
-      bookP: null,
-      odd: null,
-      ev: null,
-      kelly: null,
-      stake: null
+      modelP,
+      bookP,
+      odd,
+      ev,
+      kelly,
+      stake
     });
   }
 
-  // BTTS
+  // BTTS (Sí)
   {
     const modelP = probs.btts;
+    const odd = inputs.oddsBTTS || 0;
+    const bookP = odd > 0 ? 1/odd : 0;
+    const ev = odd > 0 ? evPercent(modelP, odd) : null;
+    let kelly = odd > 0 ? kellyFraction(modelP, odd) * 100 : null;
+    if(kelly !== null && kelly > inputs.capKelly) kelly = inputs.capKelly;
+    const stake = (kelly !== null) ? (kelly/100) * inputs.bankroll : null;
+
     markets.push({
       name: 'BTTS (Sí)',
-      modelP: modelP,
-      bookP: null,
-      odd: null,
-      ev: null,
-      kelly: null,
-      stake: null
+      modelP,
+      bookP,
+      odd,
+      ev,
+      kelly,
+      stake
     });
   }
 
-  // render table
+  // pintar tabla resultados
   const tbody = document.getElementById('resultsBody');
   tbody.innerHTML = '';
   markets.forEach(m=>{
     const tr = document.createElement('tr');
-    tr.innerHTML = `<td>${m.name}</td>
-      <td>${m.modelP!==null?pct(m.modelP):'-'}</td>
-      <td>${m.bookP!==null? pct(m.bookP) : '-'}</td>
-      <td>${m.odd? n2(m.odd) : '-'}</td>
-      <td class="${m.ev>0?'good':'bad'}">${m.ev!==null? n2(m.ev) + '%' : '-'}</td>
-      <td>${m.kelly!==null? n2(m.kelly) + '%' : '-'}</td>
-      <td>${m.stake!==null? n2(m.stake) : '-'}</td>`;
+    tr.innerHTML = `
+      <td>${m.name}</td>
+      <td>${pct(m.modelP)}</td>
+      <td>${m.bookP ? pct(m.bookP) : '-'}</td>
+      <td>${m.odd ? m.odd.toFixed(2) : '-'}</td>
+      <td class="${m.ev !== null && m.ev > 0 ? 'good' : 'bad'}">${m.ev !== null ? n2(m.ev)+'%' : '-'}</td>
+      <td>${m.kelly !== null ? n2(m.kelly)+'%' : '-'}</td>
+      <td>${m.stake !== null ? '$'+n2(m.stake) : '-'}</td>
+    `;
     tbody.appendChild(tr);
   });
 
-  renderBars(probs.home, probs.draw, probs.away);
-
-  // alerts: detectar value bets (EV > threshold)
+  // alertas Value Bets (ev > threshold)
   const alertsEl = document.getElementById('alerts');
   alertsEl.innerHTML = '';
   let found = false;
-  markets.slice(0,3).forEach(m=>{
+  markets.forEach(m=>{
     if(m.ev !== null && m.ev > inputs.evThreshold){
       found = true;
       const div = document.createElement('div');
       div.className = 'alert';
-      div.innerHTML = `Value Bet detectada: <strong>${m.name}</strong> — EV ${n2(m.ev)}% — Prob Modelo ${pct(m.modelP)} — Cuota ${m.odd}`;
+      div.innerHTML = `Value Bet detectada: <strong>${m.name}</strong> — EV ${n2(m.ev)}% — Prob Modelo ${pct(m.modelP)} — Cuota ${m.odd.toFixed(2)}`;
       alertsEl.appendChild(div);
     }
   });
   if(!found){
-    const d = document.createElement('div');
-    d.className = 'small muted';
-    d.style.marginTop = '8px';
-    d.innerText = 'No se detectaron Value Bets por encima del umbral.';
-    alertsEl.appendChild(d);
+    alertsEl.innerHTML = '<div class="small muted">No se detectaron Value Bets con EV por encima del umbral.</div>';
   }
 }
 
 /* --------------------------
-   Monte Carlo (simula resultados, rellena probabilidades MC en la UI)
-   - simCount default 8000 (puedes ajustar)
+   Actualiza barras de probabilidad 1X2
+   -------------------------- */
+function updateProbBars(probs){
+  const toPct = x=> (x*100).toFixed(1) + '%';
+  document.getElementById('barHomeFill').style.height = `${probs.home*100}%`;
+  document.getElementById('barDrawFill').style.height = `${probs.draw*100}%`;
+  document.getElementById('barAwayFill').style.height = `${probs.away*100}%`;
+  document.getElementById('barHomePct').textContent = toPct(probs.home);
+  document.getElementById('barDrawPct').textContent = toPct(probs.draw);
+  document.getElementById('barAwayPct').textContent = toPct(probs.away);
+}
+
+/* --------------------------
+   Formateo % con 2 decimales
+   -------------------------- */
+function n2(x){ return Number(x).toFixed(2); }
+function pct(x){ return x!==null ? (x*100).toFixed(1)+'%' : '-'; }
+
+/* --------------------------
+   Resetear inputs a ejemplo base
+   -------------------------- */
+function resetToSample(){
+  document.getElementById('homeName').value = "Equipo A";
+  document.getElementById('awayName').value = "Equipo B";
+  document.getElementById('atkHome').value = "1.20";
+  document.getElementById('defHome').value = "0.95";
+  document.getElementById('atkAway').value = "0.98";
+  document.getElementById('defAway').value = "1.05";
+  document.getElementById('leagueHome').value = "1.45";
+  document.getElementById('leagueAway').value = "1.15";
+  document.getElementById('formHome').value = "1,1,0,1,0,1";
+  document.getElementById('formAway').value = "0,1,-1,0,0,-1";
+  document.getElementById('homeAdv').value = "1.08";
+  document.getElementById('injuryFactor').value = "1.00";
+  document.getElementById('oddsHome').value = "2.30";
+  document.getElementById('oddsDraw').value = "3.30";
+  document.getElementById('oddsAway').value = "3.10";
+  document.getElementById('oddsOver25').value = "1.85";
+  document.getElementById('oddsBTTS').value = "1.90";
+  document.getElementById('bankroll').value = "1000";
+  document.getElementById('capKelly').value = "20";
+  document.getElementById('evThreshold').value = "5";
+  calculateAll();
+}
+
+/* --------------------------
+   MonteCarlo básico (opcional)
    -------------------------- */
 function runMonteCarlo(simCount=8000){
   const inputs = readInputs();
   const lambdas = computeLambdas(inputs);
-  let home=0, draw=0, away=0, over25=0, btts=0;
+  let homeWins=0, draws=0, awayWins=0;
+  let over25Count=0, bttsCount=0;
   for(let i=0;i<simCount;i++){
-    const gH = samplePoisson(lambdas.home);
-    const gA = samplePoisson(lambdas.away);
-    if(gH>gA) home++;
-    else if(gH===gA) draw++;
-    else away++;
-    if(gH + gA > 2) over25++;
-    if(gH>0 && gA>0) btts++;
+    const goalsH = poissonSample(lambdas.home);
+    const goalsA = poissonSample(lambdas.away);
+    if(goalsH > goalsA) homeWins++;
+    else if(goalsH === goalsA) draws++;
+    else awayWins++;
+    if((goalsH+goalsA) > 2) over25Count++;
+    if(goalsH>0 && goalsA>0) bttsCount++;
   }
-  const res = {home: home/simCount, draw: draw/simCount, away: away/simCount, over25: over25/simCount, btts: btts/simCount};
-
-  // mostrar en UI reemplazando probabilidades modelo (sobre-escribe)
-  // set fake manual inputs? Mejor presentarlas en tabla: añadiremos fila MC
-  const tbody = document.getElementById('resultsBody');
-  // Insert MC summary at top as a new row (temporal)
-  const mcRow = document.createElement('tr');
-  mcRow.innerHTML = `<td colspan="7" style="background:rgba(255,255,255,0.02);font-size:13px">Simulación MonteCarlo (${simCount} iter): Probabilidades — Local ${pct(res.home)} / Empate ${pct(res.draw)} / Visita ${pct(res.away)} / Over2.5 ${pct(res.over25)} / BTTS ${pct(res.btts)}</td>`;
-  tbody.insertBefore(mcRow, tbody.firstChild);
-
-  // update bars with MC
-  renderBars(res.home, res.draw, res.away);
-
-  // also update lambdaLabel so user sees lambdas used
-  document.getElementById('lambdaLabel').innerText += ' · (MC ejecutado)';
+  const total = simCount;
+  alert(`Simulación MonteCarlo (${simCount} iteraciones):\n` +
+        `Local: ${(homeWins/total*100).toFixed(1)}%\n` +
+        `Empate: ${(draws/total*100).toFixed(1)}%\n` +
+        `Visita: ${(awayWins/total*100).toFixed(1)}%\n` +
+        `Over 2.5: ${(over25Count/total*100).toFixed(1)}%\n` +
+        `BTTS Sí: ${(bttsCount/total*100).toFixed(1)}%`);
 }
 
-/* Poisson sampler (Knuth) */
-function samplePoisson(lambda){
-  // para lambda pequeños/medios funciona bien
-  const L = Math.exp(-lambda);
+function poissonSample(lambda){
+  // Método de generación con función inversa (para lambda pequeño)
+  let L = Math.exp(-lambda);
+  let p = 1.0;
   let k = 0;
-  let p = 1;
-  while(p > L){
+  do {
     k++;
     p *= Math.random();
-    // safety
-    if(k>60) break;
-  }
-  return k - 1;
+  } while (p > L);
+  return k -1;
 }
 
-/* --------------------------
-   Reset ejemplo
-   -------------------------- */
-function resetToSample(){
-  document.getElementById('homeName').value = 'Ajax';
-  document.getElementById('awayName').value = 'PSV';
-  document.getElementById('atkHome').value = '1.35';
-  document.getElementById('defHome').value = '0.95';
-  document.getElementById('atkAway').value = '1.08';
-  document.getElementById('defAway').value = '1.12';
-  document.getElementById('leagueHome').value = '1.6';
-  document.getElementById('leagueAway').value = '1.2';
-  document.getElementById('formHome').value = '1,1,1,0,1,1';
-  document.getElementById('formAway').value = '0,1,0,-1,0,-1';
-  document.getElementById('homeAdv').value = '1.10';
-  document.getElementById('injuryFactor').value = '1.00';
-  document.getElementById('oddsHome').value = '1.90';
-  document.getElementById('oddsDraw').value = '3.80';
-  document.getElementById('oddsAway').value = '4.20';
-  document.getElementById('bankroll').value = '1000';
-  document.getElementById('capKelly').value = '20';
-  calculateAll();
-}
-
-/* Ejecutar inicial */
-calculateAll();
-
+// Init
+resetToSample();
 </script>
 </body>
 </html>
