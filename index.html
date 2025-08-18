@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Calculadora Kelly — Pro</title>
+<title>Calculadora Kelly — Pro (Portafolio Conectado)</title>
 <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <style>
@@ -49,12 +49,14 @@
   .sep{height:10px}
   .tag{font-size:12px; color:#cbd3e6}
   .blocked{outline:2px solid var(--bad); box-shadow:0 0 0 6px rgba(255,91,110,.2)}
+  .settled{opacity:.6}
+  .tiny{font-size:12px}
 </style>
 </head>
 <body>
 <div class="wrap">
   <h1>Calculadora Kelly — Pro</h1>
-  <p class="lead">Incluye Kelly dinámico, stop-loss diario, simulación Monte Carlo, ajuste por deporte, gráfico y multi-apuesta.</p>
+  <p class="lead">Kelly dinámico, stop-loss, Monte Carlo, ajuste por deporte, gráfico y portafolio conectado al control diario.</p>
 
   <div class="grid">
     <!-- Controles principales -->
@@ -76,9 +78,9 @@
         <option value="0.90">Baloncesto — x0.90</option>
         <option value="0.80">MMA / Box — x0.80</option>
         <option value="0.70">NFL — x0.70</option>
-        <option value="0.65">Fútbol (soccer) — x0.65</option>
+        <option value="0.65" selected>Fútbol (soccer) — x0.65</option>
       </select>
-      <div class="hint">Se multiplica el stake Kelly por este factor conservador según la varianza típica del mercado.</div>
+      <div class="hint">Se multiplica el stake Kelly por este factor según la varianza típica.</div>
 
       <div class="sep"></div>
 
@@ -95,7 +97,7 @@
 
       <label>Confianza en tu estimación (%)</label>
       <input id="confidence" type="range" min="0" max="100" value="70">
-      <div class="hint">p<sub>ajustada</sub> = c·p + (1−c)·(1/odds), donde c = confianza/100.</div>
+      <div class="hint">p<sub>ajustada</sub> = c·p + (1−c)·(1/odds), con c = confianza/100.</div>
 
       <div class="sep"></div>
 
@@ -109,7 +111,13 @@
           <input id="capPct" type="number" value="10" min="1" max="50" step="1">
         </div>
       </div>
-      <div class="hint">Si el P&L de hoy ≤ −stop-loss, se bloquean nuevas apuestas.</div>
+      <div class="row" style="margin-top:6px">
+        <label class="flex" style="gap:8px; align-items:center">
+          <input id="autoUpdateBR" type="checkbox" style="width:auto; height:auto"> 
+          <span class="tiny">Actualizar bankroll con resultados del portafolio</span>
+        </label>
+      </div>
+      <div class="hint">Si está activo, cada resultado registrado moverá tu bankroll y recalculará stakes.</div>
     </div>
 
     <!-- Resultados -->
@@ -211,7 +219,11 @@
       <table id="multiTable" style="margin-top:8px">
         <thead>
           <tr>
-            <th>#</th><th>Prob (%)</th><th>Cuota</th><th>Conf. (%)</th><th>Deporte</th><th>Stake (Kelly)</th><th>Stake (final)</th><th>Nota</th><th>—</th>
+            <th>#</th><th>Prob (%)</th><th>Cuota</th><th>Conf. (%)</th><th>Deporte</th>
+            <th>Stake (Kelly)</th><th>Stake (final)</th>
+            <th>Nota</th>
+            <th>Resultado</th>
+            <th>—</th>
           </tr>
         </thead>
         <tbody></tbody>
@@ -229,7 +241,7 @@
   const $ = id => document.getElementById(id);
   const bankroll = $("bankroll"), fraction = $("fraction"), sport = $("sport");
   const prob = $("prob"), odds = $("odds"), confidence = $("confidence");
-  const stopLossPct = $("stopLossPct"), capPct = $("capPct");
+  const stopLossPct = $("stopLossPct"), capPct = $("capPct"), autoUpdateBR = $("autoUpdateBR");
   const kFull = $("kFull"), k100 = $("k100"), stakeFrac = $("stakeFrac"), stakeFinal = $("stakeFinal");
   const impliedTag = $("impliedTag"), padjTag = $("padjTag"), edgeTag = $("edgeTag"), stopState = $("stopState");
   const summaryTxt = $("summaryTxt"), resultCard = $("resultCard");
@@ -288,7 +300,7 @@
     refreshDaily();
   });
 
-  // ===== Historial
+  // ===== Historial cálculos
   function saveToHistory(p, o, frac, stake){
     const hist = read("kellyHist",[]);
     hist.unshift({ date:new Date().toLocaleString(), p:p.toFixed(2), o:o.toFixed(3), f:frac.toFixed(0), s:stake.toFixed(2) });
@@ -325,15 +337,12 @@
     const stakeFracSport = sportF * stakeFracRaw;
     const final = Math.min(stakeFracSport, cap);
 
-    // Edge e info
     const impl = 1/o;
     const edge = pAdj - impl;
 
-    // Bloqueo por stop-loss
     const blocked = refreshDaily();
     const showFinal = blocked ? 0 : final;
 
-    // Pintar
     kFull.textContent = fmtPct(fStar);
     k100.textContent = fmtNum(stakeKelly);
     stakeFrac.textContent = fmtNum(stakeFracSport);
@@ -345,11 +354,13 @@
       ? "Stop-loss alcanzado: se sugiere NO apostar hoy."
       : `Con f*=${fmtPct(fStar)}, fracción=${(frac*100).toFixed(0)}% y factor deporte=${sportF.toFixed(2)}, stake final=${fmtNum(final)} (cap ${fmtNum(cap)}).`;
 
-    // Guardar historial (si no está bloqueado y hay datos válidos)
     if(!blocked && fStar>0){
       saveToHistory(p*100, o, frac*100, final);
       renderHistory();
     }
+
+    // Recalcular portafolio ante cualquier cambio
+    computePortfolio();
   }
 
   // ===== Simulación Monte Carlo
@@ -384,14 +395,10 @@
     const cap = ((parseFloat(capPct.value)||10)/100) * BR0;
     const nB = clamp(parseInt(simBets.value)||100, 10, 500);
     const nP = clamp(parseInt(simPaths.value)||1000, 100, 5000);
-    const expo = (parseFloat(expoMax.value)||20)/100;
 
     if(BR0<=0 || o<=1 || p<=0) return;
 
     const pAdj = pAdjusted(p,o,c);
-    // Para el MC usamos stake por paso recalculado sobre BR vivo:
-    // stake_t = min( sportF * frac * f*(BR_t), cap_t ), con cap_t proporcional al BR_t
-    // Donde f = kellyF(pAdj,o). (manteniendo p constante)
     const fStar = kellyF(pAdj,o);
 
     const labels = Array.from({length:nB+1}, (_,i)=>i);
@@ -400,14 +407,12 @@
 
     for(let k=0;k<nP;k++){
       let br = BR0;
-      let minHitHalf = false;
       for(let t=1;t<=nB;t++){
-        const cap_t = (cap/BR0)*br; // mismo % sobre BR actual
+        const cap_t = (cap/BR0)*br; 
         const stakeKelly = fStar*br;
         const stakeFrac = sportF * frac * stakeKelly;
         const stake = Math.min(stakeFrac, cap_t);
 
-        // resultado
         const win = Math.random() < pAdj;
         br += win ? stake*(o-1) : -stake;
 
@@ -421,19 +426,15 @@
       if(br <= 0) countRuin++;
     }
 
-    // percentiles por paso
     const p10=[], p50arr=[], p90=[];
     for(let t=0;t<=nB;t++){
-      const slice = paths.map(p=>p[t]);
-      slice.sort((a,b)=>a-b);
+      const slice = paths.map(p=>p[t]).sort((a,b)=>a-b);
       const q = qtile => slice[Math.floor(qtile*(slice.length-1))];
       p10.push(q(0.10)); p50arr.push(q(0.50)); p90.push(q(0.90));
     }
 
-    // métricas
     const Pdouble = countDouble/nP, Phalf = countHalf/nP, Pruin = countRuin/nP;
 
-    // pintar
     const ch = ensureChart();
     ch.data.labels = labels;
     ch.data.datasets[0].data = p10.map(x=>+x.toFixed(2));
@@ -448,12 +449,12 @@
   }
   runSim.addEventListener("click", simulate);
 
-  // ===== Multi-apuesta simultánea (portafolio)
+  // ===== Portafolio: filas + conexión a Control diario
   function addMultiRow(defaults={p:"",o:"",c:70, s:"0.65", note:""}){
     const idx = multiTable.children.length+1;
     const tr = document.createElement("tr");
     tr.innerHTML = `
-      <td>${idx}</td>
+      <td class="idx">${idx}</td>
       <td><input type="number" step="0.01" min="0" max="100" value="${defaults.p}" style="width:110px"></td>
       <td><input type="number" step="0.001" min="1.01" value="${defaults.o}" style="width:110px"></td>
       <td><input type="number" step="1" min="0" max="100" value="${defaults.c}" style="width:100px"></td>
@@ -469,16 +470,37 @@
       <td class="stakeK">—</td>
       <td class="stakeF">—</td>
       <td><input type="text" placeholder="Nota" value="${defaults.note}" style="width:180px"></td>
+      <td class="settleCell">
+        <div class="row" style="gap:6px; justify-content:center">
+          <button class="btn btn-ghost win" title="Ganada">✅</button>
+          <button class="btn btn-ghost loss" title="Perdida">❌</button>
+          <button class="btn btn-ghost halfwin" title="Half win">🌓+</button>
+          <button class="btn btn-ghost halfloss" title="Half loss">🌓−</button>
+          <button class="btn btn-ghost void" title="Void">⛔</button>
+        </div>
+        <div class="tiny" style="margin-top:4px">P&L: <span class="plVal">0.00</span></div>
+      </td>
       <td><button class="btn btn-ghost del">✖</button></td>
     `;
     multiTable.appendChild(tr);
-    tr.querySelectorAll("input,select").forEach(el=> el.addEventListener("input", computePortfolio));
+
+    // listeners
+    tr.querySelectorAll("input,select").forEach(el=> el.addEventListener("input", ()=>{ computePortfolio(); }));
     tr.querySelector(".del").addEventListener("click", ()=>{ tr.remove(); renumberMulti(); computePortfolio(); });
+
+    // settle buttons
+    tr.querySelector(".win").addEventListener("click", ()=> registerOutcome(tr,"win"));
+    tr.querySelector(".loss").addEventListener("click", ()=> registerOutcome(tr,"loss"));
+    tr.querySelector(".halfwin").addEventListener("click", ()=> registerOutcome(tr,"halfwin"));
+    tr.querySelector(".halfloss").addEventListener("click", ()=> registerOutcome(tr,"halfloss"));
+    tr.querySelector(".void").addEventListener("click", ()=> registerOutcome(tr,"void"));
+
     computePortfolio();
   }
   function renumberMulti(){
-    [...multiTable.children].forEach((tr,i)=> tr.children[0].textContent = (i+1));
+    [...multiTable.children].forEach((tr,i)=> tr.querySelector(".idx").textContent = (i+1));
   }
+
   function computePortfolio(){
     const BR = parseFloat(bankroll.value)||0;
     const frac = (parseFloat(fraction.value)||0)/100;
@@ -488,7 +510,6 @@
     const rows = [...multiTable.children];
     if(rows.length===0){ multiSummary.textContent = "Exposición total: —"; return; }
 
-    // Primero calcular stakes individuales con caps por apuesta
     const items = rows.map(tr=>{
       const p = (parseFloat(tr.children[1].querySelector("input").value)||0)/100;
       const o = parseFloat(tr.children[2].querySelector("input").value)||0;
@@ -498,12 +519,15 @@
       const fStar = kellyF(pAdj,o);
       const stakeK = fStar*BR;
       const stakeFrac = sportF * frac * stakeK;
-      // cap individual
       const sCap = Math.min(stakeFrac, cap);
+      // guardar datos para la fila
+      tr.dataset.odds = o || 0;
+      tr.dataset.stakeFinal = sCap || 0;
+      tr.dataset.settled = tr.dataset.settled || "0";
       return {tr, pAdj, o, fStar, stakeK, sCap};
     });
 
-    // Sumar exposición; si excede, escalar proporcionalmente
+    // Exposición total y escalado si supera el máximo
     const sum = items.reduce((acc,it)=> acc + it.sCap, 0);
     const scale = sum > expo ? (expo / sum) : 1;
 
@@ -512,19 +536,56 @@
       const sF = it.sCap * scale;
       it.tr.querySelector(".stakeK").textContent = fmtNum(sK);
       it.tr.querySelector(".stakeF").textContent = fmtNum(sF);
+      it.tr.dataset.stakeFinal = sF; // guardar stake final escalado
     });
 
     multiSummary.textContent = `Exposición total: ${fmtNum(Math.min(sum, expo))} / ${fmtNum(expo)} (${fmtPct(Math.min(sum/expo,1))}) ${sum>expo ? " — escalado" : ""}`;
   }
-  addRow.addEventListener("click", ()=> addMultiRow());
+
+  // Registrar resultado de una fila del portafolio -> suma al P&L diario y (opcional) mueve bankroll
+  function registerOutcome(tr, kind){
+    // no permitir doble registro
+    if(tr.dataset.settled === "1") return;
+
+    const stake = parseFloat(tr.dataset.stakeFinal)||0;
+    const o = parseFloat(tr.dataset.odds)||0;
+    if(stake<=0 || o<=1) return;
+
+    let pnl = 0;
+    if(kind==="win") pnl = stake*(o-1);
+    else if(kind==="loss") pnl = -stake;
+    else if(kind==="halfwin") pnl = stake*(o-1)/2;
+    else if(kind==="halfloss") pnl = -stake/2;
+    else pnl = 0; // void
+
+    // Actualizar P&L diario
+    const d = getDaily(); d.pnl += pnl; setDaily(d);
+    refreshDaily();
+
+    // Actualizar bankroll si está activado
+    if(autoUpdateBR.checked){
+      const BR = parseFloat(bankroll.value)||0;
+      bankroll.value = (BR + pnl).toFixed(2);
+    }
+
+    // Mostrar P&L de la fila y marcar como liquidada
+    tr.querySelector(".plVal").textContent = fmtNum(pnl);
+    tr.classList.add("settled");
+    tr.dataset.settled = "1";
+
+    // Recalcular todo (por si cambió el BR)
+    compute();
+  }
 
   // ===== Inicialización
   renderHistory();
   refreshDaily();
   compute();
-  // Una fila de ejemplo en portafolio
+  // Fila de ejemplo
   addMultiRow({p:55,o:1.90,c:70,s:"0.65",note:"Ejemplo — soccer"});
 
+  // Simulación botón
+  runSim.addEventListener("click", simulate);
 })();
 </script>
 </body>
