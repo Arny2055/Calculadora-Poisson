@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Backtesting JSON Adaptado</title>
+<title>Backtesting JSON Automático</title>
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap">
@@ -12,14 +12,14 @@
   body{font-family:Inter,system-ui;background:#0f1724;color:#e6eef6;margin:0;padding:20px}
   .card{background:#0b1220;padding:14px;border-radius:10px;margin-bottom:16px}
   .btn{padding:6px 12px;border:none;border-radius:6px;background:#06b6d4;color:#021522;font-weight:600;cursor:pointer}
-  select,textarea,input{width:100%;margin:4px 0;padding:6px;border-radius:6px;border:1px solid #333;background:#111;color:#fff}
+  textarea,input{width:100%;margin:4px 0;padding:6px;border-radius:6px;border:1px solid #333;background:#111;color:#fff}
   table{width:100%;border-collapse:collapse;margin-top:8px;font-size:13px}
   th,td{padding:6px;border-bottom:1px solid #222;text-align:left}
 </style>
 </head>
 <body>
 
-<h1>Backtesting JSON (con claves especiales)</h1>
+<h1>Backtesting JSON (Stake fijo = 1)</h1>
 
 <div class="card">
   <label>Subir archivo JSON
@@ -27,17 +27,6 @@
   </label>
   <label>Pegar JSON</label>
   <textarea id="pasteJson" rows="6"></textarea>
-  <button id="btnParse" class="btn">Parsear</button>
-</div>
-
-<div id="mappingArea" class="card" style="display:none">
-  <h3>Mapeo automático de campos</h3>
-  <label>Fecha</label><select id="mapDate"></select>
-  <label>Mercado</label><select id="mapMarket"></select>
-  <label>Selección</label><select id="mapSelection"></select>
-  <label>Cuota</label><select id="mapOdds"></select>
-  <label>Stake</label><select id="mapStake"></select>
-  <label>Resultado/Profit</label><select id="mapProfit"></select>
   <button id="btnRun" class="btn">Ejecutar Backtest</button>
 </div>
 
@@ -57,42 +46,28 @@ let rawData=[], parsed=[];
 function q(id){return document.getElementById(id);}
 function safeNumber(v){let n=Number(v);return isFinite(n)?n:0;}
 
-function detectKeys(sample){
-  return Object.keys(sample).map(k=>k.trim());
-}
-
-function suggestMapping(keys){
-  const norm = k => k.trim().toLowerCase();
-  return {
-    date: keys.find(k=>norm(k)==="date"),
-    market: keys.find(k=>norm(k)==="league"||norm(k)==="name"),
-    selection: keys.find(k=>norm(k)==="desired outcome"||norm(k)==="name"),
-    odds: keys.find(k=>norm(k)==="odd"),
-    stake: keys.find(k=>norm(k)==="stake"),
-    profit: keys.find(k=>norm(k)==="result")
-  };
-}
-
-function buildMappedRecords(records){
-  const dateKey=q("mapDate").value;
-  const marketKey=q("mapMarket").value;
-  const selKey=q("mapSelection").value;
-  const oddsKey=q("mapOdds").value;
-  const stakeKey=q("mapStake").value;
-  const profitKey=q("mapProfit").value;
-
+function parseRecords(records){
   return records.map((r,i)=>{
-    const date=new Date(r[dateKey]);
-    const odds=safeNumber(r[oddsKey]);
-    const stake=stakeKey && r[stakeKey]!==undefined ? safeNumber(r[stakeKey]) : 1;
+    const clean={};
+    for(let k in r){ clean[k.trim().toLowerCase()] = r[k]; }
+
+    const date=new Date(clean["date"]);
+    const odds=safeNumber(clean["odd"]);
+    const stake=1; // fijo
     let profit=0;
-    if(profitKey){
-      const val=(r[profitKey]||"").toString().toLowerCase().trim();
+
+    if(clean["result"]){
+      const val=clean["result"].toString().toLowerCase().trim();
       if(val.includes("win")) profit=(odds-1)*stake;
       else if(val.includes("lose")) profit=-stake;
       else profit=0;
     }
-    return {i,date,market:r[marketKey],selection:r[selKey],odds,stake,profit};
+
+    return {
+      i,date,
+      selection: clean["desired outcome"] || clean["name"] || "-",
+      odds,stake,profit
+    };
   });
 }
 
@@ -107,7 +82,7 @@ function computeMetrics(recs){
 function renderMetrics(m){
   q("metrics").innerHTML=`
     Apuestas: ${m.total}<br>
-    Stake total: ${m.stake.toFixed(2)}<br>
+    Stake total: ${m.stake}<br>
     Beneficio neto: ${m.profit.toFixed(2)}<br>
     ROI: ${m.roi.toFixed(2)}%
   `;
@@ -128,38 +103,25 @@ function renderTable(recs){
   });
 }
 
-q("fileInput").addEventListener("change",e=>{
-  const f=e.target.files[0];if(!f)return;
-  const reader=new FileReader();
-  reader.onload=ev=>{q("pasteJson").value=ev.target.result;q("btnParse").click();};
-  reader.readAsText(f);
-});
-
-q("btnParse").addEventListener("click",()=>{
+function runBacktest(){
   try{
     rawData=JSON.parse(q("pasteJson").value);
     if(!Array.isArray(rawData)) rawData=[rawData];
-    const keys=detectKeys(rawData[0]);
-    ["mapDate","mapMarket","mapSelection","mapOdds","mapStake","mapProfit"].forEach(id=>{
-      q(id).innerHTML=keys.map(k=>`<option>${k}</option>`).join("");
-    });
-    const s=suggestMapping(keys);
-    if(s.date) q("mapDate").value=s.date;
-    if(s.market) q("mapMarket").value=s.market;
-    if(s.selection) q("mapSelection").value=s.selection;
-    if(s.odds) q("mapOdds").value=s.odds;
-    if(s.stake) q("mapStake").value=s.stake;
-    if(s.profit) q("mapProfit").value=s.profit;
-    q("mappingArea").style.display="";
+    parsed=parseRecords(rawData);
+    const m=computeMetrics(parsed);
+    renderMetrics(m);
+    renderTable(parsed);
+    q("results").style.display="";
   }catch(err){alert("Error: "+err.message);}
-});
+}
 
-q("btnRun").addEventListener("click",()=>{
-  parsed=buildMappedRecords(rawData);
-  const m=computeMetrics(parsed);
-  renderMetrics(m);
-  renderTable(parsed);
-  q("results").style.display="";
+q("btnRun").addEventListener("click",runBacktest);
+
+q("fileInput").addEventListener("change",e=>{
+  const f=e.target.files[0];if(!f)return;
+  const reader=new FileReader();
+  reader.onload=ev=>{q("pasteJson").value=ev.target.result;runBacktest();};
+  reader.readAsText(f);
 });
 </script>
 </body>
