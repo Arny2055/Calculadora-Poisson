@@ -1,116 +1,415 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-<meta charset="UTF-8">
-<title>Backtesting JSON</title>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Backtesting Robusto — Detecta patrones y valida resultados</title>
 <style>
-  body{font-family:sans-serif;background:#0f1724;color:#eee;padding:20px}
-  .card{background:#1e293b;padding:14px;border-radius:8px;margin-bottom:16px}
-  table{width:100%;border-collapse:collapse;margin-top:10px}
-  td,th{border:1px solid #444;padding:4px;text-align:left}
-  th{background:#334155}
+  :root{--bg:#071225;--card:#0b1220;--muted:#9aa4b2;--accent:#06b6d4}
+  body{background:linear-gradient(180deg,var(--bg),#04101a);color:#e6eef6;font-family:Inter,system-ui,Arial;margin:0;padding:18px}
+  h1{font-size:1.1rem;margin:0 0 12px 0}
+  .card{background:var(--card);padding:12px;border-radius:10px;margin-bottom:12px;box-shadow:0 6px 18px rgba(2,6,23,0.6)}
+  input,textarea,select,button{font:inherit}
+  input[type=file]{color:transparent}
+  textarea{width:100%;min-height:90px;padding:8px;border-radius:8px;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.03);color:inherit}
+  .row{display:flex;gap:8px;align-items:center}
+  .btn{background:linear-gradient(90deg,var(--accent),#26d0ce);border:none;color:#021522;padding:8px 12px;border-radius:8px;cursor:pointer;font-weight:700}
+  progress{width:100%;height:14px;border-radius:8px;overflow:hidden}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{padding:6px;border-bottom:1px solid rgba(255,255,255,0.04);text-align:left}
+  th{color:var(--muted);font-weight:600;font-size:12px}
+  .green{color:#8ee99b}
+  .red{color:#ff8b8b}
+  .small{font-size:13px;color:var(--muted)}
+  pre{white-space:pre-wrap;font-size:13px}
+  .warning{color:#ffd166}
 </style>
 </head>
 <body>
 
-<h1>Backtesting JSON (Patrones)</h1>
-<input type="file" id="fileInput" accept=".json" />
+<h1>Backtesting robusto — calcula desde tu JSON y valida resultados</h1>
 
-<div id="output"></div>
+<div class="card">
+  <div class="row" style="margin-bottom:10px">
+    <input id="fileInput" type="file" accept=".json" />
+    <button id="btnPaste" class="btn">Pegar JSON manual</button>
+  </div>
+
+  <textarea id="pasteArea" placeholder='Pega aquí tu JSON (array o NDJSON - una línea por objeto)'></textarea>
+
+  <div style="margin-top:8px" class="row">
+    <button id="btnStart" class="btn">Procesar Backtest</button>
+    <div style="margin-left:auto" class="small">Stake fijo = <strong>1</strong></div>
+  </div>
+
+  <progress id="progress" value="0" max="100" style="display:none;margin-top:8px"></progress>
+  <div id="status" class="small" style="margin-top:8px"></div>
+</div>
+
+<div id="output" style="display:none">
+  <div class="card">
+    <h3>Resumen</h3>
+    <div id="metrics" class="small"></div>
+  </div>
+
+  <div class="card">
+    <h3>Top ligas (ordenado por profit)</h3>
+    <div id="byLeague"></div>
+  </div>
+
+  <div class="card">
+    <h3>Top equipos (ordenado por profit)</h3>
+    <div id="byTeam"></div>
+  </div>
+
+  <div class="card">
+    <h3>Por rango de cuotas</h3>
+    <div id="byOdds"></div>
+  </div>
+
+  <div class="card">
+    <h3>Problemas / registros no decididos (muestra algunos)</h3>
+    <div id="undetermined" class="small"></div>
+  </div>
+
+  <div class="card">
+    <button id="btnExportCSV" class="btn">Exportar resultados (CSV)</button>
+  </div>
+</div>
 
 <script>
-function normalizeKey(obj, key){
-  return obj[key] || obj[key.trim()] || null;
+/* =========== Worker code (string) =========== 
+   No dependencias externas. Heurísticas para decidir ganado/perdido.
+*/
+const workerCode = `
+/* helpers */
+function normalizeKey(k){ return k ? k.toString().trim().toLowerCase().replace(/\\s+/g,' ') : ''; }
+function tryNum(v){
+  if(v===null||v===undefined) return NaN;
+  if(typeof v === 'number') return v;
+  let s = String(v).trim().replace(/['"]/g,'').replace(/,/g,'.');
+  // extra: remove non-number trailing chars
+  const m = s.match(/-?\\d+(\\.\\d+)?/);
+  if(m) return Number(m[0]);
+  return NaN;
+}
+function parseScore(s){
+  if(!s) return null;
+  const m = String(s).match(/(\\d+)\\s*[-:\\u2013]\\s*(\\d+)/);
+  if(m) return {home:parseInt(m[1],10),away:parseInt(m[2],10)};
+  return null;
 }
 
-function addStat(map, key, profit){
-  if(!map[key]) map[key] = {count:0,profit:0};
-  map[key].count++;
-  map[key].profit += profit;
-}
+/* decide if desiredOutcome wins given ftScore */
+function evaluateDesired(desired, market, score){
+  if(!desired && !market) return null;
+  const d = (desired||'').toString().toLowerCase();
+  const mkt = (market||'').toString().toLowerCase();
 
-function oddsRange(odd){
-  if(odd<1.5) return "1.01 - 1.49";
-  if(odd<2) return "1.50 - 1.99";
-  if(odd<3) return "2.00 - 2.99";
-  return "3.00+";
-}
-
-document.getElementById("fileInput").addEventListener("change", e=>{
-  const file = e.target.files[0];
-  if(!file) return;
-  const reader = new FileReader();
-  reader.onload = ev=>{
-    try {
-      let data = JSON.parse(ev.target.result);
-      runBacktest(data);
-    } catch(err){
-      document.getElementById("output").innerHTML = 
-        "<b>Error al leer JSON:</b> " + err.message;
-    }
-  };
-  reader.readAsText(file);
-});
-
-function runBacktest(records){
-  const stake = 1;
-  let total=0, profit=0, ganado=0, perdido=0;
-  let leagues={}, teams={}, oddsBuckets={};
-
-  for(const r of records){
-    let odd = Number(normalizeKey(r," Odd ")||normalizeKey(r,"Odd")||0);
-    let res = (normalizeKey(r," Result ")||normalizeKey(r,"Result")||"").toLowerCase();
-    let league = normalizeKey(r," League ")||normalizeKey(r,"League")||"Desconocida";
-    let match = normalizeKey(r," Match ")||normalizeKey(r,"Match")||"";
-
-    let p=0;
-    if(res.includes("win")) p=(odd-1)*stake;
-    else if(res.includes("lose")) p=-stake;
-
-    profit+=p;
-    if(p>0) ganado+=p; else if(p<0) perdido+=Math.abs(p);
-    total++;
-
-    addStat(leagues, league, p);
-
-    if(match.includes("-")){
-      let [home,away] = match.split("-").map(s=>s.trim());
-      addStat(teams, home, p);
-      addStat(teams, away, p);
-    }
-
-    if(odd>1){
-      let bucket = oddsRange(odd);
-      addStat(oddsBuckets, bucket, p);
-    }
+  // BTTS / GG
+  if(/gg|both teams to score|both to score|btts|both score|yes/i.test(d) || /btts|both teams to score/i.test(mkt)){
+    if(score) return (score.home>0 && score.away>0);
+    return null;
+  }
+  if(/no goal|no|nogoal|both no/i.test(d) || /(no|nogoal)/.test(mkt) ){
+    if(score) return !(score.home>0 && score.away>0);
+    return null;
   }
 
-  const roi = total? (profit/total*100):0;
+  // OVER / UNDER numeric (ej: Over 2.5)
+  const overM = d.match(/over\\s*([0-9]+(?:\\.[0-9]+)?)/i) || mkt.match(/over\\s*([0-9]+(?:\\.[0-9]+)?)/i);
+  if(overM && score){
+    const thr = parseFloat(overM[1]);
+    return (score.home + score.away) > thr;
+  }
+  const underM = d.match(/under\\s*([0-9]+(?:\\.[0-9]+)?)/i) || mkt.match(/under\\s*([0-9]+(?:\\.[0-9]+)?)/i);
+  if(underM && score){
+    const thr = parseFloat(underM[1]);
+    return (score.home + score.away) <= thr;
+  }
 
-  let html = `<div class="card">
-  <h3>Resumen</h3>
-  Apuestas: ${total}<br>
-  ✅ Ganado: ${ganado.toFixed(2)}<br>
-  ❌ Perdido: ${perdido.toFixed(2)}<br>
-  Profit neto: ${profit.toFixed(2)}<br>
-  ROI: ${roi.toFixed(2)}%</div>`;
+  // 1X2 detection: '1', 'x', '2' or 'home', 'away'
+  if(/^\\s*1\\s*$/.test(d) || /(^|\\s)home(\\s|$)/i.test(d)){
+    if(score) return (score.home > score.away);
+  }
+  if(/^\\s*2\\s*$/.test(d) || /(^|\\s)away(\\s|$)/i.test(d)){
+    if(score) return (score.away > score.home);
+  }
+  if(/^\\s*x\\s*$/.test(d) || /^\\s*draw\\s*$/i.test(d) || /(^|\\s)tie(\\s|$)/i.test(d)){
+    if(score) return (score.home === score.away);
+  }
 
-  html += makeTable(leagues,"Ligas");
-  html += makeTable(teams,"Equipos");
-  html += makeTable(oddsBuckets,"Rangos de Cuotas");
+  // If desired contains a number like "Over 2.5" or "O2.5" handled above.
+  // If desired equals exact score e.g. "1-1"
+  if(/^\\s*\\d+\\s*[-:]\\s*\\d+\\s*$/.test(d) && score){
+    const m = d.match(/(\\d+)\\s*[-:]\\s*(\\d+)/);
+    return (parseInt(m[1],10) === score.home && parseInt(m[2],10) === score.away);
+  }
 
-  document.getElementById("output").innerHTML = html;
+  // fallback null (unknown)
+  return null;
 }
 
-function makeTable(map,label){
-  let rows = Object.entries(map).map(([k,v])=>
-    `<tr><td>${k}</td><td>${v.count}</td><td>${v.profit.toFixed(2)}</td></tr>`
-  ).sort((a,b)=> b.match(/-?\d+\.\d+/)-a.match(/-?\d+\.\d+/));
-  return `<div class="card"><h3>${label}</h3><table>
-    <tr><th>${label}</th><th>Apuestas</th><th>Profit</th></tr>
-    ${rows.join("")}
-  </table></div>`;
+/* normalize fetching: find key by many variants */
+function getValue(obj, candidates){
+  const map = {};
+  for(const k in obj){
+    map[normalizeKey(k)] = obj[k];
+  }
+  for(const c of candidates){
+    const norm = normalizeKey(c);
+    if(map[norm] !== undefined) return map[norm];
+  }
+  // try partial contains
+  for(const normKey in map){
+    for(const c of candidates){
+      const q = normalizeKey(c);
+      if(normKey.includes(q) || q.includes(normKey)) return map[normKey];
+    }
+  }
+  return undefined;
 }
+
+/* bucket odds */
+function oddsBucket(o){
+  if(isNaN(o)) return 'unknown';
+  if(o < 1.5) return '1.01 - 1.49';
+  if(o < 2) return '1.50 - 1.99';
+  if(o < 3) return '2.00 - 2.99';
+  if(o < 5) return '3.00 - 4.99';
+  return '5.00+';
+}
+
+/* main */
+self.onmessage = function(e){
+  try{
+    const text = e.data.text;
+    let records = [];
+    // Try parse as JSON array
+    try{
+      records = JSON.parse(text);
+      if(!Array.isArray(records)) records = [records];
+    }catch(err){
+      // Try NDJSON: split lines, parse each
+      const lines = text.split(/\\r?\\n/).map(s=>s.trim()).filter(Boolean);
+      for(const line of lines){
+        try{
+          records.push(JSON.parse(line));
+        }catch(errLine){
+          // try forgiving replace single quotes -> double and parse (best-effort)
+          const maybe = line.replace(/'/g,'\\"');
+          try{ records.push(JSON.parse(maybe)); }catch(e2){ /* skip */ }
+        }
+      }
+    }
+
+    const stake = 1;
+    let total=0, profit=0, ganado=0, perdido=0;
+    let leagues={}, teams={}, oddsBuckets={};
+    let undetermined=[];
+
+    for(const r of records){
+      total++;
+      // try read fields flexibly
+      const rawOdds = getValue(r, ['odd','odds',' odd ','odd prematch','odd 1 prematch',' odd 1 preMatch ']);
+      const rawProfit = getValue(r, ['profit','profit ','profit (u)','profit_usd','profit_usd ']);
+      const rawResult = getValue(r, ['result',' result ','status']);
+      const rawResultFT = getValue(r, ['result ft','result_ft','result ft ','result full time','result full']);
+      const rawDesired = getValue(r, ['desired outcome','desired',' name ','name','selection','bet','market selection']);
+      const rawLeague = getValue(r, ['league',' competition ','league ']);
+      const rawMatch = getValue(r, ['match',' match ','game','fixture']);
+
+      // parse odds
+      const odds = tryNum(rawOdds);
+      // parse explicit profit if present
+      let p = NaN;
+      const pf = tryNum(rawProfit);
+      if(!isNaN(pf)){ p = pf; }
+      // else try interpret result field
+      const rstr = rawResult ? String(rawResult).toLowerCase() : '';
+      if(isNaN(p)){
+        if(rstr.match(/win|won|winning/)) p = (odds>0 ? (odds-1)*stake : 0);
+        else if(rstr.match(/lose|lost|losing/)) p = -stake;
+      }
+
+      // if still NaN, try compute from Result FT + desired
+      let decided = !isNaN(p);
+      let score = parseScore(rawResultFT);
+      if(isNaN(p)){
+        // careful: sometimes result FT is stored in " Result FT " or "Result FT "
+        if(!score){
+          // also try rawResult if contains "1-1"
+          score = parseScore(rawResult);
+        }
+        const outcome = evaluateDesired(rawDesired, getValue(r,['market','market name','market ']), score);
+        if(outcome === true) p = (odds>0 ? (odds-1)*stake : 0);
+        else if(outcome === false) p = -stake;
+        else {
+          // couldn't decide
+          p = NaN;
+        }
+      }
+
+      if(isNaN(p)){
+        undetermined.push({sample:r});
+        continue; // skip adding stats for undetermined (so you can inspect them)
+      }
+
+      profit += p;
+      if(p>0) ganado += p; else perdido += Math.abs(p);
+
+      // league
+      const leagueKey = rawLeague ? String(rawLeague).toString() : 'Desconocida';
+      if(!leagues[leagueKey]) leagues[leagueKey] = {count:0,profit:0,ganado:0,perdido:0};
+      leagues[leagueKey].count++;
+      leagues[leagueKey].profit += p;
+      if(p>0) leagues[leagueKey].ganado += p; else leagues[leagueKey].perdido += Math.abs(p);
+
+      // teams
+      const matchStr = rawMatch ? String(rawMatch) : '';
+      // try separators: '-', ' vs ', ' v ', ' — ', '@'
+      let home='', away='';
+      const sep = matchStr.includes('-') ? '-' : (matchStr.toLowerCase().includes(' vs ') ? ' vs ' : (matchStr.includes('@') ? '@' : (matchStr.includes(' v ') ? ' v ' : null)));
+      if(sep){
+        const parts = matchStr.split(sep).map(s=>s.trim()).filter(Boolean);
+        if(parts.length >= 2){ home = parts[0]; away = parts[1]; }
+      }
+      if(home){
+        if(!teams[home]) teams[home] = {count:0,profit:0,ganado:0,perdido:0};
+        teams[home].count++; teams[home].profit+=p; if(p>0) teams[home].ganado+=p; else teams[home].perdido+=Math.abs(p);
+      }
+      if(away){
+        if(!teams[away]) teams[away] = {count:0,profit:0,ganado:0,perdido:0};
+        teams[away].count++; teams[away].profit+=p; if(p>0) teams[away].ganado+=p; else teams[away].perdido+=Math.abs(p);
+      }
+
+      // odds buckets
+      const bucket = oddsBucket(odds);
+      if(!oddsBuckets[bucket]) oddsBuckets[bucket] = {count:0,profit:0,ganado:0,perdido:0};
+      oddsBuckets[bucket].count++; oddsBuckets[bucket].profit+=p; if(p>0) oddsBuckets[bucket].ganado+=p; else oddsBuckets[bucket].perdido+=Math.abs(p);
+    } // end loop
+
+    const roi = total ? (profit / total * 100) : 0;
+    self.postMessage({ok:true, metrics:{total,profit,ganado,perdido,roi,undetermined:undetermined.length}, leagues, teams, oddsBuckets, undetermined:undetermined.slice(0,20)});
+  }catch(err){
+    self.postMessage({ok:false,error:err.message});
+  }
+};
+`;
+
+/* =========== main thread =========== */
+const blob = new Blob([workerCode], { type: "application/javascript" });
+const worker = new Worker(URL.createObjectURL(blob));
+const progress = document.getElementById('progress');
+const status = document.getElementById('status');
+
+worker.onmessage = e => {
+  progress.style.display = 'none';
+  status.textContent = '';
+  if(!e.data.ok){
+    alert('Error en worker: ' + e.data.error);
+    return;
+  }
+  // show results
+  const m = e.data.metrics;
+  document.getElementById('metrics').innerHTML = `
+    <div>Apuestas procesadas: <strong>${m.total}</strong></div>
+    <div>✅ Ganado: <strong class="green">${m.ganado.toFixed(2)}</strong></div>
+    <div>❌ Perdido: <strong class="red">${m.perdido.toFixed(2)}</strong></div>
+    <div>Beneficio neto: <strong>${m.profit.toFixed(2)}</strong></div>
+    <div>ROI (por apuesta): <strong>${m.roi.toFixed(2)}%</strong></div>
+    <div class="small">Registros no decididos: <strong class="warning">${m.undetermined}</strong> (se muestran algunos abajo)</div>
+  `;
+
+  renderGroupTable(e.data.leagues, 'byLeague', 'Liga');
+  renderGroupTable(e.data.teams, 'byTeam', 'Equipo');
+  renderGroupTable(e.data.oddsBuckets, 'byOdds', 'Rango cuota');
+
+  // undetermined examples
+  const und = e.data.undetermined || [];
+  const undDiv = document.getElementById('undetermined');
+  if(und.length === 0) undDiv.innerHTML = '<div class="small">Ninguno — todos los registros fueron decididos.</div>';
+  else {
+    let html = '<div class="small">Mostrando hasta 20 registros no decididos (revisa claves, formatos de Score o Desired Outcome):</div><pre>';
+    und.forEach((u,i)=>{
+      try{ html += JSON.stringify(u.sample, null, 2) + '\\n---\\n'; }catch(err){ html += String(u.sample) + '\\n---\\n'; }
+    });
+    html += '</pre>';
+    undDiv.innerHTML = html;
+  }
+
+  document.getElementById('output').style.display = '';
+  // store last results for export
+  window._lastWorkerResult = e.data;
+};
+
+function renderGroupTable(mapObj, containerId, label){
+  // convert to array and sort by profit desc
+  const arr = Object.keys(mapObj).map(k=>({
+    key:k, count: mapObj[k].count, profit: mapObj[k].profit || 0, ganado: mapObj[k].ganado||0, perdido: mapObj[k].perdido||0
+  })).sort((a,b)=>b.profit - a.profit);
+  if(arr.length === 0){ document.getElementById(containerId).innerHTML = '<div class="small">Sin datos</div>'; return; }
+  let html = '<table><thead><tr><th>'+label+'</th><th>Apuestas</th><th>Ganado</th><th>Perdido</th><th>Profit</th></tr></thead><tbody>';
+  arr.forEach(r=>{
+    html += '<tr><td>'+escapeHtml(r.key)+'</td><td>'+r.count+'</td><td class="green">'+r.ganado.toFixed(2)+'</td><td class="red">'+r.perdido.toFixed(2)+'</td><td style="font-weight:700;color:'+(r.profit>=0? '#8ee99b':'#ff8b8b')+'">'+r.profit.toFixed(2)+'</td></tr>';
+  });
+  html += '</tbody></table>';
+  document.getElementById(containerId).innerHTML = html;
+}
+
+function escapeHtml(s){ return String(s||'').replace(/[&<>"]/g, c=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+/* UI events */
+document.getElementById('fileInput').addEventListener('change', e=>{
+  const f = e.target.files[0];
+  if(!f) return;
+  const reader = new FileReader();
+  reader.onprogress = ev => {
+    if(ev.lengthComputable){
+      progress.style.display = '';
+      progress.value = (ev.loaded/ev.total*100);
+      status.textContent = 'Leyendo archivo... ' + Math.round(progress.value) + '%';
+    }
+  };
+  reader.onload = ev => {
+    status.textContent = 'Enviando datos al worker...';
+    worker.postMessage({text: ev.target.result});
+  };
+  reader.onerror = ()=> alert('Error al leer el archivo');
+  reader.readAsText(f);
+});
+
+document.getElementById('btnPaste').addEventListener('click', ()=>{
+  const t = prompt('Pega aquí tu JSON completo (array o NDJSON). Para cancelar deja vacío.');
+  if(t) document.getElementById('pasteArea').value = t;
+});
+
+document.getElementById('btnStart').addEventListener('click', ()=>{
+  const txt = document.getElementById('pasteArea').value.trim();
+  if(!txt){ alert('Pega JSON o carga archivo'); return; }
+  progress.style.display = '';
+  progress.value = 10;
+  status.textContent = 'Procesando texto pegado...';
+  worker.postMessage({text: txt});
+});
+
+/* Export CSV: export leagues + teams summary and overall */
+document.getElementById('btnExportCSV').addEventListener('click', ()=>{
+  const res = window._lastWorkerResult;
+  if(!res){ alert('No hay resultados para exportar'); return; }
+  // build CSV rows: overall, then leagues, then teams, then odds buckets
+  const rows = [];
+  rows.push(['scope','key','count','ganado','perdido','profit']);
+  Object.entries(res.leagues).forEach(([k,v])=> rows.push(['league', k, v.count, (v.ganado||0).toFixed(2), (v.perdido||0).toFixed(2), (v.profit||0).toFixed(2)]));
+  Object.entries(res.teams).forEach(([k,v])=> rows.push(['team', k, v.count, (v.ganado||0).toFixed(2), (v.perdido||0).toFixed(2), (v.profit||0).toFixed(2)]));
+  Object.entries(res.oddsBuckets).forEach(([k,v])=> rows.push(['odds_range', k, v.count, (v.ganado||0).toFixed(2), (v.perdido||0).toFixed(2), (v.profit||0).toFixed(2)]));
+  const csv = rows.map(r=> r.map(c => '\"'+String(c).replace(/\"/g,'\"\"')+'\"').join(',')).join('\\n');
+  const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url; a.download = 'backtest_summary.csv'; a.click();
+  URL.revokeObjectURL(url);
+});
 </script>
+
 </body>
 </html>
