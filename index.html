@@ -3,213 +3,86 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Backtesting JSON Avanzado</title>
-
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap">
-
+<title>Backtesting JSON Archivos Grandes</title>
 <style>
-  body{font-family:Inter,system-ui;background:#0f1724;color:#e6eef6;margin:0;padding:20px}
-  .card{background:#0b1220;padding:14px;border-radius:10px;margin-bottom:16px}
-  .btn{padding:6px 12px;border:none;border-radius:6px;background:#06b6d4;color:#021522;font-weight:600;cursor:pointer}
-  textarea,input{width:100%;margin:4px 0;padding:6px;border-radius:6px;border:1px solid #333;background:#111;color:#fff}
-  table{width:100%;border-collapse:collapse;margin-top:8px;font-size:13px}
-  th,td{padding:6px;border-bottom:1px solid #222;text-align:left}
+  body{font-family:sans-serif;background:#0f1724;color:#eee;padding:20px}
+  .card{background:#1e293b;padding:14px;border-radius:8px;margin-bottom:16px}
+  .btn{padding:6px 12px;background:#06b6d4;border:none;border-radius:6px;font-weight:600;cursor:pointer}
+  progress{width:100%;margin-top:8px}
 </style>
 </head>
 <body>
 
-<h1>Backtesting JSON Avanzado</h1>
+<h1>Backtesting JSON (Archivos grandes)</h1>
 
 <div class="card">
-  <label>Subir archivo JSON
-    <input id="fileInput" type="file" accept=".json" />
-  </label>
-  <label>Pegar JSON</label>
-  <textarea id="pasteJson" rows="6"></textarea>
-  <button id="btnRun" class="btn">Ejecutar Backtest</button>
+  <input id="fileInput" type="file" accept=".json" />
+  <progress id="progress" value="0" max="100" style="display:none"></progress>
 </div>
 
 <div id="results" style="display:none">
   <div class="card">
-    <h3>Resumen Global</h3>
-    <div id="metrics"></div>
-  </div>
-
-  <div class="card">
-    <h3>Tabla de apuestas</h3>
-    <table>
-      <thead><tr><th>#</th><th>Fecha</th><th>Liga</th><th>Partido</th><th>Selección</th><th>Cuota</th><th>Profit</th></tr></thead>
-      <tbody id="tbodyBets"></tbody>
-    </table>
-  </div>
-
-  <div class="card">
-    <h3>Por Liga</h3>
-    <div id="tableLeagues"></div>
-  </div>
-
-  <div class="card">
-    <h3>Por Equipo</h3>
-    <div id="tableTeams"></div>
-  </div>
-
-  <div class="card">
-    <h3>Por Rango de Cuotas</h3>
-    <div id="tableOdds"></div>
+    <h3>Resumen</h3>
+    <pre id="summary"></pre>
   </div>
 </div>
 
 <script>
-let rawData=[], parsed=[];
+// ==== Worker en línea (para parsear y calcular en segundo plano) ====
+const workerCode = `
+self.onmessage = function(e){
+  try{
+    const records = JSON.parse(e.data.jsonText);
+    const stake = 1;
+    let total=0, profit=0, ganado=0, perdido=0;
+    for(const r of records){
+      let odd = Number(r[" Odd "]||r["Odd"]||0);
+      let res = (r[" Result "]||r["Result"]||"").toLowerCase();
+      let p=0;
+      if(res.includes("win")) p=(odd-1)*stake;
+      else if(res.includes("lose")) p=-stake;
+      profit+=p;
+      if(p>0) ganado+=p; else if(p<0) perdido+=Math.abs(p);
+      total++;
+    }
+    const roi = total? (profit/total*100):0;
+    self.postMessage({ok:true,metrics:{total,profit,ganado,perdido,roi}});
+  }catch(err){
+    self.postMessage({ok:false,error:err.message});
+  }
+};`;
+const blob = new Blob([workerCode], { type: "application/javascript" });
+const worker = new Worker(URL.createObjectURL(blob));
+
+worker.onmessage = e=>{
+  q("progress").style.display="none";
+  if(!e.data.ok){ alert("Error: "+e.data.error); return; }
+  const m = e.data.metrics;
+  q("summary").textContent = 
+    "Apuestas: "+m.total+
+    "\\n✅ Ganado: "+m.ganado.toFixed(2)+
+    "\\n❌ Perdido: "+m.perdido.toFixed(2)+
+    "\\nProfit neto: "+m.profit.toFixed(2)+
+    "\\nROI: "+m.roi.toFixed(2)+"%";
+  q("results").style.display="";
+};
 
 function q(id){return document.getElementById(id);}
-function safeNumber(v){let n=Number(v);return isFinite(n)?n:0;}
 
-function parseRecords(records){
-  return records.map((r,i)=>{
-    const clean={};
-    for(let k in r){ clean[k.trim().toLowerCase()] = r[k]; }
-
-    const date=new Date(clean["date"]);
-    const odds=safeNumber(clean["odd"]);
-    const stake=1; // fijo
-    let profit=0;
-
-    if(clean["result"]){
-      const val=clean["result"].toString().toLowerCase().trim();
-      if(val.includes("win")) profit=(odds-1)*stake;
-      else if(val.includes("lose")) profit=-stake;
-      else profit=0;
-    }
-
-    return {
-      i,date,
-      league: clean["league"] || "-",
-      match: clean["match"] || "-",
-      selection: clean["desired outcome"] || clean["name"] || "-",
-      odds,stake,profit
-    };
-  });
-}
-
-function computeMetrics(recs){
-  const total=recs.length;
-  const stake=recs.reduce((a,b)=>a+b.stake,0);
-  const profit=recs.reduce((a,b)=>a+b.profit,0);
-  const roi=stake? (profit/stake*100):0;
-
-  const ganado=recs.filter(r=>r.profit>0).reduce((a,b)=>a+b.profit,0);
-  const perdido=recs.filter(r=>r.profit<0).reduce((a,b)=>a+Math.abs(b.profit),0);
-
-  return {total,stake,profit,roi,ganado,perdido};
-}
-
-function renderMetrics(m){
-  q("metrics").innerHTML=`
-    Apuestas: ${m.total}<br>
-    Stake total: ${m.stake}<br>
-    ✅ Ganado: <span style="color:lightgreen">${m.ganado.toFixed(2)}</span><br>
-    ❌ Perdido: <span style="color:salmon">${m.perdido.toFixed(2)}</span><br>
-    Beneficio neto: ${m.profit.toFixed(2)}<br>
-    ROI: ${m.roi.toFixed(2)}%
-  `;
-}
-
-function renderTable(recs){
-  q("tbodyBets").innerHTML="";
-  recs.forEach((r,idx)=>{
-    q("tbodyBets").innerHTML+=`
-      <tr>
-        <td>${idx+1}</td>
-        <td>${r.date.toLocaleString()}</td>
-        <td>${r.league}</td>
-        <td>${r.match}</td>
-        <td>${r.selection}</td>
-        <td>${r.odds}</td>
-        <td style="color:${r.profit>=0?"lightgreen":"salmon"}">${r.profit.toFixed(2)}</td>
-      </tr>`;
-  });
-}
-
-// ---- Agrupadores ----
-function groupBy(arr,keyFn){
-  const map={};
-  arr.forEach(r=>{
-    const k=keyFn(r);
-    if(!map[k]) map[k]=[];
-    map[k].push(r);
-  });
-  return map;
-}
-
-function renderGroupedTable(title,grouped,containerId){
-  let html="<table><thead><tr><th>Grupo</th><th>Apuestas</th><th>Ganado</th><th>Perdido</th><th>Profit</th><th>ROI %</th></tr></thead><tbody>";
-  Object.keys(grouped).forEach(k=>{
-    const m=computeMetrics(grouped[k]);
-    html+=`<tr>
-      <td>${k}</td>
-      <td>${m.total}</td>
-      <td style="color:lightgreen">${m.ganado.toFixed(2)}</td>
-      <td style="color:salmon">${m.perdido.toFixed(2)}</td>
-      <td style="color:${m.profit>=0?"lightgreen":"salmon"}">${m.profit.toFixed(2)}</td>
-      <td>${m.roi.toFixed(2)}</td>
-    </tr>`;
-  });
-  html+="</tbody></table>";
-  q(containerId).innerHTML=html;
-}
-
-function runBacktest(){
-  try{
-    rawData=JSON.parse(q("pasteJson").value);
-    if(!Array.isArray(rawData)) rawData=[rawData];
-    parsed=parseRecords(rawData);
-
-    // global
-    renderMetrics(computeMetrics(parsed));
-    renderTable(parsed);
-
-    // por liga
-    const gLeagues=groupBy(parsed,r=>r.league);
-    renderGroupedTable("Ligas",gLeagues,"tableLeagues");
-
-    // por equipos (separa home/away del campo "match")
-    const gTeams={};
-    parsed.forEach(r=>{
-      if(r.match.includes("-")){
-        let [home,away]=r.match.split("-").map(x=>x.trim());
-        if(!gTeams[home]) gTeams[home]=[];
-        if(!gTeams[away]) gTeams[away]=[];
-        gTeams[home].push(r);
-        gTeams[away].push(r);
-      }
-    });
-    renderGroupedTable("Equipos",gTeams,"tableTeams");
-
-    // por rango de cuotas
-    const ranges=[[1,1.5],[1.51,2],[2.01,3],[3.01,5],[5.01,100]];
-    const gOdds={};
-    parsed.forEach(r=>{
-      let group=">100";
-      ranges.forEach(([min,max])=>{
-        if(r.odds>=min && r.odds<=max) group=`${min}-${max}`;
-      });
-      if(!gOdds[group]) gOdds[group]=[];
-      gOdds[group].push(r);
-    });
-    renderGroupedTable("Cuotas",gOdds,"tableOdds");
-
-    q("results").style.display="";
-  }catch(err){alert("Error: "+err.message);}
-}
-
-q("btnRun").addEventListener("click",runBacktest);
 q("fileInput").addEventListener("change",e=>{
-  const f=e.target.files[0];if(!f)return;
-  const reader=new FileReader();
-  reader.onload=ev=>{q("pasteJson").value=ev.target.result;runBacktest();};
-  reader.readAsText(f);
+  const file = e.target.files[0];
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onprogress = ev=>{
+    if(ev.lengthComputable){
+      q("progress").style.display="";
+      q("progress").value = (ev.loaded/ev.total*100);
+    }
+  };
+  reader.onload = ev=>{
+    worker.postMessage({jsonText:ev.target.result});
+  };
+  reader.readAsText(file);
 });
 </script>
 </body>
