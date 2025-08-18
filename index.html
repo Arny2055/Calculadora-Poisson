@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Backtesting JSON Automático</title>
+<title>Backtesting JSON Avanzado</title>
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap">
@@ -19,7 +19,7 @@
 </head>
 <body>
 
-<h1>Backtesting JSON (Stake fijo = 1)</h1>
+<h1>Backtesting JSON Avanzado</h1>
 
 <div class="card">
   <label>Subir archivo JSON
@@ -30,14 +30,34 @@
   <button id="btnRun" class="btn">Ejecutar Backtest</button>
 </div>
 
-<div id="results" class="card" style="display:none">
-  <h3>Métricas</h3>
-  <div id="metrics"></div>
-  <h3>Tabla</h3>
-  <table>
-    <thead><tr><th>#</th><th>Fecha</th><th>Selección</th><th>Cuota</th><th>Stake</th><th>Profit</th></tr></thead>
-    <tbody id="tbodyBets"></tbody>
-  </table>
+<div id="results" style="display:none">
+  <div class="card">
+    <h3>Resumen Global</h3>
+    <div id="metrics"></div>
+  </div>
+
+  <div class="card">
+    <h3>Tabla de apuestas</h3>
+    <table>
+      <thead><tr><th>#</th><th>Fecha</th><th>Liga</th><th>Partido</th><th>Selección</th><th>Cuota</th><th>Profit</th></tr></thead>
+      <tbody id="tbodyBets"></tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <h3>Por Liga</h3>
+    <div id="tableLeagues"></div>
+  </div>
+
+  <div class="card">
+    <h3>Por Equipo</h3>
+    <div id="tableTeams"></div>
+  </div>
+
+  <div class="card">
+    <h3>Por Rango de Cuotas</h3>
+    <div id="tableOdds"></div>
+  </div>
 </div>
 
 <script>
@@ -65,6 +85,8 @@ function parseRecords(records){
 
     return {
       i,date,
+      league: clean["league"] || "-",
+      match: clean["match"] || "-",
       selection: clean["desired outcome"] || clean["name"] || "-",
       odds,stake,profit
     };
@@ -95,12 +117,39 @@ function renderTable(recs){
       <tr>
         <td>${idx+1}</td>
         <td>${r.date.toLocaleString()}</td>
+        <td>${r.league}</td>
+        <td>${r.match}</td>
         <td>${r.selection}</td>
         <td>${r.odds}</td>
-        <td>${r.stake}</td>
         <td style="color:${r.profit>=0?"lightgreen":"salmon"}">${r.profit.toFixed(2)}</td>
       </tr>`;
   });
+}
+
+// ---- Agrupadores ----
+function groupBy(arr,keyFn){
+  const map={};
+  arr.forEach(r=>{
+    const k=keyFn(r);
+    if(!map[k]) map[k]=[];
+    map[k].push(r);
+  });
+  return map;
+}
+
+function renderGroupedTable(title,grouped,containerId){
+  let html="<table><thead><tr><th>Grupo</th><th>Apuestas</th><th>Profit</th><th>ROI %</th></tr></thead><tbody>";
+  Object.keys(grouped).forEach(k=>{
+    const m=computeMetrics(grouped[k]);
+    html+=`<tr>
+      <td>${k}</td>
+      <td>${m.total}</td>
+      <td style="color:${m.profit>=0?"lightgreen":"salmon"}">${m.profit.toFixed(2)}</td>
+      <td>${m.roi.toFixed(2)}</td>
+    </tr>`;
+  });
+  html+="</tbody></table>";
+  q(containerId).innerHTML=html;
 }
 
 function runBacktest(){
@@ -108,15 +157,46 @@ function runBacktest(){
     rawData=JSON.parse(q("pasteJson").value);
     if(!Array.isArray(rawData)) rawData=[rawData];
     parsed=parseRecords(rawData);
-    const m=computeMetrics(parsed);
-    renderMetrics(m);
+
+    // global
+    renderMetrics(computeMetrics(parsed));
     renderTable(parsed);
+
+    // por liga
+    const gLeagues=groupBy(parsed,r=>r.league);
+    renderGroupedTable("Ligas",gLeagues,"tableLeagues");
+
+    // por equipos (separa home/away del campo "match")
+    const gTeams={};
+    parsed.forEach(r=>{
+      if(r.match.includes("-")){
+        let [home,away]=r.match.split("-").map(x=>x.trim());
+        if(!gTeams[home]) gTeams[home]=[];
+        if(!gTeams[away]) gTeams[away]=[];
+        gTeams[home].push(r);
+        gTeams[away].push(r);
+      }
+    });
+    renderGroupedTable("Equipos",gTeams,"tableTeams");
+
+    // por rango de cuotas
+    const ranges=[[1,1.5],[1.51,2],[2.01,3],[3.01,5],[5.01,100]];
+    const gOdds={};
+    parsed.forEach(r=>{
+      let group=">100";
+      ranges.forEach(([min,max])=>{
+        if(r.odds>=min && r.odds<=max) group=`${min}-${max}`;
+      });
+      if(!gOdds[group]) gOdds[group]=[];
+      gOdds[group].push(r);
+    });
+    renderGroupedTable("Cuotas",gOdds,"tableOdds");
+
     q("results").style.display="";
   }catch(err){alert("Error: "+err.message);}
 }
 
 q("btnRun").addEventListener("click",runBacktest);
-
 q("fileInput").addEventListener("change",e=>{
   const f=e.target.files[0];if(!f)return;
   const reader=new FileReader();
