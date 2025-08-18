@@ -3,572 +3,164 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Backtesting JSON - Over/Under, BTTS, 1x2</title>
+<title>Backtesting JSON Adaptado</title>
 
-<!-- Chart.js -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap">
 
 <style>
-  :root{
-    --bg:#0f1724; --card:#0b1220; --muted:#9aa4b2; --accent:#06b6d4;
-    --glass: rgba(255,255,255,0.03);
-  }
-  *{box-sizing:border-box}
-  body{
-    font-family:Inter,system-ui,Segoe UI,Arial;
-    margin:0; background:linear-gradient(180deg,#071126 0%, #081226 100%); color:#e6eef6;
-    padding:20px;
-  }
-  header{display:flex;gap:16px;align-items:center;margin-bottom:16px}
-  header h1{font-size:1.25rem;margin:0}
-  .layout{display:grid;grid-template-columns:420px 1fr;gap:16px}
-  .card{background:var(--card); padding:14px;border-radius:10px;box-shadow:0 6px 18px rgba(2,6,23,0.6)}
-  label{display:block;font-size:12px;color:var(--muted);margin-bottom:6px}
-  input[type=file]{color:transparent}
-  textarea{width:100%;min-height:150px;padding:10px;border-radius:8px;border:1px solid rgba(255,255,255,0.04);background:var(--glass);color:inherit;resize:vertical}
-  select,input[type=text],input[type=number]{width:100%;padding:8px;border-radius:8px;border:1px solid rgba(255,255,255,0.04);background:transparent;color:inherit}
-  .row{display:flex;gap:8px}
-  .btn{display:inline-block;padding:8px 12px;border-radius:8px;background:linear-gradient(90deg,var(--accent),#26d0ce);color:#021522;border:none;cursor:pointer;font-weight:600}
-  .btn.ghost{background:transparent;border:1px solid rgba(255,255,255,0.06);color:var(--muted)}
-  .small{font-size:13px}
-  .map-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px}
-  .results-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-top:10px}
-  .metric{background:linear-gradient(180deg,#081220,#07101a);padding:10px;border-radius:8px}
-  table{width:100%;border-collapse:collapse;font-size:13px}
-  th,td{padding:8px;border-bottom:1px solid rgba(255,255,255,0.03);text-align:left}
-  .controls{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
-  footer{margin-top:12px;color:var(--muted);font-size:13px}
-  .chart-wrap{background:transparent;padding:8px;border-radius:8px}
-  .list-scroll{max-height:220px;overflow:auto;padding-right:6px}
-  @media (max-width:980px){.layout{grid-template-columns:1fr}}
+  body{font-family:Inter,system-ui;background:#0f1724;color:#e6eef6;margin:0;padding:20px}
+  .card{background:#0b1220;padding:14px;border-radius:10px;margin-bottom:16px}
+  .btn{padding:6px 12px;border:none;border-radius:6px;background:#06b6d4;color:#021522;font-weight:600;cursor:pointer}
+  select,textarea,input{width:100%;margin:4px 0;padding:6px;border-radius:6px;border:1px solid #333;background:#111;color:#fff}
+  table{width:100%;border-collapse:collapse;margin-top:8px;font-size:13px}
+  th,td{padding:6px;border-bottom:1px solid #222;text-align:left}
 </style>
 </head>
 <body>
 
-<header>
-  <h1>Backtesting JSON — carga, mapea, analiza</h1>
-  <div style="margin-left:auto;color:var(--muted);font-size:13px">Versión rápida · Español</div>
-</header>
+<h1>Backtesting JSON (con claves especiales)</h1>
 
-<div class="layout">
+<div class="card">
+  <label>Subir archivo JSON
+    <input id="fileInput" type="file" accept=".json" />
+  </label>
+  <label>Pegar JSON</label>
+  <textarea id="pasteJson" rows="6"></textarea>
+  <button id="btnParse" class="btn">Parsear</button>
+</div>
 
-  <!-- Panel izquierdo: carga y mapeo -->
-  <div class="card">
-    <label>1) Cargar archivo JSON
-      <input id="fileInput" type="file" accept=".json" />
-    </label>
+<div id="mappingArea" class="card" style="display:none">
+  <h3>Mapeo automático de campos</h3>
+  <label>Fecha</label><select id="mapDate"></select>
+  <label>Mercado</label><select id="mapMarket"></select>
+  <label>Selección</label><select id="mapSelection"></select>
+  <label>Cuota</label><select id="mapOdds"></select>
+  <label>Stake</label><select id="mapStake"></select>
+  <label>Resultado/Profit</label><select id="mapProfit"></select>
+  <button id="btnRun" class="btn">Ejecutar Backtest</button>
+</div>
 
-    <label>2) O pegar JSON (array de objetos)</label>
-    <textarea id="pasteJson" placeholder='Pega aquí tu JSON. Ej: [{"date":"2025-08-18","market":"1x2","selection":"Team A","odds":2.1,"stake":1,"result":"W","profit":1.1}, ...]'></textarea>
-
-    <div style="display:flex;gap:8px;margin-top:8px">
-      <button id="btnParse" class="btn">Parsear JSON</button>
-      <button id="btnLoadSample" class="btn ghost">Descargar ejemplo</button>
-      <button id="btnClear" class="btn ghost">Limpiar</button>
-    </div>
-
-    <hr style="border:none;height:10px">
-
-    <div id="mappingArea" style="display:none">
-      <label>3) Mapea las claves del JSON (el primer registro se usa para detectar)</label>
-      <div id="detectedKeys" style="margin-bottom:8px;color:var(--muted);font-size:13px"></div>
-      <div class="map-grid">
-        <div>
-          <label>Campo Fecha</label>
-          <select id="mapDate"></select>
-        </div>
-        <div>
-          <label>Campo Mercado</label>
-          <select id="mapMarket"></select>
-        </div>
-        <div>
-          <label>Campo Selección</label>
-          <select id="mapSelection"></select>
-        </div>
-        <div>
-          <label>Campo Cuota (odds)</label>
-          <select id="mapOdds"></select>
-        </div>
-        <div>
-          <label>Campo Stake</label>
-          <select id="mapStake"></select>
-        </div>
-        <div>
-          <label>Campo Resultado / Profit</label>
-          <select id="mapProfit"></select>
-        </div>
-      </div>
-
-      <div style="margin-top:8px">
-        <label>Formato de fecha (si necesario)</label>
-        <input id="dateFormat" placeholder="ISO 8601 recomendado, ej: 2025-08-18T20:00:00Z" />
-      </div>
-
-      <div style="display:flex;gap:8px;margin-top:10px">
-        <button id="btnRun" class="btn">Ejecutar Backtest</button>
-        <button id="btnPreview" class="btn ghost">Vista previa (10 registros)</button>
-      </div>
-    </div>
-
-    <hr style="border:none;height:10px">
-
-    <div>
-      <label>Filtros rápidos</label>
-      <div class="row" style="margin-bottom:8px">
-        <input id="filterMarket" type="text" placeholder="Filtrar por mercado (texto)" />
-        <input id="filterSelection" type="text" placeholder="Filtrar por selección" />
-      </div>
-      <div class="row">
-        <label style="width:100%"><input id="onlyPositive" type="checkbox" /> Mostrar solo apuestas con profit positivo</label>
-      </div>
-    </div>
-
-  </div>
-
-  <!-- Panel derecho: resultados, métricas, gráficos -->
-  <div class="card">
-    <div style="display:flex;gap:10px;align-items:flex-start;">
-      <div style="flex:1">
-        <div class="results-grid" id="metrics">
-          <!-- metrics injected -->
-        </div>
-
-        <div style="margin-top:12px;display:flex;gap:8px;align-items:center">
-          <div class="controls">
-            <label class="small">Agrupar por</label>
-            <select id="groupBy">
-              <option value="selection">Selección</option>
-              <option value="market">Market</option>
-            </select>
-            <button id="btnGroup" class="btn ghost">Ver ranking</button>
-          </div>
-        </div>
-
-        <div style="margin-top:12px">
-          <label>Exportar</label>
-          <div style="display:flex;gap:8px">
-            <button id="btnExportCSV" class="btn ghost">Exportar CSV (resultados)</button>
-            <button id="btnExportFiltered" class="btn">Exportar CSV (filtrado)</button>
-          </div>
-        </div>
-      </div>
-
-      <div style="width:380px">
-        <div style="margin-bottom:8px"><label>Curva de equity</label></div>
-        <div class="chart-wrap card" style="padding:10px">
-          <canvas id="equityChart" height="160"></canvas>
-        </div>
-
-        <div style="margin-top:12px"><label>Histograma ganancias por apuesta</label></div>
-        <div class="chart-wrap card" style="padding:10px;margin-top:6px">
-          <canvas id="histChart" height="120"></canvas>
-        </div>
-      </div>
-    </div>
-
-    <hr style="border:none;height:10px;margin-top:12px">
-
-    <div>
-      <label>Tabla de apuestas (ordenable por columnas)</label>
-      <div class="list-scroll card" style="padding:0;margin-top:8px">
-        <table id="tableBets">
-          <thead><tr id="theadRow"></tr></thead>
-          <tbody id="tbodyBets"></tbody>
-        </table>
-      </div>
-    </div>
-
-    <div id="groupResult" style="margin-top:12px"></div>
-
-    <footer>
-      Hecho para backtesting rápido · Mapea correctamente tus campos para obtener resultados fiables.
-    </footer>
-  </div>
-
+<div id="results" class="card" style="display:none">
+  <h3>Métricas</h3>
+  <div id="metrics"></div>
+  <h3>Tabla</h3>
+  <table>
+    <thead><tr><th>#</th><th>Fecha</th><th>Selección</th><th>Cuota</th><th>Stake</th><th>Profit</th></tr></thead>
+    <tbody id="tbodyBets"></tbody>
+  </table>
 </div>
 
 <script>
-/* --------------------------
-  Utilidades y estado
----------------------------*/
-let rawData = null;
-let parsed = [];
-let mappedKeys = {};
-let charts = {equity:null, hist:null};
+let rawData=[], parsed=[];
 
-function show(el, yes=true){ el.style.display = yes ? '' : 'none'; }
-function q(id){ return document.getElementById(id); }
+function q(id){return document.getElementById(id);}
+function safeNumber(v){let n=Number(v);return isFinite(n)?n:0;}
 
 function detectKeys(sample){
-  if(!sample || typeof sample !== 'object') return [];
-  return Object.keys(sample);
+  return Object.keys(sample).map(k=>k.trim());
 }
 
-function safeNumber(v){ let n = Number(v); return isFinite(n) ? n : 0; }
-
-function parseJSONText(txt){
-  try{
-    let data = JSON.parse(txt);
-    // if object and not array, try wrap
-    if(!Array.isArray(data) && typeof data === 'object'){
-      return [data];
-    }
-    if(Array.isArray(data)) return data;
-    // if newline-delimited JSON?
-    let lines = txt.trim().split(/[\r\n]+/).map(l=>l.trim()).filter(Boolean);
-    if(lines.length){
-      return lines.map(l=>JSON.parse(l));
-    }
-    return [];
-  }catch(err){
-    throw err;
-  }
-}
-
-/* --------------------------
-  File handling & sample
----------------------------*/
-q('fileInput').addEventListener('change', e=>{
-  const f = e.target.files[0];
-  if(!f) return;
-  const reader = new FileReader();
-  reader.onload = ev=>{
-    q('pasteJson').value = ev.target.result;
-    q('btnParse').click();
+function suggestMapping(keys){
+  const norm = k => k.trim().toLowerCase();
+  return {
+    date: keys.find(k=>norm(k)==="date"),
+    market: keys.find(k=>norm(k)==="league"||norm(k)==="name"),
+    selection: keys.find(k=>norm(k)==="desired outcome"||norm(k)==="name"),
+    odds: keys.find(k=>norm(k)==="odd"),
+    stake: keys.find(k=>norm(k)==="stake"),
+    profit: keys.find(k=>norm(k)==="result")
   };
-  reader.readAsText(f);
-});
+}
 
-q('btnLoadSample').addEventListener('click', ()=>{
-  const sample = [
-    {"date":"2025-08-18T20:00:00Z","market":"1x2","selection":"Team A","odds":2.10,"stake":1,"result":"W","profit":1.10},
-    {"date":"2025-08-18T20:00:00Z","market":"1x2","selection":"Team B","odds":3.50,"stake":1,"result":"L","profit":-1.00},
-    {"date":"2025-08-19T17:00:00Z","market":"Over/Under","selection":"Over 2.5","odds":1.85,"stake":1.5,"result":"W","profit":1.2775},
-    {"date":"2025-08-19T19:00:00Z","market":"BTTS","selection":"Yes","odds":1.95,"stake":1,"result":"L","profit":-1.00}
-  ];
-  const blob = new Blob([JSON.stringify(sample, null, 2)], {type: 'application/json'});
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a'); a.href = url; a.download = 'ejemplo_backtest.json'; a.click();
-  URL.revokeObjectURL(url);
-});
-
-/* --------------------------
-  Parse & Mapping UI
----------------------------*/
-q('btnParse').addEventListener('click', ()=>{
-  const txt = q('pasteJson').value.trim();
-  if(!txt){ alert('Pega un JSON o carga un archivo .json'); return; }
-  try{
-    rawData = parseJSONText(txt);
-    if(!rawData.length){ alert('No se detectaron registros en el JSON'); return; }
-    const keys = detectKeys(rawData[0]);
-    // fill selects
-    ['mapDate','mapMarket','mapSelection','mapOdds','mapStake','mapProfit'].forEach(id=>{
-      const sel = q(id);
-      sel.innerHTML = '';
-      keys.forEach(k=>{
-        const opt = document.createElement('option'); opt.value = k; opt.textContent = k;
-        sel.appendChild(opt);
-      });
-    });
-    q('detectedKeys').textContent = 'Claves detectadas: ' + keys.join(', ');
-    show(q('mappingArea'), true);
-    parsed = rawData.slice(); // copy
-    window.scrollTo({top:0,behavior:'smooth'});
-  }catch(err){
-    alert('Error al parsear JSON: ' + err.message);
-  }
-});
-
-q('btnClear').addEventListener('click', ()=>{
-  q('pasteJson').value = '';
-  rawData = null; parsed = []; mappedKeys = {};
-  show(q('mappingArea'), false);
-  q('metrics').innerHTML = '';
-  q('theadRow').innerHTML = '';
-  q('tbodyBets').innerHTML = '';
-  q('groupResult').innerHTML = '';
-  if(charts.equity) charts.equity.destroy();
-  if(charts.hist) charts.hist.destroy();
-});
-
-/* --------------------------
-  Backtest core
----------------------------*/
 function buildMappedRecords(records){
-  const dateKey = q('mapDate').value;
-  const marketKey = q('mapMarket').value;
-  const selKey = q('mapSelection').value;
-  const oddsKey = q('mapOdds').value;
-  const stakeKey = q('mapStake').value;
-  const profitKey = q('mapProfit').value;
+  const dateKey=q("mapDate").value;
+  const marketKey=q("mapMarket").value;
+  const selKey=q("mapSelection").value;
+  const oddsKey=q("mapOdds").value;
+  const stakeKey=q("mapStake").value;
+  const profitKey=q("mapProfit").value;
 
-  const out = records.map((r, idx)=>{
-    const dateRaw = r[dateKey];
-    const parsedDate = dateRaw ? new Date(dateRaw) : new Date();
-    const odds = safeNumber(r[oddsKey]);
-    const stake = r[stakeKey] !== undefined ? safeNumber(r[stakeKey]) : 1;
-    let profit;
-    if(profitKey && r[profitKey] !== undefined){
-      profit = safeNumber(r[profitKey]);
-    } else {
-      // try infer from result field like 'W' or 'L' or boolean
-      const res = (r.result || r.Result || r.RESULT || r.status);
-      if(res !== undefined){
-        const isWin = typeof res === 'string' ? /w|win|won|1|true/i.test(res) : Boolean(res);
-        profit = isWin ? (odds - 1) * stake : -stake;
-      } else {
-        profit = 0;
-      }
+  return records.map((r,i)=>{
+    const date=new Date(r[dateKey]);
+    const odds=safeNumber(r[oddsKey]);
+    const stake=stakeKey && r[stakeKey]!==undefined ? safeNumber(r[stakeKey]) : 1;
+    let profit=0;
+    if(profitKey){
+      const val=(r[profitKey]||"").toString().toLowerCase().trim();
+      if(val.includes("win")) profit=(odds-1)*stake;
+      else if(val.includes("lose")) profit=-stake;
+      else profit=0;
     }
-    return {
-      __idx: idx,
-      date: parsedDate,
-      market: r[marketKey] !== undefined ? String(r[marketKey]) : '',
-      selection: r[selKey] !== undefined ? String(r[selKey]) : '',
-      odds, stake, profit,
-      raw: r
-    };
+    return {i,date,market:r[marketKey],selection:r[selKey],odds,stake,profit};
   });
-
-  // sort by date asc
-  out.sort((a,b)=>a.date - b.date);
-  return out;
 }
 
 function computeMetrics(recs){
-  const totalBets = recs.length;
-  const totalStake = recs.reduce((s,r)=>s + safeNumber(r.stake),0);
-  const totalReturn = recs.reduce((s,r)=>s + (safeNumber(r.profit) + 0),0) + 0; // profit sum (can be negative)
-  const netProfit = totalReturn;
-  const roi = totalStake ? (netProfit / totalStake) * 100 : 0;
-  const wins = recs.filter(r=> r.profit > 0).length;
-  const winrate = totalBets ? (wins / totalBets) * 100 : 0;
-  const avgOdds = totalBets ? (recs.reduce((s,r)=>s + safeNumber(r.odds),0) / totalBets) : 0;
-  const evPerBet = totalBets ? (recs.reduce((s,r)=> s + (safeNumber(r.profit) / Math.max(1, safeNumber(r.stake))) ,0) / totalBets) : 0;
-
-  // equity curve points
-  let cum = 0;
-  const equity = recs.map((r,i)=> {
-    cum += safeNumber(r.profit);
-    return {x: r.date, y: cum};
-  });
-
-  return {totalBets,totalStake,totalReturn,netProfit,roi,winrate,avgOdds,evPerBet,equity};
+  const total=recs.length;
+  const stake=recs.reduce((a,b)=>a+b.stake,0);
+  const profit=recs.reduce((a,b)=>a+b.profit,0);
+  const roi=stake? (profit/stake*100):0;
+  return {total,stake,profit,roi};
 }
 
-/* --------------------------
-  Render: metrics, table, charts
----------------------------*/
-function renderMetrics(metrics){
-  const container = q('metrics');
-  container.innerHTML = '';
-  const cards = [
-    {k:'totalBets',t:'Apuestas',fmt: v => v},
-    {k:'totalStake',t:'Stake total',fmt: v => v.toFixed(2)},
-    {k:'netProfit',t:'Beneficio neto',fmt: v => v.toFixed(2)},
-    {k:'roi',t:'ROI (%)',fmt: v => v.toFixed(2) + '%'},
-    {k:'winrate',t:'Win rate',fmt: v => v.toFixed(2) + '%'},
-    {k:'avgOdds',t:'Cuota media',fmt: v => v.toFixed(2)},
-    {k:'evPerBet',t:'EV por apuesta (u)',fmt: v => v.toFixed(3)}
-  ];
-  cards.forEach(c=>{
-    const el = document.createElement('div'); el.className='metric';
-    el.innerHTML = `<div style="font-size:12px;color:var(--muted)">${c.t}</div><div style="font-size:18px;font-weight:700">${c.fmt(metrics[c.k])}</div>`;
-    container.appendChild(el);
-  });
+function renderMetrics(m){
+  q("metrics").innerHTML=`
+    Apuestas: ${m.total}<br>
+    Stake total: ${m.stake.toFixed(2)}<br>
+    Beneficio neto: ${m.profit.toFixed(2)}<br>
+    ROI: ${m.roi.toFixed(2)}%
+  `;
 }
 
 function renderTable(recs){
-  const thead = q('theadRow'); const tbody = q('tbodyBets');
-  thead.innerHTML = '';
-  tbody.innerHTML = '';
-  const cols = ['#','date','market','selection','odds','stake','profit'];
-  cols.forEach(c=>{
-    const th = document.createElement('th'); th.textContent = c.toUpperCase(); thead.appendChild(th);
-  });
-  recs.forEach((r,i)=>{
-    const tr = document.createElement('tr');
-    tr.innerHTML = `
-      <td>${i+1}</td>
-      <td>${r.date.toISOString().slice(0,19).replace('T',' ')}</td>
-      <td>${escapeHtml(r.market)}</td>
-      <td>${escapeHtml(r.selection)}</td>
-      <td>${r.odds}</td>
-      <td>${r.stake}</td>
-      <td style="font-weight:700;color:${r.profit>=0? '#8ee99b' : '#ff8b8b'}">${r.profit.toFixed(2)}</td>
-    `;
-    tbody.appendChild(tr);
+  q("tbodyBets").innerHTML="";
+  recs.forEach((r,idx)=>{
+    q("tbodyBets").innerHTML+=`
+      <tr>
+        <td>${idx+1}</td>
+        <td>${r.date.toLocaleString()}</td>
+        <td>${r.selection}</td>
+        <td>${r.odds}</td>
+        <td>${r.stake}</td>
+        <td style="color:${r.profit>=0?"lightgreen":"salmon"}">${r.profit.toFixed(2)}</td>
+      </tr>`;
   });
 }
 
-function escapeHtml(s){ return String(s||'').replace(/[&<>"]/g, c=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c])); }
+q("fileInput").addEventListener("change",e=>{
+  const f=e.target.files[0];if(!f)return;
+  const reader=new FileReader();
+  reader.onload=ev=>{q("pasteJson").value=ev.target.result;q("btnParse").click();};
+  reader.readAsText(f);
+});
 
-/* --------------------------
-  Charts
----------------------------*/
-function drawEquity(equityPoints){
-  const ctx = q('equityChart').getContext('2d');
-  if(charts.equity) charts.equity.destroy();
-  charts.equity = new Chart(ctx, {
-    type: 'line',
-    data: { datasets: [{
-      label:'Equity',
-      data: equityPoints.map(p=>({x:p.x, y:p.y})),
-      fill:false,
-      tension:0.2,
-      pointRadius:2
-    }]},
-    options: {
-      parsing:false,
-      scales:{ x:{type:'time', time:{unit:'day'}}, y:{beginAtZero:false} },
-      plugins:{legend:{display:false}}
-    }
-  });
-}
+q("btnParse").addEventListener("click",()=>{
+  try{
+    rawData=JSON.parse(q("pasteJson").value);
+    if(!Array.isArray(rawData)) rawData=[rawData];
+    const keys=detectKeys(rawData[0]);
+    ["mapDate","mapMarket","mapSelection","mapOdds","mapStake","mapProfit"].forEach(id=>{
+      q(id).innerHTML=keys.map(k=>`<option>${k}</option>`).join("");
+    });
+    const s=suggestMapping(keys);
+    if(s.date) q("mapDate").value=s.date;
+    if(s.market) q("mapMarket").value=s.market;
+    if(s.selection) q("mapSelection").value=s.selection;
+    if(s.odds) q("mapOdds").value=s.odds;
+    if(s.stake) q("mapStake").value=s.stake;
+    if(s.profit) q("mapProfit").value=s.profit;
+    q("mappingArea").style.display="";
+  }catch(err){alert("Error: "+err.message);}
+});
 
-function drawHist(profits){
-  const ctx = q('histChart').getContext('2d');
-  if(charts.hist) charts.hist.destroy();
-  // build bins
-  const values = profits.slice().sort((a,b)=>a-b);
-  const min = values[0]||0, max = values[values.length-1]||0;
-  const bins = 12;
-  const step = (max - min) / bins || 1;
-  const labels = [];
-  const counts = new Array(bins).fill(0);
-  for(let i=0;i<bins;i++){
-    labels.push((min + i*step).toFixed(2));
-  }
-  values.forEach(v=>{
-    const idx = Math.min(bins-1, Math.max(0, Math.floor((v - min)/step)));
-    counts[idx]++;
-  });
-
-  charts.hist = new Chart(ctx, {
-    type:'bar',
-    data:{ labels, datasets:[{label:'N', data:counts}] },
-    options:{ plugins:{legend:{display:false}}}
-  });
-}
-
-/* --------------------------
-  Grouping & export
----------------------------*/
-function groupByField(recs, field){
-  const map = {};
-  recs.forEach(r=>{
-    const key = r[field] || '(empty)';
-    if(!map[key]) map[key] = {count:0, stake:0, profit:0, avgOddsSum:0};
-    map[key].count++;
-    map[key].stake += safeNumber(r.stake);
-    map[key].profit += safeNumber(r.profit);
-    map[key].avgOddsSum += safeNumber(r.odds);
-  });
-  const arr = Object.keys(map).map(k=>({
-    key:k,
-    count:map[k].count,
-    stake:map[k].stake,
-    profit:map[k].profit,
-    avgOdds: map[k].avgOddsSum / map[k].count
-  })).sort((a,b)=>b.profit - a.profit);
-  return arr;
-}
-
-function downloadCSV(rows, filename='export.csv'){
-  if(!rows.length) { alert('Nada para exportar'); return; }
-  const keys = Object.keys(rows[0]);
-  const csv = [keys.join(',')].concat(rows.map(r=> keys.map(k=>JSON.stringify(r[k]===undefined?'':r[k])).join(','))).join('\n');
-  const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a'); a.href = url; a.download = filename; a.click();
-  URL.revokeObjectURL(url);
-}
-
-/* --------------------------
-  Events: run, preview, export
----------------------------*/
-q('btnPreview').addEventListener('click', ()=>{
-  if(!parsed.length){ alert('Parsea primero el JSON'); return; }
-  const recs = buildMappedRecords(parsed.slice(0,10));
-  renderTable(recs);
-  const m = computeMetrics(recs);
+q("btnRun").addEventListener("click",()=>{
+  parsed=buildMappedRecords(rawData);
+  const m=computeMetrics(parsed);
   renderMetrics(m);
-  drawEquity(m.equity);
-  drawHist(recs.map(r=>r.profit));
+  renderTable(parsed);
+  q("results").style.display="";
 });
-
-q('btnRun').addEventListener('click', ()=>{
-  if(!parsed.length){ alert('Parsea primero el JSON'); return; }
-  const recs = buildMappedRecords(parsed);
-  // apply quick filters
-  const fm = q('filterMarket').value.trim().toLowerCase();
-  const fs = q('filterSelection').value.trim().toLowerCase();
-  const onlyPos = q('onlyPositive').checked;
-  let filtered = recs.filter(r=>{
-    if(fm && !r.market.toLowerCase().includes(fm)) return false;
-    if(fs && !r.selection.toLowerCase().includes(fs)) return false;
-    if(onlyPos && r.profit <= 0) return false;
-    return true;
-  });
-
-  // compute
-  const m = computeMetrics(filtered);
-  renderMetrics(m);
-  renderTable(filtered);
-  drawEquity(m.equity);
-  drawHist(filtered.map(r=>r.profit));
-  q('groupResult').innerHTML = '';
-  // store mapped for export
-  window._lastRun = filtered;
-});
-
-q('btnGroup').addEventListener('click', ()=>{
-  const field = q('groupBy').value;
-  const data = window._lastRun || buildMappedRecords(parsed);
-  const grouped = groupByField(data, field);
-  const container = q('groupResult');
-  container.innerHTML = '<h3 style="margin:0 0 8px 0">Ranking ('+field+')</h3>';
-  const tbl = document.createElement('table'); tbl.style.width='100%';
-  tbl.innerHTML = '<thead><tr><th>Rank</th><th>Key</th><th>#</th><th>Profit</th><th>Stake</th><th>AvgOdds</th></tr></thead>';
-  const body = document.createElement('tbody');
-  grouped.forEach((g,i)=>{
-    const tr = document.createElement('tr');
-    tr.innerHTML = `<td>${i+1}</td><td>${escapeHtml(g.key)}</td><td>${g.count}</td><td style="font-weight:700;color:${g.profit>=0? '#8ee99b' : '#ff8b8b'}">${g.profit.toFixed(2)}</td><td>${g.stake.toFixed(2)}</td><td>${g.avgOdds.toFixed(2)}</td>`;
-    body.appendChild(tr);
-  });
-  tbl.appendChild(body);
-  container.appendChild(tbl);
-});
-
-q('btnExportCSV').addEventListener('click', ()=>{
-  const rows = (window._lastRun||[]).map(r=>({
-    date: r.date.toISOString(),
-    market: r.market, selection: r.selection,
-    odds: r.odds, stake: r.stake, profit: r.profit
-  }));
-  downloadCSV(rows, 'backtest_results.csv');
-});
-
-q('btnExportFiltered').addEventListener('click', ()=>{
-  // export entire parsed mapped
-  if(!parsed.length){ alert('Parsea primero'); return; }
-  const rows = buildMappedRecords(parsed).map(r=>({
-    date: r.date.toISOString(), market: r.market, selection: r.selection,
-    odds: r.odds, stake: r.stake, profit: r.profit
-  }));
-  downloadCSV(rows,'backtest_all_mapped.csv');
-});
-
-/* --------------------------
-  Init: keyboard shortcuts (optional)
----------------------------*/
-document.addEventListener('keydown', e=>{
-  if(e.ctrlKey && e.key.toLowerCase() === 'r'){ e.preventDefault(); q('btnRun').click(); }
-});
-
 </script>
 </body>
 </html>
