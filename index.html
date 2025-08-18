@@ -3,17 +3,20 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Backtesting JSON Archivos Grandes</title>
+<title>Backtesting JSON Avanzado</title>
 <style>
   body{font-family:sans-serif;background:#0f1724;color:#eee;padding:20px}
   .card{background:#1e293b;padding:14px;border-radius:8px;margin-bottom:16px}
   .btn{padding:6px 12px;background:#06b6d4;border:none;border-radius:6px;font-weight:600;cursor:pointer}
   progress{width:100%;margin-top:8px}
+  table{width:100%;border-collapse:collapse;margin-top:10px}
+  td,th{border:1px solid #444;padding:4px;text-align:left}
+  th{background:#334155}
 </style>
 </head>
 <body>
 
-<h1>Backtesting JSON (Archivos grandes)</h1>
+<h1>Backtesting JSON (Patrones por Liga, Equipo, Cuotas)</h1>
 
 <div class="card">
   <input id="fileInput" type="file" accept=".json" />
@@ -22,35 +25,93 @@
 
 <div id="results" style="display:none">
   <div class="card">
-    <h3>Resumen</h3>
+    <h3>Resumen General</h3>
     <pre id="summary"></pre>
+  </div>
+  <div class="card">
+    <h3>Patrones por Liga</h3>
+    <div id="byLeague"></div>
+  </div>
+  <div class="card">
+    <h3>Patrones por Equipo</h3>
+    <div id="byTeam"></div>
+  </div>
+  <div class="card">
+    <h3>Patrones por Rango de Cuotas</h3>
+    <div id="byOdds"></div>
   </div>
 </div>
 
 <script>
-// ==== Worker en línea (para parsear y calcular en segundo plano) ====
+// ==== Worker en línea ====
 const workerCode = `
+function normalizeKey(obj, key){
+  return obj[key] || obj[key.trim()] || null;
+}
+
+function addStat(map, key, profit){
+  if(!map[key]) map[key] = {count:0,profit:0};
+  map[key].count++;
+  map[key].profit += profit;
+}
+
+function oddsRange(odd){
+  if(odd<1.5) return "1.01 - 1.49";
+  if(odd<2) return "1.50 - 1.99";
+  if(odd<3) return "2.00 - 2.99";
+  return "3.00+";
+}
+
 self.onmessage = function(e){
   try{
     const records = JSON.parse(e.data.jsonText);
     const stake = 1;
     let total=0, profit=0, ganado=0, perdido=0;
+
+    let leagues={}, teams={}, oddsBuckets={};
+
     for(const r of records){
-      let odd = Number(r[" Odd "]||r["Odd"]||0);
-      let res = (r[" Result "]||r["Result"]||"").toLowerCase();
+      let odd = Number(normalizeKey(r," Odd ")||normalizeKey(r,"Odd")||0);
+      let res = (normalizeKey(r," Result ")||normalizeKey(r,"Result")||"").toLowerCase();
+      let league = normalizeKey(r," League ")||normalizeKey(r,"League")||"Desconocida";
+      let match = normalizeKey(r," Match ")||normalizeKey(r,"Match")||"";
+
       let p=0;
       if(res.includes("win")) p=(odd-1)*stake;
       else if(res.includes("lose")) p=-stake;
+
       profit+=p;
       if(p>0) ganado+=p; else if(p<0) perdido+=Math.abs(p);
       total++;
+
+      // Liga
+      addStat(leagues, league, p);
+
+      // Equipos (separamos por " - ")
+      if(match.includes("-")){
+        let [home,away] = match.split("-").map(s=>s.trim());
+        addStat(teams, home, p);
+        addStat(teams, away, p);
+      }
+
+      // Cuotas
+      if(odd>1){
+        let bucket = oddsRange(odd);
+        addStat(oddsBuckets, bucket, p);
+      }
     }
+
     const roi = total? (profit/total*100):0;
-    self.postMessage({ok:true,metrics:{total,profit,ganado,perdido,roi}});
+    self.postMessage({
+      ok:true,
+      metrics:{total,profit,ganado,perdido,roi},
+      leagues,teams,oddsBuckets
+    });
   }catch(err){
     self.postMessage({ok:false,error:err.message});
   }
 };`;
+
 const blob = new Blob([workerCode], { type: "application/javascript" });
 const worker = new Worker(URL.createObjectURL(blob));
 
@@ -58,16 +119,30 @@ worker.onmessage = e=>{
   q("progress").style.display="none";
   if(!e.data.ok){ alert("Error: "+e.data.error); return; }
   const m = e.data.metrics;
+
+  // Resumen general
   q("summary").textContent = 
     "Apuestas: "+m.total+
     "\\n✅ Ganado: "+m.ganado.toFixed(2)+
     "\\n❌ Perdido: "+m.perdido.toFixed(2)+
     "\\nProfit neto: "+m.profit.toFixed(2)+
     "\\nROI: "+m.roi.toFixed(2)+"%";
+
+  // Tablas
+  q("byLeague").innerHTML = makeTable(e.data.leagues,"Liga");
+  q("byTeam").innerHTML = makeTable(e.data.teams,"Equipo");
+  q("byOdds").innerHTML = makeTable(e.data.oddsBuckets,"Rango de Cuota");
+
   q("results").style.display="";
 };
 
 function q(id){return document.getElementById(id);}
+function makeTable(map,label){
+  let rows = Object.entries(map).map(([k,v])=>{
+    return \`<tr><td>\${k}</td><td>\${v.count}</td><td>\${v.profit.toFixed(2)}</td></tr>\`;
+  }).sort((a,b)=>parseFloat(b.match(/-?\\d+\\.\\d+/)) - parseFloat(a.match(/-?\\d+\\.\\d+/))); // ordena por profit
+  return \`<table><tr><th>\${label}</th><th>Apuestas</th><th>Profit</th></tr>\${rows.join("")}</table>\`;
+}
 
 q("fileInput").addEventListener("change",e=>{
   const file = e.target.files[0];
