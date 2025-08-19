@@ -23,6 +23,9 @@
   .small{font-size:13px;color:var(--muted)}
   pre{white-space:pre-wrap;font-size:13px}
   .warning{color:#ffd166}
+  .toggle { cursor: pointer; color:var(--accent); font-weight:700 }
+  .detail-row { background: rgba(255,255,255,0.01); padding:8px; border-radius:6px; margin-top:6px; }
+  .muted-pill { background: rgba(255,255,255,0.02); padding:6px 8px; border-radius:8px; color:var(--muted); font-size:12px }
 </style>
 </head>
 <body>
@@ -59,6 +62,15 @@
 
   <div class="card">
     <h3>Top equipos (ordenado por profit)</h3>
+    <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
+      <div class="small">Ver equipos como:</div>
+      <select id="teamViewSelect" class="muted-pill">
+        <option value="both">Ambos</option>
+        <option value="home">Solo Local</option>
+        <option value="away">Solo Visita</option>
+      </select>
+      <div style="margin-left:auto" class="small">Haz click en un equipo para ver desglose por cuotas</div>
+    </div>
     <div id="byTeam"></div>
   </div>
 
@@ -72,150 +84,250 @@
     <div id="undetermined" class="small"></div>
   </div>
 
-  <!-- NUEVO: Informe de puntos fuertes/débiles -->
-  <div class="card">
-    <h3>Informe de puntos fuertes y débiles</h3>
-    <div id="insights" class="small"></div>
-  </div>
-
   <div class="card">
     <button id="btnExportCSV" class="btn">Exportar resultados (CSV)</button>
   </div>
 </div>
 
 <script>
-/* =========== Worker code (string) =========== */
+/* =========== Worker code (string) =========== 
+   No dependencias externas. Heurísticas para decidir ganado/perdido.
+*/
 const workerCode = `
-
+/* helpers */
 function normalizeKey(k){ return k ? k.toString().trim().toLowerCase().replace(/\\s+/g,' ') : ''; }
 function tryNum(v){
   if(v===null||v===undefined) return NaN;
-  if(typeof v==='number') return v;
-  let s=String(v).trim().replace(/['"]/g,'').replace(/,/g,'.');
-  const m=s.match(/-?\\d+(\\.\\d+)?/);
+  if(typeof v === 'number') return v;
+  let s = String(v).trim().replace(/['"]/g,'').replace(/,/g,'.');
+  const m = s.match(/-?\\d+(\\.\\d+)?/);
   if(m) return Number(m[0]);
   return NaN;
 }
 function parseScore(s){
   if(!s) return null;
-  const m=String(s).match(/(\\d+)\\s*[-:\\u2013]\\s*(\\d+)/);
+  const m = String(s).match(/(\\d+)\\s*[-:\\u2013]\\s*(\\d+)/);
   if(m) return {home:parseInt(m[1],10),away:parseInt(m[2],10)};
   return null;
 }
+
+/* decide if desiredOutcome wins given ftScore */
 function evaluateDesired(desired, market, score){
   if(!desired && !market) return null;
-  const d=(desired||'').toString().toLowerCase();
-  const mkt=(market||'').toString().toLowerCase();
+  const d = (desired||'').toString().toLowerCase();
+  const mkt = (market||'').toString().toLowerCase();
 
-  if(/gg|both teams to score|btts|yes/i.test(d)||/btts/.test(mkt)){if(score) return (score.home>0 && score.away>0);return null;}
-  if(/no goal|no|nogoal|both no/i.test(d)||/(no|nogoal)/.test(mkt)){if(score) return !(score.home>0 && score.away>0);return null;}
+  // BTTS / GG
+  if(/gg|both teams to score|both to score|btts|both score|yes/i.test(d) || /btts|both teams to score/i.test(mkt)){
+    if(score) return (score.home>0 && score.away>0);
+    return null;
+  }
+  if(/no goal|no|nogoal|both no/i.test(d) || /(no|nogoal)/.test(mkt) ){
+    if(score) return !(score.home>0 && score.away>0);
+    return null;
+  }
 
-  const overM=d.match(/over\\s*([0-9]+(?:\\.[0-9]+)?)/i)||mkt.match(/over\\s*([0-9]+(?:\\.[0-9]+)?)/i);
-  if(overM && score){return (score.home+score.away)>parseFloat(overM[1]);}
-  const underM=d.match(/under\\s*([0-9]+(?:\\.[0-9]+)?)/i)||mkt.match(/under\\s*([0-9]+(?:\\.[0-9]+)?)/i);
-  if(underM && score){return (score.home+score.away)<=parseFloat(underM[1]);}
+  // OVER / UNDER numeric (ej: Over 2.5)
+  const overM = d.match(/over\\s*([0-9]+(?:\\.[0-9]+)?)/i) || mkt.match(/over\\s*([0-9]+(?:\\.[0-9]+)?)/i);
+  if(overM && score){
+    const thr = parseFloat(overM[1]);
+    return (score.home + score.away) > thr;
+  }
+  const underM = d.match(/under\\s*([0-9]+(?:\\.[0-9]+)?)/i) || mkt.match(/under\\s*([0-9]+(?:\\.[0-9]+)?)/i);
+  if(underM && score){
+    const thr = parseFloat(underM[1]);
+    return (score.home + score.away) <= thr;
+  }
 
-  if(/^\\s*1\\s*$/.test(d)||/(^|\\s)home(\\s|$)/i.test(d)){if(score) return (score.home>score.away);}
-  if(/^\\s*2\\s*$/.test(d)||/(^|\\s)away(\\s|$)/i.test(d)){if(score) return (score.away>score.home);}
-  if(/^\\s*x\\s*$/.test(d)||/^\\s*draw\\s*$/i.test(d)||/(^|\\s)tie(\\s|$)/i.test(d)){if(score) return (score.home===score.away);}
+  // 1X2 detection: '1', 'x', '2' or 'home', 'away'
+  if(/^\\s*1\\s*$/.test(d) || /(^|\\s)home(\\s|$)/i.test(d)){
+    if(score) return (score.home > score.away);
+  }
+  if(/^\\s*2\\s*$/.test(d) || /(^|\\s)away(\\s|$)/i.test(d)){
+    if(score) return (score.away > score.home);
+  }
+  if(/^\\s*x\\s*$/.test(d) || /^\\s*draw\\s*$/i.test(d) || /(^|\\s)tie(\\s|$)/i.test(d)){
+    if(score) return (score.home === score.away);
+  }
 
-  if(/^\\s*\\d+\\s*[-:]\\s*\\d+\\s*$/.test(d)&&score){const m=d.match(/(\\d+)\\s*[-:]\\s*(\\d+)/);return (parseInt(m[1],10)===score.home && parseInt(m[2],10)===score.away);}
+  // exact score e.g. "1-1"
+  if(/^\\s*\\d+\\s*[-:]\\s*\\d+\\s*$/.test(d) && score){
+    const m = d.match(/(\\d+)\\s*[-:]\\s*(\\d+)/);
+    return (parseInt(m[1],10) === score.home && parseInt(m[2],10) === score.away);
+  }
+
   return null;
 }
 
+/* normalize fetching: find key by many variants */
 function getValue(obj, candidates){
-  const map={};
-  for(const k in obj){ map[normalizeKey(k)]=obj[k]; }
-  for(const c of candidates){ const norm=normalizeKey(c); if(map[norm]!==undefined) return map[norm]; }
-  for(const normKey in map){ for(const c of candidates){ const q=normalizeKey(c); if(normKey.includes(q)||q.includes(normKey)) return map[normKey]; } }
+  const map = {};
+  for(const k in obj) map[normalizeKey(k)] = obj[k];
+  for(const c of candidates){
+    const norm = normalizeKey(c);
+    if(map[norm] !== undefined) return map[norm];
+  }
+  for(const normKey in map){
+    for(const c of candidates){
+      const q = normalizeKey(c);
+      if(normKey.includes(q) || q.includes(normKey)) return map[normKey];
+    }
+  }
   return undefined;
 }
+
+/* bucket odds */
 function oddsBucket(o){
   if(isNaN(o)) return 'unknown';
-  if(o<1.5) return '1.01 - 1.49';
-  if(o<2) return '1.50 - 1.99';
-  if(o<3) return '2.00 - 2.99';
-  if(o<5) return '3.00 - 4.99';
+  if(o < 1.5) return '1.01 - 1.49';
+  if(o < 2) return '1.50 - 1.99';
+  if(o < 3) return '2.00 - 2.99';
+  if(o < 5) return '3.00 - 4.99';
   return '5.00+';
 }
 
-self.onmessage=function(e){
+/* ensure team structure */
+function ensureTeamObj(obj, name){
+  if(!obj[name]) obj[name] = {
+    overall:{count:0,profit:0,ganado:0,perdido:0},
+    home:{count:0,profit:0,ganado:0,perdido:0,oddsBuckets:{}},
+    away:{count:0,profit:0,ganado:0,perdido:0,oddsBuckets:{}}
+  };
+}
+
+/* main */
+self.onmessage = function(e){
   try{
-    const text=e.data.text;
-    let records=[];
-    try{ records=JSON.parse(text); if(!Array.isArray(records)) records=[records]; }
-    catch(err){
-      const lines=text.split(/\\r?\\n/).map(s=>s.trim()).filter(Boolean);
-      for(const line of lines){ try{records.push(JSON.parse(line);}catch(errLine){}}}
+    const text = e.data.text;
+    let records = [];
+    try{
+      records = JSON.parse(text);
+      if(!Array.isArray(records)) records = [records];
+    }catch(err){
+      const lines = text.split(/\\r?\\n/).map(s=>s.trim()).filter(Boolean);
+      for(const line of lines){
+        try{ records.push(JSON.parse(line)); }catch(errLine){
+          const maybe = line.replace(/'/g,'\\"');
+          try{ records.push(JSON.parse(maybe)); }catch(e2){ /* skip */ }
+        }
+      }
     }
 
-    const stake=1;
+    const stake = 1;
     let total=0, profit=0, ganado=0, perdido=0;
-    let leagues={}, teams={}, oddsBuckets={}, undetermined=[];
-    let insights={home:{profit:0,count:0},away:{profit:0,count:0},cuotas:{}};
+    let leagues={}, teams={}, oddsBuckets={};
+    let undetermined=[];
 
     for(const r of records){
       total++;
-      const rawOdds=getValue(r,['odd','odds',' odd ','odd prematch']);
-      const rawProfit=getValue(r,['profit','profit ','profit (u)']);
-      const rawResult=getValue(r,['result',' result ','status']);
-      const rawResultFT=getValue(r,['result ft','result_ft','result full']);
-      const rawDesired=getValue(r,['desired outcome','desired',' name ','name','selection','bet','market selection']);
-      const rawLeague=getValue(r,['league',' competition ','league ']);
-      const rawMatch=getValue(r,['match',' match ','game','fixture']);
+      const rawOdds = getValue(r, ['odd','odds',' odd ','odd prematch','odd 1 prematch','odd 1 preMatch ']);
+      const rawProfit = getValue(r, ['profit','profit ','profit (u)','profit_usd','profit_usd ']);
+      const rawResult = getValue(r, ['result',' result ','status']);
+      const rawResultFT = getValue(r, ['result ft','result_ft','result ft ','result full time','result full']);
+      const rawDesired = getValue(r, ['desired outcome','desired',' name ','name','selection','bet','market selection']);
+      const rawLeague = getValue(r, ['league',' competition ','league ']);
+      const rawMatch = getValue(r, ['match',' match ','game','fixture']);
 
-      const odds=tryNum(rawOdds);
-      let p=tryNum(rawProfit);
+      const odds = tryNum(rawOdds);
+      let p = NaN;
+      const pf = tryNum(rawProfit);
+      if(!isNaN(pf)){ p = pf; }
+      const rstr = rawResult ? String(rawResult).toLowerCase() : '';
       if(isNaN(p)){
-        const rstr=rawResult?String(rawResult).toLowerCase():'';
-        if(rstr.match(/win|won|winning/)) p=(odds>0?odds-1:0)*stake;
-        else if(rstr.match(/lose|lost|losing/)) p=-stake;
+        if(rstr.match(/win|won|winning/)) p = (odds>0 ? (odds-1)*stake : 0);
+        else if(rstr.match(/lose|lost|losing/)) p = -stake;
       }
+
+      let score = parseScore(rawResultFT);
       if(isNaN(p)){
-        let score=parseScore(rawResultFT)||parseScore(rawResult);
-        const outcome=evaluateDesired(rawDesired,getValue(r,['market','market name','market ']),score);
-        if(outcome===true) p=(odds>0?odds-1:0)*stake;
-        else if(outcome===false) p=-stake;
+        if(!score) score = parseScore(rawResult);
+        const outcome = evaluateDesired(rawDesired, getValue(r,['market','market name','market ']), score);
+        if(outcome === true) p = (odds>0 ? (odds-1)*stake : 0);
+        else if(outcome === false) p = -stake;
+        else p = NaN;
       }
-      if(isNaN(p)){ undetermined.push({sample:r}); continue; }
 
-      profit+=p;
-      if(p>0) ganado+=p; else perdido+=Math.abs(p);
+      if(isNaN(p)){
+        undetermined.push({sample:r});
+        continue;
+      }
 
-      const leagueKey=rawLeague?String(rawLeague):'Desconocida';
-      if(!leagues[leagueKey]) leagues[leagueKey]={count:0,profit:0,ganado:0,perdido:0};
-      leagues[leagueKey].count++; leagues[leagueKey].profit+=p; if(p>0) leagues[leagueKey].ganado+=p; else leagues[leagueKey].perdido+=Math.abs(p);
+      profit += p;
+      if(p>0) ganado += p; else perdido += Math.abs(p);
 
-      const matchStr=rawMatch?String(rawMatch):'';
+      // league
+      const leagueKey = rawLeague ? String(rawLeague).toString() : 'Desconocida';
+      if(!leagues[leagueKey]) leagues[leagueKey] = {count:0,profit:0,ganado:0,perdido:0};
+      leagues[leagueKey].count++;
+      leagues[leagueKey].profit += p;
+      if(p>0) leagues[leagueKey].ganado += p; else leagues[leagueKey].perdido += Math.abs(p);
+
+      // teams: try parse match into home/away with heuristics
+      const matchStr = rawMatch ? String(rawMatch) : '';
       let home='', away='';
-      const sep=matchStr.includes('-')?'-':(matchStr.toLowerCase().includes(' vs ')?' vs ':(matchStr.includes('@')?'@':(matchStr.includes(' v ')?' v ':null)));
-      if(sep){ const parts=matchStr.split(sep).map(s=>s.trim()).filter(Boolean); if(parts.length>=2){home=parts[0];away=parts[1];} }
+      if(matchStr){
+        if(matchStr.includes('@')){
+          const parts = matchStr.split('@').map(s=>s.trim()).filter(Boolean);
+          if(parts.length >= 2){ away = parts[0]; home = parts[1]; }
+        } else if(/\\s+at\\s+/i.test(matchStr)){
+          const parts = matchStr.split(/\\s+at\\s+/i).map(s=>s.trim()).filter(Boolean);
+          if(parts.length >= 2){ away = parts[0]; home = parts[1]; }
+        } else {
+          const sepCandidates = [' vs ',' v ',' - ',' — ','–','-'];
+          let used = null;
+          for(const s of sepCandidates){
+            if(matchStr.toLowerCase().includes(s.trim())){
+              used = s; break;
+            }
+          }
+          if(used){
+            const parts = matchStr.split(used).map(s=>s.trim()).filter(Boolean);
+            if(parts.length >= 2){ home = parts[0]; away = parts[1]; }
+          } else {
+            // try common "TeamA vs TeamB" without spaces
+            const parts = matchStr.split(/vs|VS|Vs/).map(s=>s.trim()).filter(Boolean);
+            if(parts.length >= 2){ home = parts[0]; away = parts[1]; }
+          }
+        }
+      }
 
-      if(home){ if(!teams[home]) teams[home]={count:0,profit:0,ganado:0,perdido:0}; teams[home].count++; teams[home].profit+=p; if(p>0) teams[home].ganado+=p; else teams[home].perdido+=Math.abs(p); insights.home.profit+=p; insights.home.count++; }
-      if(away){ if(!teams[away]) teams[away]={count:0,profit:0,ganado:0,perdido:0}; teams[away].count++; teams[away].profit+=p; if(p>0) teams[away].ganado+=p; else teams[away].perdido+=Math.abs(p); insights.away.profit+=p; insights.away.count++; }
+      // update team structures
+      if(home){
+        ensureTeamObj(teams, home);
+        teams[home].overall.count++; teams[home].overall.profit += p; if(p>0) teams[home].overall.ganado += p; else teams[home].overall.perdido += Math.abs(p);
+        teams[home].home.count++; teams[home].home.profit += p; if(p>0) teams[home].home.ganado += p; else teams[home].home.perdido += Math.abs(p);
+        const bucket = oddsBucket(odds);
+        if(!teams[home].home.oddsBuckets[bucket]) teams[home].home.oddsBuckets[bucket] = {count:0,profit:0,ganado:0,perdido:0};
+        teams[home].home.oddsBuckets[bucket].count++; teams[home].home.oddsBuckets[bucket].profit += p; if(p>0) teams[home].home.oddsBuckets[bucket].ganado += p; else teams[home].home.oddsBuckets[bucket].perdido += Math.abs(p);
+      }
 
-      const bucket=oddsBucket(odds);
-      if(!oddsBuckets[bucket]) oddsBuckets[bucket]={count:0,profit:0,ganado:0,perdido:0};
-      oddsBuckets[bucket].count++; oddsBuckets[bucket].profit+=p; if(p>0) oddsBuckets[bucket].ganado+=p; else oddsBuckets[bucket].perdido+=Math.abs(p);
-      // insights por cuotas
-      if(!insights.cuotas[bucket]) insights.cuotas[bucket]={profit:0,count:0};
-      insights.cuotas[bucket].profit+=p; insights.cuotas[bucket].count++;
-    }
+      if(away){
+        ensureTeamObj(teams, away);
+        teams[away].overall.count++; teams[away].overall.profit += p; if(p>0) teams[away].overall.ganado += p; else teams[away].overall.perdido += Math.abs(p);
+        teams[away].away.count++; teams[away].away.profit += p; if(p>0) teams[away].away.ganado += p; else teams[away].away.perdido += Math.abs(p);
+        const bucket = oddsBucket(odds);
+        if(!teams[away].away.oddsBuckets[bucket]) teams[away].away.oddsBuckets[bucket] = {count:0,profit:0,ganado:0,perdido:0};
+        teams[away].away.oddsBuckets[bucket].count++; teams[away].away.oddsBuckets[bucket].profit += p; if(p>0) teams[away].away.oddsBuckets[bucket].ganado += p; else teams[away].away.oddsBuckets[bucket].perdido += Math.abs(p);
+      }
 
-    const roi=total?(profit/total*100):0;
+      // if neither parsed, still try to tag overall by matchStr as team name (best-effort)
+      if(!home && !away && matchStr){
+        ensureTeamObj(teams, matchStr);
+        teams[matchStr].overall.count++; teams[matchStr].overall.profit += p; if(p>0) teams[matchStr].overall.ganado += p; else teams[matchStr].overall.perdido += Math.abs(p);
+        const bucket = oddsBucket(odds);
+        if(!teams[matchStr].overall.oddsBuckets) teams[matchStr].overall.oddsBuckets = {};
+        if(!teams[matchStr].overall.oddsBuckets[bucket]) teams[matchStr].overall.oddsBuckets[bucket] = {count:0,profit:0,ganado:0,perdido:0};
+        teams[matchStr].overall.oddsBuckets[bucket].count++; teams[matchStr].overall.oddsBuckets[bucket].profit += p;
+      }
 
-    // ANALISIS PUNTOS FUERTES/DÉBILES
-    let report=[];
-    if(insights.home.count>0) report.push('🏠 Local promedio profit: '+(insights.home.profit/insights.home.count).toFixed(2));
-    if(insights.away.count>0) report.push('🛫 Visitante promedio profit: '+(insights.away.profit/insights.away.count).toFixed(2));
-    const cuotasArr=Object.entries(insights.cuotas).map(([k,v])=>({bucket:k,profit:v.profit,avg:v.profit/v.count}));
-    if(cuotasArr.length>0){
-      cuotasArr.sort((a,b)=>b.avg-a.avg);
-      report.push('💰 Cuotas más rentables: '+cuotasArr[0].bucket+' (avg profit: '+cuotasArr[0].avg.toFixed(2)+')');
-      report.push('⚠️ Cuotas menos rentables: '+cuotasArr[cuotasArr.length-1].bucket+' (avg profit: '+cuotasArr[cuotasArr.length-1].avg.toFixed(2)+')');
-    }
+      // odds buckets global
+      const gb = oddsBucket(odds);
+      if(!oddsBuckets[gb]) oddsBuckets[gb] = {count:0,profit:0,ganado:0,perdido:0};
+      oddsBuckets[gb].count++; oddsBuckets[gb].profit += p; if(p>0) oddsBuckets[gb].ganado += p; else oddsBuckets[gb].perdido += Math.abs(p);
+    } // end loop
 
-    self.postMessage({ok:true, metrics:{total,profit,ganado,perdido,roi,undetermined:undetermined.length}, leagues, teams, oddsBuckets, undetermined:undetermined.slice(0,20), insightsReport:report});
+    const roi = total ? (profit / total * 100) : 0;
+    self.postMessage({ok:true, metrics:{total,profit,ganado,perdido,roi,undetermined:undetermined.length}, leagues, teams, oddsBuckets, undetermined:undetermined.slice(0,20)});
   }catch(err){
     self.postMessage({ok:false,error:err.message});
   }
@@ -231,8 +343,10 @@ const status = document.getElementById('status');
 worker.onmessage = e => {
   progress.style.display = 'none';
   status.textContent = '';
-  if(!e.data.ok){ alert('Error en worker: ' + e.data.error); return; }
-
+  if(!e.data.ok){
+    alert('Error en worker: ' + e.data.error);
+    return;
+  }
   const m = e.data.metrics;
   document.getElementById('metrics').innerHTML = `
     <div>Apuestas procesadas: <strong>${m.total}</strong></div>
@@ -244,70 +358,191 @@ worker.onmessage = e => {
   `;
 
   renderGroupTable(e.data.leagues, 'byLeague', 'Liga');
-  renderGroupTable(e.data.teams, 'byTeam', 'Equipo');
-  renderGroupTable(e.data.oddsBuckets, 'byOdds', 'Rango cuota');
+  renderOddsTable(e.data.oddsBuckets, 'byOdds', 'Rango cuota');
+  renderTeamDetailed(e.data.teams, 'byTeam');
 
   const und = e.data.undetermined || [];
   const undDiv = document.getElementById('undetermined');
   if(und.length === 0) undDiv.innerHTML = '<div class="small">Ninguno — todos los registros fueron decididos.</div>';
   else {
-    let html = '<div class="small">Mostrando hasta 20 registros no decididos:</div><pre>';
-    und.forEach((u)=>{ html += JSON.stringify(u.sample, null, 2) + '\\n---\\n'; });
+    let html = '<div class="small">Mostrando hasta 20 registros no decididos (revisa claves, formatos de Score o Desired Outcome):</div><pre>';
+    und.forEach((u,i)=>{
+      try{ html += JSON.stringify(u.sample, null, 2) + '\\n---\\n'; }catch(err){ html += String(u.sample) + '\\n---\\n'; }
+    });
     html += '</pre>';
     undDiv.innerHTML = html;
   }
-
-  // NUEVO: mostrar insights
-  const insightsDiv = document.getElementById('insights');
-  if(e.data.insightsReport && e.data.insightsReport.length>0){
-    insightsDiv.innerHTML = '<ul>'+e.data.insightsReport.map(r=>'<li>'+r+'</li>').join('')+'</ul>';
-  } else { insightsDiv.innerHTML = '<div class="small">No se detectaron patrones claros.</div>'; }
 
   document.getElementById('output').style.display = '';
   window._lastWorkerResult = e.data;
 };
 
 function renderGroupTable(mapObj, containerId, label){
-  const arr=Object.keys(mapObj).map(k=>({key:k,count:mapObj[k].count,profit: mapObj[k].profit||0,ganado:mapObj[k].ganado||0,perdido:mapObj[k].perdido||0})).sort((a,b)=>b.profit-a.profit);
-  if(arr.length===0){ document.getElementById(containerId).innerHTML='<div class="small">Sin datos</div>'; return; }
-  let html='<table><thead><tr><th>'+label+'</th><th>#</th><th>Profit</th><th>Ganado</th><th>Perdido</th></tr></thead><tbody>';
-  arr.forEach(r=>{ html+='<tr><td>'+r.key+'</td><td>'+r.count+'</td><td>'+r.profit.toFixed(2)+'</td><td>'+r.ganado.toFixed(2)+'</td><td>'+r.perdido.toFixed(2)+'</td></tr>'; });
-  html+='</tbody></table>';
-  document.getElementById(containerId).innerHTML=html;
+  const arr = Object.keys(mapObj).map(k=>({
+    key:k, count: mapObj[k].count, profit: mapObj[k].profit || 0, ganado: mapObj[k].ganado||0, perdido: mapObj[k].perdido||0
+  })).sort((a,b)=>b.profit - a.profit);
+  if(arr.length === 0){ document.getElementById(containerId).innerHTML = '<div class="small">Sin datos</div>'; return; }
+  let html = '<table><thead><tr><th>'+label+'</th><th>Apuestas</th><th>Ganado</th><th>Perdido</th><th>Profit</th></tr></thead><tbody>';
+  arr.forEach(r=>{
+    html += '<tr><td>'+escapeHtml(r.key)+'</td><td>'+r.count+'</td><td class="green">'+r.ganado.toFixed(2)+'</td><td class="red">'+r.perdido.toFixed(2)+'</td><td style="font-weight:700;color:'+(r.profit>=0? '#8ee99b':'#ff8b8b')+'">'+r.profit.toFixed(2)+'</td></tr>';
+  });
+  html += '</tbody></table>';
+  document.getElementById(containerId).innerHTML = html;
 }
 
-document.getElementById('btnStart').onclick=function(){
-  const text = document.getElementById('pasteArea').value;
-  if(!text) { alert('No hay datos'); return; }
-  progress.style.display = 'block';
-  progress.value=0; status.textContent='Procesando...';
-  worker.postMessage({text});
-};
+function renderOddsTable(mapObj, containerId, label){
+  const arr = Object.keys(mapObj).map(k=>({
+    key:k, count: mapObj[k].count, profit: mapObj[k].profit || 0, ganado: mapObj[k].ganado||0, perdido: mapObj[k].perdido||0
+  })).sort((a,b)=>b.profit - a.profit);
+  if(arr.length === 0){ document.getElementById(containerId).innerHTML = '<div class="small">Sin datos</div>'; return; }
+  let html = '<table><thead><tr><th>'+label+'</th><th>Apuestas</th><th>Ganado</th><th>Perdido</th><th>Profit</th></tr></thead><tbody>';
+  arr.forEach(r=>{
+    html += '<tr><td>'+escapeHtml(r.key)+'</td><td>'+r.count+'</td><td class="green">'+r.ganado.toFixed(2)+'</td><td class="red">'+r.perdido.toFixed(2)+'</td><td style="font-weight:700;color:'+(r.profit>=0? '#8ee99b':'#ff8b8b')+'">'+r.profit.toFixed(2)+'</td></tr>';
+  });
+  html += '</tbody></table>';
+  document.getElementById(containerId).innerHTML = html;
+}
 
-document.getElementById('btnPaste').onclick=function(){
-  navigator.clipboard.readText().then(t=>{ document.getElementById('pasteArea').value=t; });
-};
+/* Teams detailed renderer */
+function renderTeamDetailed(teamsObj, containerId){
+  const view = document.getElementById('teamViewSelect') ? document.getElementById('teamViewSelect').value : 'both';
+  const arr = Object.keys(teamsObj).map(k=>{
+    const t = teamsObj[k];
+    return {
+      key:k,
+      overallProfit: (t.overall && t.overall.profit) || 0,
+      homeProfit: (t.home && t.home.profit) || 0,
+      awayProfit: (t.away && t.away.profit) || 0,
+      overallCount: (t.overall && t.overall.count) || 0
+    };
+  }).sort((a,b)=>b.overallProfit - a.overallProfit);
 
-document.getElementById('fileInput').onchange=function(e){
-  const f = e.target.files[0]; if(!f) return;
+  if(arr.length === 0){ document.getElementById(containerId).innerHTML = '<div class="small">Sin datos</div>'; return; }
+
+  let html = '<table id="teamsTable"><thead><tr><th>Equipo</th><th>Apuestas</th><th>Profit total</th><th>Local</th><th>Visita</th><th>Detalle</th></tr></thead><tbody>';
+  arr.forEach((r, idx)=>{
+    // choose displayProfit based on view
+    const teamsEntry = teamsObj[r.key];
+    const displayProfit = view === 'home' ? (teamsEntry.home.profit || 0) : (view === 'away' ? (teamsEntry.away.profit || 0) : (teamsEntry.overall.profit || 0));
+    html += '<tr data-team-index="'+idx+'" style="vertical-align:top"><td>'+escapeHtml(r.key)+'</td><td>'+r.overallCount+'</td><td style="font-weight:700;color:'+(displayProfit>=0? '#8ee99b':'#ff8b8b')+'">'+displayProfit.toFixed(2)+'</td><td class="green">'+((teamsEntry.home && teamsEntry.home.profit)||0).toFixed(2)+'</td><td class="green">'+((teamsEntry.away && teamsEntry.away.profit)||0).toFixed(2)+'</td><td><span class="toggle" data-team="'+escapeHtml(r.key)+'">Ver / Ocultar</span></td></tr>';
+    // hidden detail row placeholder
+    html += '<tr class="detail-placeholder" data-for="'+escapeHtml(r.key)+'" style="display:none"><td colspan="6"></td></tr>';
+  });
+  html += '</tbody></table>';
+  document.getElementById(containerId).innerHTML = html;
+
+  // attach click handlers for toggles
+  document.querySelectorAll('#teamsTable .toggle').forEach(btn=>{
+    btn.addEventListener('click', function(){
+      const teamKey = this.getAttribute('data-team');
+      const ph = document.querySelector('.detail-placeholder[data-for="'+teamKey+'"]');
+      if(!ph) return;
+      if(ph.style.display === 'none' || ph.style.display === ''){
+        // build details HTML for this team
+        const t = teamsObj[teamKey];
+        let inner = '<div class="detail-row">';
+        inner += '<strong>Resumen por rol</strong>';
+        inner += '<table style="margin-top:8px"><thead><tr><th>Rol</th><th>Apuestas</th><th>Ganado</th><th>Perdido</th><th>Profit</th></tr></thead><tbody>';
+        inner += '<tr><td>Overall</td><td>'+((t.overall && t.overall.count)||0)+'</td><td class="green">'+(((t.overall && t.overall.ganado)||0).toFixed(2))+'</td><td class="red">'+(((t.overall && t.overall.perdido)||0).toFixed(2))+'</td><td style="font-weight:700;color:'+(((t.overall && t.overall.profit)||0)>=0? '#8ee99b':'#ff8b8b')+'">'+(((t.overall && t.overall.profit)||0).toFixed(2))+'</td></tr>';
+        inner += '<tr><td>Local</td><td>'+((t.home && t.home.count)||0)+'</td><td class="green">'+(((t.home && t.home.ganado)||0).toFixed(2))+'</td><td class="red">'+(((t.home && t.home.perdido)||0).toFixed(2))+'</td><td style="font-weight:700;color:'+(((t.home && t.home.profit)||0)>=0? '#8ee99b':'#ff8b8b')+'">'+(((t.home && t.home.profit)||0).toFixed(2))+'</td></tr>';
+        inner += '<tr><td>Visita</td><td>'+((t.away && t.away.count)||0)+'</td><td class="green">'+(((t.away && t.away.ganado)||0).toFixed(2))+'</td><td class="red">'+(((t.away && t.away.perdido)||0).toFixed(2))+'</td><td style="font-weight:700;color:'+(((t.away && t.away.profit)||0)>=0? '#8ee99b':'#ff8b8b')+'">'+(((t.away && t.away.profit)||0).toFixed(2))+'</td></tr>';
+        inner += '</tbody></table>';
+
+        // odds buckets per role (show top by profit)
+        function buildBucketHtml(buckets){
+          if(!buckets) return '<div class="small">Sin datos</div>';
+          const arr = Object.keys(buckets).map(k=>({k,profit:buckets[k].profit||0,count:buckets[k].count||0})).sort((a,b)=>b.profit - a.profit);
+          if(arr.length===0) return '<div class="small">Sin datos</div>';
+          let h = '<table style="margin-top:8px"><thead><tr><th>Rango cuota</th><th>Apuestas</th><th>Profit</th></tr></thead><tbody>';
+          arr.forEach(a=> h += '<tr><td>'+escapeHtml(a.k)+'</td><td>'+a.count+'</td><td style="font-weight:700;color:'+(a.profit>=0? '#8ee99b':'#ff8b8b')+'">'+a.profit.toFixed(2)+'</td></tr>');
+          h += '</tbody></table>';
+          return h;
+        }
+        inner += '<div style="margin-top:12px"><strong>Buckets de cuota — Local</strong>'+buildBucketHtml(t.home.oddsBuckets)+'</div>';
+        inner += '<div style="margin-top:12px"><strong>Buckets de cuota — Visita</strong>'+buildBucketHtml(t.away.oddsBuckets)+'</div>';
+        inner += '</div>';
+
+        ph.querySelector('td').innerHTML = inner;
+        ph.style.display = '';
+      } else {
+        ph.style.display = 'none';
+      }
+    });
+  });
+}
+
+/* escape helper */
+function escapeHtml(s){ return String(s||'').replace(/[&<>"]/g, c=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+/* UI events */
+document.getElementById('fileInput').addEventListener('change', e=>{
+  const f = e.target.files[0];
+  if(!f) return;
   const reader = new FileReader();
-  reader.onload=function(evt){ document.getElementById('pasteArea').value=evt.target.result; };
+  reader.onprogress = ev => {
+    if(ev.lengthComputable){
+      progress.style.display = '';
+      progress.value = (ev.loaded/ev.total*100);
+      status.textContent = 'Leyendo archivo... ' + Math.round(progress.value) + '%';
+    }
+  };
+  reader.onload = ev => {
+    status.textContent = 'Enviando datos al worker...';
+    worker.postMessage({text: ev.target.result});
+  };
+  reader.onerror = ()=> alert('Error al leer el archivo');
   reader.readAsText(f);
-};
+});
 
-document.getElementById('btnExportCSV').onclick=function(){
-  const data = window._lastWorkerResult;
-  if(!data){ alert('No hay datos para exportar'); return; }
-  let csv='Grupo,Nombre,#,Profit,Ganado,Perdido\\n';
-  const combine = {...data.leagues,...data.teams,...data.oddsBuckets};
-  for(const k in combine){
-    const v=combine[k];
-    csv+=`${k},${k},${v.count},${v.profit||0},${v.ganado||0},${v.perdido||0}\\n`;
-  }
-  const blob = new Blob([csv],{type:'text/csv'});
+document.getElementById('btnPaste').addEventListener('click', ()=>{
+  const t = prompt('Pega aquí tu JSON completo (array o NDJSON). Para cancelar deja vacío.');
+  if(t) document.getElementById('pasteArea').value = t;
+});
+
+document.getElementById('btnStart').addEventListener('click', ()=>{
+  const txt = document.getElementById('pasteArea').value.trim();
+  if(!txt){ alert('Pega JSON o carga archivo'); return; }
+  progress.style.display = '';
+  progress.value = 10;
+  status.textContent = 'Procesando texto pegado...';
+  worker.postMessage({text: txt});
+});
+
+document.getElementById('teamViewSelect').addEventListener('change', ()=>{
+  if(window._lastWorkerResult && window._lastWorkerResult.teams) renderTeamDetailed(window._lastWorkerResult.teams, 'byTeam');
+});
+
+/* Export CSV: now incluye equipo/rol y buckets */
+document.getElementById('btnExportCSV').addEventListener('click', ()=>{
+  const res = window._lastWorkerResult;
+  if(!res){ alert('No hay resultados para exportar'); return; }
+  const rows = [];
+  rows.push(['scope','key','role','count','ganado','perdido','profit','bucket']);
+  Object.entries(res.leagues).forEach(([k,v])=> rows.push(['league', k, 'overall', v.count, (v.ganado||0).toFixed(2), (v.perdido||0).toFixed(2), (v.profit||0).toFixed(2), '']));
+  // teams: overall, home, away
+  Object.entries(res.teams).forEach(([team,t])=>{
+    rows.push(['team', team, 'overall', (t.overall && t.overall.count)||0, ((t.overall && t.overall.ganado)||0).toFixed(2), ((t.overall && t.overall.perdido)||0).toFixed(2), ((t.overall && t.overall.profit)||0).toFixed(2), '']);
+    rows.push(['team', team, 'home', (t.home && t.home.count)||0, ((t.home && t.home.ganado)||0).toFixed(2), ((t.home && t.home.perdido)||0).toFixed(2), ((t.home && t.home.profit)||0).toFixed(2), '']);
+    rows.push(['team', team, 'away', (t.away && t.away.count)||0, ((t.away && t.away.ganado)||0).toFixed(2), ((t.away && t.away.perdido)||0).toFixed(2), ((t.away && t.away.profit)||0).toFixed(2), '']);
+    // buckets per role
+    const pushBuckets = (roleObj, roleName) => {
+      if(!roleObj || !roleObj.oddsBuckets) return;
+      Object.entries(roleObj.oddsBuckets).forEach(([bk, val])=>{
+        rows.push(['team_bucket', team, roleName, val.count||0, (val.ganado||0).toFixed(2), (val.perdido||0).toFixed(2), (val.profit||0).toFixed(2), bk]);
+      });
+    };
+    pushBuckets(t.home, 'home');
+    pushBuckets(t.away, 'away');
+    if(t.overall && t.overall.oddsBuckets) Object.entries(t.overall.oddsBuckets).forEach(([bk, val]) => rows.push(['team_bucket', team, 'overall', val.count||0, (val.ganado||0).toFixed(2), (val.perdido||0).toFixed(2), (val.profit||0).toFixed(2), bk]));
+  });
+  Object.entries(res.oddsBuckets).forEach(([k,v])=> rows.push(['odds_range', k, 'overall', v.count, (v.ganado||0).toFixed(2), (v.perdido||0).toFixed(2), (v.profit||0).toFixed(2), '']));
+
+  const csv = rows.map(r=> r.map(c => '\"'+String(c).replace(/\"/g,'\"\"')+'\"').join(',')).join('\\n');
+  const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
   const url = URL.createObjectURL(blob);
-  const a = document.createElement('a'); a.href=url; a.download='backtest.csv'; a.click();
-};
+  const a = document.createElement('a'); a.href = url; a.download = 'backtest_summary.csv'; a.click();
+  URL.revokeObjectURL(url);
+});
 </script>
 </body>
 </html>
