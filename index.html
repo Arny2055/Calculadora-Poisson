@@ -30,15 +30,6 @@
 <h1>Backtesting robusto — calcula desde tu JSON y valida resultados</h1>
 
 <div class="card">
-  <h3>Simulación de encuentro futuro</h3>
-  <div class="row" style="margin-bottom:8px">
-    <input id="inputHome" type="text" placeholder="Equipo Local (ej. Real Madrid)" />
-    <input id="inputAway" type="text" placeholder="Equipo Visitante (ej. Barcelona)" />
-    <input id="inputOdds" type="number" step="0.01" placeholder="Cuota (ej. 1.80)" />
-    <button onclick="predictMatch()" class="btn">Calcular probabilidad</button>
-  </div>
-  <div id="futureResult" class="small" style="margin-top:6px"></div>
-</div>
   <div class="row" style="margin-bottom:10px">
     <input id="fileInput" type="file" accept=".json" />
     <button id="btnPaste" class="btn">Pegar JSON manual</button>
@@ -91,12 +82,13 @@
    No dependencias externas. Heurísticas para decidir ganado/perdido.
 */
 const workerCode = `
-/* helpers (igual que antes) */
+/* helpers */
 function normalizeKey(k){ return k ? k.toString().trim().toLowerCase().replace(/\\s+/g,' ') : ''; }
 function tryNum(v){
   if(v===null||v===undefined) return NaN;
-  if(typeof v==='number') return v;
+  if(typeof v === 'number') return v;
   let s = String(v).trim().replace(/['"]/g,'').replace(/,/g,'.');
+  // extra: remove non-number trailing chars
   const m = s.match(/-?\\d+(\\.\\d+)?/);
   if(m) return Number(m[0]);
   return NaN;
@@ -107,10 +99,14 @@ function parseScore(s){
   if(m) return {home:parseInt(m[1],10),away:parseInt(m[2],10)};
   return null;
 }
+
+/* decide if desiredOutcome wins given ftScore */
 function evaluateDesired(desired, market, score){
   if(!desired && !market) return null;
   const d = (desired||'').toString().toLowerCase();
   const mkt = (market||'').toString().toLowerCase();
+
+  // BTTS / GG
   if(/gg|both teams to score|both to score|btts|both score|yes/i.test(d) || /btts|both teams to score/i.test(mkt)){
     if(score) return (score.home>0 && score.away>0);
     return null;
@@ -119,85 +115,102 @@ function evaluateDesired(desired, market, score){
     if(score) return !(score.home>0 && score.away>0);
     return null;
   }
+
+  // OVER / UNDER numeric (ej: Over 2.5)
   const overM = d.match(/over\\s*([0-9]+(?:\\.[0-9]+)?)/i) || mkt.match(/over\\s*([0-9]+(?:\\.[0-9]+)?)/i);
-  if(overM && score){ const thr=parseFloat(overM[1]); return (score.home+score.away)>thr; }
-  const underM = d.match(/under\\s*([0-9]+(?:\\.[0-9]+)?)/i) || mkt.match(/under\\s*([0-9]+(?:\\.[0-9]+)?)/i);
-  if(underM && score){ const thr=parseFloat(underM[1]); return (score.home+score.away)<=thr; }
-  if(/^\\s*1\\s*$/.test(d) || /(^|\\s)home(\\s|$)/i.test(d)){ if(score) return score.home>score.away; }
-  if(/^\\s*2\\s*$/.test(d) || /(^|\\s)away(\\s|$)/i.test(d)){ if(score) return score.away>score.home; }
-  if(/^\\s*x\\s*$/.test(d) || /^\\s*draw\\s*$/i.test(d) || /(^|\\s)tie(\\s|$)/i.test(d)){ if(score) return score.home===score.away; }
-  if(/^\\s*\\d+\\s*[-:]\\s*\\d+\\s*$/.test(d) && score){
-    const m = d.match(/(\\d+)\\s*[-:]\\s*(\\d+)/); return parseInt(m[1],10)===score.home && parseInt(m[2],10)===score.away;
+  if(overM && score){
+    const thr = parseFloat(overM[1]);
+    return (score.home + score.away) > thr;
   }
+  const underM = d.match(/under\\s*([0-9]+(?:\\.[0-9]+)?)/i) || mkt.match(/under\\s*([0-9]+(?:\\.[0-9]+)?)/i);
+  if(underM && score){
+    const thr = parseFloat(underM[1]);
+    return (score.home + score.away) <= thr;
+  }
+
+  // 1X2 detection: '1', 'x', '2' or 'home', 'away'
+  if(/^\\s*1\\s*$/.test(d) || /(^|\\s)home(\\s|$)/i.test(d)){
+    if(score) return (score.home > score.away);
+  }
+  if(/^\\s*2\\s*$/.test(d) || /(^|\\s)away(\\s|$)/i.test(d)){
+    if(score) return (score.away > score.home);
+  }
+  if(/^\\s*x\\s*$/.test(d) || /^\\s*draw\\s*$/i.test(d) || /(^|\\s)tie(\\s|$)/i.test(d)){
+    if(score) return (score.home === score.away);
+  }
+
+  // If desired contains a number like "Over 2.5" or "O2.5" handled above.
+  // If desired equals exact score e.g. "1-1"
+  if(/^\\s*\\d+\\s*[-:]\\s*\\d+\\s*$/.test(d) && score){
+    const m = d.match(/(\\d+)\\s*[-:]\\s*(\\d+)/);
+    return (parseInt(m[1],10) === score.home && parseInt(m[2],10) === score.away);
+  }
+
+  // fallback null (unknown)
   return null;
 }
+
+/* normalize fetching: find key by many variants */
 function getValue(obj, candidates){
-  const map={}; for(const k in obj) map[normalizeKey(k)]=obj[k];
-  for(const c of candidates){ const norm=normalizeKey(c); if(map[norm]!==undefined) return map[norm]; }
-  for(const normKey in map){ for(const c of candidates){ const q=normalizeKey(c); if(normKey.includes(q) || q.includes(normKey)) return map[normKey]; } }
+  const map = {};
+  for(const k in obj){
+    map[normalizeKey(k)] = obj[k];
+  }
+  for(const c of candidates){
+    const norm = normalizeKey(c);
+    if(map[norm] !== undefined) return map[norm];
+  }
+  // try partial contains
+  for(const normKey in map){
+    for(const c of candidates){
+      const q = normalizeKey(c);
+      if(normKey.includes(q) || q.includes(normKey)) return map[normKey];
+    }
+  }
   return undefined;
 }
+
+/* bucket odds */
 function oddsBucket(o){
   if(isNaN(o)) return 'unknown';
-  if(o<1.5) return '1.01 - 1.49';
-  if(o<2) return '1.50 - 1.99';
-  if(o<3) return '2.00 - 2.99';
-  if(o<5) return '3.00 - 4.99';
+  if(o < 1.5) return '1.01 - 1.49';
+  if(o < 2) return '1.50 - 1.99';
+  if(o < 3) return '2.00 - 2.99';
+  if(o < 5) return '3.00 - 4.99';
   return '5.00+';
-}
-function predictMatch(){
-  const home = document.getElementById("inputHome").value.trim();
-  const away = document.getElementById("inputAway").value.trim();
-  const odds = parseFloat(document.getElementById("inputOdds").value);
-
-  if(!window._lastWorkerResult || !window._lastWorkerResult.records){
-    alert("Primero importa y procesa tu historial JSON.");
-    return;
-  }
-
-  const recs = window._lastWorkerResult.records;
-
-  // Filtrar enfrentamientos históricos (busca en distintos campos)
-  const filtered = recs.filter(r=>{
-    const match = (
-      r.match || r.Match || r[" Name"] || r.Partido || ""
-    ).toLowerCase();
-
-    return match.includes(home.toLowerCase()) && match.includes(away.toLowerCase());
-  });
-
-  if(filtered.length===0){
-    document.getElementById("futureResult").innerText =
-      "No hay historial entre " + home + " y " + away;
-    return;
-  }
-
-  const wins = filtered.filter(r=>r._profit>0).length;
-  const prob = (wins/filtered.length*100).toFixed(2);
-  const impProb = odds>0 ? (100/odds).toFixed(2) : "N/A";
-
-  document.getElementById("futureResult").innerText =
-    "Histórico " + home + " vs " + away + " → " + wins + "/" + filtered.length +
-    " aciertos. Probabilidad real: " + prob + "% | Implícita cuota " + odds + ": " + impProb + "%";
 }
 
 /* main */
 self.onmessage = function(e){
   try{
     const text = e.data.text;
-    let records=[];
-    try{ records=JSON.parse(text); if(!Array.isArray(records)) records=[records]; }catch(err){
-      const lines=text.split(/\\r?\\n/).map(s=>s.trim()).filter(Boolean);
-      for(const line of lines){ try{ records.push(JSON.parse(line)); }catch(errLine){ const maybe=line.replace(/'/g,'\\"'); try{records.push(JSON.parse(maybe));}catch(e2){} } }
+    let records = [];
+    // Try parse as JSON array
+    try{
+      records = JSON.parse(text);
+      if(!Array.isArray(records)) records = [records];
+    }catch(err){
+      // Try NDJSON: split lines, parse each
+      const lines = text.split(/\\r?\\n/).map(s=>s.trim()).filter(Boolean);
+      for(const line of lines){
+        try{
+          records.push(JSON.parse(line));
+        }catch(errLine){
+          // try forgiving replace single quotes -> double and parse (best-effort)
+          const maybe = line.replace(/'/g,'\\"');
+          try{ records.push(JSON.parse(maybe)); }catch(e2){ /* skip */ }
+        }
+      }
     }
 
-    const stake=1, undetermined=[];
+    const stake = 1;
     let total=0, profit=0, ganado=0, perdido=0;
     let leagues={}, teams={}, oddsBuckets={};
-    const processedRecords=[]; // nuevo array para guardar todos los registros procesados
+    let undetermined=[];
 
     for(const r of records){
       total++;
+      // try read fields flexibly
       const rawOdds = getValue(r, ['odd','odds',' odd ','odd prematch','odd 1 prematch',' odd 1 preMatch ']);
       const rawProfit = getValue(r, ['profit','profit ','profit (u)','profit_usd','profit_usd ']);
       const rawResult = getValue(r, ['result',' result ','status']);
@@ -206,60 +219,78 @@ self.onmessage = function(e){
       const rawLeague = getValue(r, ['league',' competition ','league ']);
       const rawMatch = getValue(r, ['match',' match ','game','fixture']);
 
+      // parse odds
       const odds = tryNum(rawOdds);
-      let p=NaN;
-      const pf=tryNum(rawProfit);
-      if(!isNaN(pf)) p=pf;
+      // parse explicit profit if present
+      let p = NaN;
+      const pf = tryNum(rawProfit);
+      if(!isNaN(pf)){ p = pf; }
+      // else try interpret result field
       const rstr = rawResult ? String(rawResult).toLowerCase() : '';
       if(isNaN(p)){
-        if(rstr.match(/win|won|winning/)) p = (odds>0?(odds-1)*stake:0);
-        else if(rstr.match(/lose|lost|losing/)) p=-stake;
+        if(rstr.match(/win|won|winning/)) p = (odds>0 ? (odds-1)*stake : 0);
+        else if(rstr.match(/lose|lost|losing/)) p = -stake;
       }
 
-      let decided=!isNaN(p);
-      let score=parseScore(rawResultFT);
+      // if still NaN, try compute from Result FT + desired
+      let decided = !isNaN(p);
+      let score = parseScore(rawResultFT);
       if(isNaN(p)){
-        if(!score) score=parseScore(rawResult);
-        const outcome=evaluateDesired(rawDesired,getValue(r,['market','market name','market ']),score);
-        if(outcome===true) p=(odds>0?(odds-1)*stake:0);
-        else if(outcome===false) p=-stake;
-        else p=NaN;
+        // careful: sometimes result FT is stored in " Result FT " or "Result FT "
+        if(!score){
+          // also try rawResult if contains "1-1"
+          score = parseScore(rawResult);
+        }
+        const outcome = evaluateDesired(rawDesired, getValue(r,['market','market name','market ']), score);
+        if(outcome === true) p = (odds>0 ? (odds-1)*stake : 0);
+        else if(outcome === false) p = -stake;
+        else {
+          // couldn't decide
+          p = NaN;
+        }
       }
 
       if(isNaN(p)){
         undetermined.push({sample:r});
-        continue;
+        continue; // skip adding stats for undetermined (so you can inspect them)
       }
 
-      profit+=p; if(p>0) ganado+=p; else perdido+=Math.abs(p);
+      profit += p;
+      if(p>0) ganado += p; else perdido += Math.abs(p);
 
-      const leagueKey=rawLeague?String(rawLeague):'Desconocida';
-      if(!leagues[leagueKey]) leagues[leagueKey]={count:0,profit:0,ganado:0,perdido:0};
-      leagues[leagueKey].count++; leagues[leagueKey].profit+=p; if(p>0) leagues[leagueKey].ganado+=p; else leagues[leagueKey].perdido+=Math.abs(p);
+      // league
+      const leagueKey = rawLeague ? String(rawLeague).toString() : 'Desconocida';
+      if(!leagues[leagueKey]) leagues[leagueKey] = {count:0,profit:0,ganado:0,perdido:0};
+      leagues[leagueKey].count++;
+      leagues[leagueKey].profit += p;
+      if(p>0) leagues[leagueKey].ganado += p; else leagues[leagueKey].perdido += Math.abs(p);
 
-      const matchStr=rawMatch?String(rawMatch):'';
+      // teams
+      const matchStr = rawMatch ? String(rawMatch) : '';
+      // try separators: '-', ' vs ', ' v ', ' — ', '@'
       let home='', away='';
-      const sep=matchStr.includes('-')?'-':(matchStr.toLowerCase().includes(' vs ')?' vs ':(matchStr.includes('@')?'@':(matchStr.includes(' v ')?' v ':null)));
-      if(sep){ const parts=matchStr.split(sep).map(s=>s.trim()).filter(Boolean); if(parts.length>=2){home=parts[0]; away=parts[1];} }
-      if(home){ if(!teams[home]) teams[home]={count:0,profit:0,ganado:0,perdido:0}; teams[home].count++; teams[home].profit+=p; if(p>0) teams[home].ganado+=p; else teams[home].perdido+=Math.abs(p); }
-      if(away){ if(!teams[away]) teams[away]={count:0,profit:0,ganado:0,perdido:0}; teams[away].count++; teams[away].profit+=p; if(p>0) teams[away].ganado+=p; else teams[away].perdido+=Math.abs(p); }
+      const sep = matchStr.includes('-') ? '-' : (matchStr.toLowerCase().includes(' vs ') ? ' vs ' : (matchStr.includes('@') ? '@' : (matchStr.includes(' v ') ? ' v ' : null)));
+      if(sep){
+        const parts = matchStr.split(sep).map(s=>s.trim()).filter(Boolean);
+        if(parts.length >= 2){ home = parts[0]; away = parts[1]; }
+      }
+      if(home){
+        if(!teams[home]) teams[home] = {count:0,profit:0,ganado:0,perdido:0};
+        teams[home].count++; teams[home].profit+=p; if(p>0) teams[home].ganado+=p; else teams[home].perdido+=Math.abs(p);
+      }
+      if(away){
+        if(!teams[away]) teams[away] = {count:0,profit:0,ganado:0,perdido:0};
+        teams[away].count++; teams[away].profit+=p; if(p>0) teams[away].ganado+=p; else teams[away].perdido+=Math.abs(p);
+      }
 
-      const bucket=oddsBucket(odds);
-      if(!oddsBuckets[bucket]) oddsBuckets[bucket]={count:0,profit:0,ganado:0,perdido:0};
+      // odds buckets
+      const bucket = oddsBucket(odds);
+      if(!oddsBuckets[bucket]) oddsBuckets[bucket] = {count:0,profit:0,ganado:0,perdido:0};
       oddsBuckets[bucket].count++; oddsBuckets[bucket].profit+=p; if(p>0) oddsBuckets[bucket].ganado+=p; else oddsBuckets[bucket].perdido+=Math.abs(p);
+    } // end loop
 
-      // guardar registro procesado completo
-      processedRecords.push({...r, _profit:p, _score:score});
-    }
-
-    const roi = total ? (profit/total*100) : 0;
-    self.postMessage({
-      ok:true,
-      metrics:{total,profit,ganado,perdido,roi,undetermined:undetermined.length},
-      leagues, teams, oddsBuckets,
-      undetermined:undetermined.slice(0,20),
-      records: processedRecords // <--- añadimos los registros procesados
-    });
+    const roi = total ? (profit / total * 100) : 0;
+    self.postMessage({ok:true, metrics:{total,profit,ganado,perdido,roi,undetermined:undetermined.length}, leagues, teams, oddsBuckets, undetermined:undetermined.slice(0,20)});
   }catch(err){
     self.postMessage({ok:false,error:err.message});
   }
