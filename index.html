@@ -3,546 +3,456 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Backtesting Robusto — Detecta patrones y valida resultados</title>
+<title>Conversor Universal a JSON</title>
 <style>
-  :root{--bg:#071225;--card:#0b1220;--muted:#9aa4b2;--accent:#06b6d4}
-  body{background:linear-gradient(180deg,var(--bg),#04101a);color:#e6eef6;font-family:Inter,system-ui,Arial;margin:0;padding:18px}
-  h1{font-size:1.1rem;margin:0 0 12px 0}
-  .card{background:var(--card);padding:12px;border-radius:10px;margin-bottom:12px;box-shadow:0 6px 18px rgba(2,6,23,0.6)}
-  input,textarea,select,button{font:inherit}
-  input[type=file]{color:transparent}
-  textarea{width:100%;min-height:90px;padding:8px;border-radius:8px;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.03);color:inherit}
-  .row{display:flex;gap:8px;align-items:center}
-  .btn{background:linear-gradient(90deg,var(--accent),#26d0ce);border:none;color:#021522;padding:8px 12px;border-radius:8px;cursor:pointer;font-weight:700}
-  progress{width:100%;height:14px;border-radius:8px;overflow:hidden}
-  table{width:100%;border-collapse:collapse;font-size:13px}
-  th,td{padding:6px;border-bottom:1px solid rgba(255,255,255,0.04);text-align:left}
-  th{color:var(--muted);font-weight:600;font-size:12px}
-  .green{color:#8ee99b}
-  .red{color:#ff8b8b}
-  .small{font-size:13px;color:var(--muted)}
-  pre{white-space:pre-wrap;font-size:13px}
-  .warning{color:#ffd166}
-  .toggle { cursor: pointer; color:var(--accent); font-weight:700 }
-  .detail-row { background: rgba(255,255,255,0.01); padding:8px; border-radius:6px; margin-top:6px; }
-  .muted-pill { background: rgba(255,255,255,0.02); padding:6px 8px; border-radius:8px; color:var(--muted); font-size:12px }
+  :root{
+    --bg:#0b1220;--card:#121a2b;--muted:#93a0b2;--text:#e6ecf2;--accent:#22d3ee;--ok:#22c55e;--warn:#f59e0b;--err:#ef4444;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:linear-gradient(180deg,#081022,#0b1426);color:var(--text);font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Arial}
+  header{padding:28px 20px;text-align:center}
+  header h1{margin:0 0 6px;font-size:clamp(20px,3.5vw,30px)}
+  header p{margin:0;color:var(--muted)}
+  .wrap{max-width:1100px;margin:0 auto;padding:16px}
+  .panel{background:var(--card);border:1px solid #1b2540;border-radius:14px;padding:16px;margin-bottom:16px}
+  .grid{display:grid;gap:12px}
+  @media(min-width:900px){.grid{grid-template-columns:1.1fr 1fr}}
+  .drop{
+    border:2px dashed #243455;border-radius:12px;padding:20px;text-align:center;cursor:pointer;
+    transition:0.2s background,0.2s border-color
+  }
+  .drop.drag{background:#0f1b34;border-color:var(--accent)}
+  .row{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+  .row > *{flex:0 0 auto}
+  input[type="file"]{display:none}
+  button, select{background:#17233f;border:1px solid #233153;color:var(--text);padding:10px 14px;border-radius:10px;cursor:pointer}
+  button:hover{border-color:#33508a}
+  .pill{padding:6px 10px;border-radius:999px;background:#0e1a31;border:1px solid #1b2b4e;color:var(--muted);font-size:12px}
+  .options{display:flex;gap:10px;flex-wrap:wrap}
+  textarea{width:100%;min-height:300px;background:#0c162b;color:#eaf2ff;border:1px solid #1b2540;border-radius:10px;padding:12px;font-family:ui-monospace,SFMono-Regular,Consolas,Monaco,monospace}
+  .footer{display:flex;gap:8px;flex-wrap:wrap;justify-content:space-between;align-items:center;margin-top:10px}
+  .small{color:var(--muted);font-size:12px}
+  .tag{font-family:ui-monospace,monospace;background:#0b1730;border:1px solid #1a2a52;border-radius:8px;padding:4px 8px}
+  .status{font-size:13px}
+  .ok{color:var(--ok)} .warn{color:var(--warn)} .err{color:var(--err)}
+  .hidden{display:none}
+  .kbd{font-family:ui-monospace,monospace;background:#0d1a33;border:1px solid #213158;border-radius:6px;padding:0 6px}
 </style>
 </head>
 <body>
+  <header>
+    <h1>Conversor Universal a JSON</h1>
+    <p>Sube, arrastra o pega archivos y conviértelos a JSON. Soporta JSON, CSV/TSV, Excel, YAML, XML/HTML, INI, TXT y binarios.</p>
+  </header>
 
-<h1>Backtesting robusto — calcula desde tu JSON y valida resultados</h1>
+  <div class="wrap">
+    <div class="panel grid">
+      <div>
+        <label for="file" class="drop" id="drop">
+          <div style="font-size:15px;margin-bottom:6px;">Arrastra y suelta archivos aquí</div>
+          <div class="small">o haz clic para elegir…</div>
+          <div style="margin-top:10px" class="row">
+            <span class="pill">Múltiples archivos</span>
+            <span class="pill">Hasta ~50MB por archivo*</span>
+          </div>
+        </label>
+        <input id="file" type="file" multiple />
+        <div class="row" style="margin-top:10px;gap:8px;">
+          <button id="btnPaste">Pegar desde portapapeles</button>
+          <span class="small">Tip: presiona <span class="kbd">Ctrl/⌘ + V</span> en la página para pegar texto o imágenes.</span>
+        </div>
+        <div id="pasteZone" class="panel hidden" style="margin-top:12px">
+          <div class="row" style="justify-content:space-between">
+            <strong>Zona de pegado</strong>
+            <button id="closePaste">Cerrar</button>
+          </div>
+          <p class="small">Pega texto, imágenes o archivos (desde el explorador) aquí abajo:</p>
+          <div id="pasteTarget" contenteditable="true" style="min-height:120px;border:1px dashed #27406f;border-radius:10px;padding:10px;"></div>
+          <div class="small">El contenido pegado se convertirá igual que un archivo subido.</div>
+        </div>
+      </div>
 
-<div class="card">
-  <div class="row" style="margin-bottom:10px">
-    <input id="fileInput" type="file" />
-    <button id="btnPaste" class="btn">Pegar JSON manual</button>
-  </div>
+      <div>
+        <div class="panel">
+          <strong>Opciones</strong>
+          <div class="options" style="margin-top:10px">
+            <label class="tag">Indentación: 
+              <select id="indent">
+                <option value="2">2</option>
+                <option value="4" selected>4</option>
+                <option value="0">Compacto</option>
+              </select>
+            </label>
+            <label class="tag">Modo CSV:
+              <select id="csvMode">
+                <option value="auto" selected>Auto (detecta cabeceras)</option>
+                <option value="rows">Filas (array de arrays)</option>
+                <option value="objects">Objetos (usa primera fila)</option>
+              </select>
+            </label>
+            <label class="tag">Base64 binarios:
+              <select id="b64Limit">
+                <option value="full">Completo</option>
+                <option value="200000">Truncar ~200KB</option>
+                <option value="0" selected>Sin base64 (solo metadatos)</option>
+              </select>
+            </label>
+          </div>
+          <div class="small" style="margin-top:8px">*Navegadores pueden limitar lectura de archivos muy grandes.</div>
+        </div>
 
-  <textarea id="pasteArea" placeholder='Pega aquí tu JSON (array o NDJSON - una línea por objeto)'></textarea>
-
-  <div style="margin-top:8px" class="row">
-    <button id="btnStart" class="btn">Procesar Backtest</button>
-    <div style="margin-left:auto" class="small">Stake fijo = <strong>1</strong></div>
-  </div>
-
-  <progress id="progress" value="0" max="100" style="display:none;margin-top:8px"></progress>
-  <div id="status" class="small" style="margin-top:8px"></div>
-</div>
-
-<div id="output" style="display:none">
-  <div class="card">
-    <h3>Resumen</h3>
-    <div id="metrics" class="small"></div>
-  </div>
-
-  <div class="card">
-    <h3>Top ligas (ordenado por profit)</h3>
-    <div id="byLeague"></div>
-  </div>
-
-  <div class="card">
-    <h3>Top equipos (ordenado por profit)</h3>
-    <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
-      <div class="small">Ver equipos como:</div>
-      <select id="teamViewSelect" class="muted-pill">
-        <option value="both">Ambos</option>
-        <option value="home">Solo Local</option>
-        <option value="away">Solo Visita</option>
-      </select>
-      <div style="margin-left:auto" class="small">Haz click en un equipo para ver desglose por cuotas</div>
+        <div class="panel">
+          <strong>Acciones</strong>
+          <div class="row" style="margin-top:10px">
+            <button id="btnCopy">Copiar JSON</button>
+            <button id="btnDownload">Descargar .json</button>
+            <button id="btnClear">Limpiar</button>
+          </div>
+          <div id="status" class="status small" style="margin-top:8px"></div>
+        </div>
+      </div>
     </div>
-    <div id="byTeam"></div>
+
+    <div class="panel">
+      <div class="row" style="justify-content:space-between;align-items:center">
+        <strong>Resultado JSON</strong>
+        <span class="small">Salida combina todos los archivos en un array si subes más de uno.</span>
+      </div>
+      <textarea id="output" spellcheck="false" placeholder='[{"name":"archivo.ext","data":{...}}]'></textarea>
+    </div>
   </div>
 
-  <div class="card">
-    <h3>Por rango de cuotas</h3>
-    <div id="byOdds"></div>
-  </div>
+  <!-- Dependencias desde CDN (ligeras y ampliamente usadas) -->
+  <!-- CSV -->
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js" integrity="" crossorigin="anonymous"></script>
+  <!-- Excel -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js" integrity="" crossorigin="anonymous"></script>
+  <!-- YAML -->
+  <script src="https://cdn.jsdelivr.net/npm/js-yaml@4.1.0/dist/js-yaml.min.js" integrity="" crossorigin="anonymous"></script>
 
-  <div class="card">
-    <h3>Problemas / registros no decididos (muestra algunos)</h3>
-    <div id="undetermined" class="small"></div>
-  </div>
+  <script>
+  (function(){
+    const fileInput = document.getElementById('file');
+    const drop = document.getElementById('drop');
+    const output = document.getElementById('output');
+    const statusEl = document.getElementById('status');
+    const indentSel = document.getElementById('indent');
+    const csvModeSel = document.getElementById('csvMode');
+    const b64LimitSel = document.getElementById('b64Limit');
 
-  <div class="card">
-    <button id="btnExportCSV" class="btn">Exportar resultados (CSV)</button>
-  </div>
-</div>
+    const btnCopy = document.getElementById('btnCopy');
+    const btnDownload = document.getElementById('btnDownload');
+    const btnClear = document.getElementById('btnClear');
 
-<script>
-/* =========== Worker code (string) =========== 
-   No dependencias externas. Heurísticas para decidir ganado/perdido.
-*/
-const workerCode = `
-/* helpers */
-function normalizeKey(k){ return k ? k.toString().trim().toLowerCase().replace(/\\s+/g,' ') : ''; }
-function tryNum(v){
-  if(v===null||v===undefined) return NaN;
-  if(typeof v === 'number') return v;
-  let s = String(v).trim().replace(/['"]/g,'').replace(/,/g,'.');
-  const m = s.match(/-?\\d+(\\.\\d+)?/);
-  if(m) return Number(m[0]);
-  return NaN;
-}
-function parseScore(s){
-  if(!s) return null;
-  const m = String(s).match(/(\\d+)\\s*[-:\\u2013]\\s*(\\d+)/);
-  if(m) return {home:parseInt(m[1],10),away:parseInt(m[2],10)};
-  return null;
-}
+    const btnPaste = document.getElementById('btnPaste');
+    const pasteZone = document.getElementById('pasteZone');
+    const closePaste = document.getElementById('closePaste');
+    const pasteTarget = document.getElementById('pasteTarget');
 
-/* decide if desiredOutcome wins given ftScore */
-function evaluateDesired(desired, market, score){
-  if(!desired && !market) return null;
-  const d = (desired||'').toString().toLowerCase();
-  const mkt = (market||'').toString().toLowerCase();
-
-  // BTTS / GG
-  if(/gg|both teams to score|both to score|btts|both score|yes/i.test(d) || /btts|both teams to score/i.test(mkt)){
-    if(score) return (score.home>0 && score.away>0);
-    return null;
-  }
-  if(/no goal|no|nogoal|both no/i.test(d) || /(no|nogoal)/.test(mkt) ){
-    if(score) return !(score.home>0 && score.away>0);
-    return null;
-  }
-
-  // OVER / UNDER numeric (ej: Over 2.5)
-  const overM = d.match(/over\\s*([0-9]+(?:\\.[0-9]+)?)/i) || mkt.match(/over\\s*([0-9]+(?:\\.[0-9]+)?)/i);
-  if(overM && score){
-    const thr = parseFloat(overM[1]);
-    return (score.home + score.away) > thr;
-  }
-  const underM = d.match(/under\\s*([0-9]+(?:\\.[0-9]+)?)/i) || mkt.match(/under\\s*([0-9]+(?:\\.[0-9]+)?)/i);
-  if(underM && score){
-    const thr = parseFloat(underM[1]);
-    return (score.home + score.away) <= thr;
-  }
-
-  // 1X2 detection: '1', 'x', '2' or 'home', 'away'
-  if(/^\\s*1\\s*$/.test(d) || /(^|\\s)home(\\s|$)/i.test(d)){
-    if(score) return (score.home > score.away);
-  }
-  if(/^\\s*2\\s*$/.test(d) || /(^|\\s)away(\\s|$)/i.test(d)){
-    if(score) return (score.away > score.home);
-  }
-  if(/^\\s*x\\s*$/.test(d) || /^\\s*draw\\s*$/i.test(d) || /(^|\\s)tie(\\s|$)/i.test(d)){
-    if(score) return (score.home === score.away);
-  }
-
-  // exact score e.g. "1-1"
-  if(/^\\s*\\d+\\s*[-:]\\s*\\d+\\s*$/.test(d) && score){
-    const m = d.match(/(\\d+)\\s*[-:]\\s*(\\d+)/);
-    return (parseInt(m[1],10) === score.home && parseInt(m[2],10) === score.away);
-  }
-
-  return null;
-}
-
-/* normalize fetching: find key by many variants */
-function getValue(obj, candidates){
-  const map = {};
-  for(const k in obj) map[normalizeKey(k)] = obj[k];
-  for(const c of candidates){
-    const norm = normalizeKey(c);
-    if(map[norm] !== undefined) return map[norm];
-  }
-  for(const normKey in map){
-    for(const c of candidates){
-      const q = normalizeKey(c);
-      if(normKey.includes(q) || q.includes(normKey)) return map[normKey];
-    }
-  }
-  return undefined;
-}
-
-/* bucket odds */
-function oddsBucket(o){
-  if(isNaN(o)) return 'unknown';
-  if(o < 1.5) return '1.01 - 1.49';
-  if(o < 2) return '1.50 - 1.99';
-  if(o < 3) return '2.00 - 2.99';
-  if(o < 5) return '3.00 - 4.99';
-  return '5.00+';
-}
-
-/* ensure team structure */
-function ensureTeamObj(obj, name){
-  if(!obj[name]) obj[name] = {
-    overall:{count:0,profit:0,ganado:0,perdido:0},
-    home:{count:0,profit:0,ganado:0,perdido:0,oddsBuckets:{}},
-    away:{count:0,profit:0,ganado:0,perdido:0,oddsBuckets:{}}
-  };
-}
-
-/* main */
-self.onmessage = function(e){
-  try{
-    const text = e.data.text;
-    let records = [];
-    try{
-      records = JSON.parse(text);
-      if(!Array.isArray(records)) records = [records];
-    }catch(err){
-      const lines = text.split(/\\r?\\n/).map(s=>s.trim()).filter(Boolean);
-      for(const line of lines){
-        try{ records.push(JSON.parse(line)); }catch(errLine){
-          const maybe = line.replace(/'/g,'\\"');
-          try{ records.push(JSON.parse(maybe)); }catch(e2){ /* skip */ }
-        }
-      }
-    }
-
-    const stake = 1;
-    let total=0, profit=0, ganado=0, perdido=0;
-    let leagues={}, teams={}, oddsBuckets={};
-    let undetermined=[];
-
-    for(const r of records){
-      total++;
-      const rawOdds = getValue(r, ['odd','odds',' odd ','odd prematch','odd 1 prematch','odd 1 preMatch ']);
-      const rawProfit = getValue(r, ['profit','profit ','profit (u)','profit_usd','profit_usd ']);
-      const rawResult = getValue(r, ['result',' result ','status']);
-      const rawResultFT = getValue(r, ['result ft','result_ft','result ft ','result full time','result full']);
-      const rawDesired = getValue(r, ['desired outcome','desired',' name ','name','selection','bet','market selection']);
-      const rawLeague = getValue(r, ['league',' competition ','league ']);
-      const rawMatch = getValue(r, ['match',' match ','game','fixture']);
-
-      const odds = tryNum(rawOdds);
-      let p = NaN;
-      const pf = tryNum(rawProfit);
-      if(!isNaN(pf)){ p = pf; }
-      const rstr = rawResult ? String(rawResult).toLowerCase() : '';
-      if(isNaN(p)){
-        if(rstr.match(/win|won|winning/)) p = (odds>0 ? (odds-1)*stake : 0);
-        else if(rstr.match(/lose|lost|losing/)) p = -stake;
-      }
-
-      let score = parseScore(rawResultFT);
-      if(isNaN(p)){
-        if(!score) score = parseScore(rawResult);
-        const outcome = evaluateDesired(rawDesired, getValue(r,['market','market name','market ']), score);
-        if(outcome === true) p = (odds>0 ? (odds-1)*stake : 0);
-        else if(outcome === false) p = -stake;
-        else p = NaN;
-      }
-
-      if(isNaN(p)){
-        undetermined.push({sample:r});
-        continue;
-      }
-
-      profit += p;
-      if(p>0) ganado += p; else perdido += Math.abs(p);
-
-      // league
-      const leagueKey = rawLeague ? String(rawLeague).toString() : 'Desconocida';
-      if(!leagues[leagueKey]) leagues[leagueKey] = {count:0,profit:0,ganado:0,perdido:0};
-      leagues[leagueKey].count++;
-      leagues[leagueKey].profit += p;
-      if(p>0) leagues[leagueKey].ganado += p; else leagues[leagueKey].perdido += Math.abs(p);
-
-      // teams: try parse match into home/away with heuristics
-      const matchStr = rawMatch ? String(rawMatch) : '';
-      let home='', away='';
-      if(matchStr){
-        if(matchStr.includes('@')){
-          const parts = matchStr.split('@').map(s=>s.trim()).filter(Boolean);
-          if(parts.length >= 2){ away = parts[0]; home = parts[1]; }
-        } else if(/\\s+at\\s+/i.test(matchStr)){
-          const parts = matchStr.split(/\\s+at\\s+/i).map(s=>s.trim()).filter(Boolean);
-          if(parts.length >= 2){ away = parts[0]; home = parts[1]; }
-        } else {
-          const sepCandidates = [' vs ',' v ',' - ',' — ','–','-'];
-          let used = null;
-          for(const s of sepCandidates){
-            if(matchStr.toLowerCase().includes(s.trim())){
-              used = s; break;
-            }
-          }
-          if(used){
-            const parts = matchStr.split(used).map(s=>s.trim()).filter(Boolean);
-            if(parts.length >= 2){ home = parts[0]; away = parts[1]; }
-          } else {
-            // try common "TeamA vs TeamB" without spaces
-            const parts = matchStr.split(/vs|VS|Vs/).map(s=>s.trim()).filter(Boolean);
-            if(parts.length >= 2){ home = parts[0]; away = parts[1]; }
-          }
-        }
-      }
-
-      // update team structures
-      if(home){
-        ensureTeamObj(teams, home);
-        teams[home].overall.count++; teams[home].overall.profit += p; if(p>0) teams[home].overall.ganado += p; else teams[home].overall.perdido += Math.abs(p);
-        teams[home].home.count++; teams[home].home.profit += p; if(p>0) teams[home].home.ganado += p; else teams[home].home.perdido += Math.abs(p);
-        const bucket = oddsBucket(odds);
-        if(!teams[home].home.oddsBuckets[bucket]) teams[home].home.oddsBuckets[bucket] = {count:0,profit:0,ganado:0,perdido:0};
-        teams[home].home.oddsBuckets[bucket].count++; teams[home].home.oddsBuckets[bucket].profit += p; if(p>0) teams[home].home.oddsBuckets[bucket].ganado += p; else teams[home].home.oddsBuckets[bucket].perdido += Math.abs(p);
-      }
-
-      if(away){
-        ensureTeamObj(teams, away);
-        teams[away].overall.count++; teams[away].overall.profit += p; if(p>0) teams[away].overall.ganado += p; else teams[away].overall.perdido += Math.abs(p);
-        teams[away].away.count++; teams[away].away.profit += p; if(p>0) teams[away].away.ganado += p; else teams[away].away.perdido += Math.abs(p);
-        const bucket = oddsBucket(odds);
-        if(!teams[away].away.oddsBuckets[bucket]) teams[away].away.oddsBuckets[bucket] = {count:0,profit:0,ganado:0,perdido:0};
-        teams[away].away.oddsBuckets[bucket].count++; teams[away].away.oddsBuckets[bucket].profit += p; if(p>0) teams[away].away.oddsBuckets[bucket].ganado += p; else teams[away].away.oddsBuckets[bucket].perdido += Math.abs(p);
-      }
-
-      // if neither parsed, still try to tag overall by matchStr as team name (best-effort)
-      if(!home && !away && matchStr){
-        ensureTeamObj(teams, matchStr);
-        teams[matchStr].overall.count++; teams[matchStr].overall.profit += p; if(p>0) teams[matchStr].overall.ganado += p; else teams[matchStr].overall.perdido += Math.abs(p);
-        const bucket = oddsBucket(odds);
-        if(!teams[matchStr].overall.oddsBuckets) teams[matchStr].overall.oddsBuckets = {};
-        if(!teams[matchStr].overall.oddsBuckets[bucket]) teams[matchStr].overall.oddsBuckets[bucket] = {count:0,profit:0,ganado:0,perdido:0};
-        teams[matchStr].overall.oddsBuckets[bucket].count++; teams[matchStr].overall.oddsBuckets[bucket].profit += p;
-      }
-
-      // odds buckets global
-      const gb = oddsBucket(odds);
-      if(!oddsBuckets[gb]) oddsBuckets[gb] = {count:0,profit:0,ganado:0,perdido:0};
-      oddsBuckets[gb].count++; oddsBuckets[gb].profit += p; if(p>0) oddsBuckets[gb].ganado += p; else oddsBuckets[gb].perdido += Math.abs(p);
-    } // end loop
-
-    const roi = total ? (profit / total * 100) : 0;
-    self.postMessage({ok:true, metrics:{total,profit,ganado,perdido,roi,undetermined:undetermined.length}, leagues, teams, oddsBuckets, undetermined:undetermined.slice(0,20)});
-  }catch(err){
-    self.postMessage({ok:false,error:err.message});
-  }
-};
-`;
-
-/* =========== main thread =========== */
-const blob = new Blob([workerCode], { type: "application/javascript" });
-const worker = new Worker(URL.createObjectURL(blob));
-const progress = document.getElementById('progress');
-const status = document.getElementById('status');
-
-worker.onmessage = e => {
-  progress.style.display = 'none';
-  status.textContent = '';
-  if(!e.data.ok){
-    alert('Error en worker: ' + e.data.error);
-    return;
-  }
-  const m = e.data.metrics;
-  document.getElementById('metrics').innerHTML = `
-    <div>Apuestas procesadas: <strong>${m.total}</strong></div>
-    <div>✅ Ganado: <strong class="green">${m.ganado.toFixed(2)}</strong></div>
-    <div>❌ Perdido: <strong class="red">${m.perdido.toFixed(2)}</strong></div>
-    <div>Beneficio neto: <strong>${m.profit.toFixed(2)}</strong></div>
-    <div>ROI (por apuesta): <strong>${m.roi.toFixed(2)}%</strong></div>
-    <div class="small">Registros no decididos: <strong class="warning">${m.undetermined}</strong> (se muestran algunos abajo)</div>
-  `;
-
-  renderGroupTable(e.data.leagues, 'byLeague', 'Liga');
-  renderOddsTable(e.data.oddsBuckets, 'byOdds', 'Rango cuota');
-  renderTeamDetailed(e.data.teams, 'byTeam');
-
-  const und = e.data.undetermined || [];
-  const undDiv = document.getElementById('undetermined');
-  if(und.length === 0) undDiv.innerHTML = '<div class="small">Ninguno — todos los registros fueron decididos.</div>';
-  else {
-    let html = '<div class="small">Mostrando hasta 20 registros no decididos (revisa claves, formatos de Score o Desired Outcome):</div><pre>';
-    und.forEach((u,i)=>{
-      try{ html += JSON.stringify(u.sample, null, 2) + '\\n---\\n'; }catch(err){ html += String(u.sample) + '\\n---\\n'; }
-    });
-    html += '</pre>';
-    undDiv.innerHTML = html;
-  }
-
-  document.getElementById('output').style.display = '';
-  window._lastWorkerResult = e.data;
-};
-
-function renderGroupTable(mapObj, containerId, label){
-  const arr = Object.keys(mapObj).map(k=>({
-    key:k, count: mapObj[k].count, profit: mapObj[k].profit || 0, ganado: mapObj[k].ganado||0, perdido: mapObj[k].perdido||0
-  })).sort((a,b)=>b.profit - a.profit);
-  if(arr.length === 0){ document.getElementById(containerId).innerHTML = '<div class="small">Sin datos</div>'; return; }
-  let html = '<table><thead><tr><th>'+label+'</th><th>Apuestas</th><th>Ganado</th><th>Perdido</th><th>Profit</th></tr></thead><tbody>';
-  arr.forEach(r=>{
-    html += '<tr><td>'+escapeHtml(r.key)+'</td><td>'+r.count+'</td><td class="green">'+r.ganado.toFixed(2)+'</td><td class="red">'+r.perdido.toFixed(2)+'</td><td style="font-weight:700;color:'+(r.profit>=0? '#8ee99b':'#ff8b8b')+'">'+r.profit.toFixed(2)+'</td></tr>';
-  });
-  html += '</tbody></table>';
-  document.getElementById(containerId).innerHTML = html;
-}
-
-function renderOddsTable(mapObj, containerId, label){
-  const arr = Object.keys(mapObj).map(k=>({
-    key:k, count: mapObj[k].count, profit: mapObj[k].profit || 0, ganado: mapObj[k].ganado||0, perdido: mapObj[k].perdido||0
-  })).sort((a,b)=>b.profit - a.profit);
-  if(arr.length === 0){ document.getElementById(containerId).innerHTML = '<div class="small">Sin datos</div>'; return; }
-  let html = '<table><thead><tr><th>'+label+'</th><th>Apuestas</th><th>Ganado</th><th>Perdido</th><th>Profit</th></tr></thead><tbody>';
-  arr.forEach(r=>{
-    html += '<tr><td>'+escapeHtml(r.key)+'</td><td>'+r.count+'</td><td class="green">'+r.ganado.toFixed(2)+'</td><td class="red">'+r.perdido.toFixed(2)+'</td><td style="font-weight:700;color:'+(r.profit>=0? '#8ee99b':'#ff8b8b')+'">'+r.profit.toFixed(2)+'</td></tr>';
-  });
-  html += '</tbody></table>';
-  document.getElementById(containerId).innerHTML = html;
-}
-
-/* Teams detailed renderer */
-function renderTeamDetailed(teamsObj, containerId){
-  const view = document.getElementById('teamViewSelect') ? document.getElementById('teamViewSelect').value : 'both';
-  const arr = Object.keys(teamsObj).map(k=>{
-    const t = teamsObj[k];
-    return {
-      key:k,
-      overallProfit: (t.overall && t.overall.profit) || 0,
-      homeProfit: (t.home && t.home.profit) || 0,
-      awayProfit: (t.away && t.away.profit) || 0,
-      overallCount: (t.overall && t.overall.count) || 0
+    const setStatus = (msg, type='')=>{
+      statusEl.className = 'status small ' + (type||'');
+      statusEl.textContent = msg;
     };
-  }).sort((a,b)=>b.overallProfit - a.overallProfit);
 
-  if(arr.length === 0){ document.getElementById(containerId).innerHTML = '<div class="small">Sin datos</div>'; return; }
-
-  let html = '<table id="teamsTable"><thead><tr><th>Equipo</th><th>Apuestas</th><th>Profit total</th><th>Local</th><th>Visita</th><th>Detalle</th></tr></thead><tbody>';
-  arr.forEach((r, idx)=>{
-    // choose displayProfit based on view
-    const teamsEntry = teamsObj[r.key];
-    const displayProfit = view === 'home' ? (teamsEntry.home.profit || 0) : (view === 'away' ? (teamsEntry.away.profit || 0) : (teamsEntry.overall.profit || 0));
-    html += '<tr data-team-index="'+idx+'" style="vertical-align:top"><td>'+escapeHtml(r.key)+'</td><td>'+r.overallCount+'</td><td style="font-weight:700;color:'+(displayProfit>=0? '#8ee99b':'#ff8b8b')+'">'+displayProfit.toFixed(2)+'</td><td class="green">'+((teamsEntry.home && teamsEntry.home.profit)||0).toFixed(2)+'</td><td class="green">'+((teamsEntry.away && teamsEntry.away.profit)||0).toFixed(2)+'</td><td><span class="toggle" data-team="'+escapeHtml(r.key)+'">Ver / Ocultar</span></td></tr>';
-    // hidden detail row placeholder
-    html += '<tr class="detail-placeholder" data-for="'+escapeHtml(r.key)+'" style="display:none"><td colspan="6"></td></tr>';
-  });
-  html += '</tbody></table>';
-  document.getElementById(containerId).innerHTML = html;
-
-  // attach click handlers for toggles
-  document.querySelectorAll('#teamsTable .toggle').forEach(btn=>{
-    btn.addEventListener('click', function(){
-      const teamKey = this.getAttribute('data-team');
-      const ph = document.querySelector('.detail-placeholder[data-for="'+teamKey+'"]');
-      if(!ph) return;
-      if(ph.style.display === 'none' || ph.style.display === ''){
-        // build details HTML for this team
-        const t = teamsObj[teamKey];
-        let inner = '<div class="detail-row">';
-        inner += '<strong>Resumen por rol</strong>';
-        inner += '<table style="margin-top:8px"><thead><tr><th>Rol</th><th>Apuestas</th><th>Ganado</th><th>Perdido</th><th>Profit</th></tr></thead><tbody>';
-        inner += '<tr><td>Overall</td><td>'+((t.overall && t.overall.count)||0)+'</td><td class="green">'+(((t.overall && t.overall.ganado)||0).toFixed(2))+'</td><td class="red">'+(((t.overall && t.overall.perdido)||0).toFixed(2))+'</td><td style="font-weight:700;color:'+(((t.overall && t.overall.profit)||0)>=0? '#8ee99b':'#ff8b8b')+'">'+(((t.overall && t.overall.profit)||0).toFixed(2))+'</td></tr>';
-        inner += '<tr><td>Local</td><td>'+((t.home && t.home.count)||0)+'</td><td class="green">'+(((t.home && t.home.ganado)||0).toFixed(2))+'</td><td class="red">'+(((t.home && t.home.perdido)||0).toFixed(2))+'</td><td style="font-weight:700;color:'+(((t.home && t.home.profit)||0)>=0? '#8ee99b':'#ff8b8b')+'">'+(((t.home && t.home.profit)||0).toFixed(2))+'</td></tr>';
-        inner += '<tr><td>Visita</td><td>'+((t.away && t.away.count)||0)+'</td><td class="green">'+(((t.away && t.away.ganado)||0).toFixed(2))+'</td><td class="red">'+(((t.away && t.away.perdido)||0).toFixed(2))+'</td><td style="font-weight:700;color:'+(((t.away && t.away.profit)||0)>=0? '#8ee99b':'#ff8b8b')+'">'+(((t.away && t.away.profit)||0).toFixed(2))+'</td></tr>';
-        inner += '</tbody></table>';
-
-        // odds buckets per role (show top by profit)
-        function buildBucketHtml(buckets){
-          if(!buckets) return '<div class="small">Sin datos</div>';
-          const arr = Object.keys(buckets).map(k=>({k,profit:buckets[k].profit||0,count:buckets[k].count||0})).sort((a,b)=>b.profit - a.profit);
-          if(arr.length===0) return '<div class="small">Sin datos</div>';
-          let h = '<table style="margin-top:8px"><thead><tr><th>Rango cuota</th><th>Apuestas</th><th>Profit</th></tr></thead><tbody>';
-          arr.forEach(a=> h += '<tr><td>'+escapeHtml(a.k)+'</td><td>'+a.count+'</td><td style="font-weight:700;color:'+(a.profit>=0? '#8ee99b':'#ff8b8b')+'">'+a.profit.toFixed(2)+'</td></tr>');
-          h += '</tbody></table>';
-          return h;
-        }
-        inner += '<div style="margin-top:12px"><strong>Buckets de cuota — Local</strong>'+buildBucketHtml(t.home.oddsBuckets)+'</div>';
-        inner += '<div style="margin-top:12px"><strong>Buckets de cuota — Visita</strong>'+buildBucketHtml(t.away.oddsBuckets)+'</div>';
-        inner += '</div>';
-
-        ph.querySelector('td').innerHTML = inner;
-        ph.style.display = '';
-      } else {
-        ph.style.display = 'none';
-      }
+    // Utilidades
+    const extOf = name => (name.split('.').pop()||'').toLowerCase();
+    const isTextType = type => /^text\/|javascript|json|xml|yaml|yml/.test(type);
+    const readAsText = file => new Promise((res,rej)=>{
+      const r=new FileReader(); r.onerror=rej; r.onload=()=>res(r.result); r.readAsText(file);
     });
-  });
-}
+    const readAsArrayBuffer = file => new Promise((res,rej)=>{
+      const r=new FileReader(); r.onerror=rej; r.onload=()=>res(r.result); r.readAsArrayBuffer(file);
+    });
+    const readAsDataURL = file => new Promise((res,rej)=>{
+      const r=new FileReader(); r.onerror=rej; r.onload=()=>res(r.result); r.readAsDataURL(file);
+    });
 
-/* escape helper */
-function escapeHtml(s){ return String(s||'').replace(/[&<>"]/g, c=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
-
-/* UI events */
-document.getElementById('fileInput').addEventListener('change', e=>{
-  const f = e.target.files[0];
-  if(!f) return;
-  const reader = new FileReader();
-  reader.onprogress = ev => {
-    if(ev.lengthComputable){
-      progress.style.display = '';
-      progress.value = (ev.loaded/ev.total*100);
-      status.textContent = 'Leyendo archivo... ' + Math.round(progress.value) + '%';
-    }
-  };
-  reader.onload = ev => {
-    status.textContent = 'Enviando datos al worker...';
-    worker.postMessage({text: ev.target.result});
-  };
-  reader.onerror = ()=> alert('Error al leer el archivo');
-  reader.readAsText(f);
-});
-
-document.getElementById('btnPaste').addEventListener('click', ()=>{
-  const t = prompt('Pega aquí tu JSON completo (array o NDJSON). Para cancelar deja vacío.');
-  if(t) document.getElementById('pasteArea').value = t;
-});
-
-document.getElementById('btnStart').addEventListener('click', ()=>{
-  const txt = document.getElementById('pasteArea').value.trim();
-  if(!txt){ alert('Pega JSON o carga archivo'); return; }
-  progress.style.display = '';
-  progress.value = 10;
-  status.textContent = 'Procesando texto pegado...';
-  worker.postMessage({text: txt});
-});
-
-document.getElementById('teamViewSelect').addEventListener('change', ()=>{
-  if(window._lastWorkerResult && window._lastWorkerResult.teams) renderTeamDetailed(window._lastWorkerResult.teams, 'byTeam');
-});
-
-/* Export CSV: now incluye equipo/rol y buckets */
-document.getElementById('btnExportCSV').addEventListener('click', ()=>{
-  const res = window._lastWorkerResult;
-  if(!res){ alert('No hay resultados para exportar'); return; }
-  const rows = [];
-  rows.push(['scope','key','role','count','ganado','perdido','profit','bucket']);
-  Object.entries(res.leagues).forEach(([k,v])=> rows.push(['league', k, 'overall', v.count, (v.ganado||0).toFixed(2), (v.perdido||0).toFixed(2), (v.profit||0).toFixed(2), '']));
-  // teams: overall, home, away
-  Object.entries(res.teams).forEach(([team,t])=>{
-    rows.push(['team', team, 'overall', (t.overall && t.overall.count)||0, ((t.overall && t.overall.ganado)||0).toFixed(2), ((t.overall && t.overall.perdido)||0).toFixed(2), ((t.overall && t.overall.profit)||0).toFixed(2), '']);
-    rows.push(['team', team, 'home', (t.home && t.home.count)||0, ((t.home && t.home.ganado)||0).toFixed(2), ((t.home && t.home.perdido)||0).toFixed(2), ((t.home && t.home.profit)||0).toFixed(2), '']);
-    rows.push(['team', team, 'away', (t.away && t.away.count)||0, ((t.away && t.away.ganado)||0).toFixed(2), ((t.away && t.away.perdido)||0).toFixed(2), ((t.away && t.away.profit)||0).toFixed(2), '']);
-    // buckets per role
-    const pushBuckets = (roleObj, roleName) => {
-      if(!roleObj || !roleObj.oddsBuckets) return;
-      Object.entries(roleObj.oddsBuckets).forEach(([bk, val])=>{
-        rows.push(['team_bucket', team, roleName, val.count||0, (val.ganado||0).toFixed(2), (val.perdido||0).toFixed(2), (val.profit||0).toFixed(2), bk]);
+    function parseINI(text){
+      const result = {}; let section = result;
+      const sectionStack = [];
+      text.split(/\r?\n/).forEach(line=>{
+        line=line.trim();
+        if(!line || line.startsWith(';') || line.startsWith('#')) return;
+        const mSec = line.match(/^\[(.+?)\]$/);
+        if(mSec){
+          const path = mSec[1].split('.');
+          section = result;
+          for(const p of path){ section[p] = section[p] || {}; section = section[p]; }
+          return;
+        }
+        const mKV = line.match(/^([^=]+)=(.*)$/);
+        if(mKV){
+          const key=mKV[1].trim(); let val=mKV[2].trim();
+          // intenta numerico/booleano
+          if(/^(true|false)$/i.test(val)) val = /^true$/i.test(val);
+          else if(!isNaN(Number(val))) val = Number(val);
+          else if(/^".*"$|^'.*'$/.test(val)) val = val.slice(1,-1);
+          section[key]=val;
+        }
       });
-    };
-    pushBuckets(t.home, 'home');
-    pushBuckets(t.away, 'away');
-    if(t.overall && t.overall.oddsBuckets) Object.entries(t.overall.oddsBuckets).forEach(([bk, val]) => rows.push(['team_bucket', team, 'overall', val.count||0, (val.ganado||0).toFixed(2), (val.perdido||0).toFixed(2), (val.profit||0).toFixed(2), bk]));
-  });
-  Object.entries(res.oddsBuckets).forEach(([k,v])=> rows.push(['odds_range', k, 'overall', v.count, (v.ganado||0).toFixed(2), (v.perdido||0).toFixed(2), (v.profit||0).toFixed(2), '']));
+      return result;
+    }
 
-  const csv = rows.map(r=> r.map(c => '\"'+String(c).replace(/\"/g,'\"\"')+'\"').join(',')).join('\\n');
-  const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a'); a.href = url; a.download = 'backtest_summary.csv'; a.click();
-  URL.revokeObjectURL(url);
-});
-</script>
+    function xmlNodeToJson(node){
+      // Element, Text, CDATA
+      if(node.nodeType === 3 || node.nodeType === 4){
+        const t = node.nodeValue.trim();
+        return t ? t : undefined;
+      }
+      if(node.nodeType !== 1) return undefined;
+
+      const obj = {};
+      // atributos
+      if(node.attributes && node.attributes.length){
+        obj['@attrs'] = {};
+        for(const attr of node.attributes){
+          obj['@attrs'][attr.name] = attr.value;
+        }
+      }
+      // hijos
+      const childMap = {};
+      for(const child of node.childNodes){
+        const j = xmlNodeToJson(child);
+        if(j === undefined) continue;
+        const key = child.nodeType===1 ? child.nodeName : '#text';
+        if(!childMap[key]) childMap[key] = [];
+        childMap[key].push(j);
+      }
+      for(const k in childMap){
+        obj[k] = childMap[k].length===1 ? childMap[k][0] : childMap[k];
+      }
+      if(Object.keys(obj).length===0) return null;
+      return obj;
+    }
+
+    async function convertFile(file){
+      const name = file.name || 'pasted';
+      const type = file.type || '';
+      const ext = extOf(name);
+
+      try{
+        // JSON
+        if(ext==='json' || /application\/json/.test(type)){
+          const text = await readAsText(file);
+          return { name, type, data: JSON.parse(text) };
+        }
+
+        // CSV/TSV
+        if(ext==='csv' || ext==='tsv' || /^text\/(csv|tsv)/.test(type)){
+          const text = await readAsText(file);
+          let config = {skipEmptyLines:true, dynamicTyping:true};
+          if(csvModeSel.value==='rows'){ config.header=false }
+          else if(csvModeSel.value==='objects'){ config.header=true }
+          else { config.header='infer' } // ext: soporte auto (Papa no lo tiene nativo)
+          // hack infer: si la primera fila no repite campos, asumimos header
+          if(config.header==='infer'){
+            const probe = Papa.parse(text, {preview:2}).data||[];
+            const first = probe[0]||[], second = probe[1]||[];
+            const unique = new Set(first).size === first.length;
+            config.header = unique && first.length===second.length;
+          }
+          const parsed = Papa.parse(text, config);
+          return { name, type: type||'text/csv', data: parsed.data };
+        }
+
+        // Excel (xlsx/xls)
+        if(['xlsx','xls','xlsb','xlsm','ods','fods'].includes(ext)){
+          const buf = await readAsArrayBuffer(file);
+          const wb = XLSX.read(buf, { type:'array' });
+          const sheets = {};
+          wb.SheetNames.forEach(sn=>{
+            sheets[sn] = XLSX.utils.sheet_to_json(wb.Sheets[sn], {defval:null});
+          });
+          return { name, type: type||'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', data: sheets };
+        }
+
+        // YAML
+        if(['yaml','yml'].includes(ext) || /(yaml|yml)/.test(type)){
+          const text = await readAsText(file);
+          const data = jsyaml.load(text);
+          return { name, type: type||'text/yaml', data };
+        }
+
+        // XML / HTML
+        if(['xml','html','xhtml','svg'].includes(ext) || /(xml|html|svg)/.test(type)){
+          const text = await readAsText(file);
+          const parser = new DOMParser();
+          const mime = ext==='html' ? 'text/html' : 'application/xml';
+          const doc = parser.parseFromString(text, mime);
+          // errores de parseo?
+          if(doc.querySelector('parsererror')) throw new Error('XML/HTML inválido');
+          const root = doc.documentElement || doc;
+          const data = {};
+          data[root.nodeName] = xmlNodeToJson(root);
+          return { name, type: type||mime, data };
+        }
+
+        // INI
+        if(['ini','cfg','conf','properties'].includes(ext)){
+          const text = await readAsText(file);
+          const data = parseINI(text);
+          return { name, type: type||'text/plain', data };
+        }
+
+        // TXT (por descarte si es texto)
+        if(isTextType(type) || ['txt','log','md','rtf'].includes(ext)){
+          const text = await readAsText(file);
+          const lines = text.split(/\r?\n/);
+          return { name, type: type||'text/plain', data: lines };
+        }
+
+        // Binarios (PDF, imágenes, etc.)
+        const b64Mode = b64LimitSel.value;
+        const meta = { name, mime: type||'application/octet-stream', size: file.size };
+        if(b64Mode !== '0'){
+          const dataURL = await readAsDataURL(file);
+          let base64 = dataURL.split(',')[1] || '';
+          const limit = b64Mode==='full' ? Infinity : Number(b64Mode);
+          if(base64.length > limit){
+            base64 = base64.slice(0, limit);
+            meta.base64_truncated = true;
+            meta.base64_note = 'Truncado para evitar archivos JSON gigantes';
+          }
+          meta.base64 = base64;
+        }
+        return { name, type: type||'application/octet-stream', data: meta };
+
+      } catch(err){
+        return { name, type, error: true, message: (err && err.message) ? err.message : String(err) };
+      }
+    }
+
+    async function handleFiles(fileList){
+      if(!fileList || !fileList.length) return;
+      setStatus('Convirtiendo ' + fileList.length + ' archivo(s)…');
+      const results = [];
+      for(const file of fileList){
+        results.push( await convertFile(file) );
+      }
+      const indent = Number(indentSel.value);
+      const json = results.length===1 ? results[0] : results;
+      output.value = JSON.stringify(json, null, indent);
+      const errors = (Array.isArray(json)?json:[json]).filter(x=>x && x.error);
+      if(errors.length){
+        setStatus('Convertido con errores en ' + errors.length + ' archivo(s). Revisa mensajes.', 'warn');
+      } else {
+        setStatus('Conversión completada.', 'ok');
+      }
+    }
+
+    // Arrastrar/soltar
+    ['dragenter','dragover'].forEach(evt=>{
+      drop.addEventListener(evt, e=>{ e.preventDefault(); e.stopPropagation(); drop.classList.add('drag'); });
+    });
+    ['dragleave','drop'].forEach(evt=>{
+      drop.addEventListener(evt, e=>{ e.preventDefault(); e.stopPropagation(); drop.classList.remove('drag'); });
+    });
+    drop.addEventListener('drop', e=>{
+      const items = e.dataTransfer.items;
+      if(items && items.length){
+        const files = [];
+        for(const it of items){
+          if(it.kind==='file'){ files.push(it.getAsFile()); }
+        }
+        handleFiles(files);
+      } else {
+        handleFiles(e.dataTransfer.files);
+      }
+    });
+    drop.addEventListener('click', ()=> fileInput.click());
+    fileInput.addEventListener('change', e=> handleFiles(e.target.files));
+
+    // Portapapeles (botón)
+    btnPaste.addEventListener('click', async ()=>{
+      pasteZone.classList.remove('hidden');
+      try{
+        if(!navigator.clipboard || !navigator.clipboard.read){
+          setStatus('Tu navegador no permite leer archivos del portapapeles automáticamente. Pega en la zona y se procesará.', 'warn');
+          return;
+        }
+        const items = await navigator.clipboard.read();
+        const files = [];
+        for(const it of items){
+          for(const type of it.types){
+            const blob = await it.getType(type);
+            const name = 'clipboard.' + (type.split('/')[1]||'bin');
+            files.push(new File([blob], name, {type}));
+          }
+        }
+        if(files.length) handleFiles(files);
+      }catch(e){
+        setStatus('No se pudo leer del portapapeles: ' + e.message, 'warn');
+      }
+    });
+    closePaste.addEventListener('click', ()=> pasteZone.classList.add('hidden'));
+
+    // Pegar directo en la página (Ctrl/⌘+V)
+    document.addEventListener('paste', e=>{
+      const files = [];
+      if(e.clipboardData && e.clipboardData.items){
+        for(const it of e.clipboardData.items){
+          if(it.kind==='file'){
+            const f = it.getAsFile();
+            if(f) files.push(f);
+          }
+        }
+      }
+      if(files.length){
+        e.preventDefault();
+        handleFiles(files);
+      } else {
+        // texto pegado
+        const text = e.clipboardData.getData('text');
+        if(text){
+          e.preventDefault();
+          // lo tratamos como archivo txt
+          const blob = new Blob([text], {type:'text/plain'});
+          const file = new File([blob], 'clipboard.txt', {type:'text/plain'});
+          handleFiles([file]);
+        }
+      }
+    });
+
+    // Botones
+    btnCopy.addEventListener('click', async ()=>{
+      try{
+        await navigator.clipboard.writeText(output.value);
+        setStatus('JSON copiado al portapapeles.', 'ok');
+      }catch(e){
+        setStatus('No se pudo copiar: ' + e.message, 'err');
+      }
+    });
+    btnDownload.addEventListener('click', ()=>{
+      const blob = new Blob([output.value||''], {type:'application/json'});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'convertido.json';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      setStatus('Descarga iniciada.', 'ok');
+    });
+    btnClear.addEventListener('click', ()=>{
+      output.value='';
+      fileInput.value='';
+      setStatus('Limpio.');
+    });
+
+    // React a cambio de opciones (reformatea)
+    [indentSel,csvModeSel,b64LimitSel].forEach(el=>{
+      el.addEventListener('change', ()=> {
+        // solo reintenta parsear si hay archivos? No los conservamos.
+        // Así que solo re-indentamos si es JSON válido.
+        try{
+          const current = JSON.parse(output.value);
+          output.value = JSON.stringify(current, null, Number(indentSel.value));
+          setStatus('Formato actualizado.', 'ok');
+        }catch{}
+      });
+    });
+  })();
+  </script>
 </body>
 </html>
