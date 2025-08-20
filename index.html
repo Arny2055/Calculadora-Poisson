@@ -63,6 +63,11 @@
   <div class="card">
     <h3>Top equipos (ordenado por profit)</h3>
     <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
+      <div class="small">Filtrar por liga:</div>
+      <select id="leagueFilter" class="muted-pill">
+        <option value="all">Todas</option>
+      </select>
+
       <div class="small">Ver equipos como:</div>
       <select id="teamViewSelect" class="muted-pill">
         <option value="both">Ambos</option>
@@ -189,10 +194,17 @@ function oddsBucket(o){
 /* ensure team structure */
 function ensureTeamObj(obj, name){
   if(!obj[name]) obj[name] = {
-    overall:{count:0,profit:0,ganado:0,perdido:0},
+    overall:{count:0,profit:0,ganado:0,perdido:0,oddsBuckets:{}},
     home:{count:0,profit:0,ganado:0,perdido:0,oddsBuckets:{}},
     away:{count:0,profit:0,ganado:0,perdido:0,oddsBuckets:{}}
   };
+}
+
+/* add team->league mapping (avoid duplicates) */
+function addTeamLeague(map, team, liga){
+  if(!team) return;
+  if(!map[team]) map[team] = [];
+  if(!map[team].includes(liga)) map[team].push(liga);
 }
 
 /* main */
@@ -208,7 +220,9 @@ self.onmessage = function(e){
       for(const line of lines){
         try{ records.push(JSON.parse(line)); }catch(errLine){
           const maybe = line.replace(/'/g,'\\"');
-          try{ records.push(JSON.parse(maybe)); }catch(e2){ /* skip */ }
+          try{ records.push(JSON.parse(maybe)); }catch(e2){
+            // couldn't parse line as JSON: skip
+          }
         }
       }
     }
@@ -217,6 +231,7 @@ self.onmessage = function(e){
     let total=0, profit=0, ganado=0, perdido=0;
     let leagues={}, teams={}, oddsBuckets={};
     let undetermined=[];
+    let teamLeagues = {}; // team -> [liga1, liga2, ...]
 
     for(const r of records){
       total++;
@@ -300,6 +315,9 @@ self.onmessage = function(e){
         const bucket = oddsBucket(odds);
         if(!teams[home].home.oddsBuckets[bucket]) teams[home].home.oddsBuckets[bucket] = {count:0,profit:0,ganado:0,perdido:0};
         teams[home].home.oddsBuckets[bucket].count++; teams[home].home.oddsBuckets[bucket].profit += p; if(p>0) teams[home].home.oddsBuckets[bucket].ganado += p; else teams[home].home.oddsBuckets[bucket].perdido += Math.abs(p);
+
+        // mapping team -> league
+        addTeamLeague(teamLeagues, home, leagueKey);
       }
 
       if(away){
@@ -309,6 +327,9 @@ self.onmessage = function(e){
         const bucket = oddsBucket(odds);
         if(!teams[away].away.oddsBuckets[bucket]) teams[away].away.oddsBuckets[bucket] = {count:0,profit:0,ganado:0,perdido:0};
         teams[away].away.oddsBuckets[bucket].count++; teams[away].away.oddsBuckets[bucket].profit += p; if(p>0) teams[away].away.oddsBuckets[bucket].ganado += p; else teams[away].away.oddsBuckets[bucket].perdido += Math.abs(p);
+
+        // mapping team -> league
+        addTeamLeague(teamLeagues, away, leagueKey);
       }
 
       // if neither parsed, still try to tag overall by matchStr as team name (best-effort)
@@ -319,6 +340,8 @@ self.onmessage = function(e){
         if(!teams[matchStr].overall.oddsBuckets) teams[matchStr].overall.oddsBuckets = {};
         if(!teams[matchStr].overall.oddsBuckets[bucket]) teams[matchStr].overall.oddsBuckets[bucket] = {count:0,profit:0,ganado:0,perdido:0};
         teams[matchStr].overall.oddsBuckets[bucket].count++; teams[matchStr].overall.oddsBuckets[bucket].profit += p;
+
+        addTeamLeague(teamLeagues, matchStr, leagueKey);
       }
 
       // odds buckets global
@@ -328,7 +351,7 @@ self.onmessage = function(e){
     } // end loop
 
     const roi = total ? (profit / total * 100) : 0;
-    self.postMessage({ok:true, metrics:{total,profit,ganado,perdido,roi,undetermined:undetermined.length}, leagues, teams, oddsBuckets, undetermined:undetermined.slice(0,20)});
+    self.postMessage({ok:true, metrics:{total,profit,ganado,perdido,roi,undetermined:undetermined.length}, leagues, teams, oddsBuckets, undetermined:undetermined.slice(0,20), teamLeagues});
   }catch(err){
     self.postMessage({ok:false,error:err.message});
   }
@@ -358,6 +381,23 @@ worker.onmessage = e => {
     <div class="small">Registros no decididos: <strong class="warning">${m.undetermined}</strong> (se muestran algunos abajo)</div>
   `;
 
+  // POBLAR SELECT DE LIGAS (punto 2)
+  const leagueSelect = document.getElementById('leagueFilter');
+  leagueSelect.innerHTML = '<option value="all">Todas</option>';
+  try {
+    Object.keys(e.data.leagues).forEach(liga=>{
+      const opt = document.createElement('option');
+      opt.value = liga;
+      opt.textContent = liga;
+      leagueSelect.appendChild(opt);
+    });
+  } catch(err) {
+    // si no hay ligas, dejar "Todas"
+  }
+
+  // guardar para filtrado dinámico
+  window._lastWorkerResult = e.data;
+
   renderGroupTable(e.data.leagues, 'byLeague', 'Liga');
   renderOddsTable(e.data.oddsBuckets, 'byOdds', 'Rango cuota');
   renderTeamDetailed(e.data.teams, 'byTeam');
@@ -375,7 +415,6 @@ worker.onmessage = e => {
   }
 
   document.getElementById('output').style.display = '';
-  window._lastWorkerResult = e.data;
 };
 
 function renderGroupTable(mapObj, containerId, label){
@@ -407,8 +446,24 @@ function renderOddsTable(mapObj, containerId, label){
 /* Teams detailed renderer */
 function renderTeamDetailed(teamsObj, containerId){
   const view = document.getElementById('teamViewSelect') ? document.getElementById('teamViewSelect').value : 'both';
-  const arr = Object.keys(teamsObj).map(k=>{
-    const t = teamsObj[k];
+  const leagueFilter = document.getElementById('leagueFilter') ? document.getElementById('leagueFilter').value : 'all';
+  // build filtered teams object according to selected league
+  let filtered = {};
+  if(leagueFilter === 'all'){
+    filtered = teamsObj;
+  } else {
+    const mapping = (window._lastWorkerResult && window._lastWorkerResult.teamLeagues) ? window._lastWorkerResult.teamLeagues : {};
+    // teamsObj includes full aggregated team stats; teamLeagues tells which teams appear in the chosen league.
+    Object.keys(teamsObj).forEach(teamName => {
+      const leaguesForTeam = mapping[teamName] || [];
+      if(leaguesForTeam.includes(leagueFilter)){
+        filtered[teamName] = teamsObj[teamName];
+      }
+    });
+  }
+
+  const arr = Object.keys(filtered).map(k=>{
+    const t = filtered[k];
     return {
       key:k,
       overallProfit: (t.overall && t.overall.profit) || 0,
@@ -423,7 +478,7 @@ function renderTeamDetailed(teamsObj, containerId){
   let html = '<table id="teamsTable"><thead><tr><th>Equipo</th><th>Apuestas</th><th>Profit total</th><th>Local</th><th>Visita</th><th>Detalle</th></tr></thead><tbody>';
   arr.forEach((r, idx)=>{
     // choose displayProfit based on view
-    const teamsEntry = teamsObj[r.key];
+    const teamsEntry = filtered[r.key];
     const displayProfit = view === 'home' ? (teamsEntry.home.profit || 0) : (view === 'away' ? (teamsEntry.away.profit || 0) : (teamsEntry.overall.profit || 0));
     html += '<tr data-team-index="'+idx+'" style="vertical-align:top"><td>'+escapeHtml(r.key)+'</td><td>'+r.overallCount+'</td><td style="font-weight:700;color:'+(displayProfit>=0? '#8ee99b':'#ff8b8b')+'">'+displayProfit.toFixed(2)+'</td><td class="green">'+((teamsEntry.home && teamsEntry.home.profit)||0).toFixed(2)+'</td><td class="green">'+((teamsEntry.away && teamsEntry.away.profit)||0).toFixed(2)+'</td><td><span class="toggle" data-team="'+escapeHtml(r.key)+'">Ver / Ocultar</span></td></tr>';
     // hidden detail row placeholder
@@ -440,7 +495,7 @@ function renderTeamDetailed(teamsObj, containerId){
       if(!ph) return;
       if(ph.style.display === 'none' || ph.style.display === ''){
         // build details HTML for this team
-        const t = teamsObj[teamKey];
+        const t = filtered[teamKey] || teamsObj[teamKey];
         let inner = '<div class="detail-row">';
         inner += '<strong>Resumen por rol</strong>';
         inner += '<table style="margin-top:8px"><thead><tr><th>Rol</th><th>Apuestas</th><th>Ganado</th><th>Perdido</th><th>Profit</th></tr></thead><tbody>';
@@ -510,6 +565,11 @@ document.getElementById('btnStart').addEventListener('click', ()=>{
 });
 
 document.getElementById('teamViewSelect').addEventListener('change', ()=>{
+  if(window._lastWorkerResult && window._lastWorkerResult.teams) renderTeamDetailed(window._lastWorkerResult.teams, 'byTeam');
+});
+
+/* (3) Evento filtro de liga */
+document.getElementById('leagueFilter').addEventListener('change', ()=>{
   if(window._lastWorkerResult && window._lastWorkerResult.teams) renderTeamDetailed(window._lastWorkerResult.teams, 'byTeam');
 });
 
