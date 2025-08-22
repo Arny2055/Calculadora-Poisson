@@ -1,610 +1,140 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Backtesting Robusto — Detecta patrones y valida resultados</title>
+<meta charset="UTF-8">
+<title>Estadísticas de Ligas y Equipos</title>
 <style>
-  :root{--bg:#071225;--card:#0b1220;--muted:#9aa4b2;--accent:#06b6d4}
-  body{background:linear-gradient(180deg,var(--bg),#04101a);color:#e6eef6;font-family:Inter,system-ui,Arial;margin:0;padding:18px}
-  h1{font-size:1.1rem;margin:0 0 12px 0}
-  .card{background:var(--card);padding:12px;border-radius:10px;margin-bottom:12px;box-shadow:0 6px 18px rgba(2,6,23,0.6)}
-  input,textarea,select,button{font:inherit}
-  input[type=file]{color:transparent}
-  textarea{width:100%;min-height:90px;padding:8px;border-radius:8px;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.03);color:inherit}
-  .row{display:flex;gap:8px;align-items:center}
-  .btn{background:linear-gradient(90deg,var(--accent),#26d0ce);border:none;color:#021522;padding:8px 12px;border-radius:8px;cursor:pointer;font-weight:700}
-  progress{width:100%;height:14px;border-radius:8px;overflow:hidden}
-  table{width:100%;border-collapse:collapse;font-size:13px}
-  th,td{padding:6px;border-bottom:1px solid rgba(255,255,255,0.04);text-align:left}
-  th{color:var(--muted);font-weight:600;font-size:12px}
-  .green{color:#8ee99b}
-  .red{color:#ff8b8b}
-  .small{font-size:13px;color:var(--muted)}
-  pre{white-space:pre-wrap;font-size:13px}
-  .warning{color:#ffd166}
-  .toggle { cursor: pointer; color:var(--accent); font-weight:700 }
-  .detail-row { background: rgba(255,255,255,0.01); padding:8px; border-radius:6px; margin-top:6px; }
-  .muted-pill { background: rgba(255,255,255,0.02); padding:6px 8px; border-radius:8px; color:var(--muted); font-size:12px }
+  body {font-family: Arial, sans-serif; background:#0b1220; color:#fff; padding:20px;}
+  h1, h2 {color:#06b6d4;}
+  select, input, button {padding:6px; margin:5px; border-radius:4px; border:1px solid #06b6d4;}
+  table {border-collapse: collapse; width:100%; margin-top:10px;}
+  th, td {border:1px solid #444; padding:6px; text-align:center;}
+  th {background:#06b6d4; color:#fff;}
 </style>
 </head>
 <body>
-
-<h1>Backtesting robusto — calcula desde tu JSON y valida resultados</h1>
-
-<div class="card">
-  <div class="row" style="margin-bottom:10px">
-    <input id="fileInput" type="file" />
-    <button id="btnPaste" class="btn">Pegar JSON manual</button>
-  </div>
-
-  <textarea id="pasteArea" placeholder='Pega aquí tu JSON (array o NDJSON - una línea por objeto)'></textarea>
-
-  <div style="margin-top:8px" class="row">
-    <button id="btnStart" class="btn">Procesar Backtest</button>
-    <div style="margin-left:auto" class="small">Stake fijo = <strong>1</strong></div>
-  </div>
-
-  <progress id="progress" value="0" max="100" style="display:none;margin-top:8px"></progress>
-  <div id="status" class="small" style="margin-top:8px"></div>
-</div>
-
-<div id="output" style="display:none">
-  <div class="card">
-    <h3>Resumen</h3>
-    <div id="metrics" class="small"></div>
-  </div>
-
-  <div class="card">
-    <h3>Top ligas (ordenado por profit)</h3>
-    <div id="byLeague"></div>
-  </div>
-
-  <div class="card">
-    <h3>Top equipos (ordenado por profit)</h3>
-    <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
-      <div class="small">Filtrar por liga:</div>
-      <select id="leagueFilter" class="muted-pill">
-        <option value="all">Todas</option>
-      </select>
-
-      <div class="small">Ver equipos como:</div>
-      <select id="teamViewSelect" class="muted-pill">
-        <option value="both">Ambos</option>
-        <option value="home">Solo Local</option>
-        <option value="away">Solo Visita</option>
-      </select>
-      <div style="margin-left:auto" class="small">Haz click en un equipo para ver desglose por cuotas</div>
-    </div>
-    <div id="byTeam"></div>
-  </div>
-
-  <div class="card">
-    <h3>Por rango de cuotas</h3>
-    <div id="byOdds"></div>
-  </div>
-
-  <div class="card">
-    <h3>Problemas / registros no decididos (muestra algunos)</h3>
-    <div id="undetermined" class="small"></div>
-  </div>
-
-  <div class="card">
-    <button id="btnExportCSV" class="btn">Exportar resultados (CSV)</button>
-  </div>
-</div>
-
+  <h1>Estadísticas últimos partidos</h1>
+  <input type="file" id="fileInput" accept=".json"><br><br>
+  
+  <label>Selecciona Liga:</label>
+  <select id="leagueSelect"></select>
+  
+  <br><br>
+  <label>Equipo Local:</label>
+  <select id="homeSelect"></select>
+  
+  <label>Equipo Visitante:</label>
+  <select id="awaySelect"></select>
+  
+  <br><br>
+  <button id="analyzeBtn">Analizar</button>
+  
+  <div class="section" id="homeStats"></div>
+  <div class="section" id="awayStats"></div>
+  
 <script>
-/* =========== Worker code (string) =========== 
-   No dependencias externas. Heurísticas para decidir ganado/perdido.
-*/
-const workerCode = `
-/* helpers */
-function normalizeKey(k){ return k ? k.toString().trim().toLowerCase().replace(/\\s+/g,' ') : ''; }
-function tryNum(v){
-  if(v===null||v===undefined) return NaN;
-  if(typeof v === 'number') return v;
-  let s = String(v).trim().replace(/['"]/g,'').replace(/,/g,'.');
-  const m = s.match(/-?\\d+(\\.\\d+)?/);
-  if(m) return Number(m[0]);
-  return NaN;
-}
-function parseScore(s){
-  if(!s) return null;
-  const m = String(s).match(/(\\d+)\\s*[-:\\u2013]\\s*(\\d+)/);
-  if(m) return {home:parseInt(m[1],10),away:parseInt(m[2],10)};
-  return null;
+let allMatches = [];
+let leagueTeams = [];
+
+function parseResult(result) {
+  let [home, away] = result.split("-").map(Number);
+  if (home > away) return "1";
+  if (home < away) return "2";
+  return "X";
 }
 
-/* decide if desiredOutcome wins given ftScore */
-function evaluateDesired(desired, market, score){
-  if(!desired && !market) return null;
-  const d = (desired||'').toString().toLowerCase();
-  const mkt = (market||'').toString().toLowerCase();
+function calculateStats(matches, team, isHome=true) {
+  let filtered = matches.filter(m => 
+    isHome ? m.Match.startsWith(team) : m.Match.endsWith(team)
+  ).slice(-10); // últimos 10
 
-  // BTTS / GG
-  if(/gg|both teams to score|both to score|btts|both score|yes/i.test(d) || /btts|both teams to score/i.test(mkt)){
-    if(score) return (score.home>0 && score.away>0);
-    return null;
-  }
-  if(/no goal|no|nogoal|both no/i.test(d) || /(no|nogoal)/.test(mkt) ){
-    if(score) return !(score.home>0 && score.away>0);
-    return null;
-  }
+  let total = filtered.length;
+  if (total === 0) return {total:0,matches:[]};
 
-  // OVER / UNDER numeric (ej: Over 2.5)
-  const overM = d.match(/over\\s*([0-9]+(?:\\.[0-9]+)?)/i) || mkt.match(/over\\s*([0-9]+(?:\\.[0-9]+)?)/i);
-  if(overM && score){
-    const thr = parseFloat(overM[1]);
-    return (score.home + score.away) > thr;
-  }
-  const underM = d.match(/under\\s*([0-9]+(?:\\.[0-9]+)?)/i) || mkt.match(/under\\s*([0-9]+(?:\\.[0-9]+)?)/i);
-  if(underM && score){
-    const thr = parseFloat(underM[1]);
-    return (score.home + score.away) <= thr;
-  }
+  let htGoals = filtered.filter(m => m["Result HT"] !== "0-0").length;
+  let over25 = filtered.filter(m => {
+    let [h,a] = m["Result FT"].split("-").map(Number);
+    return (h+a) > 2.5;
+  }).length;
+  let wins = filtered.filter(m => parseResult(m["Result FT"]) === (isHome ? "1" : "2")).length;
 
-  // 1X2 detection: '1', 'x', '2' or 'home', 'away'
-  if(/^\\s*1\\s*$/.test(d) || /(^|\\s)home(\\s|$)/i.test(d)){
-    if(score) return (score.home > score.away);
-  }
-  if(/^\\s*2\\s*$/.test(d) || /(^|\\s)away(\\s|$)/i.test(d)){
-    if(score) return (score.away > score.home);
-  }
-  if(/^\\s*x\\s*$/.test(d) || /^\\s*draw\\s*$/i.test(d) || /(^|\\s)tie(\\s|$)/i.test(d)){
-    if(score) return (score.home === score.away);
-  }
-
-  // exact score e.g. "1-1"
-  if(/^\\s*\\d+\\s*[-:]\\s*\\d+\\s*$/.test(d) && score){
-    const m = d.match(/(\\d+)\\s*[-:]\\s*(\\d+)/);
-    return (parseInt(m[1],10) === score.home && parseInt(m[2],10) === score.away);
-  }
-
-  return null;
-}
-
-/* normalize fetching: find key by many variants */
-function getValue(obj, candidates){
-  const map = {};
-  for(const k in obj) map[normalizeKey(k)] = obj[k];
-  for(const c of candidates){
-    const norm = normalizeKey(c);
-    if(map[norm] !== undefined) return map[norm];
-  }
-  for(const normKey in map){
-    for(const c of candidates){
-      const q = normalizeKey(c);
-      if(normKey.includes(q) || q.includes(normKey)) return map[normKey];
-    }
-  }
-  return undefined;
-}
-
-/* bucket odds */
-function oddsBucket(o){
-  if(isNaN(o)) return 'unknown';
-  if(o < 1.5) return '1.01 - 1.49';
-  if(o < 2) return '1.50 - 1.99';
-  if(o < 3) return '2.00 - 2.99';
-  if(o < 5) return '3.00 - 4.99';
-  return '5.00+';
-}
-
-/* ensure team structure */
-function ensureTeamObj(obj, name){
-  if(!obj[name]) obj[name] = {
-    overall:{count:0,profit:0,ganado:0,perdido:0,oddsBuckets:{}},
-    home:{count:0,profit:0,ganado:0,perdido:0,oddsBuckets:{}},
-    away:{count:0,profit:0,ganado:0,perdido:0,oddsBuckets:{}}
+  return {
+    total,
+    htGoalRate: ((htGoals/total)*100).toFixed(1)+"%",
+    over25Rate: ((over25/total)*100).toFixed(1)+"%",
+    winRate: ((wins/total)*100).toFixed(1)+"%",
+    matches: filtered
   };
 }
 
-/* add team->league mapping (avoid duplicates) */
-function addTeamLeague(map, team, liga){
-  if(!team) return;
-  if(!map[team]) map[team] = [];
-  if(!map[team].includes(liga)) map[team].push(liga);
-}
-
-/* main */
-self.onmessage = function(e){
-  try{
-    const text = e.data.text;
-    let records = [];
-    try{
-      records = JSON.parse(text);
-      if(!Array.isArray(records)) records = [records];
-    }catch(err){
-      const lines = text.split(/\\r?\\n/).map(s=>s.trim()).filter(Boolean);
-      for(const line of lines){
-        try{ records.push(JSON.parse(line)); }catch(errLine){
-          const maybe = line.replace(/'/g,'\\"');
-          try{ records.push(JSON.parse(maybe)); }catch(e2){
-            // couldn't parse line as JSON: skip
-          }
-        }
-      }
-    }
-
-    const stake = 1;
-    let total=0, profit=0, ganado=0, perdido=0;
-    let leagues={}, teams={}, oddsBuckets={};
-    let undetermined=[];
-    let teamLeagues = {}; // team -> [liga1, liga2, ...]
-
-    for(const r of records){
-      total++;
-      const rawOdds = getValue(r, ['odd','odds',' odd ','odd prematch','odd 1 prematch','odd 1 preMatch ']);
-      const rawProfit = getValue(r, ['profit','profit ','profit (u)','profit_usd','profit_usd ']);
-      const rawResult = getValue(r, ['result',' result ','status']);
-      const rawResultFT = getValue(r, ['result ft','result_ft','result ft ','result full time','result full']);
-      const rawDesired = getValue(r, ['desired outcome','desired',' name ','name','selection','bet','market selection']);
-      const rawLeague = getValue(r, ['league',' competition ','league ']);
-      const rawMatch = getValue(r, ['match',' match ','game','fixture']);
-
-      const odds = tryNum(rawOdds);
-      let p = NaN;
-      const pf = tryNum(rawProfit);
-      if(!isNaN(pf)){ p = pf; }
-      const rstr = rawResult ? String(rawResult).toLowerCase() : '';
-      if(isNaN(p)){
-        if(rstr.match(/win|won|winning/)) p = (odds>0 ? (odds-1)*stake : 0);
-        else if(rstr.match(/lose|lost|losing/)) p = -stake;
-      }
-
-      let score = parseScore(rawResultFT);
-      if(isNaN(p)){
-        if(!score) score = parseScore(rawResult);
-        const outcome = evaluateDesired(rawDesired, getValue(r,['market','market name','market ']), score);
-        if(outcome === true) p = (odds>0 ? (odds-1)*stake : 0);
-        else if(outcome === false) p = -stake;
-        else p = NaN;
-      }
-
-      if(isNaN(p)){
-        undetermined.push({sample:r});
-        continue;
-      }
-
-      profit += p;
-      if(p>0) ganado += p; else perdido += Math.abs(p);
-
-      // league
-      const leagueKey = rawLeague ? String(rawLeague).toString() : 'Desconocida';
-      if(!leagues[leagueKey]) leagues[leagueKey] = {count:0,profit:0,ganado:0,perdido:0};
-      leagues[leagueKey].count++;
-      leagues[leagueKey].profit += p;
-      if(p>0) leagues[leagueKey].ganado += p; else leagues[leagueKey].perdido += Math.abs(p);
-
-      // teams: try parse match into home/away with heuristics
-      const matchStr = rawMatch ? String(rawMatch) : '';
-      let home='', away='';
-      if(matchStr){
-        if(matchStr.includes('@')){
-          const parts = matchStr.split('@').map(s=>s.trim()).filter(Boolean);
-          if(parts.length >= 2){ away = parts[0]; home = parts[1]; }
-        } else if(/\\s+at\\s+/i.test(matchStr)){
-          const parts = matchStr.split(/\\s+at\\s+/i).map(s=>s.trim()).filter(Boolean);
-          if(parts.length >= 2){ away = parts[0]; home = parts[1]; }
-        } else {
-          // primero probar con " - " (espacio guion espacio), luego lo demás
-          const sepCandidates = [' - ', ' vs ', ' v ', ' — ', ' – ', '-'];
-          let used = null;
-          for(const s of sepCandidates){
-            if(matchStr.toLowerCase().includes(s.trim())){
-              used = s; break;
-            }
-          }
-          if(used){
-            const parts = matchStr.split(used).map(s=>s.trim()).filter(Boolean);
-            if(parts.length >= 2){ home = parts[0]; away = parts[1]; }
-          } else {
-            // try common "TeamA vs TeamB" without spaces
-            const parts = matchStr.split(/vs|VS|Vs/).map(s=>s.trim()).filter(Boolean);
-            if(parts.length >= 2){ home = parts[0]; away = parts[1]; }
-          }
-        }
-      }
-
-      // update team structures
-      if(home){
-        ensureTeamObj(teams, home);
-        teams[home].overall.count++; teams[home].overall.profit += p; if(p>0) teams[home].overall.ganado += p; else teams[home].overall.perdido += Math.abs(p);
-        teams[home].home.count++; teams[home].home.profit += p; if(p>0) teams[home].home.ganado += p; else teams[home].home.perdido += Math.abs(p);
-        const bucket = oddsBucket(odds);
-        if(!teams[home].home.oddsBuckets[bucket]) teams[home].home.oddsBuckets[bucket] = {count:0,profit:0,ganado:0,perdido:0};
-        teams[home].home.oddsBuckets[bucket].count++; teams[home].home.oddsBuckets[bucket].profit += p; if(p>0) teams[home].home.oddsBuckets[bucket].ganado += p; else teams[home].home.oddsBuckets[bucket].perdido += Math.abs(p);
-
-        // mapping team -> league
-        addTeamLeague(teamLeagues, home, leagueKey);
-      }
-
-      if(away){
-        ensureTeamObj(teams, away);
-        teams[away].overall.count++; teams[away].overall.profit += p; if(p>0) teams[away].overall.ganado += p; else teams[away].overall.perdido += Math.abs(p);
-        teams[away].away.count++; teams[away].away.profit += p; if(p>0) teams[away].away.ganado += p; else teams[away].away.perdido += Math.abs(p);
-        const bucket = oddsBucket(odds);
-        if(!teams[away].away.oddsBuckets[bucket]) teams[away].away.oddsBuckets[bucket] = {count:0,profit:0,ganado:0,perdido:0};
-        teams[away].away.oddsBuckets[bucket].count++; teams[away].away.oddsBuckets[bucket].profit += p; if(p>0) teams[away].away.oddsBuckets[bucket].ganado += p; else teams[away].away.oddsBuckets[bucket].perdido += Math.abs(p);
-
-        // mapping team -> league
-        addTeamLeague(teamLeagues, away, leagueKey);
-      }
-
-      // if neither parsed, still try to tag overall by matchStr as team name (best-effort)
-      if(!home && !away && matchStr){
-        ensureTeamObj(teams, matchStr);
-        teams[matchStr].overall.count++; teams[matchStr].overall.profit += p; if(p>0) teams[matchStr].overall.ganado += p; else teams[matchStr].overall.perdido += Math.abs(p);
-        const bucket = oddsBucket(odds);
-        if(!teams[matchStr].overall.oddsBuckets) teams[matchStr].overall.oddsBuckets = {};
-        if(!teams[matchStr].overall.oddsBuckets[bucket]) teams[matchStr].overall.oddsBuckets[bucket] = {count:0,profit:0,ganado:0,perdido:0};
-        teams[matchStr].overall.oddsBuckets[bucket].count++; teams[matchStr].overall.oddsBuckets[bucket].profit += p;
-
-        addTeamLeague(teamLeagues, matchStr, leagueKey);
-      }
-
-      // odds buckets global
-      const gb = oddsBucket(odds);
-      if(!oddsBuckets[gb]) oddsBuckets[gb] = {count:0,profit:0,ganado:0,perdido:0};
-      oddsBuckets[gb].count++; oddsBuckets[gb].profit += p; if(p>0) oddsBuckets[gb].ganado += p; else oddsBuckets[gb].perdido += Math.abs(p);
-    } // end loop
-
-    const roi = total ? (profit / total * 100) : 0;
-    self.postMessage({ok:true, metrics:{total,profit,ganado,perdido,roi,undetermined:undetermined.length}, leagues, teams, oddsBuckets, undetermined:undetermined.slice(0,20), teamLeagues});
-  }catch(err){
-    self.postMessage({ok:false,error:err.message});
-  }
-};
-`;
-
-/* =========== main thread =========== */
-const blob = new Blob([workerCode], { type: "application/javascript" });
-const worker = new Worker(URL.createObjectURL(blob));
-const progress = document.getElementById('progress');
-const status = document.getElementById('status');
-
-worker.onmessage = e => {
-  progress.style.display = 'none';
-  status.textContent = '';
-  if(!e.data.ok){
-    alert('Error en worker: ' + e.data.error);
+function renderStats(container, stats, title){
+  if (stats.total === 0) {
+    document.getElementById(container).innerHTML = `<h2>${title}</h2><p>No hay partidos disponibles</p>`;
     return;
   }
-  const m = e.data.metrics;
-  document.getElementById('metrics').innerHTML = `
-    <div>Apuestas procesadas: <strong>${m.total}</strong></div>
-    <div>✅ Ganado: <strong class="green">${m.ganado.toFixed(2)}</strong></div>
-    <div>❌ Perdido: <strong class="red">${m.perdido.toFixed(2)}</strong></div>
-    <div>Beneficio neto: <strong>${m.profit.toFixed(2)}</strong></div>
-    <div>ROI (por apuesta): <strong>${m.roi.toFixed(2)}%</strong></div>
-    <div class="small">Registros no decididos: <strong class="warning">${m.undetermined}</strong> (se muestran algunos abajo)</div>
-  `;
-
-// POBLAR SELECT DE LIGAS (orden alfabético)
-const leagueSelect = document.getElementById('leagueFilter');
-leagueSelect.innerHTML = '<option value="all">Todas</option>';
-try {
-  Object.keys(e.data.leagues)
-    .sort((a, b) => a.localeCompare(b, 'es', { sensitivity: 'base' }))
-    .forEach(liga => {
-      const opt = document.createElement('option');
-      opt.value = liga;
-      opt.textContent = liga;
-      leagueSelect.appendChild(opt);
-    });
-} catch(err) {
-  // si no hay ligas, dejar "Todas"
+  let html = `<h2>${title}</h2>
+  <p>Partidos analizados: ${stats.total}</p>
+  <ul>
+    <li>Gol HT: ${stats.htGoalRate}</li>
+    <li>Over 2.5 FT: ${stats.over25Rate}</li>
+    <li>Victorias: ${stats.winRate}</li>
+  </ul>
+  <table>
+    <tr><th>Fecha</th><th>Partido</th><th>HT</th><th>FT</th></tr>
+    ${stats.matches.map(m=>`<tr>
+      <td>${m.Date}</td><td>${m.Match}</td>
+      <td>${m["Result HT"]}</td><td>${m["Result FT"]}</td>
+    </tr>`).join("")}
+  </table>`;
+  document.getElementById(container).innerHTML = html;
 }
 
-  // guardar para filtrado dinámico
-  window._lastWorkerResult = e.data;
-
-  renderGroupTable(e.data.leagues, 'byLeague', 'Liga');
-  renderOddsTable(e.data.oddsBuckets, 'byOdds', 'Rango cuota');
-  renderTeamDetailed(e.data.teams, 'byTeam');
-
-  const und = e.data.undetermined || [];
-  const undDiv = document.getElementById('undetermined');
-  if(und.length === 0) undDiv.innerHTML = '<div class="small">Ninguno — todos los registros fueron decididos.</div>';
-  else {
-    let html = '<div class="small">Mostrando hasta 20 registros no decididos (revisa claves, formatos de Score o Desired Outcome):</div><pre>';
-    und.forEach((u,i)=>{
-      try{ html += JSON.stringify(u.sample, null, 2) + '\\n---\\n'; }catch(err){ html += String(u.sample) + '\\n---\\n'; }
-    });
-    html += '</pre>';
-    undDiv.innerHTML = html;
+// Cargar JSON
+document.getElementById("fileInput").addEventListener("change", function(e){
+  let file = e.target.files[0];
+  let reader = new FileReader();
+  reader.onload = function(event){
+    allMatches = JSON.parse(event.target.result);
+    let leagues = [...new Set(allMatches.map(m=>m.League))];
+    
+    let leagueSelect = document.getElementById("leagueSelect");
+    leagueSelect.innerHTML = "<option value=''>--Selecciona--</option>" +
+      leagues.map(l=>`<option value="${l}">${l}</option>`).join("");
   }
+  reader.readAsText(file);
+});
 
-  document.getElementById('output').style.display = '';
-};
+// Al seleccionar liga, solo guardamos equipos, pero no llenamos selects
+document.getElementById("leagueSelect").addEventListener("change", function(){
+  let league = this.value;
+  let leagueMatches = allMatches.filter(m=>m.League === league);
+  leagueTeams = [...new Set(leagueMatches.flatMap(m=>m.Match.split(" - ")))];
+  
+  // Reseteamos selects para que el usuario elija manualmente
+  document.getElementById("homeSelect").innerHTML = "<option value=''>--Selecciona equipo local--</option>" +
+    leagueTeams.map(t=>`<option value="${t}">${t}</option>`).join("");
+  document.getElementById("awaySelect").innerHTML = "<option value=''>--Selecciona equipo visitante--</option>" +
+    leagueTeams.map(t=>`<option value="${t}">${t}</option>`).join("");
+});
 
-function renderGroupTable(mapObj, containerId, label){
-  const arr = Object.keys(mapObj).map(k=>({
-    key:k, count: mapObj[k].count, profit: mapObj[k].profit || 0, ganado: mapObj[k].ganado||0, perdido: mapObj[k].perdido||0
-  })).sort((a,b)=>b.profit - a.profit);
-  if(arr.length === 0){ document.getElementById(containerId).innerHTML = '<div class="small">Sin datos</div>'; return; }
-  let html = '<table><thead><tr><th>'+label+'</th><th>Apuestas</th><th>Ganado</th><th>Perdido</th><th>Profit</th></tr></thead><tbody>';
-  arr.forEach(r=>{
-    html += '<tr><td>'+escapeHtml(r.key)+'</td><td>'+r.count+'</td><td class="green">'+r.ganado.toFixed(2)+'</td><td class="red">'+r.perdido.toFixed(2)+'</td><td style="font-weight:700;color:'+(r.profit>=0? '#8ee99b':'#ff8b8b')+'">'+r.profit.toFixed(2)+'</td></tr>';
-  });
-  html += '</tbody></table>';
-  document.getElementById(containerId).innerHTML = html;
-}
-
-function renderOddsTable(mapObj, containerId, label){
-  const arr = Object.keys(mapObj).map(k=>({
-    key:k, count: mapObj[k].count, profit: mapObj[k].profit || 0, ganado: mapObj[k].ganado||0, perdido: mapObj[k].perdido||0
-  })).sort((a,b)=>b.profit - a.profit);
-  if(arr.length === 0){ document.getElementById(containerId).innerHTML = '<div class="small">Sin datos</div>'; return; }
-  let html = '<table><thead><tr><th>'+label+'</th><th>Apuestas</th><th>Ganado</th><th>Perdido</th><th>Profit</th></tr></thead><tbody>';
-  arr.forEach(r=>{
-    html += '<tr><td>'+escapeHtml(r.key)+'</td><td>'+r.count+'</td><td class="green">'+r.ganado.toFixed(2)+'</td><td class="red">'+r.perdido.toFixed(2)+'</td><td style="font-weight:700;color:'+(r.profit>=0? '#8ee99b':'#ff8b8b')+'">'+r.profit.toFixed(2)+'</td></tr>';
-  });
-  html += '</tbody></table>';
-  document.getElementById(containerId).innerHTML = html;
-}
-
-/* Teams detailed renderer */
-function renderTeamDetailed(teamsObj, containerId){
-  const view = document.getElementById('teamViewSelect') ? document.getElementById('teamViewSelect').value : 'both';
-  const leagueFilter = document.getElementById('leagueFilter') ? document.getElementById('leagueFilter').value : 'all';
-  // build filtered teams object according to selected league
-  let filtered = {};
-  if(leagueFilter === 'all'){
-    filtered = teamsObj;
-  } else {
-    const mapping = (window._lastWorkerResult && window._lastWorkerResult.teamLeagues) ? window._lastWorkerResult.teamLeagues : {};
-    // teamsObj includes full aggregated team stats; teamLeagues tells which teams appear in the chosen league.
-    Object.keys(teamsObj).forEach(teamName => {
-      const leaguesForTeam = mapping[teamName] || [];
-      if(leaguesForTeam.includes(leagueFilter)){
-        filtered[teamName] = teamsObj[teamName];
-      }
-    });
+// Botón analizar
+document.getElementById("analyzeBtn").addEventListener("click", function(){
+  let league = document.getElementById("leagueSelect").value;
+  let homeTeam = document.getElementById("homeSelect").value;
+  let awayTeam = document.getElementById("awaySelect").value;
+  
+  if (!league || !homeTeam || !awayTeam) {
+    alert("Debes seleccionar liga, equipo local y visitante.");
+    return;
   }
-
-  const arr = Object.keys(filtered).map(k=>{
-    const t = filtered[k];
-    return {
-      key:k,
-      overallProfit: (t.overall && t.overall.profit) || 0,
-      homeProfit: (t.home && t.home.profit) || 0,
-      awayProfit: (t.away && t.away.profit) || 0,
-      overallCount: (t.overall && t.overall.count) || 0
-    };
-  }).sort((a,b)=>b.overallProfit - a.overallProfit);
-
-  if(arr.length === 0){ document.getElementById(containerId).innerHTML = '<div class="small">Sin datos</div>'; return; }
-
-  let html = '<table id="teamsTable"><thead><tr><th>Equipo</th><th>Apuestas</th><th>Profit total</th><th>Local</th><th>Visita</th><th>Detalle</th></tr></thead><tbody>';
-  arr.forEach((r, idx)=>{
-    // choose displayProfit based on view
-    const teamsEntry = filtered[r.key];
-    const displayProfit = view === 'home' ? (teamsEntry.home.profit || 0) : (view === 'away' ? (teamsEntry.away.profit || 0) : (teamsEntry.overall.profit || 0));
-    html += '<tr data-team-index="'+idx+'" style="vertical-align:top"><td>'+escapeHtml(r.key)+'</td><td>'+r.overallCount+'</td><td style="font-weight:700;color:'+(displayProfit>=0? '#8ee99b':'#ff8b8b')+'">'+displayProfit.toFixed(2)+'</td><td class="green">'+((teamsEntry.home && teamsEntry.home.profit)||0).toFixed(2)+'</td><td class="green">'+((teamsEntry.away && teamsEntry.away.profit)||0).toFixed(2)+'</td><td><span class="toggle" data-team="'+escapeHtml(r.key)+'">Ver / Ocultar</span></td></tr>';
-    // hidden detail row placeholder
-    html += '<tr class="detail-placeholder" data-for="'+escapeHtml(r.key)+'" style="display:none"><td colspan="6"></td></tr>';
-  });
-  html += '</tbody></table>';
-  document.getElementById(containerId).innerHTML = html;
-
-  // attach click handlers for toggles
-  document.querySelectorAll('#teamsTable .toggle').forEach(btn=>{
-    btn.addEventListener('click', function(){
-      const teamKey = this.getAttribute('data-team');
-      const ph = document.querySelector('.detail-placeholder[data-for="'+teamKey+'"]');
-      if(!ph) return;
-      if(ph.style.display === 'none' || ph.style.display === ''){
-        // build details HTML for this team
-        const t = filtered[teamKey] || teamsObj[teamKey];
-        let inner = '<div class="detail-row">';
-        inner += '<strong>Resumen por rol</strong>';
-        inner += '<table style="margin-top:8px"><thead><tr><th>Rol</th><th>Apuestas</th><th>Ganado</th><th>Perdido</th><th>Profit</th></tr></thead><tbody>';
-        inner += '<tr><td>Overall</td><td>'+((t.overall && t.overall.count)||0)+'</td><td class="green">'+(((t.overall && t.overall.ganado)||0).toFixed(2))+'</td><td class="red">'+(((t.overall && t.overall.perdido)||0).toFixed(2))+'</td><td style="font-weight:700;color:'+(((t.overall && t.overall.profit)||0)>=0? '#8ee99b':'#ff8b8b')+'">'+(((t.overall && t.overall.profit)||0).toFixed(2))+'</td></tr>';
-        inner += '<tr><td>Local</td><td>'+((t.home && t.home.count)||0)+'</td><td class="green">'+(((t.home && t.home.ganado)||0).toFixed(2))+'</td><td class="red">'+(((t.home && t.home.perdido)||0).toFixed(2))+'</td><td style="font-weight:700;color:'+(((t.home && t.home.profit)||0)>=0? '#8ee99b':'#ff8b8b')+'">'+(((t.home && t.home.profit)||0).toFixed(2))+'</td></tr>';
-        inner += '<tr><td>Visita</td><td>'+((t.away && t.away.count)||0)+'</td><td class="green">'+(((t.away && t.away.ganado)||0).toFixed(2))+'</td><td class="red">'+(((t.away && t.away.perdido)||0).toFixed(2))+'</td><td style="font-weight:700;color:'+(((t.away && t.away.profit)||0)>=0? '#8ee99b':'#ff8b8b')+'">'+(((t.away && t.away.profit)||0).toFixed(2))+'</td></tr>';
-        inner += '</tbody></table>';
-
-        // odds buckets per role (show top by profit)
-        function buildBucketHtml(buckets){
-          if(!buckets) return '<div class="small">Sin datos</div>';
-          const arr = Object.keys(buckets).map(k=>({k,profit:buckets[k].profit||0,count:buckets[k].count||0})).sort((a,b)=>b.profit - a.profit);
-          if(arr.length===0) return '<div class="small">Sin datos</div>';
-          let h = '<table style="margin-top:8px"><thead><tr><th>Rango cuota</th><th>Apuestas</th><th>Profit</th></tr></thead><tbody>';
-          arr.forEach(a=> h += '<tr><td>'+escapeHtml(a.k)+'</td><td>'+a.count+'</td><td style="font-weight:700;color:'+(a.profit>=0? '#8ee99b':'#ff8b8b')+'">'+a.profit.toFixed(2)+'</td></tr>');
-          h += '</tbody></table>';
-          return h;
-        }
-        inner += '<div style="margin-top:12px"><strong>Buckets de cuota — Local</strong>'+buildBucketHtml(t.home.oddsBuckets)+'</div>';
-        inner += '<div style="margin-top:12px"><strong>Buckets de cuota — Visita</strong>'+buildBucketHtml(t.away.oddsBuckets)+'</div>';
-        inner += '</div>';
-
-        ph.querySelector('td').innerHTML = inner;
-        ph.style.display = '';
-      } else {
-        ph.style.display = 'none';
-      }
-    });
-  });
-}
-
-/* escape helper */
-function escapeHtml(s){ return String(s||'').replace(/[&<>"]/g, c=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
-
-/* UI events */
-document.getElementById('fileInput').addEventListener('change', e=>{
-  const f = e.target.files[0];
-  if(!f) return;
-  const reader = new FileReader();
-  reader.onprogress = ev => {
-    if(ev.lengthComputable){
-      progress.style.display = '';
-      progress.value = (ev.loaded/ev.total*100);
-      status.textContent = 'Leyendo archivo... ' + Math.round(progress.value) + '%';
-    }
-  };
-  reader.onload = ev => {
-    status.textContent = 'Enviando datos al worker...';
-    worker.postMessage({text: ev.target.result});
-  };
-  reader.onerror = ()=> alert('Error al leer el archivo');
-  reader.readAsText(f);
-});
-
-document.getElementById('btnPaste').addEventListener('click', ()=>{
-  const t = prompt('Pega aquí tu JSON completo (array o NDJSON). Para cancelar deja vacío.');
-  if(t) document.getElementById('pasteArea').value = t;
-});
-
-document.getElementById('btnStart').addEventListener('click', ()=>{
-  const txt = document.getElementById('pasteArea').value.trim();
-  if(!txt){ alert('Pega JSON o carga archivo'); return; }
-  progress.style.display = '';
-  progress.value = 10;
-  status.textContent = 'Procesando texto pegado...';
-  worker.postMessage({text: txt});
-});
-
-document.getElementById('teamViewSelect').addEventListener('change', ()=>{
-  if(window._lastWorkerResult && window._lastWorkerResult.teams) renderTeamDetailed(window._lastWorkerResult.teams, 'byTeam');
-});
-
-/* (3) Evento filtro de liga */
-document.getElementById('leagueFilter').addEventListener('change', ()=>{
-  if(window._lastWorkerResult && window._lastWorkerResult.teams) renderTeamDetailed(window._lastWorkerResult.teams, 'byTeam');
-});
-
-/* Export CSV: now incluye equipo/rol y buckets */
-document.getElementById('btnExportCSV').addEventListener('click', ()=>{
-  const res = window._lastWorkerResult;
-  if(!res){ alert('No hay resultados para exportar'); return; }
-  const rows = [];
-  rows.push(['scope','key','role','count','ganado','perdido','profit','bucket']);
-  Object.entries(res.leagues).forEach(([k,v])=> rows.push(['league', k, 'overall', v.count, (v.ganado||0).toFixed(2), (v.perdido||0).toFixed(2), (v.profit||0).toFixed(2), '']));
-  // teams: overall, home, away
-  Object.entries(res.teams).forEach(([team,t])=>{
-    rows.push(['team', team, 'overall', (t.overall && t.overall.count)||0, ((t.overall && t.overall.ganado)||0).toFixed(2), ((t.overall && t.overall.perdido)||0).toFixed(2), ((t.overall && t.overall.profit)||0).toFixed(2), '']);
-    rows.push(['team', team, 'home', (t.home && t.home.count)||0, ((t.home && t.home.ganado)||0).toFixed(2), ((t.home && t.home.perdido)||0).toFixed(2), ((t.home && t.home.profit)||0).toFixed(2), '']);
-    rows.push(['team', team, 'away', (t.away && t.away.count)||0, ((t.away && t.away.ganado)||0).toFixed(2), ((t.away && t.away.perdido)||0).toFixed(2), ((t.away && t.away.profit)||0).toFixed(2), '']);
-    // buckets per role
-    const pushBuckets = (roleObj, roleName) => {
-      if(!roleObj || !roleObj.oddsBuckets) return;
-      Object.entries(roleObj.oddsBuckets).forEach(([bk, val])=>{
-        rows.push(['team_bucket', team, roleName, val.count||0, (val.ganado||0).toFixed(2), (val.perdido||0).toFixed(2), (val.profit||0).toFixed(2), bk]);
-      });
-    };
-    pushBuckets(t.home, 'home');
-    pushBuckets(t.away, 'away');
-    if(t.overall && t.overall.oddsBuckets) Object.entries(t.overall.oddsBuckets).forEach(([bk, val]) => rows.push(['team_bucket', team, 'overall', val.count||0, (val.ganado||0).toFixed(2), (val.perdido||0).toFixed(2), (val.profit||0).toFixed(2), bk]));
-  });
-  Object.entries(res.oddsBuckets).forEach(([k,v])=> rows.push(['odds_range', k, 'overall', v.count, (v.ganado||0).toFixed(2), (v.perdido||0).toFixed(2), (v.profit||0).toFixed(2), '']));
-
-  const csv = rows.map(r=> r.map(c => '\"'+String(c).replace(/\"/g,'\"\"')+'\"').join(',')).join('\\n');
-  const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a'); a.href = url; a.download = 'backtest_summary.csv'; a.click();
-  URL.revokeObjectURL(url);
+  
+  let leagueMatches = allMatches.filter(m=>m.League === league);
+  
+  let homeStats = calculateStats(leagueMatches, homeTeam, true);
+  let awayStats = calculateStats(leagueMatches, awayTeam, false);
+  
+  renderStats("homeStats", homeStats, `Últimos 10 partidos de ${homeTeam} en casa`);
+  renderStats("awayStats", awayStats, `Últimos 10 partidos de ${awayTeam} de visita`);
 });
 </script>
 </body>
