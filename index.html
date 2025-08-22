@@ -13,25 +13,21 @@
   body{font-family:Inter,system-ui,Segoe UI,Arial,sans-serif;background:var(--bg);color:var(--text);margin:0;padding:16px}
   h1{color:var(--accent);text-align:center;margin:8px 0 16px}
 
-  /* Controles */
   .card{background:var(--card);border-radius:14px;padding:16px;margin:16px 0;border:3px solid transparent;transition:.2s border-color}
   label{display:block;margin:10px 0 6px;color:var(--muted);font-size:.95rem}
   select,input,button{width:100%;padding:12px;border-radius:10px;border:1px solid var(--line);background:#0f1726;color:var(--text);font-size:16px}
   button{background:var(--accent);border-color:var(--accent);font-weight:600;cursor:pointer}
   button:hover{filter:brightness(1.05)}
 
-  /* Tabs */
   .tabs{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
   .tab{flex:1;min-width:110px;background:#0f1726;border:1px solid var(--line);color:var(--muted);padding:10px;border-radius:10px;cursor:pointer;text-align:center}
   .tab.active{background:var(--accent);color:#fff;border-color:var(--accent);font-weight:700}
 
-  /* Grid panels */
   .grid{display:grid;gap:12px}
   @media(min-width:900px){.grid{grid-template-columns:1fr 1fr}}
   .panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px}
   .panel h3{margin:0 0 10px;font-size:1.05rem;color:#cbd5e1}
 
-  /* Listas de stats */
   .kv{display:flex;justify-content:space-between;align-items:center;padding:8px 10px;border-bottom:1px dashed var(--line)}
   .kv:last-child{border-bottom:0}
   .muted{color:var(--muted)}
@@ -40,7 +36,6 @@
   .b-green{background:var(--green)} .b-amber{background:var(--amber)} .b-red{background:var(--red)}
   .b-soft{background:#0f1726;border:1px solid var(--line);color:#cbd5e1}
 
-  /* Tablas compactas */
   table{width:100%;border-collapse:collapse;font-size:.95rem;margin-top:8px;overflow:hidden;border-radius:10px;border:1px solid var(--line)}
   th,td{padding:8px 10px;text-align:center;border-bottom:1px solid var(--line)}
   th{background:#0f1726;color:#cbd5e1;font-weight:600}
@@ -49,19 +44,28 @@
   .valueBox{margin-top:10px;padding:10px;border-radius:10px;text-align:center;font-weight:800}
   .value{background:var(--green);color:#fff} .novalue{background:var(--red);color:#fff}
 
-  /* Subtítulos */
   .sub{display:flex;align-items:center;gap:8px;color:#cbd5e1;margin:8px 0 4px}
   .divider{height:1px;background:var(--line);margin:8px 0;border-radius:1px}
-
-  /* Responsive helpers */
   .row{display:grid;gap:10px}
   @media(min-width:640px){.row{grid-template-columns:1fr 1fr}}
+
+  /* Pills para Game Predictions */
+  .pills{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
+  @media(min-width:900px){.pills{grid-template-columns:repeat(3,1fr)}}
+  .pill{
+    position:relative;background:#0f1726;border:1px solid var(--line);
+    border-radius:18px;padding:16px;text-align:center;min-height:72px;
+    display:flex;flex-direction:column;justify-content:center;gap:6px;
+    box-shadow:inset 0 -3px 0 0 rgba(255,255,255,0.06);
+  }
+  .pill .big{font-weight:800;font-size:1.1rem}
+  .pill .caption{color:#cbd5e1;font-weight:600}
+  .pill.ok{outline:2px solid var(--green)} .pill.warn{outline:2px solid var(--amber)} .pill.bad{outline:2px solid var(--red)}
 </style>
 </head>
 <body>
   <h1>Estadísticas Over/Under</h1>
 
-  <!-- Controles -->
   <div class="card">
     <input type="file" id="fileInput" accept=".json,.txt"><br>
 
@@ -99,128 +103,96 @@
     <button id="analyzeBtn" style="margin-top:10px">Analizar</button>
   </div>
 
-  <!-- Resultado principal (borde dinámico por O2.5) -->
   <div id="results" class="card"></div>
 
 <script>
 let allMatches = [];
-let currentPeriod = "FT"; // FT | 1H | 2H
+let currentPeriod = "FT";
 
-/* ---------- Utilidades ---------- */
+/* Utils */
 function tryParseJSON(text){
   try { return JSON.parse(text); } catch(e){}
-  // si viene como objetos separados por comas/nuevas líneas, intentamos envoltura
-  const wrapped = "[" + text.trim()
-    .replace(/(^,)|(,$)/g,"")
-    .replace(/\n+/g,"\n")
-    .replace(/\}\s*,\s*\{/g,"},{") + "]";
+  const wrapped = "[" + text.trim().replace(/(^,)|(,$)/g,"").replace(/\n+/g,"\n").replace(/\}\s*,\s*\{/g,"},{") + "]";
   try { return JSON.parse(wrapped); } catch(e2){ return []; }
 }
 function pct(a,b){ return b ? Math.round((a/b)*100) : 0; }
 function cls(p){ return p>=70?"b-green":(p>=50?"b-amber":"b-red"); }
 function badge(p){ return `<span class="badge ${cls(p)}">${p}%</span>`; }
-function parseScore(txt){
-  if(!txt) return [0,0];
-  const m = txt.split("-").map(x=>parseInt(x,10));
-  return [m[0]||0, m[1]||0];
-}
-function periodGoals(m){ // retorna [golesHomePeriodo, golesAwayPeriodo]
-  const [hHT,aHT] = parseScore(m["Result HT"]);
-  const [hFT,aFT] = parseScore(m["Result FT"]);
+function parseScore(txt){ if(!txt) return [0,0]; const m = txt.split("-").map(x=>parseInt(x,10)); return [m[0]||0,m[1]||0]; }
+function periodGoals(m){
+  const [hHT,aHT] = parseScore(m["Result HT"]); const [hFT,aFT] = parseScore(m["Result FT"]);
   if(currentPeriod==="FT") return [hFT,aFT];
   if(currentPeriod==="1H") return [hHT,aHT];
   return [(hFT-hHT),(aFT-aHT)]; // 2H
 }
-function teamPeriodGoals(m, team){
-  const [home, away] = m.Match.split(" - ");
-  const [gH,gA] = periodGoals(m);
-  return (team===home)?[gH,gA]:(team===away)?[gA,gH]:[null,null];
-}
-
-/* ---------- Filtros ---------- */
-function lastMatchesByRole(matches, team, role){ // role: "home" | "away"
+function lastMatchesByRole(matches, team, role){
   const arr = matches.filter(m=>{
-    const [h,a]=m.Match.split(" - ");
-    return role==="home"? h===team : a===team;
+    const [h,a]=m.Match.split(" - "); return role==="home"? h===team : a===team;
   });
   return arr.slice(-10);
 }
-
-/* ---------- Cálculos por equipo (sin tabla de overs para evitar redundancia) ---------- */
-function calcTeamBlock(matches, team, role){
-  const last = lastMatchesByRole(matches, team, role);
-  const n = last.length;
-  let scored=0, conceded=0, total=0, noScore=0, noConcede=0;
-
-  // para summary (BTTS / OverX.X) usamos luego el promedio entre bloques home/away
-  last.forEach(m=>{
-    const [forTeam, opp] = teamPeriodGoals(m, team);
+function percentOver(lastMatches, line){
+  const n = lastMatches.length; let over=0;
+  lastMatches.forEach(m=>{ const [h,a]=periodGoals(m); if(h+a>line) over++; });
+  return pct(over,n);
+}
+function percentBTTS(lastMatches){
+  const n = lastMatches.length; let yes=0;
+  lastMatches.forEach(m=>{ const [h,a]=periodGoals(m); if(h>0 && a>0) yes++; });
+  return pct(yes,n);
+}
+function teamAverages(lastMatches, team){
+  let s=0,c=0,t=0;
+  lastMatches.forEach(m=>{
+    const [home,away]=m.Match.split(" - ");
+    const [h,a]=periodGoals(m);
+    const forTeam=(team===home)?h:(team===away)?a:null;
+    const opp=(team===home)?a:(team===away)?h:null;
     if(forTeam==null) return;
-    const tot = forTeam + opp;
-    scored += forTeam; conceded += opp; total += tot;
-    if(forTeam===0) noScore++;
-    if(opp===0) noConcede++;
+    s+=forTeam; c+=opp; t+=(forTeam+opp);
   });
+  const n=lastMatches.length||1;
+  return {avgScored:(s/n).toFixed(1), avgConceded:(c/n).toFixed(1), avgGoals:(t/n).toFixed(1)};
+}
+function avgCornersFT(lastMatches){
+  // No hay corners por periodo; usamos FT de cada registro
+  let sum=0, n=0;
+  lastMatches.forEach(m=>{
+    const hc = Number(m["Home Corners at FT"]||0);
+    const ac = Number(m["Away Corners at FT"]||0);
+    if(!isNaN(hc+ac)){ sum += (hc+ac); n++; }
+  });
+  return n? Math.round(sum/n) : 0;
+}
+function secondHalfGoalsTotal(arr){
+  // Aproximación de 76-FT usando 2ª parte (no hay minutos en JSON)
+  let tot=0;
+  arr.forEach(m=>{
+    const [hHT,aHT] = parseScore(m["Result HT"]); const [hFT,aFT] = parseScore(m["Result FT"]);
+    tot += (hFT-hHT) + (aFT-aHT);
+  });
+  return tot;
+}
 
-  const avgScored = n? (scored/n).toFixed(1):"0.0";
-  const avgConceded = n?(conceded/n).toFixed(1):"0.0";
-  const avgGoals = n? (total/n).toFixed(1):"0.0";
-
-  // devolvemos solo métricas base; Overs/BTTS se calcularán en funciones dedicadas por consistencia
+/* Blocks */
+function calcTeamBlock(matches, team, role){
+  const last = lastMatchesByRole(matches, team, role); const n = last.length;
+  let noScore=0, noConcede=0, s=0,c=0,t=0;
+  last.forEach(m=>{
+    const [home,away]=m.Match.split(" - "); const [h,a]=periodGoals(m);
+    const forTeam=(team===home)?h:(team===away)?a:null; const opp=(team===home)?a:(team===away)?h:null;
+    if(forTeam==null) return; if(forTeam===0) noScore++; if(opp===0) noConcede++; s+=forTeam; c+=opp; t+=forTeam+opp;
+  });
   return {
     n, last,
-    avgScored, avgConceded, avgGoals,
+    avgScored: n?(s/n).toFixed(1):"0.0",
+    avgConceded: n?(c/n).toFixed(1):"0.0",
+    avgGoals: n?(t/n).toFixed(1):"0.0",
     pNoScore: pct(noScore,n),
     pNoConcede: pct(noConcede,n)
   };
 }
 
-/* ---------- Cálculos para summary (Home/Away/Match) ---------- */
-function percentOver(lastMatches, team, line){
-  const n = lastMatches.length;
-  let over=0;
-  lastMatches.forEach(m=>{
-    const [h,a] = periodGoals(m);
-    if(h+a > line) over++;
-  });
-  return pct(over,n);
-}
-function percentBTTS(lastMatches){
-  const n = lastMatches.length;
-  let yes=0;
-  lastMatches.forEach(m=>{
-    const [h,a] = periodGoals(m);
-    if(h>0 && a>0) yes++;
-  });
-  return pct(yes,n);
-}
-
-/* ---------- Handicap por equipo ---------- */
-function handicapBlock(lastMatches, team){
-  const lines=[-2.5,-1.5,-0.5,0.5,1.5,2.5];
-  const n = lastMatches.length;
-  const hcap = Object.fromEntries(lines.map(l=>[l,{win:0,loss:0}]));
-  lastMatches.forEach(m=>{
-    const [home, away] = m.Match.split(" - ");
-    const [h,a] = periodGoals(m);
-    const forTeam = (team===home)?h:(team===away)?a:null;
-    const opp = (team===home)?a:(team===away)?h:null;
-    if(forTeam==null) return;
-    const diff = forTeam - opp;
-    lines.forEach(l=>{
-      if(diff - l > 0) hcap[l].win++;
-      else hcap[l].loss++;
-    });
-  });
-  // convertir a %
-  lines.forEach(l=>{
-    hcap[l].win = pct(hcap[l].win,n);
-    hcap[l].loss = pct(hcap[l].loss,n);
-  });
-  return hcap;
-}
-
-/* ---------- UI ---------- */
 function renderTeamPanel(title, stats){
   return `
   <div class="panel">
@@ -229,20 +201,27 @@ function renderTeamPanel(title, stats){
     <div class="kv"><span class="muted">Avg. Suffer</span><span class="mono">${stats.avgConceded}</span></div>
     <div class="kv"><span class="muted">Avg. Goals</span><span class="mono">${stats.avgGoals}</span></div>
     <div class="divider"></div>
-    <div class="kv"><span>Games without Scoring</span><span>${badge(stats.pNoScore)}</span></div>
-    <div class="kv"><span>Games without Conceding</span><span>${badge(stats.pNoConcede)}</span></div>
+    <div class="kv"><span>Games without Scoring</span><span><span class="badge ${cls(stats.pNoScore)}">${stats.pNoScore}%</span></span></div>
+    <div class="kv"><span>Games without Conceding</span><span><span class="badge ${cls(stats.pNoConcede)}">${stats.pNoConcede}%</span></span></div>
   </div>`;
 }
 
-function renderHandicapTable(title, hcap){
+function renderHandicapTable(title, lastMatches, team){
   const lines=[-2.5,-1.5,-0.5,0.5,1.5,2.5];
+  const n = lastMatches.length;
+  const hcap = Object.fromEntries(lines.map(l=>[l,{w:0,l:0}]));
+  lastMatches.forEach(m=>{
+    const [home,away]=m.Match.split(" - "); const [h,a]=periodGoals(m);
+    const forTeam=(team===home)?h:(team===away)?a:null; const opp=(team===home)?a:(team===away)?h:null;
+    if(forTeam==null) return; const diff=forTeam-opp;
+    lines.forEach(l=>{ if(diff-l>0) hcap[l].w++; else hcap[l].l++; });
+  });
   const rows = lines.map(l=>`
     <tr>
       <td class="mono">${l>0?`+${l}`:l}</td>
-      <td>${badge(hcap[l].win)}</td>
-      <td>${badge(hcap[l].loss)}</td>
-    </tr>
-  `).join("");
+      <td><span class="badge ${cls(pct(hcap[l].w,n))}">${pct(hcap[l].w,n)}%</span></td>
+      <td><span class="badge ${cls(pct(hcap[l].l,n))}">${pct(hcap[l].l,n)}%</span></td>
+    </tr>`).join("");
   return `
     <div class="panel">
       <h3>${title}</h3>
@@ -254,34 +233,29 @@ function renderHandicapTable(title, hcap){
   `;
 }
 
-/* Summary con BTTS debajo de Over 3.5 */
 function renderSummaryTable(homeLast, awayLast){
-  // Home/Away por rol
   const h = {
-    o05: percentOver(homeLast,"home",0.5), // esta firma no usa el segundo arg realmente
-    o15: percentOver(homeLast,"home",1.5),
-    o25: percentOver(homeLast,"home",2.5),
-    o35: percentOver(homeLast,"home",3.5),
+    o05: percentOver(homeLast,0.5),
+    o15: percentOver(homeLast,1.5),
+    o25: percentOver(homeLast,2.5),
+    o35: percentOver(homeLast,3.5),
     btts: percentBTTS(homeLast)
   };
   const a = {
-    o05: percentOver(awayLast,"away",0.5),
-    o15: percentOver(awayLast,"away",1.5),
-    o25: percentOver(awayLast,"away",2.5),
-    o35: percentOver(awayLast,"away",3.5),
+    o05: percentOver(awayLast,0.5),
+    o15: percentOver(awayLast,1.5),
+    o25: percentOver(awayLast,2.5),
+    o35: percentOver(awayLast,3.5),
     btts: percentBTTS(awayLast)
   };
   const avg = (x,y)=>Math.round((x+y)/2);
-
   const row = (label, hv, av, mv)=>`
     <tr>
       <td>${label}</td>
       <td>${badge(hv)}</td>
       <td>${badge(av)}</td>
       <td><span class="badge ${cls(mv)}">${mv}%</span></td>
-    </tr>
-  `;
-
+    </tr>`;
   return `
     <div class="panel">
       <h3>Summary</h3>
@@ -293,8 +267,59 @@ function renderSummaryTable(homeLast, awayLast){
         ${row('Over 3.5',  h.o35, a.o35, avg(h.o35,a.o35))}
         ${row('BTTS',      h.btts, a.btts, avg(h.btts,a.btts))}
       </table>
-    </div>
-  `;
+    </div>`;
+}
+
+/* --- NEW: Game Predictions pills --- */
+function renderPredictions(homeTeam, awayTeam, homeLast, awayLast){
+  // Probabilidades (Match = promedio)
+  const pO25 = Math.round((percentOver(homeLast,2.5)+percentOver(awayLast,2.5))/2);
+  const pO15 = Math.round((percentOver(homeLast,1.5)+percentOver(awayLast,1.5))/2);
+  const pBTTS = Math.round((percentBTTS(homeLast)+percentBTTS(awayLast))/2);
+
+  // Goles esperados FT (promedio de avgScored H como local + avgScored A como visitante)
+  const hAvg = teamAverages(homeLast, homeTeam);
+  const aAvg = teamAverages(awayLast, awayTeam);
+  const expGoals = Math.round((parseFloat(hAvg.avgScored)+parseFloat(aAvg.avgScored)));
+
+  // Aproximación: goles de 2ª parte (no hay minutos -> usamos 46-FT)
+  const shGoals = secondHalfGoalsTotal(homeLast) + secondHalfGoalsTotal(awayLast);
+
+  // Corners promedio FT (estimado desde JSON)
+  const avgCorners = Math.round((avgCornersFT(homeLast) + avgCornersFT(awayLast))/2);
+
+  const pillClass = p => p>=70?'ok':(p>=50?'warn':'bad');
+
+  return `
+    <div class="panel">
+      <h3>Game Predictions</h3>
+      <div class="pills">
+        <div class="pill ${pillClass(pO25)}">
+          <div class="big">${pO25}%</div>
+          <div class="caption">Over 2.5FT</div>
+        </div>
+        <div class="pill ${pillClass(pO15)}">
+          <div class="big">${pO15}%</div>
+          <div class="caption">Over 1.5FT</div>
+        </div>
+        <div class="pill ${pillClass(pBTTS)}">
+          <div class="big">${pBTTS}%</div>
+          <div class="caption">BTTS</div>
+        </div>
+        <div class="pill">
+          <div class="big">${expGoals}</div>
+          <div class="caption">Goals</div>
+        </div>
+        <div class="pill">
+          <div class="big">${avgCorners}</div>
+          <div class="caption">Corners</div>
+        </div>
+        <div class="pill">
+          <div class="big">${shGoals}</div>
+          <div class="caption" title="Estimación con goles de 2ª parte (no hay minutos)">Goals @ 76-FT</div>
+        </div>
+      </div>
+    </div>`;
 }
 
 function valueBox(prob, odd){
@@ -305,10 +330,9 @@ function valueBox(prob, odd){
     : `<div class="valueBox novalue">NO VALUE (Model ${prob}% vs ${implied}% imp.)</div>`;
 }
 
-/* ---------- Carga de archivo ---------- */
+/* Load */
 document.getElementById("fileInput").addEventListener("change", (e)=>{
-  const file = e.target.files[0];
-  if(!file) return;
+  const file = e.target.files[0]; if(!file) return;
   const rd = new FileReader();
   rd.onload = ev=>{
     allMatches = tryParseJSON(ev.target.result).map(m=>({
@@ -316,94 +340,75 @@ document.getElementById("fileInput").addEventListener("change", (e)=>{
       League: m.League || m.league || "",
       Match: m.Match || m.match || "",
       "Result HT": m["Result HT"] || m.result_ht || m.ht || "0-0",
-      "Result FT": m["Result FT"] || m.result_ft || m.ft || "0-0"
+      "Result FT": m["Result FT"] || m.result_ft || m.ft || "0-0",
+      "Home Corners at FT": m["Home Corners at FT"]||0,
+      "Away Corners at FT": m["Away Corners at FT"]||0
     }));
     const leagues = [...new Set(allMatches.map(m=>m.League).filter(Boolean))].sort();
-    const leagueSelect = document.getElementById("leagueSelect");
-    leagueSelect.innerHTML = "<option value=''>--Selecciona--</option>" + leagues.map(l=>`<option>${l}</option>`).join("");
+    document.getElementById("leagueSelect").innerHTML = "<option value=''>--Selecciona--</option>" + leagues.map(l=>`<option>${l}</option>`).join("");
   };
   rd.readAsText(file);
 });
 
-/* ---------- Selects dependientes ---------- */
 document.getElementById("leagueSelect").addEventListener("change", function(){
   const league = this.value;
   const leagueMatches = allMatches.filter(m=>m.League===league);
   const teams = [...new Set(leagueMatches.flatMap(m=>m.Match.split(" - ")))].sort();
-  const home = document.getElementById("homeSelect");
-  const away = document.getElementById("awaySelect");
-  home.innerHTML = teams.map(t=>`<option>${t}</option>`).join("");
-  away.innerHTML = teams.map(t=>`<option>${t}</option>`).join("");
+  document.getElementById("homeSelect").innerHTML = teams.map(t=>`<option>${t}</option>`).join("");
+  document.getElementById("awaySelect").innerHTML = teams.map(t=>`<option>${t}</option>`).join("");
 });
 
-/* ---------- Tabs de periodo ---------- */
 document.getElementById("tabs").addEventListener("click", (e)=>{
   const t = e.target.closest(".tab"); if(!t) return;
   document.querySelectorAll(".tab").forEach(x=>x.classList.remove("active"));
-  t.classList.add("active");
-  currentPeriod = t.dataset.period;
+  t.classList.add("active"); currentPeriod = t.dataset.period;
 });
 
-/* ---------- Acción principal ---------- */
 document.getElementById("analyzeBtn").addEventListener("click", ()=>{
   const league = document.getElementById("leagueSelect").value;
   const homeTeam = document.getElementById("homeSelect").value;
   const awayTeam = document.getElementById("awaySelect").value;
   const oddOver = parseFloat(document.getElementById("oddOver").value);
   const oddUnder = parseFloat(document.getElementById("oddUnder").value);
-
-  if(!league || !homeTeam || !awayTeam || homeTeam===awayTeam){
-    alert("Selecciona liga y equipos (distintos).");
-    return;
-  }
+  if(!league || !homeTeam || !awayTeam || homeTeam===awayTeam){ alert("Selecciona liga y equipos (distintos)."); return; }
 
   const leagueMatches = allMatches.filter(m=>m.League===league);
-  // Últimos 10 por rol
   const homeLast = lastMatchesByRole(leagueMatches, homeTeam, "home");
   const awayLast = lastMatchesByRole(leagueMatches, awayTeam, "away");
-
-  // Bloques base (sin overs por equipo para evitar redundancia)
   const homeStats = calcTeamBlock(leagueMatches, homeTeam, "home");
   const awayStats = calcTeamBlock(leagueMatches, awayTeam, "away");
 
-  // Paneles
-  const teamPanels = `
-    ${renderTeamPanel(homeTeam, homeStats)}
-    ${renderTeamPanel(awayTeam, awayStats)}
-  `;
-
-  // Summary (incluye BTTS debajo de Over 3.5)
   const summary = renderSummaryTable(homeLast, awayLast);
-
-  // Handicap
-  const hcapHome = handicapBlock(homeLast, homeTeam);
-  const hcapAway = handicapBlock(awayLast, awayTeam);
+  const preds = renderPredictions(homeTeam, awayTeam, homeLast, awayLast);
   const hcaps = `
-    ${renderHandicapTable(`${homeTeam} Handicap Goals`, hcapHome)}
-    ${renderHandicapTable(`${awayTeam} Handicap Goals`, hcapAway)}
+    ${renderHandicapTable(`${homeTeam} Handicap Goals`, homeLast, homeTeam)}
+    ${renderHandicapTable(`${awayTeam} Handicap Goals`, awayLast, awayTeam)}
   `;
 
-  // Value para O/U 2.5 del periodo activo (Match = promedio H/A)
-  const o25Home = percentOver(homeLast,"home",2.5);
-  const o25Away = percentOver(awayLast,"away",2.5);
-  const matchOver25 = Math.round((o25Home+o25Away)/2);
+  // Match O2.5 para borde
+  const matchOver25 = Math.round((percentOver(homeLast,2.5)+percentOver(awayLast,2.5))/2);
+
   const valueOver = valueBox(matchOver25, oddOver);
   const valueUnder = valueBox(100-matchOver25, oddUnder);
 
-  // Dump
   const res = document.getElementById("results");
   res.innerHTML = `
     <div class="kv"><span class="muted">Periodo activo</span><span class="badge b-soft">${currentPeriod}</span></div>
     <div class="divider"></div>
-    <div class="grid">${teamPanels}</div>
-    <div class="grid" style="margin-top:12px">${summary}${hcaps}</div>
-    ${(oddOver||oddUnder)?`<div class="grid" style="margin-top:12px">
+    <div class="grid">
+      ${renderTeamPanel(homeTeam, homeStats)}
+      ${renderTeamPanel(awayTeam, awayStats)}
+    </div>
+    <div class="grid" style="margin-top:12px">
+      ${summary}
+      ${preds}
+    </div>
+    <div class="grid" style="margin-top:12px">
       <div class="panel"><h3>Over 2.5</h3>${valueOver||'<div class="muted">Ingresa Odd Over 2.5</div>'}</div>
       <div class="panel"><h3>Under 2.5</h3>${valueUnder||'<div class="muted">Ingresa Odd Under 2.5</div>'}</div>
-    </div>`:""}
+    </div>
+    <div class="grid" style="margin-top:12px">${hcaps}</div>
   `;
-
-  // Contorno dinámico por Over 2.5 del periodo (summary Match)
   if (matchOver25 >= 70) res.style.borderColor = "var(--green)";
   else if (matchOver25 >= 50) res.style.borderColor = "var(--amber)";
   else res.style.borderColor = "var(--red)";
