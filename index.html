@@ -2,227 +2,132 @@
 <html lang="es">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Estadísticas Over/Under</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Estadísticas de Partidos</title>
 <style>
-  :root {
-    --bg:#0a0f1c;
-    --card:#121826;
-    --text:#e5e7eb;
-    --accent:#3b82f6;
-    --green:#10b981;
-    --orange:#f59e0b;
-    --red:#ef4444;
-  }
   body {
-    font-family: "Segoe UI", Arial, sans-serif;
-    background: var(--bg);
-    color: var(--text);
+    font-family: Arial, sans-serif;
+    background: #0d1117;
+    color: #e6edf3;
     margin: 0;
     padding: 20px;
   }
-  h1 {color: var(--accent); text-align:center;}
+  select {
+    padding: 10px;
+    border-radius: 6px;
+    border: 1px solid #30363d;
+    margin: 5px 0;
+    width: 100%;
+    background: #161b22;
+    color: #e6edf3;
+  }
   .card {
-    background: var(--card);
-    border-radius: 12px;
-    padding: 16px;
-    margin-top: 20px;
-    border: 3px solid transparent; /* Contorno dinámico */
-    transition: border 0.3s;
-  }
-  label {display:block; margin:10px 0 5px;}
-  select, input, button {
-    width: 100%;
-    padding: 10px;
-    margin-bottom: 12px;
-    border-radius: 8px;
-    border: 1px solid var(--accent);
-    font-size: 16px;
-    background: #1f2937;
-    color: var(--text);
-  }
-  button {
-    background: var(--accent);
-    color: #fff;
-    font-weight: bold;
-    cursor: pointer;
-    transition: 0.3s;
-  }
-  button:hover {background:#2563eb;}
-  table {
-    width: 100%;
-    border-collapse: collapse;
+    border: 2px solid #30363d;
+    border-radius: 10px;
+    padding: 15px;
     margin-top: 15px;
-    font-size: 15px;
-    border-radius: 8px;
-    overflow: hidden;
+    background: #161b22;
   }
-  th, td {
-    padding: 10px;
-    text-align: center;
+  .highlight {
+    color: #58a6ff;
+    font-weight: bold;
   }
-  th {
-    background: var(--accent);
-    color: #fff;
+  .stat {
+    display: flex;
+    justify-content: space-between;
+    margin: 4px 0;
   }
-  td {background:#1f2937; color:#fff;}
-  .green {color: var(--green); font-weight:bold;}
-  .orange {color: var(--orange); font-weight:bold;}
-  .red {color: var(--red); font-weight:bold;}
-  .valueBox {
-    margin-top:15px;
-    padding:10px;
-    border-radius:8px;
-    text-align:center;
-    font-weight:bold;
-  }
-  .value {background: var(--green); color:#fff;}
-  .novalue {background: var(--red); color:#fff;}
+  .green {color:#2ea043;}
+  .red {color:#f85149;}
+  .yellow {color:#d29922;}
 </style>
 </head>
 <body>
-  <h1>Estadísticas Over/Under</h1>
 
-  <div class="card">
-    <input type="file" id="fileInput" accept=".json"><br>
-    
-    <label>Selecciona Liga:</label>
-    <select id="leagueSelect"></select>
-    
-    <label>Equipo Local:</label>
-    <select id="homeSelect"></select>
-    
-    <label>Equipo Visitante:</label>
-    <select id="awaySelect"></select>
-    
-    <label>Odd Over 2.5:</label>
-    <input type="number" id="oddOver" step="0.01" placeholder="Ej: 1.90">
-    
-    <label>Odd Under 2.5:</label>
-    <input type="number" id="oddUnder" step="0.01" placeholder="Ej: 2.00">
-    
-    <button id="analyzeBtn">Analizar</button>
-  </div>
-  
-  <div id="results" class="card"></div>
-  
+<h2>📊 Estadísticas de Partidos</h2>
+
+<!-- Selectores -->
+<select id="leagueSelect"></select>
+<select id="homeSelect"></select>
+<select id="awaySelect"></select>
+
+<div id="stats" class="card"></div>
+
 <script>
-let allMatches = [];
+// JSON de ejemplo
+const data = [
+  {"League":"Bosnia and Herzegovina Premier Liga","Match":"Tuzla City - Sarajevo","Result FT":"1-2"},
+  {"League":"Italy Serie A","Match":"Torino - Cagliari","Result FT":"0-0"},
+  {"League":"Denmark Superliga","Match":"Viborg FF - Vejle Boldklub","Result FT":"2-1"}
+];
 
-function getClass(p){
-  if (p >= 70) return "green";
-  if (p >= 50) return "orange";
-  return "red";
-}
+// Obtener ligas únicas
+const leagues = [...new Set(data.map(m => m.League))];
+const leagueSelect = document.getElementById('leagueSelect');
+const homeSelect = document.getElementById('homeSelect');
+const awaySelect = document.getElementById('awaySelect');
+const statsDiv = document.getElementById('stats');
 
-function calcOver(matches, team, isHome, line){
-  let filtered = matches.filter(m => 
-    isHome ? m.Match.startsWith(team) : m.Match.endsWith(team)
-  ).slice(-10);
-
-  if (filtered.length === 0) return 0;
-  let count = filtered.filter(m=>{
-    let [h,a] = m["Result FT"].split("-").map(Number);
-    return (h+a) > line;
-  }).length;
-  return Math.round((count/filtered.length)*100);
-}
-
-function analyze(leagueMatches, homeTeam, awayTeam){
-  let overs = [0.5,1.5,2.5,3.5];
-  let rows = overs.map(line=>{
-    let home = calcOver(leagueMatches, homeTeam, true, line);
-    let away = calcOver(leagueMatches, awayTeam, false, line);
-    let avg = Math.round((home+away)/2);
-
-    return `<tr>
-      <td>Over ${line}</td>
-      <td class="${getClass(home)}">${home}%</td>
-      <td class="${getClass(away)}">${away}%</td>
-      <td class="${getClass(avg)}">${avg}%</td>
-    </tr>`;
-  }).join("");
-
-  return `<table>
-    <tr><th></th><th>Home</th><th>Away</th><th>Match</th></tr>
-    ${rows}
-  </table>`;
-}
-
-function valueCheck(prob, odd){
-  let implied = 100/odd;
-  return prob > implied ? `<div class="valueBox value">VALUE</div>` : `<div class="valueBox novalue">NO VALUE</div>`;
-}
-
-// Cargar JSON
-document.getElementById("fileInput").addEventListener("change", function(e){
-  let file = e.target.files[0];
-  let reader = new FileReader();
-  reader.onload = function(event){
-    allMatches = JSON.parse(event.target.result);
-    let leagues = [...new Set(allMatches.map(m=>m.League))];
-    
-    let leagueSelect = document.getElementById("leagueSelect");
-    leagueSelect.innerHTML = "<option value=''>--Selecciona--</option>" +
-      leagues.map(l=>`<option value="${l}">${l}</option>`).join("");
-  }
-  reader.readAsText(file);
+// Rellenar ligas
+leagues.forEach(l => {
+  let opt = document.createElement('option');
+  opt.value = l; opt.textContent = l;
+  leagueSelect.appendChild(opt);
 });
 
-// Al seleccionar liga, llenar equipos
-document.getElementById("leagueSelect").addEventListener("change", function(){
-  let league = this.value;
-  let leagueMatches = allMatches.filter(m=>m.League === league);
-  let teams = [...new Set(leagueMatches.flatMap(m=>m.Match.split(" - ")))];
-  
-  document.getElementById("homeSelect").innerHTML = teams.map(t=>`<option value="${t}">${t}</option>`).join("");
-  document.getElementById("awaySelect").innerHTML = teams.map(t=>`<option value="${t}">${t}</option>`).join("");
+leagueSelect.addEventListener('change', () => {
+  const league = leagueSelect.value;
+  const matches = data.filter(m => m.League === league);
+  const teams = [...new Set(matches.flatMap(m => m.Match.split(" - ")))];
+
+  homeSelect.innerHTML = "";
+  awaySelect.innerHTML = "";
+  teams.forEach(t => {
+    let opt1 = document.createElement('option');
+    opt1.value = t; opt1.textContent = t;
+    homeSelect.appendChild(opt1);
+
+    let opt2 = document.createElement('option');
+    opt2.value = t; opt2.textContent = t;
+    awaySelect.appendChild(opt2);
+  });
 });
 
-// Botón analizar
-document.getElementById("analyzeBtn").addEventListener("click", function(){
-  let league = document.getElementById("leagueSelect").value;
-  let homeTeam = document.getElementById("homeSelect").value;
-  let awayTeam = document.getElementById("awaySelect").value;
-  let oddOver = parseFloat(document.getElementById("oddOver").value);
-  let oddUnder = parseFloat(document.getElementById("oddUnder").value);
+// Mostrar stats al escoger equipos
+[homeSelect, awaySelect].forEach(sel => sel.addEventListener('change', () => {
+  const league = leagueSelect.value;
+  const home = homeSelect.value;
+  const away = awaySelect.value;
+  if (!home || !away || home === away) return;
 
-  if (!league || !homeTeam || !awayTeam) {
-    alert("Debes seleccionar liga y equipos.");
+  const matches = data.filter(m => 
+    m.League === league && m.Match.includes(home) && m.Match.includes(away)
+  );
+
+  if (!matches.length) {
+    statsDiv.innerHTML = "<p>No hay partidos disponibles.</p>";
     return;
   }
-  
-  let leagueMatches = allMatches.filter(m=>m.League === league);
-  let table = analyze(leagueMatches, homeTeam, awayTeam);
 
-  // cálculo específico para Over 2.5
-  let homeOver25 = calcOver(leagueMatches, homeTeam, true, 2.5);
-  let awayOver25 = calcOver(leagueMatches, awayTeam, false, 2.5);
-  let matchOver25 = Math.round((homeOver25+awayOver25)/2);
+  let totalGoals = 0, homeGoals=0, awayGoals=0, over25=0, btts=0;
+  matches.forEach(m => {
+    const [hg, ag] = m["Result FT"].split("-").map(Number);
+    totalGoals += hg+ag;
+    homeGoals += hg; awayGoals += ag;
+    if (hg+ag > 2.5) over25++;
+    if (hg>0 && ag>0) btts++;
+  });
 
-  let valueOdds = "";
-  if (oddOver && oddUnder){
-    valueOdds = `
-      <h3>Over 2.5</h3>
-      <p>Odd Over: ${oddOver}</p>
-      ${valueCheck(matchOver25, oddOver)}
-      <p>Odd Under: ${oddUnder}</p>
-      ${valueCheck(100-matchOver25, oddUnder)}
-    `;
-  }
-
-  let resultsCard = document.getElementById("results");
-  resultsCard.innerHTML = `
-    <h2>${homeTeam} (Home) vs ${awayTeam} (Away)</h2>
-    ${table}
-    ${valueOdds}
+  const games = matches.length;
+  statsDiv.innerHTML = `
+    <div class="stat"><span>⚽ Promedio goles totales</span><span class="highlight">${(totalGoals/games).toFixed(2)}</span></div>
+    <div class="stat"><span>🏠 Promedio goles ${home}</span><span class="highlight">${(homeGoals/games).toFixed(2)}</span></div>
+    <div class="stat"><span>🚀 Promedio goles ${away}</span><span class="highlight">${(awayGoals/games).toFixed(2)}</span></div>
+    <div class="stat"><span>🔥 Over 2.5</span><span class="${(over25/games*100)>=50?'green':'red'}">${(over25/games*100).toFixed(0)}%</span></div>
+    <div class="stat"><span>🤝 BTTS</span><span class="${(btts/games*100)>=50?'green':'red'}">${(btts/games*100).toFixed(0)}%</span></div>
   `;
-
-  // Contorno dinámico según probabilidad Over 2.5
-  if (matchOver25 >= 70) resultsCard.style.borderColor = "var(--green)";
-  else if (matchOver25 >= 50) resultsCard.style.borderColor = "var(--orange)";
-  else resultsCard.style.borderColor = "var(--red)";
-});
+}));
 </script>
+
 </body>
 </html>
