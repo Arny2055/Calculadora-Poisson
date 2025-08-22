@@ -201,6 +201,13 @@ function avgCornersFT(lastMatches){
 }
 
 /* ---------- Poisson helpers ---------- */
+function poisP0(lambda){ return Math.exp(-lambda); }
+function poisPMF(k, lambda){
+  if(k<0) return 0;
+  let p = Math.exp(-lambda), acc = (k===0)?p:0;
+  for(let i=1;i<=k;i++){ p = p * (lambda / i); if(i===k) return p; }
+  return 0;
+}
 function poisCDF(k, lambda){ // P(X<=k)
   let p0 = Math.exp(-lambda), sum = p0;
   let p = p0;
@@ -208,7 +215,7 @@ function poisCDF(k, lambda){ // P(X<=k)
   return sum;
 }
 function probTeamOver(lambda, lineHalf){ // P(X > lineHalf)
-  const k = Math.floor(lineHalf);
+  const k = Math.floor(lineHalf); // e.g., 1.5 -> k=1 => P(X>=2) = 1 - P<=1
   return 1 - poisCDF(k, lambda);
 }
 function probTotalOver(lambdaH, lambdaA, lineHalf){
@@ -217,72 +224,42 @@ function probTotalOver(lambdaH, lambdaA, lineHalf){
   return 1 - poisCDF(k, L);
 }
 function probBTTS(lambdaH, lambdaA){
+  // 1 - P(H=0) - P(A=0) + P(H=0,A=0)
   return 1 - Math.exp(-lambdaH) - Math.exp(-lambdaA) + Math.exp(-(lambdaH+lambdaA));
 }
 
-/* ====== NUEVO: equipos de liga + media por equipo (últimos 10 por rol) ====== */
-function uniqueTeamsFromLeague(leagueMatches){
-  const set = new Set();
-  leagueMatches.forEach(m=>{
-    const [h,a] = (m.Match||" - ").split(" - ");
-    if(h) set.add(h.trim());
-    if(a) set.add(a.trim());
-  });
-  return Array.from(set);
-}
-// últimos 10 por rol de un equipo (dentro de la liga)
-function lastMatchesByRoleForTeam(leagueMatches, team, role){
-  const arr = leagueMatches.filter(m=>{
-    const [h,a]=m.Match.split(" - ");
-    return role==="home" ? h===team : a===team;
-  });
-  return arr.slice(-10);
-}
-// promedio de goles a favor para un equipo en sus últimos N por rol
-function avgGoalsForTeamByRole(leagueMatches, team, role){
-  const last = lastMatchesByRoleForTeam(leagueMatches, team, role);
-  let s=0, n=0;
+/* ---------- Blocks ---------- */
+function calcTeamBlock(matches, team, role){
+  const last = lastMatchesByRole(matches, team, role); const n = last.length;
+  let noScore=0, noConcede=0, s=0,c=0,t=0;
   last.forEach(m=>{
-    const [h,a]=periodGoals(m);
-    const forTeam = (role==="home") ? h : a;
-    s += forTeam; n++;
+    const [home,away]=m.Match.split(" - "); const [h,a]=periodGoals(m);
+    const forTeam=(team===home)?h:(team===away)?a:null; const opp=(team===home)?a:(team===away)?h:null;
+    if(forTeam==null) return; if(forTeam===0) noScore++; if(opp===0) noConcede++; s+=forTeam; c+=opp; t+=forTeam+opp;
   });
-  return n ? (s/n) : 0;
-}
-// promedio de goles en contra (para defensa)
-function avgGoalsAgainstTeamByRole(leagueMatches, team, role){
-  const last = lastMatchesByRoleForTeam(leagueMatches, team, role);
-  let s=0, n=0;
-  last.forEach(m=>{
-    const [h,a]=periodGoals(m);
-    const against = (role==="home") ? a : h;
-    s += against; n++;
-  });
-  return n ? (s/n) : 0;
-}
-/* Media de liga por rol = promedio de promedios por equipo */
-function getLeagueRoleAveragesPerTeam(leagueMatches){
-  const teams = uniqueTeamsFromLeague(leagueMatches);
-  const homeAvgs = [];
-  const awayAvgs = [];
-  teams.forEach(t=>{
-    const hAvg = avgGoalsForTeamByRole(leagueMatches, t, "home");
-    const aAvg = avgGoalsForTeamByRole(leagueMatches, t, "away");
-    // Contamos como muestra aunque el promedio sea 0; la presencia de partidos ya valida.
-    if(lastMatchesByRoleForTeam(leagueMatches, t, "home").length>0) homeAvgs.push(hAvg);
-    if(lastMatchesByRoleForTeam(leagueMatches, t, "away").length>0) awayAvgs.push(aAvg);
-  });
-  const mean = arr => arr.length? (arr.reduce((x,y)=>x+y,0)/arr.length) : 0.0001;
   return {
-    leagueHomeAvg: mean(homeAvgs),
-    leagueAwayAvg: mean(awayAvgs),
-    totalTeams: teams.length,
-    teamsWithHomeSample: homeAvgs.length,
-    teamsWithAwaySample: awayAvgs.length
+    n, last,
+    avgScored: n?(s/n).toFixed(1):"0.0",
+    avgConceded: n?(c/n).toFixed(1):"0.0",
+    avgGoals: n?(t/n).toFixed(1):"0.0",
+    pNoScore: pct(noScore,n),
+    pNoConcede: pct(noConcede,n)
   };
 }
 
-/* ---- Summary (Histórico) ---- */
+function renderTeamPanel(title, stats){
+  return `
+  <div class="panel">
+    <div class="sub"><strong>${title}</strong></div>
+    <div class="kv"><span class="muted">Avg. Scored</span><span class="mono">${stats.avgScored}</span></div>
+    <div class="kv"><span class="muted">Avg. Suffer</span><span class="mono">${stats.avgConceded}</span></div>
+    <div class="kv"><span class="muted">Avg. Goals</span><span class="mono">${stats.avgGoals}</span></div>
+    <div class="divider"></div>
+    <div class="kv"><span>Games without Scoring</span><span><span class="badge ${cls(stats.pNoScore)}">${stats.pNoScore}%</span></span></div>
+    <div class="kv"><span>Games without Conceding</span><span><span class="badge ${cls(stats.pNoConcede)}">${stats.pNoConcede}%</span></span></div>
+  </div>`;
+}
+
 function renderSummaryTable(homeLast, awayLast){
   const h = {
     o05: percentOver(homeLast,0.5),
@@ -320,31 +297,16 @@ function renderSummaryTable(homeLast, awayLast){
     </div>`;
 }
 
-/* ====== Reemplazo: Poisson usando medias por-equipo y for/against ====== */
-function renderPoissonSummaryTable(homeTeam, awayTeam, leagueMatches){
-  // 1) Media de liga por rol (promedio de promedios por equipo en sus últimos 10 por rol)
-  const { leagueHomeAvg, leagueAwayAvg, totalTeams, teamsWithHomeSample, teamsWithAwaySample } =
-    getLeagueRoleAveragesPerTeam(leagueMatches);
-
-  // 2) Equipo: for/against en sus últimos 10 por rol (para strengths)
-  const hFor = avgGoalsForTeamByRole(leagueMatches, homeTeam, "home");
-  const hAg  = avgGoalsAgainstTeamByRole(leagueMatches, homeTeam, "home");
-  const aFor = avgGoalsForTeamByRole(leagueMatches, awayTeam, "away");
-  const aAg  = avgGoalsAgainstTeamByRole(leagueMatches, awayTeam, "away");
-
-  // 3) Strengths ajustados por media liga rol
-  const eps = 1e-6;
-  const att_home = hFor / Math.max(leagueHomeAvg, eps);
-  const def_away = aAg  / Math.max(leagueAwayAvg, eps);
-  const att_away = aFor / Math.max(leagueAwayAvg, eps);
-  const def_home = hAg  / Math.max(leagueHomeAvg, eps);
-
-  let lambdaH = att_home * def_away * Math.max(leagueHomeAvg, eps);
-  let lambdaA = att_away * def_home * Math.max(leagueAwayAvg, eps);
-  if(!isFinite(lambdaH) || lambdaH<0) lambdaH = Math.max(hFor,0);
-  if(!isFinite(lambdaA) || lambdaA<0) lambdaA = Math.max(aFor,0);
+/* ---- NUEVO: Summary Poisson (Goles) ---- */
+function renderPoissonSummaryTable(homeTeam, awayTeam, homeLast, awayLast){
+  // λ de cada equipo según su promedio de goles a favor en el periodo actual (últimos 10 partidos en su rol)
+  const hAvg = teamAverages(homeLast, homeTeam);
+  const aAvg = teamAverages(awayLast, awayTeam);
+  const lambdaH = Math.max(0, parseFloat(hAvg.avgScored)||0);
+  const lambdaA = Math.max(0, parseFloat(aAvg.avgScored)||0);
 
   const lines = [0.5,1.5,2.5,3.5];
+
   const row = (L)=>{
     const ph = Math.round(probTeamOver(lambdaH, L)*100);
     const pa = Math.round(probTeamOver(lambdaA, L)*100);
@@ -357,25 +319,16 @@ function renderPoissonSummaryTable(homeTeam, awayTeam, leagueMatches){
         <td><span class="badge ${cls(pm)}">${pm}%</span></td>
       </tr>`;
   };
+
   const bttsHome = Math.round((1 - Math.exp(-lambdaH))*100);
   const bttsAway = Math.round((1 - Math.exp(-lambdaA))*100);
   const bttsMatch = Math.round(probBTTS(lambdaH, lambdaA)*100);
 
-  const info = `
-    <div class="kv"><span class="muted">Equipos en liga</span><span class="mono">${totalTeams}</span></div>
-    <div class="kv"><span class="muted">Equipos con muestra (Home)</span><span class="mono">${teamsWithHomeSample}</span></div>
-    <div class="kv"><span class="muted">Equipos con muestra (Away)</span><span class="mono">${teamsWithAwaySample}</span></div>
-    <div class="kv"><span class="muted">Liga — λ Home</span><span class="mono">${leagueHomeAvg.toFixed(2)}</span></div>
-    <div class="kv"><span class="muted">Liga — λ Away</span><span class="mono">${leagueAwayAvg.toFixed(2)}</span></div>
-    <div class="kv"><span class="muted">Equipo L (For/Ag)</span><span class="mono">${hFor.toFixed(2)} / ${hAg.toFixed(2)}</span></div>
-    <div class="kv"><span class="muted">Equipo V (For/Ag)</span><span class="mono">${aFor.toFixed(2)} / ${aAg.toFixed(2)}</span></div>
-    <div class="kv"><span class="muted">λ Home / λ Away</span><span class="mono">${lambdaH.toFixed(2)} / ${lambdaA.toFixed(2)}</span></div>
-  `;
-
   return `
     <div class="panel">
       <h3>Summary (Poisson · ${currentPeriod})</h3>
-      ${info}
+      <div class="kv"><span class="muted">λ Home</span><span class="mono">${lambdaH.toFixed(2)}</span></div>
+      <div class="kv"><span class="muted">λ Away</span><span class="mono">${lambdaA.toFixed(2)}</span></div>
       <div class="divider"></div>
       <table>
         <tr><th></th><th>Home</th><th>Away</th><th>Match</th></tr>
@@ -575,7 +528,7 @@ document.getElementById("analyzeBtn").addEventListener("click", ()=>{
   const awayStats = calcTeamBlock(leagueMatches, awayTeam, "away");
 
   const summary = renderSummaryTable(homeLast, awayLast);
-  const poissonSummary = renderPoissonSummaryTable(homeTeam, awayTeam, leagueMatches); /* ✅ usa media por-equipo */
+  const poissonSummary = renderPoissonSummaryTable(homeTeam, awayTeam, homeLast, awayLast); /* 🔥 reemplazo del corners summary */
 
   const preds = renderPredictions(homeTeam, awayTeam, homeLast, awayLast);
 
