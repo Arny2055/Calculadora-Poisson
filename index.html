@@ -49,7 +49,6 @@
   .row{display:grid;gap:10px}
   @media(min-width:640px){.row{grid-template-columns:1fr 1fr}}
 
-  /* Pills + sparkline */
   .pills{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
   @media(min-width:900px){.pills{grid-template-columns:repeat(3,1fr)}}
   .pill{
@@ -63,14 +62,12 @@
   .pill.ok{outline:2px solid var(--green)} .pill.warn{outline:2px solid var(--amber)} .pill.bad{outline:2px solid var(--red)}
   .spark{width:100%;height:28px}
 
-  /* === Mejora móvil (tamaños pro) === */
   :root{ --radius:14px; --field-h:56px; --font-base:16px; --font-field:18px; --font-label:1.05rem; --font-chip-lg:1.1rem; }
   label{ font-size: var(--font-label); letter-spacing:.2px; }
   select,input,button{ min-height: var(--field-h); font-size: var(--font-field); border-radius: var(--radius); }
   select option{ font-size: 18px; }
   .tab{ padding:12px; font-size:1rem; font-weight:600; }
 
-  /* Chips de vista previa */
   .preview{
     display:flex;gap:8px;flex-wrap:wrap;align-items:center;
     background:#0f1726;border:1px solid var(--line);border-radius:16px;
@@ -203,27 +200,32 @@ function avgCornersFT(lastMatches){
   return n? (sum/n) : 0;
 }
 
-/* ---- Córners por periodo (con fallback si no hay HT) ---- */
-function periodCornersTotal(m){
-  const hcFT = Number(m["Home Corners at FT"]||m.home_corners_ft||m.home_corners||0);
-  const acFT = Number(m["Away Corners at FT"]||m.away_corners_ft||m.away_corners||0);
-  const totalFT = (isNaN(hcFT)||isNaN(acFT)) ? 0 : (hcFT+acFT);
-
-  const hcHT = Number(m["Home Corners at HT"]||m.home_corners_ht||0);
-  const acHT = Number(m["Away Corners at HT"]||m.away_corners_ht||0);
-  const hasHT = !isNaN(hcHT) && !isNaN(acHT) && (hcHT+acHT)>=0;
-
-  if(currentPeriod==="FT") return totalFT;
-  if(currentPeriod==="1H"){
-    return hasHT ? (hcHT+acHT) : totalFT/2; // estimación si no hay HT
-  }
-  // 2H
-  return hasHT ? (totalFT - (hcHT+acHT)) : totalFT/2; // estimación si no hay HT
+/* ---------- Poisson helpers ---------- */
+function poisP0(lambda){ return Math.exp(-lambda); }
+function poisPMF(k, lambda){
+  if(k<0) return 0;
+  let p = Math.exp(-lambda), acc = (k===0)?p:0;
+  for(let i=1;i<=k;i++){ p = p * (lambda / i); if(i===k) return p; }
+  return 0;
 }
-function percentOverCorners(lastMatches, line){
-  const n = lastMatches.length; let over=0;
-  lastMatches.forEach(m=>{ const c = periodCornersTotal(m); if(c>line) over++; });
-  return pct(over,n);
+function poisCDF(k, lambda){ // P(X<=k)
+  let p0 = Math.exp(-lambda), sum = p0;
+  let p = p0;
+  for(let i=1;i<=k;i++){ p = p*(lambda/i); sum += p; }
+  return sum;
+}
+function probTeamOver(lambda, lineHalf){ // P(X > lineHalf)
+  const k = Math.floor(lineHalf); // e.g., 1.5 -> k=1 => P(X>=2) = 1 - P<=1
+  return 1 - poisCDF(k, lambda);
+}
+function probTotalOver(lambdaH, lambdaA, lineHalf){
+  const L = lambdaH + lambdaA;
+  const k = Math.floor(lineHalf);
+  return 1 - poisCDF(k, L);
+}
+function probBTTS(lambdaH, lambdaA){
+  // 1 - P(H=0) - P(A=0) + P(H=0,A=0)
+  return 1 - Math.exp(-lambdaH) - Math.exp(-lambdaA) + Math.exp(-(lambdaH+lambdaA));
 }
 
 /* ---------- Blocks ---------- */
@@ -283,7 +285,7 @@ function renderSummaryTable(homeLast, awayLast){
     </tr>`;
   return `
     <div class="panel">
-      <h3>Summary</h3>
+      <h3>Summary (Histórico)</h3>
       <table>
         <tr><th></th><th>Home</th><th>Away</th><th>Match</th></tr>
         ${row('Over 0.5',  h.o05, a.o05, avg(h.o05,a.o05))}
@@ -295,25 +297,48 @@ function renderSummaryTable(homeLast, awayLast){
     </div>`;
 }
 
-/* ---- NEW: Corners Summary dinámico por periodo ---- */
-function renderCornersSummaryTable(homeLast, awayLast){
-  const lines = (currentPeriod==="FT") ? [7.5,8.5,9.5,10.5,11.5] : [3.5,4.5,5.5];
-  const h = Object.fromEntries(lines.map(L=>[L, percentOverCorners(homeLast, L)]));
-  const a = Object.fromEntries(lines.map(L=>[L, percentOverCorners(awayLast, L)]));
-  const avg = (x,y)=>Math.round((x+y)/2);
-  const row = (L)=>`
-    <tr>
-      <td>Over ${L.toFixed(1)}</td>
-      <td>${badge(h[L])}</td>
-      <td>${badge(a[L])}</td>
-      <td><span class="badge ${cls(avg(h[L],a[L]))}">${avg(h[L],a[L])}%</span></td>
-    </tr>`;
+/* ---- NUEVO: Summary Poisson (Goles) ---- */
+function renderPoissonSummaryTable(homeTeam, awayTeam, homeLast, awayLast){
+  // λ de cada equipo según su promedio de goles a favor en el periodo actual (últimos 10 partidos en su rol)
+  const hAvg = teamAverages(homeLast, homeTeam);
+  const aAvg = teamAverages(awayLast, awayTeam);
+  const lambdaH = Math.max(0, parseFloat(hAvg.avgScored)||0);
+  const lambdaA = Math.max(0, parseFloat(aAvg.avgScored)||0);
+
+  const lines = [0.5,1.5,2.5,3.5];
+
+  const row = (L)=>{
+    const ph = Math.round(probTeamOver(lambdaH, L)*100);
+    const pa = Math.round(probTeamOver(lambdaA, L)*100);
+    const pm = Math.round(probTotalOver(lambdaH, lambdaA, L)*100);
+    return `
+      <tr>
+        <td>Over ${L.toFixed(1)}</td>
+        <td>${badge(ph)}</td>
+        <td>${badge(pa)}</td>
+        <td><span class="badge ${cls(pm)}">${pm}%</span></td>
+      </tr>`;
+  };
+
+  const bttsHome = Math.round((1 - Math.exp(-lambdaH))*100);
+  const bttsAway = Math.round((1 - Math.exp(-lambdaA))*100);
+  const bttsMatch = Math.round(probBTTS(lambdaH, lambdaA)*100);
+
   return `
     <div class="panel">
-      <h3>Corners Summary (${currentPeriod})</h3>
+      <h3>Summary (Poisson · ${currentPeriod})</h3>
+      <div class="kv"><span class="muted">λ Home</span><span class="mono">${lambdaH.toFixed(2)}</span></div>
+      <div class="kv"><span class="muted">λ Away</span><span class="mono">${lambdaA.toFixed(2)}</span></div>
+      <div class="divider"></div>
       <table>
         <tr><th></th><th>Home</th><th>Away</th><th>Match</th></tr>
         ${lines.map(row).join("")}
+        <tr>
+          <td>BTTS</td>
+          <td>${badge(bttsHome)}</td>
+          <td>${badge(bttsAway)}</td>
+          <td><span class="badge ${cls(bttsMatch)}">${bttsMatch}%</span></td>
+        </tr>
       </table>
     </div>
   `;
@@ -354,7 +379,6 @@ function buildSeries(homeLast, awayLast){
   const sCorners = ()=>{
     const out=[];
     for(let i=0;i<len;i++){
-      // Para sparklines usamos FT como referencia visual
       const c1 = (Number(H[i]["Home Corners at FT"]||H[i].home_corners_ft||H[i].home_corners||0)+
                   Number(H[i]["Away Corners at FT"]||H[i].away_corners_ft||H[i].away_corners||0));
       const c2 = (Number(A[i]["Home Corners at FT"]||A[i].home_corners_ft||A[i].home_corners||0)+
@@ -504,7 +528,7 @@ document.getElementById("analyzeBtn").addEventListener("click", ()=>{
   const awayStats = calcTeamBlock(leagueMatches, awayTeam, "away");
 
   const summary = renderSummaryTable(homeLast, awayLast);
-  const cornersSummary = renderCornersSummaryTable(homeLast, awayLast); /* 🔥 nuevo panel */
+  const poissonSummary = renderPoissonSummaryTable(homeTeam, awayTeam, homeLast, awayLast); /* 🔥 reemplazo del corners summary */
 
   const preds = renderPredictions(homeTeam, awayTeam, homeLast, awayLast);
 
@@ -522,7 +546,7 @@ document.getElementById("analyzeBtn").addEventListener("click", ()=>{
     </div>
     <div class="grid" style="margin-top:12px">
       ${summary}
-      ${cornersSummary}
+      ${poissonSummary}
     </div>
     <div class="grid" style="margin-top:12px">
       ${preds}
