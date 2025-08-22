@@ -201,13 +201,13 @@ function avgCornersFT(lastMatches){
 }
 
 /* ---------- Poisson helpers ---------- */
-function poisCDF(k, lambda){ // P(X<=k)
+function poisCDF(k, lambda){
   let p0 = Math.exp(-lambda), sum = p0;
   let p = p0;
   for(let i=1;i<=k;i++){ p = p*(lambda/i); sum += p; }
   return sum;
 }
-function probTeamOver(lambda, lineHalf){ // P(X > lineHalf)
+function probTeamOver(lambda, lineHalf){
   const k = Math.floor(lineHalf);
   return 1 - poisCDF(k, lambda);
 }
@@ -220,7 +220,7 @@ function probBTTS(lambdaH, lambdaA){
   return 1 - Math.exp(-lambdaH) - Math.exp(-lambdaA) + Math.exp(-(lambdaH+lambdaA));
 }
 
-/* ====== NUEVO: equipos de liga + media por equipo (últimos 10 por rol) ====== */
+/* ====== NUEVO: Liga por equipos (últimos 10 por rol) ====== */
 function uniqueTeamsFromLeague(leagueMatches){
   const set = new Set();
   leagueMatches.forEach(m=>{
@@ -230,7 +230,6 @@ function uniqueTeamsFromLeague(leagueMatches){
   });
   return Array.from(set);
 }
-// últimos 10 por rol de un equipo (dentro de la liga)
 function lastMatchesByRoleForTeam(leagueMatches, team, role){
   const arr = leagueMatches.filter(m=>{
     const [h,a]=m.Match.split(" - ");
@@ -238,7 +237,6 @@ function lastMatchesByRoleForTeam(leagueMatches, team, role){
   });
   return arr.slice(-10);
 }
-// promedio de goles a favor para un equipo en sus últimos N por rol
 function avgGoalsForTeamByRole(leagueMatches, team, role){
   const last = lastMatchesByRoleForTeam(leagueMatches, team, role);
   let s=0, n=0;
@@ -249,7 +247,6 @@ function avgGoalsForTeamByRole(leagueMatches, team, role){
   });
   return n ? (s/n) : 0;
 }
-// promedio de goles en contra (para defensa)
 function avgGoalsAgainstTeamByRole(leagueMatches, team, role){
   const last = lastMatchesByRoleForTeam(leagueMatches, team, role);
   let s=0, n=0;
@@ -260,7 +257,6 @@ function avgGoalsAgainstTeamByRole(leagueMatches, team, role){
   });
   return n ? (s/n) : 0;
 }
-/* Media de liga por rol = promedio de promedios por equipo */
 function getLeagueRoleAveragesPerTeam(leagueMatches){
   const teams = uniqueTeamsFromLeague(leagueMatches);
   const homeAvgs = [];
@@ -268,7 +264,6 @@ function getLeagueRoleAveragesPerTeam(leagueMatches){
   teams.forEach(t=>{
     const hAvg = avgGoalsForTeamByRole(leagueMatches, t, "home");
     const aAvg = avgGoalsForTeamByRole(leagueMatches, t, "away");
-    // Contamos como muestra aunque el promedio sea 0; la presencia de partidos ya valida.
     if(lastMatchesByRoleForTeam(leagueMatches, t, "home").length>0) homeAvgs.push(hAvg);
     if(lastMatchesByRoleForTeam(leagueMatches, t, "away").length>0) awayAvgs.push(aAvg);
   });
@@ -320,19 +315,16 @@ function renderSummaryTable(homeLast, awayLast){
     </div>`;
 }
 
-/* ====== Reemplazo: Poisson usando medias por-equipo y for/against ====== */
+/* ====== Poisson usando medias por-equipo y for/against ====== */
 function renderPoissonSummaryTable(homeTeam, awayTeam, leagueMatches){
-  // 1) Media de liga por rol (promedio de promedios por equipo en sus últimos 10 por rol)
   const { leagueHomeAvg, leagueAwayAvg, totalTeams, teamsWithHomeSample, teamsWithAwaySample } =
     getLeagueRoleAveragesPerTeam(leagueMatches);
 
-  // 2) Equipo: for/against en sus últimos 10 por rol (para strengths)
   const hFor = avgGoalsForTeamByRole(leagueMatches, homeTeam, "home");
   const hAg  = avgGoalsAgainstTeamByRole(leagueMatches, homeTeam, "home");
   const aFor = avgGoalsForTeamByRole(leagueMatches, awayTeam, "away");
   const aAg  = avgGoalsAgainstTeamByRole(leagueMatches, awayTeam, "away");
 
-  // 3) Strengths ajustados por media liga rol
   const eps = 1e-6;
   const att_home = hFor / Math.max(leagueHomeAvg, eps);
   const def_away = aAg  / Math.max(leagueAwayAvg, eps);
@@ -575,7 +567,7 @@ document.getElementById("analyzeBtn").addEventListener("click", ()=>{
   const awayStats = calcTeamBlock(leagueMatches, awayTeam, "away");
 
   const summary = renderSummaryTable(homeLast, awayLast);
-  const poissonSummary = renderPoissonSummaryTable(homeTeam, awayTeam, leagueMatches); /* ✅ usa media por-equipo */
+  const poissonSummary = renderPoissonSummaryTable(homeTeam, awayTeam, leagueMatches);
 
   const preds = renderPredictions(homeTeam, awayTeam, homeLast, awayLast);
 
