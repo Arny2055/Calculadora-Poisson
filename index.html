@@ -144,13 +144,13 @@
   <div id="results" class="card"></div>
 </div>
 
+<!-- html2canvas para exportar -->
 <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
 <script>
 let allMatches = [];
 let currentPeriod = "FT";
 let SAMPLE_N = 10;
-let ALPHA = 0.60; // pondera más lo reciente
-const LINES = [0.5,1.5,2.5,3.5]; // ← agrega/quita líneas aquí
+let ALPHA = 0.60; // 0..1 (más cerca de 1 = más peso a recientes)
 
 /* ---------- Utils ---------- */
 function tryParseJSON(text){
@@ -168,14 +168,23 @@ function periodGoals(m){
   if(currentPeriod==="1H") return [hHT,aHT];
   return [(hFT-hHT),(aFT-aHT)];
 }
-function weightAt(i,len){ const f = 1 + ALPHA*1.5; return Math.pow(f, i); }
-function selectSample(list){ return list.slice(-SAMPLE_N); }
+function weightAt(i,len){
+  // i: 0..len-1 (antiguo..reciente). base 1, escala exponencial con ALPHA
+  const f = 1 + ALPHA*1.5; // 1..2.5
+  return Math.pow(f, i);
+}
+
+/* ---------- Selección de muestras ---------- */
+function selectSample(list){
+  // coge últimos SAMPLE_N; i=0 más antiguo
+  const arr = list.slice(-SAMPLE_N);
+  return arr;
+}
 
 /* ---------- Filtros ---------- */
 function lastByRole(matches, team, role){
   const arr = matches.filter(m=>{
-    const [h,a]=m.Match.split(" - ");
-    return role==="home"? h===team : a===team;
+    const [h,a]=m.Match.split(" - "); return role==="home"? h===team : a===team;
   });
   return selectSample(arr);
 }
@@ -208,7 +217,8 @@ function weightedBTTS(list){
   return Math.round((hit/wsum)*100);
 }
 function teamAverages(list, team){
-  let s=0,c=0,t=0,ws=0; const len=list.length;
+  let s=0,c=0,t=0,ws=0;
+  const len=list.length;
   for(let i=0;i<len;i++){
     const m=list[i]; const w=weightAt(i,len);
     const [home,away]=m.Match.split(" - "); const [h,a]=periodGoals(m);
@@ -256,6 +266,7 @@ function calcTeamBlock(matches, team, role){
     pNoConcede: ws? Math.round((noConcede/ws)*100):0
   };
 }
+
 function renderTeamPanel(title, stats){
   return `
   <div class="panel">
@@ -289,58 +300,35 @@ function renderSummaryTable(hLast, aLast){
     </div>`;
 }
 
-/* Markets con líneas (Over/Under por línea) */
-function renderMarkets(hLast, aLast){
-  const avg = (x,y)=>Math.round((x+y)/2);
-  const rowsOver = LINES.map(L=>{
-    const h=weightedPercentOver(hLast,L), a=weightedPercentOver(aLast,L), m=avg(h,a);
-    return `<tr><td>Over ${L}</td><td>${badge(h)}</td><td>${badge(a)}</td><td><span class="badge ${cls(m)}">${m}%</span></td></tr>`;
-  }).join("");
-  const rowsUnder = LINES.map(L=>{
-    const h=100-weightedPercentOver(hLast,L), a=100-weightedPercentOver(aLast,L), m=avg(h,a);
-    return `<tr><td>Under ${L}</td><td>${badge(h)}</td><td>${badge(a)}</td><td><span class="badge ${cls(m)}">${m}%</span></td></tr>`;
-  }).join("");
-
-  return `
-  <div class="panel">
-    <h3>Markets (con líneas)</h3>
-    <table>
-      <tr><th></th><th>Home</th><th>Away</th><th>Match</th></tr>
-      ${rowsOver}
-      ${rowsUnder}
-    </table>
-  </div>`;
-}
-
-/* Sparklines helpers */
+/* Sparklines */
 function buildSeries(hLast,aLast){
   const len = Math.min(hLast.length, aLast.length);
   const H = hLast.slice(-len), A=aLast.slice(-len);
+  const series = {};
   const seq = (fn)=>{ const out=[]; for(let i=0;i<len;i++){ out.push(fn(H[i],A[i],i,len)); } return out; };
-  return {
-    o25: seq((m1,m2)=> ( ((periodGoals(m1).reduce((x,y)=>x+y)>2.5)?1:0)+((periodGoals(m2).reduce((x,y)=>x+y)>2.5)?1:0) )/2 *100 ),
-    o15: seq((m1,m2)=> ( ((periodGoals(m1).reduce((x,y)=>x+y)>1.5)?1:0)+((periodGoals(m2).reduce((x,y)=>x+y)>1.5)?1:0) )/2 *100 ),
-    btts: seq((m1,m2)=> {const [h1,a1]=periodGoals(m1); const [h2,a2]=periodGoals(m2); return ((h1>0&&a1>0?1:0)+(h2>0&&a2>0?1:0))/2*100;}),
-    goals: seq((m1,m2)=> {const [h1,a1]=periodGoals(m1); const [h2,a2]=periodGoals(m2); return (h1+h2+a1+a2)/2;}),
-    corners: seq((m1,m2)=> {const c1=Number(m1["Home Corners at FT"]||0)+Number(m1["Away Corners at FT"]||0); const c2=Number(m2["Home Corners at FT"]||0)+Number(m2["Away Corners at FT"]||0); return (c1+c2)/2;}),
-    g76: seq((m1,m2)=> {const [hHT1,aHT1]=parseScore(m1["Result HT"]); const [hFT1,aFT1]=parseScore(m1["Result FT"]); const [hHT2,aHT2]=parseScore(m2["Result HT"]); const [hFT2,aFT2]=parseScore(m2["Result FT"]); return ((hFT1-hHT1+aFT1-aHT1)+(hFT2-hHT2+aFT2-aHT2))/2;})
-  };
+  series.o25 = seq((m1,m2,i,l)=> ( ( (periodGoals(m1).reduce((x,y)=>x+y)>2.5)?1:0) + ( (periodGoals(m2).reduce((x,y)=>x+y)>2.5)?1:0) )/2 *100 );
+  series.o15 = seq((m1,m2)=> ( ( (periodGoals(m1).reduce((x,y)=>x+y)>1.5)?1:0) + ( (periodGoals(m2).reduce((x,y)=>x+y)>1.5)?1:0) )/2 *100 );
+  series.btts = seq((m1,m2)=> {const [h1,a1]=periodGoals(m1); const [h2,a2]=periodGoals(m2); return ((h1>0&&a1>0?1:0)+(h2>0&&a2>0?1:0))/2*100;});
+  series.goals = seq((m1,m2)=> {const [h1,a1]=periodGoals(m1); const [h2,a2]=periodGoals(m2); return (h1+h2+a1+a2)/2;});
+  series.corners = seq((m1,m2)=> {const c1=Number(m1["Home Corners at FT"]||0)+Number(m1["Away Corners at FT"]||0); const c2=Number(m2["Home Corners at FT"]||0)+Number(m2["Away Corners at FT"]||0); return (c1+c2)/2;});
+  series.g76 = seq((m1,m2)=> {const [hHT1,aHT1]=parseScore(m1["Result HT"]); const [hFT1,aFT1]=parseScore(m1["Result FT"]); const [hHT2,aHT2]=parseScore(m2["Result HT"]); const [hFT2,aFT2]=parseScore(m2["Result FT"]); return ((hFT1-hHT1+aFT1-aHT1)+(hFT2-hHT2+aFT2-aHT2))/2;});
+  return series;
 }
 function drawSpark(canvas, series, color){
   if(!canvas) return;
-  const dpr=window.devicePixelRatio||1, w=canvas.clientWidth, h=canvas.clientHeight;
-  canvas.width=Math.round(w*dpr); canvas.height=Math.round(h*dpr);
-  const ctx=canvas.getContext('2d'); ctx.scale(dpr,dpr); ctx.clearRect(0,0,w,h);
+  const dpr = window.devicePixelRatio||1, w = canvas.clientWidth, h = canvas.clientHeight;
+  canvas.width = Math.round(w*dpr); canvas.height = Math.round(h*dpr);
+  const ctx = canvas.getContext('2d'); ctx.scale(dpr,dpr); ctx.clearRect(0,0,w,h);
   if(!series || series.length===0) return;
   let min=Math.min(...series), max=Math.max(...series); if(min===max){min-=1;max+=1;}
   const nx=i=> (i/(series.length-1))*(w-4)+2, ny=v=> h-2 - ((v-min)/(max-min))*(h-6);
   ctx.beginPath(); ctx.lineWidth=2; ctx.strokeStyle=color;
   for(let i=0;i<series.length;i++){ const x=nx(i), y=ny(series[i]); i?ctx.lineTo(x,y):ctx.moveTo(x,y); }
-  ctx.stroke(); ctx.lineTo(nx(series.length-1),h-2); ctx.lineTo(2,h-2); ctx.closePath(); ctx.fillStyle=color.replace('1)', '.12)'); ctx.fill();
+  ctx.stroke(); ctx.lineTo(nx(series.length-1),h-2); ctx.lineTo(2,h-2); ctx.closePath(); ctx.fillStyle=color.replace('1)','.12)'); ctx.fill();
   const lx=nx(series.length-1), ly=ny(series[series.length-1]); ctx.beginPath(); ctx.arc(lx,ly,2.5,0,Math.PI*2); ctx.fillStyle=color; ctx.fill();
 }
 
-/* Game Predictions */
+/* Game Predictions con sparklines */
 function predictionsBlock(homeTeam, awayTeam, hLast, aLast){
   const pO25 = Math.round((weightedPercentOver(hLast,2.5)+weightedPercentOver(aLast,2.5))/2);
   const pO15 = Math.round((weightedPercentOver(hLast,1.5)+weightedPercentOver(aLast,1.5))/2);
@@ -365,7 +353,7 @@ function predictionsBlock(homeTeam, awayTeam, hLast, aLast){
       <div class="legend small" style="margin:-2px 0 8px">
         <span class="dot cyan"></span><span class="muted">Over</span>
         <span class="dot violet"></span><span class="muted">BTTS</span>
-        <span class="dot lime"></span><span class="muted">Volumen</span>
+        <span class="dot lime"></span><span class="muted">Volumen (goles/corners)</span>
       </div>
       <div class="pills">
         ${pill('o25', pO25+'%', 'Over 2.5FT', klass(pO25))}
@@ -388,6 +376,26 @@ function predictionsBlock(homeTeam, awayTeam, hLast, aLast){
   return html;
 }
 
+/* Handicap */
+function renderHandicap(title, last, team){
+  const lines=[-2.5,-1.5,-0.5,0.5,1.5,2.5];
+  const len=last.length;
+  const tally=Object.fromEntries(lines.map(l=>[l,{w:0,l:0,ws:0}]));
+  for(let i=0;i<len;i++){
+    const m=last[i]; const w=weightAt(i,len);
+    const [home,away]=m.Match.split(" - "); const [h,a]=periodGoals(m);
+    const forTeam=(team===home)?h:(team===away)?a:null; const opp=(team===home)?a:(team===away)?h:null;
+    if(forTeam==null) continue;
+    const diff=forTeam-opp; lines.forEach(l=>{ (diff-l>0)? tally[l].w+=w : tally[l].l+=w; tally[l].ws+=w; });
+  }
+  const rows = lines.map(l=>{
+    const ws=tally[l].ws||1;
+    const win=Math.round(tally[l].w/ws*100), loss=Math.round(tally[l].l/ws*100);
+    return `<tr><td class="mono">${l>0?`+${l}`:l}</td><td>${badge(win)}</td><td>${badge(loss)}</td></tr>`;
+  }).join("");
+  return `<div class="panel"><h3>${title}</h3><table><tr><th>Hcp</th><th>Win</th><th>Loss</th></tr>${rows}</table></div>`;
+}
+
 /* Value bars */
 function valueBars(prob, odd, label){
   if(!odd || odd<=1) return `<div class="muted small">Ingresa cuota para ${label}</div>`;
@@ -400,7 +408,7 @@ function valueBars(prob, odd, label){
   `;
 }
 
-/* ---------- Carga ---------- */
+/* ---------- Carga de archivo ---------- */
 document.getElementById("fileInput").addEventListener("change", (e)=>{
   const file = e.target.files[0]; if(!file) return;
   const rd = new FileReader();
@@ -470,14 +478,14 @@ document.getElementById("analyzeBtn").addEventListener("click", ()=>{
   const homeStats = calcTeamBlock(leagueMatches, homeTeam, "home");
   const awayStats = calcTeamBlock(leagueMatches, awayTeam, "away");
 
-  // Bloques
   const summary = renderSummaryTable(hAll, aAll);
-  const markets = renderMarkets(hAll, aAll);   // ← nuevo panel con líneas
   const preds = predictionsBlock(homeTeam, awayTeam, hAll, aAll);
+  const hcaps = `
+    ${renderHandicap(\`\${homeTeam} Handicap Goals\`, hAll, homeTeam)}
+    ${renderHandicap(\`\${awayTeam} Handicap Goals\`, aAll, awayTeam)}
+  `;
 
-  // Value bars para 2.5
   const matchOver25 = Math.round((weightedPercentOver(hAll,2.5)+weightedPercentOver(aAll,2.5))/2);
-
   const res = document.getElementById("results");
   res.innerHTML = `
     <div class="kv"><span class="muted">Periodo</span><span class="badge b-soft">${currentPeriod}</span></div>
@@ -489,19 +497,14 @@ document.getElementById("analyzeBtn").addEventListener("click", ()=>{
     </div>
     <div class="grid cols-2" style="margin-top:12px">
       ${summary}
-      ${markets}
+      ${preds}
     </div>
     <div class="grid cols-2" style="margin-top:12px">
-      ${preds}
-      <div class="panel">
-        <h3>Value vs Odds (2.5)</h3>
-        ${valueBars(matchOver25, oddOver, 'Over 2.5')}
-        <div style="height:8px"></div>
-        ${valueBars(100-matchOver25, oddUnder, 'Under 2.5')}
-      </div>
+      <div class="panel"><h3>Over 2.5</h3>${valueBars(matchOver25, oddOver, 'Over 2.5')}</div>
+      <div class="panel"><h3>Under 2.5</h3>${valueBars(100-matchOver25, oddUnder, 'Under 2.5')}</div>
     </div>
+    <div class="grid cols-2" style="margin-top:12px">${hcaps}</div>
   `;
-  // Borde del panel por O2.5 (match)
   if (matchOver25 >= 70) res.style.borderColor = "var(--green)";
   else if (matchOver25 >= 50) res.style.borderColor = "var(--amber)";
   else res.style.borderColor = "var(--red)";
