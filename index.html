@@ -63,17 +63,8 @@
   .pill.ok{outline:2px solid var(--green)} .pill.warn{outline:2px solid var(--amber)} .pill.bad{outline:2px solid var(--red)}
   .spark{width:100%;height:28px}
 
-  /* ===================== */
-  /* === MEJORA MÓVIL ==== */
-  /* ===================== */
-  :root{
-    --radius:14px;
-    --field-h:56px;           /* altura táctil */
-    --font-base:16px;
-    --font-field:18px;        /* selects/inputs */
-    --font-label:1.05rem;     /* etiquetas */
-    --font-chip-lg:1.1rem;    /* chips grandes */
-  }
+  /* === Mejora móvil (tamaños pro) === */
+  :root{ --radius:14px; --field-h:56px; --font-base:16px; --font-field:18px; --font-label:1.05rem; --font-chip-lg:1.1rem; }
   label{ font-size: var(--font-label); letter-spacing:.2px; }
   select,input,button{ min-height: var(--field-h); font-size: var(--font-field); border-radius: var(--radius); }
   select option{ font-size: 18px; }
@@ -94,8 +85,8 @@
   }
   .preview .chip .dot{width:8px;height:8px;border-radius:50%}
   .preview .chip.league .dot{background:var(--accent)}
-  .preview .chip.home .dot{background:var(--green)}
-  .preview .chip.away .dot{background:var(--red)}
+  .preview .chip.home  .dot{background:var(--green)}
+  .preview .chip.away  .dot{background:var(--red)}
 
   @media (max-width:480px){
     body{padding:12px}
@@ -205,11 +196,34 @@ function teamAverages(lastMatches, team){
 function avgCornersFT(lastMatches){
   let sum=0, n=0;
   lastMatches.forEach(m=>{
-    const hc = Number(m["Home Corners at FT"]||0);
-    const ac = Number(m["Away Corners at FT"]||0);
+    const hc = Number(m["Home Corners at FT"]||m.home_corners_ft||m.home_corners||0);
+    const ac = Number(m["Away Corners at FT"]||m.away_corners_ft||m.away_corners||0);
     if(!isNaN(hc+ac)){ sum += (hc+ac); n++; }
   });
   return n? (sum/n) : 0;
+}
+
+/* ---- Córners por periodo (con fallback si no hay HT) ---- */
+function periodCornersTotal(m){
+  const hcFT = Number(m["Home Corners at FT"]||m.home_corners_ft||m.home_corners||0);
+  const acFT = Number(m["Away Corners at FT"]||m.away_corners_ft||m.away_corners||0);
+  const totalFT = (isNaN(hcFT)||isNaN(acFT)) ? 0 : (hcFT+acFT);
+
+  const hcHT = Number(m["Home Corners at HT"]||m.home_corners_ht||0);
+  const acHT = Number(m["Away Corners at HT"]||m.away_corners_ht||0);
+  const hasHT = !isNaN(hcHT) && !isNaN(acHT) && (hcHT+acHT)>=0;
+
+  if(currentPeriod==="FT") return totalFT;
+  if(currentPeriod==="1H"){
+    return hasHT ? (hcHT+acHT) : totalFT/2; // estimación si no hay HT
+  }
+  // 2H
+  return hasHT ? (totalFT - (hcHT+acHT)) : totalFT/2; // estimación si no hay HT
+}
+function percentOverCorners(lastMatches, line){
+  const n = lastMatches.length; let over=0;
+  lastMatches.forEach(m=>{ const c = periodCornersTotal(m); if(c>line) over++; });
+  return pct(over,n);
 }
 
 /* ---------- Blocks ---------- */
@@ -244,7 +258,6 @@ function renderTeamPanel(title, stats){
   </div>`;
 }
 
-/* ---------- Summary ---------- */
 function renderSummaryTable(homeLast, awayLast){
   const h = {
     o05: percentOver(homeLast,0.5),
@@ -282,6 +295,30 @@ function renderSummaryTable(homeLast, awayLast){
     </div>`;
 }
 
+/* ---- NEW: Corners Summary dinámico por periodo ---- */
+function renderCornersSummaryTable(homeLast, awayLast){
+  const lines = (currentPeriod==="FT") ? [7.5,8.5,9.5,10.5,11.5] : [3.5,4.5,5.5];
+  const h = Object.fromEntries(lines.map(L=>[L, percentOverCorners(homeLast, L)]));
+  const a = Object.fromEntries(lines.map(L=>[L, percentOverCorners(awayLast, L)]));
+  const avg = (x,y)=>Math.round((x+y)/2);
+  const row = (L)=>`
+    <tr>
+      <td>Over ${L.toFixed(1)}</td>
+      <td>${badge(h[L])}</td>
+      <td>${badge(a[L])}</td>
+      <td><span class="badge ${cls(avg(h[L],a[L]))}">${avg(h[L],a[L])}%</span></td>
+    </tr>`;
+  return `
+    <div class="panel">
+      <h3>Corners Summary (${currentPeriod})</h3>
+      <table>
+        <tr><th></th><th>Home</th><th>Away</th><th>Match</th></tr>
+        ${lines.map(row).join("")}
+      </table>
+    </div>
+  `;
+}
+
 /* ---------- SPARKLINES ---------- */
 function buildSeries(homeLast, awayLast){
   const len = Math.min(homeLast.length, awayLast.length, 10);
@@ -317,21 +354,17 @@ function buildSeries(homeLast, awayLast){
   const sCorners = ()=>{
     const out=[];
     for(let i=0;i<len;i++){
-      const c1 = (Number(H[i]["Home Corners at FT"]||0)+Number(H[i]["Away Corners at FT"]||0));
-      const c2 = (Number(A[i]["Home Corners at FT"]||0)+Number(A[i]["Away Corners at FT"]||0));
+      // Para sparklines usamos FT como referencia visual
+      const c1 = (Number(H[i]["Home Corners at FT"]||H[i].home_corners_ft||H[i].home_corners||0)+
+                  Number(H[i]["Away Corners at FT"]||H[i].away_corners_ft||H[i].away_corners||0));
+      const c2 = (Number(A[i]["Home Corners at FT"]||A[i].home_corners_ft||A[i].home_corners||0)+
+                  Number(A[i]["Away Corners at FT"]||A[i].away_corners_ft||A[i].away_corners||0));
       out.push((c1+c2)/2);
     }
     return out;
   };
 
-  return {
-    o05: sOver(0.5),
-    o25: sOver(2.5),
-    o15: sOver(1.5),
-    btts: sBTTS(),
-    goals: sGoals(),
-    corners: sCorners()
-  };
+  return { o05: sOver(0.5), o25: sOver(2.5), o15: sOver(1.5), btts: sBTTS(), goals: sGoals(), corners: sCorners() };
 }
 
 function drawSpark(canvas, series){
@@ -342,7 +375,6 @@ function drawSpark(canvas, series){
   const ctx = canvas.getContext('2d');
   ctx.scale(dpr,dpr);
   ctx.clearRect(0,0,w,h);
-
   if(!series || series.length===0){ return; }
 
   let min = Math.min(...series), max = Math.max(...series);
@@ -384,9 +416,7 @@ function renderPredictions(homeTeam, awayTeam, homeLast, awayLast){
   const avgCorners = Math.round((avgCornersFT(homeLast) + avgCornersFT(awayLast))/2);
 
   const pillClass = p => p>=70?'ok':(p>=50?'warn':'bad');
-
   const S = buildSeries(homeLast, awayLast);
-
   const pill = (key, big, caption, klass='')=>`
     <div class="pill ${klass}">
       <div class="big">${big}</div>
@@ -407,13 +437,7 @@ function renderPredictions(homeTeam, awayTeam, homeLast, awayLast){
       </div>
     </div>`;
 
-  setTimeout(()=>{
-    document.querySelectorAll('.spark').forEach(cv=>{
-      const key = cv.dataset.key;
-      drawSpark(cv, S[key]);
-    });
-  },0);
-
+  setTimeout(()=>{ document.querySelectorAll('.spark').forEach(cv=>{ const key=cv.dataset.key; drawSpark(cv, S[key]); }); },0);
   return html;
 }
 
@@ -436,8 +460,10 @@ document.getElementById("fileInput").addEventListener("change", (e)=>{
       Match: m.Match || m.match || "",
       "Result HT": m["Result HT"] || m.result_ht || m.ht || "0-0",
       "Result FT": m["Result FT"] || m.result_ft || m.ft || "0-0",
-      "Home Corners at FT": m["Home Corners at FT"]||0,
-      "Away Corners at FT": m["Away Corners at FT"]||0
+      "Home Corners at FT": m["Home Corners at FT"]||m.home_corners_ft||m.home_corners||0,
+      "Away Corners at FT": m["Away Corners at FT"]||m.away_corners_ft||m.away_corners||0,
+      "Home Corners at HT": m["Home Corners at HT"]||m.home_corners_ht||undefined,
+      "Away Corners at HT": m["Away Corners at HT"]||m.away_corners_ht||undefined
     }));
     const leagues = [...new Set(allMatches.map(m=>m.League).filter(Boolean))].sort();
     document.getElementById("leagueSelect").innerHTML = "<option value=''>--Selecciona--</option>" + leagues.map(l=>`<option>${l}</option>`).join("");
@@ -478,6 +504,8 @@ document.getElementById("analyzeBtn").addEventListener("click", ()=>{
   const awayStats = calcTeamBlock(leagueMatches, awayTeam, "away");
 
   const summary = renderSummaryTable(homeLast, awayLast);
+  const cornersSummary = renderCornersSummaryTable(homeLast, awayLast); /* 🔥 nuevo panel */
+
   const preds = renderPredictions(homeTeam, awayTeam, homeLast, awayLast);
 
   const matchOver25 = Math.round((percentOver(homeLast,2.5)+percentOver(awayLast,2.5))/2);
@@ -494,11 +522,17 @@ document.getElementById("analyzeBtn").addEventListener("click", ()=>{
     </div>
     <div class="grid" style="margin-top:12px">
       ${summary}
-      ${preds}
+      ${cornersSummary}
     </div>
     <div class="grid" style="margin-top:12px">
-      <div class="panel"><h3>Over 2.5</h3>${valueOver||'<div class="muted">Ingresa Odd Over 2.5</div>'}</div>
-      <div class="panel"><h3>Under 2.5</h3>${valueUnder||'<div class="muted">Ingresa Odd Under 2.5</div>'}</div>
+      ${preds}
+      <div class="panel">
+        <h3>Value Check</h3>
+        <div class="grid">
+          <div class="panel"><h3>Over 2.5</h3>${valueOver||'<div class="muted">Ingresa Odd Over 2.5</div>'}</div>
+          <div class="panel"><h3>Under 2.5</h3>${valueUnder||'<div class="muted">Ingresa Odd Under 2.5</div>'}</div>
+        </div>
+      </div>
     </div>
   `;
   if (matchOver25 >= 70) res.style.borderColor = "var(--green)";
