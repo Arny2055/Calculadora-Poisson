@@ -200,237 +200,117 @@ function avgCornersFT(lastMatches){
   return n? (sum/n) : 0;
 }
 
-<script>
-// ====== Poisson PRO ======
-
-// --- Utilidades numéricas ---
-function clamp(x, a, b){ return Math.max(a, Math.min(b, x)); }
-function expwWeights(n, alpha=0.85){ // w más altos a los partidos recientes
-  const w = Array.from({length:n}, (_,i)=>Math.pow(alpha, n-1-i));
-  const s = w.reduce((a,b)=>a+b,0);
-  return w.map(x=>x/s);
+/* ---------- Poisson helpers ---------- */
+function poisP0(lambda){ return Math.exp(-lambda); }
+function poisPMF(k, lambda){
+  if(k<0) return 0;
+  let p = Math.exp(-lambda), acc = (k===0)?p:0;
+  for(let i=1;i<=k;i++){ p = p * (lambda / i); if(i===k) return p; }
+  return 0;
+}
+function poisCDF(k, lambda){ // P(X<=k)
+  let p0 = Math.exp(-lambda), sum = p0;
+  let p = p0;
+  for(let i=1;i<=k;i++){ p = p*(lambda/i); sum += p; }
+  return sum;
+}
+function probTeamOver(lambda, lineHalf){ // P(X > lineHalf)
+  const k = Math.floor(lineHalf); // e.g., 1.5 -> k=1 => P(X>=2) = 1 - P<=1
+  return 1 - poisCDF(k, lambda);
+}
+function probTotalOver(lambdaH, lambdaA, lineHalf){
+  const L = lambdaH + lambdaA;
+  const k = Math.floor(lineHalf);
+  return 1 - poisCDF(k, L);
+}
+function probBTTS(lambdaH, lambdaA){
+  // 1 - P(H=0) - P(A=0) + P(H=0,A=0)
+  return 1 - Math.exp(-lambdaH) - Math.exp(-lambdaA) + Math.exp(-(lambdaH+lambdaA));
 }
 
-// --- Parsing de goles por periodo (usa tu currentPeriod y periodGoals ya existentes) ---
-function goalsForTeamInMatch(m, team){
-  const [home,away]=m.Match.split(" - ");
-  const [h,a]=periodGoals(m);
-  const forTeam=(team===home)?h:(team===away)?a:null;
-  const opp=(team===home)?a:(team===away)?h:null;
-  return {forTeam,opp,role:(team===home)?'home':'away'};
-}
-
-// --- Media ponderada por recencia (goles a favor y en contra) ---
-function recencyAverages(matches, team, maxN=10){
-  const last = matches.filter(m=> {
-    const [h,a]=m.Match.split(" - ");
-    return h===team || a===team;
-  }).slice(-maxN);
-
-  const w = expwWeights(last.length);
-  let gf=0, ga=0, n=0, homeGames=0, awayGames=0, gfH=0, gfA=0, gaH=0, gaA=0;
-  last.forEach((m,i)=>{
-    const g = goalsForTeamInMatch(m, team);
-    if(g.forTeam==null) return;
-    const wi = w[i];
-    gf += wi*g.forTeam; ga += wi*g.opp; n++;
-    if(g.role==='home'){ homeGames+=wi; gfH+=wi*g.forTeam; gaH+=wi*g.opp; }
-    else { awayGames+=wi; gfA+=wi*g.forTeam; gaA+=wi*g.opp; }
+/* ---------- Blocks ---------- */
+function calcTeamBlock(matches, team, role){
+  const last = lastMatchesByRole(matches, team, role); const n = last.length;
+  let noScore=0, noConcede=0, s=0,c=0,t=0;
+  last.forEach(m=>{
+    const [home,away]=m.Match.split(" - "); const [h,a]=periodGoals(m);
+    const forTeam=(team===home)?h:(team===away)?a:null; const opp=(team===home)?a:(team===away)?h:null;
+    if(forTeam==null) return; if(forTeam===0) noScore++; if(opp===0) noConcede++; s+=forTeam; c+=opp; t+=forTeam+opp;
   });
   return {
-    gf: n?gf:0, ga: n?ga:0, // promedio ponderado por partido
-    gfH: homeGames? gfH/homeGames : 0,
-    gfA: awayGames? gfA/awayGames : 0,
-    gaH: homeGames? gaH/homeGames : 0,
-    gaA: awayGames? gaA/awayGames : 0
+    n, last,
+    avgScored: n?(s/n).toFixed(1):"0.0",
+    avgConceded: n?(c/n).toFixed(1):"0.0",
+    avgGoals: n?(t/n).toFixed(1):"0.0",
+    pNoScore: pct(noScore,n),
+    pNoConcede: pct(noConcede,n)
   };
 }
 
-// --- Promedios de liga por periodo (por rol) ---
-function leagueRoleAverages(leagueMatches){
-  let hG=0,aG=0, hN=0,aN=0;
-  leagueMatches.forEach(m=>{
-    const [h,a]=periodGoals(m);
-    if(Number.isFinite(h)&&Number.isFinite(a)){
-      hG+=h; aG+=a; hN++; aN++;
-    }
-  });
-  const homeAvg = hN? hG/hN : 0;
-  const awayAvg = aN? aG/aN : 0;
-  return {homeAvg, awayAvg, totalAvg: (homeAvg+awayAvg)};
+function renderTeamPanel(title, stats){
+  return `
+  <div class="panel">
+    <div class="sub"><strong>${title}</strong></div>
+    <div class="kv"><span class="muted">Avg. Scored</span><span class="mono">${stats.avgScored}</span></div>
+    <div class="kv"><span class="muted">Avg. Suffer</span><span class="mono">${stats.avgConceded}</span></div>
+    <div class="kv"><span class="muted">Avg. Goals</span><span class="mono">${stats.avgGoals}</span></div>
+    <div class="divider"></div>
+    <div class="kv"><span>Games without Scoring</span><span><span class="badge ${cls(stats.pNoScore)}">${stats.pNoScore}%</span></span></div>
+    <div class="kv"><span>Games without Conceding</span><span><span class="badge ${cls(stats.pNoConcede)}">${stats.pNoConcede}%</span></span></div>
+  </div>`;
 }
 
-// --- Split dinámico por periodo (1H/2H vs FT) usando dataset de liga ---
-function periodSplitRatios(leagueAll){ // devuelve {r1H, r2H} relativos a FT=1.0
-  // Estimamos % de goles del FT que ocurren en 1H y 2H en esta liga
-  let gFT=0, g1=0, g2=0;
-  leagueAll.forEach(m=>{
-    const [hHT,aHT] = parseScore(m["Result HT"]);
-    const [hFT,aFT] = parseScore(m["Result FT"]);
-    const p1 = hHT + aHT;
-    const p2 = (hFT-hHT) + (aFT-aHT);
-    const ft = hFT + aFT;
-    if(Number.isFinite(ft)){ gFT += ft; g1 += p1; g2 += p2; }
-  });
-  if(gFT<=0) return {r1H:0.45, r2H:0.55}; // fallback típico
-  const r1 = g1/gFT, r2 = g2/gFT;
-  // Normalizamos para que r1+r2≈1 (por seguridad numérica)
-  const s = (r1+r2)||1;
-  return {r1H: r1/s, r2H: r2/s};
+function renderSummaryTable(homeLast, awayLast){
+  const h = {
+    o05: percentOver(homeLast,0.5),
+    o15: percentOver(homeLast,1.5),
+    o25: percentOver(homeLast,2.5),
+    o35: percentOver(homeLast,3.5),
+    btts: percentBTTS(homeLast)
+  };
+  const a = {
+    o05: percentOver(awayLast,0.5),
+    o15: percentOver(awayLast,1.5),
+    o25: percentOver(awayLast,2.5),
+    o35: percentOver(awayLast,3.5),
+    btts: percentBTTS(awayLast)
+  };
+  const avg = (x,y)=>Math.round((x+y)/2);
+  const row = (label, hv, av, mv)=>`
+    <tr>
+      <td>${label}</td>
+      <td>${badge(hv)}</td>
+      <td>${badge(av)}</td>
+      <td><span class="badge ${cls(mv)}">${mv}%</span></td>
+    </tr>`;
+  return `
+    <div class="panel">
+      <h3>Summary (Histórico)</h3>
+      <table>
+        <tr><th></th><th>Home</th><th>Away</th><th>Match</th></tr>
+        ${row('Over 0.5',  h.o05, a.o05, avg(h.o05,a.o05))}
+        ${row('Over 1.5',  h.o15, a.o15, avg(h.o15,a.o15))}
+        ${row('Over 2.5',  h.o25, a.o25, avg(h.o25,a.o25))}
+        ${row('Over 3.5',  h.o35, a.o35, avg(h.o35,a.o35))}
+        ${row('BTTS',      h.btts, a.btts, avg(h.btts,a.btts))}
+      </table>
+    </div>`;
 }
 
-// --- Fortalezas ataque/defensa por rol + home advantage ---
-function teamStrengths(leagueMatches, team){
-  const lg = leagueRoleAverages(leagueMatches);
-  const ra = recencyAverages(leagueMatches, team, 10);
-  const atkHome = lg.homeAvg>0 ? (ra.gfH||ra.gf)/lg.homeAvg : 1;
-  const atkAway = lg.awayAvg>0 ? (ra.gfA||ra.gf)/lg.awayAvg : 1;
-  const defHome = lg.awayAvg>0 ? ( (ra.gaH||ra.ga) / lg.awayAvg ) : 1;
-  const defAway = lg.homeAvg>0 ? ( (ra.gaA||ra.ga) / lg.homeAvg ) : 1;
-  return {atkHome, atkAway, defHome, defAway, league:lg};
-}
-
-// --- Home advantage: factor multiplicativo sobre λ local (estimado de la liga actual) ---
-function estimateHomeAdv(leagueMatches){
-  const lg = leagueRoleAverages(leagueMatches);
-  if(lg.awayAvg<=0) return 1.10; // fallback
-  const adv = lg.homeAvg / lg.awayAvg;
-  return clamp(adv, 0.95, 1.25);
-}
-
-// --- Construcción de λ por partido con escalado de periodo ---
-function matchLambdasPRO(leagueMatches, homeTeam, awayTeam){
-  const {r1H, r2H} = periodSplitRatios(leagueMatches);
-  const HA = estimateHomeAdv(leagueMatches);
-  const H = teamStrengths(leagueMatches, homeTeam);
-  const A = teamStrengths(leagueMatches, awayTeam);
-
-  // λ base por rol en FT
-  const baseHomeFT = H.league.homeAvg * H.atkHome * A.defAway * HA;
-  const baseAwayFT = A.league.awayAvg * A.atkAway * H.defHome;
-
-  // Escalado según periodo activo
-  let scale = 1.0;
-  if(currentPeriod==="1H") scale = r1H;
-  else if(currentPeriod==="2H") scale = r2H;
-
-  const lambdaH = Math.max(0, baseHomeFT*scale);
-  const lambdaA = Math.max(0, baseAwayFT*scale);
-  return {lambdaH, lambdaA};
-}
-
-// --- Poisson PMF ---
-function poisPMF(k, lambda){
-  if(k<0) return 0;
-  let p = Math.exp(-lambda);
-  if(k===0) return p;
-  for(let i=1;i<=k;i++) p = p*(lambda/i);
-  return p;
-}
-
-// --- Matriz conjunta con ajuste Dixon-Coles (rho pequeño) ---
-function dixonColesTau(i,j, lambdaH, lambdaA, rho){
-  // Ajuste clásico heurístico para celdas bajas:
-  // (no es una densidad por sí misma, luego renormalizamos la matriz completa)
-  if(i===0 && j===0) return 1 - (lambdaH*lambdaA*rho);
-  if(i===0 && j===1) return 1 + (lambdaH*rho);
-  if(i===1 && j===0) return 1 + (lambdaA*rho);
-  if(i===1 && j===1) return 1 - rho;
-  return 1;
-}
-
-function jointScoreMatrix(lambdaH, lambdaA, rho=0.05, maxG=7){
-  const M = [];
-  let sum=0;
-  for(let i=0;i<=maxG;i++){
-    const row=[];
-    for(let j=0;j<=maxG;j++){
-      let pij = poisPMF(i,lambdaH)*poisPMF(j,lambdaA);
-      const tau = dixonColesTau(i,j,lambdaH,lambdaA,rho);
-      pij = Math.max(0, pij * tau);
-      row.push(pij); sum+=pij;
-    }
-    M.push(row);
-  }
-  // Renormaliza para que sume 1 (el DC tweak rompe la unidad ligeramente)
-  if(sum>0){
-    for(let i=0;i<=maxG;i++) for(let j=0;j<=maxG;j++) M[i][j]/=sum;
-  }
-  return M;
-}
-
-// --- Agregaciones desde la matriz conjunta ---
-function probOverFromMatrix(M, lineHalf){
-  const k = Math.floor(lineHalf);
-  let p=0;
-  for(let i=0;i<M.length;i++){
-    for(let j=0;j<M[i].length;j++){
-      if(i+j > k) p+=M[i][j];
-    }
-  }
-  return p;
-}
-function probBTTSFromMatrix(M){
-  let p=0;
-  for(let i=1;i<M.length;i++){
-    for(let j=1;j<M[i].length;j++){
-      p+=M[i][j];
-    }
-  }
-  return p;
-}
-function topCorrectScores(M, top=4){
-  const arr=[];
-  for(let i=0;i<M.length;i++) for(let j=0;j<M[i].length;j++) arr.push({i,j,p:M[i][j]});
-  arr.sort((a,b)=>b.p-a.p);
-  return arr.slice(0,top);
-}
-
-// --- Calibración a la cuota de Over 2.5 (opcional) ---
-function calibrateScaleToMarket(lambdaH, lambdaA, targetOverProb, lineHalf=2.5){
-  if(!Number.isFinite(targetOverProb) || targetOverProb<=0 || targetOverProb>=1) return 1.0;
-  let lo=0.5, hi=1.8, s=1.0; // rango razonable
-  for(let it=0; it<22; it++){
-    const mid = (lo+hi)/2;
-    const M = jointScoreMatrix(lambdaH*mid, lambdaA*mid, 0.05, 7);
-    const p = probOverFromMatrix(M, lineHalf);
-    if(p < targetOverProb) lo = mid; else hi = mid;
-    s = mid;
-  }
-  return s;
-}
-
-// === NUEVA tabla Poisson PRO ===
+/* ---- NUEVO: Summary Poisson (Goles) ---- */
 function renderPoissonSummaryTable(homeTeam, awayTeam, homeLast, awayLast){
-  const league = allMatches.filter(m=>m.League===document.getElementById("leagueSelect").value);
-  const {lambdaH:baseH, lambdaA:baseA} = matchLambdasPRO(league, homeTeam, awayTeam);
+  // λ de cada equipo según su promedio de goles a favor en el periodo actual (últimos 10 partidos en su rol)
+  const hAvg = teamAverages(homeLast, homeTeam);
+  const aAvg = teamAverages(awayLast, awayTeam);
+  const lambdaH = Math.max(0, parseFloat(hAvg.avgScored)||0);
+  const lambdaA = Math.max(0, parseFloat(aAvg.avgScored)||0);
 
-  // Calibración opcional si el usuario ingresó odd Over 2.5
-  const oddOver = parseFloat(document.getElementById("oddOver").value);
-  const impliedOver = (oddOver && oddOver>1)? (1/oddOver) : null;
-  const scale = impliedOver ? calibrateScaleToMarket(baseH, baseA, impliedOver, 2.5) : 1.0;
-
-  const lambdaH = baseH*scale, lambdaA = baseA*scale;
-
-  // Matriz conjunta con Dixon-Coles
-  const M = jointScoreMatrix(lambdaH, lambdaA, 0.05, 7);
-
-  // Filas Over
   const lines = [0.5,1.5,2.5,3.5];
+
   const row = (L)=>{
-    // Prob de Over equipo: P(H > L) ≈ sum_i>k P(H=i) — usando marginal
-    const k = Math.floor(L);
-    let pH=0, pA=0;
-    for(let i=k+1;i<M.length;i++){
-      let sumRow=0; for(let j=0;j<M[i].length;j++) sumRow+=M[i][j];
-      pH += sumRow;
-    }
-    for(let j=k+1;j<M[0].length;j++){
-      let sumCol=0; for(let i=0;i<M.length;i++) sumCol+=M[i][j];
-      pA += sumCol;
-    }
-    const pMatch = probOverFromMatrix(M, L);
-    const ph = Math.round(pH*100), pa = Math.round(pA*100), pm = Math.round(pMatch*100);
+    const ph = Math.round(probTeamOver(lambdaH, L)*100);
+    const pa = Math.round(probTeamOver(lambdaA, L)*100);
+    const pm = Math.round(probTotalOver(lambdaH, lambdaA, L)*100);
     return `
       <tr>
         <td>Over ${L.toFixed(1)}</td>
@@ -440,34 +320,29 @@ function renderPoissonSummaryTable(homeTeam, awayTeam, homeLast, awayLast){
       </tr>`;
   };
 
-  // BTTS y correct scores
-  const btts = Math.round(probBTTSFromMatrix(M)*100);
-  const topCS = topCorrectScores(M, 4)
-    .map(cs=>`${cs.i}-${cs.j} <span class="muted">(${Math.round(cs.p*100)}%)</span>`)
-    .join(' · ');
+  const bttsHome = Math.round((1 - Math.exp(-lambdaH))*100);
+  const bttsAway = Math.round((1 - Math.exp(-lambdaA))*100);
+  const bttsMatch = Math.round(probBTTS(lambdaH, lambdaA)*100);
 
   return `
     <div class="panel">
-      <h3>Summary (Poisson PRO · ${currentPeriod})</h3>
+      <h3>Summary (Poisson · ${currentPeriod})</h3>
       <div class="kv"><span class="muted">λ Home</span><span class="mono">${lambdaH.toFixed(2)}</span></div>
       <div class="kv"><span class="muted">λ Away</span><span class="mono">${lambdaA.toFixed(2)}</span></div>
-      ${ (scale!==1)? `<div class="kv"><span class="muted">Market calibration</span><span class="mono">x${scale.toFixed(3)}</span></div>` : '' }
       <div class="divider"></div>
       <table>
         <tr><th></th><th>Home</th><th>Away</th><th>Match</th></tr>
         ${lines.map(row).join("")}
         <tr>
           <td>BTTS</td>
-          <td colspan="2"></td>
-          <td><span class="badge ${cls(btts)}">${btts}%</span></td>
+          <td>${badge(bttsHome)}</td>
+          <td>${badge(bttsAway)}</td>
+          <td><span class="badge ${cls(bttsMatch)}">${bttsMatch}%</span></td>
         </tr>
       </table>
-      <div class="divider"></div>
-      <div class="kv"><span class="muted">Top correct scores</span><span class="mono">${topCS}</span></div>
     </div>
   `;
 }
-</script>
 
 /* ---------- SPARKLINES ---------- */
 function buildSeries(homeLast, awayLast){
@@ -706,3 +581,4 @@ function updateSelectionPreview(){
 </script>
 </body>
 </html>
+Como puedes mejorar el poisson?haz algo pro 
