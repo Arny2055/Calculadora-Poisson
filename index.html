@@ -49,18 +49,19 @@
   .row{display:grid;gap:10px}
   @media(min-width:640px){.row{grid-template-columns:1fr 1fr}}
 
-  /* Pills para Game Predictions */
+  /* Pills + sparkline */
   .pills{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
   @media(min-width:900px){.pills{grid-template-columns:repeat(3,1fr)}}
   .pill{
     position:relative;background:#0f1726;border:1px solid var(--line);
-    border-radius:18px;padding:16px;text-align:center;min-height:72px;
-    display:flex;flex-direction:column;justify-content:center;gap:6px;
+    border-radius:18px;padding:12px 12px 6px;text-align:center;min-height:84px;
+    display:flex;flex-direction:column;justify-content:space-between;gap:6px;
     box-shadow:inset 0 -3px 0 0 rgba(255,255,255,0.06);
   }
-  .pill .big{font-weight:800;font-size:1.1rem}
+  .pill .big{font-weight:800;font-size:1.05rem}
   .pill .caption{color:#cbd5e1;font-weight:600}
   .pill.ok{outline:2px solid var(--green)} .pill.warn{outline:2px solid var(--amber)} .pill.bad{outline:2px solid var(--red)}
+  .spark{width:100%;height:28px}
 </style>
 </head>
 <body>
@@ -109,7 +110,7 @@
 let allMatches = [];
 let currentPeriod = "FT";
 
-/* Utils */
+/* ---------- Utils ---------- */
 function tryParseJSON(text){
   try { return JSON.parse(text); } catch(e){}
   const wrapped = "[" + text.trim().replace(/(^,)|(,$)/g,"").replace(/\n+/g,"\n").replace(/\}\s*,\s*\{/g,"},{") + "]";
@@ -123,7 +124,7 @@ function periodGoals(m){
   const [hHT,aHT] = parseScore(m["Result HT"]); const [hFT,aFT] = parseScore(m["Result FT"]);
   if(currentPeriod==="FT") return [hFT,aFT];
   if(currentPeriod==="1H") return [hHT,aHT];
-  return [(hFT-hHT),(aFT-aHT)]; // 2H
+  return [(hFT-hHT),(aFT-aHT)];
 }
 function lastMatchesByRole(matches, team, role){
   const arr = matches.filter(m=>{
@@ -142,7 +143,7 @@ function percentBTTS(lastMatches){
   return pct(yes,n);
 }
 function teamAverages(lastMatches, team){
-  let s=0,c=0,t=0;
+  let s=0,c=0,t=0,n=lastMatches.length||1;
   lastMatches.forEach(m=>{
     const [home,away]=m.Match.split(" - ");
     const [h,a]=periodGoals(m);
@@ -151,21 +152,18 @@ function teamAverages(lastMatches, team){
     if(forTeam==null) return;
     s+=forTeam; c+=opp; t+=(forTeam+opp);
   });
-  const n=lastMatches.length||1;
   return {avgScored:(s/n).toFixed(1), avgConceded:(c/n).toFixed(1), avgGoals:(t/n).toFixed(1)};
 }
 function avgCornersFT(lastMatches){
-  // No hay corners por periodo; usamos FT de cada registro
   let sum=0, n=0;
   lastMatches.forEach(m=>{
     const hc = Number(m["Home Corners at FT"]||0);
     const ac = Number(m["Away Corners at FT"]||0);
     if(!isNaN(hc+ac)){ sum += (hc+ac); n++; }
   });
-  return n? Math.round(sum/n) : 0;
+  return n? (sum/n) : 0;
 }
 function secondHalfGoalsTotal(arr){
-  // Aproximación de 76-FT usando 2ª parte (no hay minutos en JSON)
   let tot=0;
   arr.forEach(m=>{
     const [hHT,aHT] = parseScore(m["Result HT"]); const [hFT,aFT] = parseScore(m["Result FT"]);
@@ -174,7 +172,7 @@ function secondHalfGoalsTotal(arr){
   return tot;
 }
 
-/* Blocks */
+/* ---------- Blocks ---------- */
 function calcTeamBlock(matches, team, role){
   const last = lastMatchesByRole(matches, team, role); const n = last.length;
   let noScore=0, noConcede=0, s=0,c=0,t=0;
@@ -270,56 +268,196 @@ function renderSummaryTable(homeLast, awayLast){
     </div>`;
 }
 
-/* --- NEW: Game Predictions pills --- */
+/* ---------- SPARKLINES ---------- */
+function buildSeries(homeLast, awayLast){
+  // Alineamos por índice (más antiguo → más reciente). Si longitudes difieren, usamos la mínima.
+  const len = Math.min(homeLast.length, awayLast.length, 10);
+  const H = homeLast.slice(-len);
+  const A = awayLast.slice(-len);
+
+  // Helpers de serie
+  const sOver = line => {
+    const out=[];
+    for(let i=0;i<len;i++){
+      const [h1,a1]=periodGoals(H[i]); const [h2,a2]=periodGoals(A[i]);
+      const v1=(h1+a1>line)?1:0, v2=(h2+a2>line)?1:0;
+      out.push( (v1+v2)/2 * 100 ); // %
+    }
+    return out;
+  };
+  const sBTTS = ()=>{
+    const out=[];
+    for(let i=0;i<len;i++){
+      const [h1,a1]=periodGoals(H[i]); const [h2,a2]=periodGoals(A[i]);
+      const v1=(h1>0&&a1>0)?1:0, v2=(h2>0&&a2>0)?1:0;
+      out.push( (v1+v2)/2 * 100 );
+    }
+    return out;
+  };
+  const sGoals = ()=>{
+    const out=[];
+    for(let i=0;i<len;i++){
+      const [h1,a1]=periodGoals(H[i]); const [h2,a2]=periodGoals(A[i]);
+      out.push( (h1+h2 + a1+a2)/2 ); // promedio de goles del periodo
+    }
+    return out;
+  };
+  const sCorners = ()=>{
+    const out=[];
+    for(let i=0;i<len;i++){
+      const c1 = (Number(H[i]["Home Corners at FT"]||0)+Number(H[i]["Away Corners at FT"]||0));
+      const c2 = (Number(A[i]["Home Corners at FT"]||0)+Number(A[i]["Away Corners at FT"]||0));
+      out.push((c1+c2)/2);
+    }
+    return out;
+  };
+  const sSecondHalfGoals = ()=>{
+    const out=[];
+    for(let i=0;i<len;i++){
+      const [hHT1,aHT1]=parseScore(H[i]["Result HT"]); const [hFT1,aFT1]=parseScore(H[i]["Result FT"]);
+      const [hHT2,aHT2]=parseScore(A[i]["Result HT"]); const [hFT2,aFT2]=parseScore(A[i]["Result FT"]);
+      const g1=(hFT1-hHT1)+(aFT1-aHT1), g2=(hFT2-hHT2)+(aFT2-aHT2);
+      out.push((g1+g2)/2);
+    }
+    return out;
+  };
+
+  return {
+    o25: sOver(2.5),
+    o15: sOver(1.5),
+    btts: sBTTS(),
+    goals: sGoals(),
+    corners: sCorners(),
+    g76: sSecondHalfGoals()
+  };
+}
+
+function drawSpark(canvas, series){
+  if(!canvas) return;
+  const dpr = window.devicePixelRatio||1;
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  canvas.width = Math.round(w*dpr); canvas.height = Math.round(h*dpr);
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr,dpr);
+  ctx.clearRect(0,0,w,h);
+
+  if(!series || series.length===0){ return; }
+
+  let min = Math.min(...series), max = Math.max(...series);
+  if (min===max){ min = min-1; max = max+1; }
+  const nx = i => (i/(series.length-1))*(w-4)+2;
+  const ny = v => h-2 - ((v-min)/(max-min))*(h-6);
+
+  // línea
+  ctx.beginPath();
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = '#22d3ee'; // turquesa sutil
+  for(let i=0;i<series.length;i++){
+    const x = nx(i), y = ny(series[i]);
+    if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+  }
+  ctx.stroke();
+
+  // relleno suave
+  const lastY = ny(series[series.length-1]);
+  const lastX = nx(series.length-1);
+  ctx.lineTo(lastX,h-2); ctx.lineTo(2,h-2); ctx.closePath();
+  ctx.fillStyle = 'rgba(34,211,238,0.10)';
+  ctx.fill();
+
+  // punto final
+  ctx.beginPath();
+  ctx.arc(lastX,lastY,2.5,0,Math.PI*2);
+  ctx.fillStyle = '#22d3ee';
+  ctx.fill();
+}
+
+/* ---------- Summary ---------- */
+function renderSummaryTable(homeLast, awayLast){
+  const h = {
+    o05: percentOver(homeLast,0.5),
+    o15: percentOver(homeLast,1.5),
+    o25: percentOver(homeLast,2.5),
+    o35: percentOver(homeLast,3.5),
+    btts: percentBTTS(homeLast)
+  };
+  const a = {
+    o05: percentOver(awayLast,0.5),
+    o15: percentOver(awayLast,1.5),
+    o25: percentOver(awayLast,2.5),
+    o35: percentOver(awayLast,3.5),
+    btts: percentBTTS(awayLast)
+  };
+  const avg = (x,y)=>Math.round((x+y)/2);
+  const row = (label, hv, av, mv)=>`
+    <tr>
+      <td>${label}</td>
+      <td>${badge(hv)}</td>
+      <td>${badge(av)}</td>
+      <td><span class="badge ${cls(mv)}">${mv}%</span></td>
+    </tr>`;
+  return `
+    <div class="panel">
+      <h3>Summary</h3>
+      <table>
+        <tr><th></th><th>Home</th><th>Away</th><th>Match</th></tr>
+        ${row('Over 0.5',  h.o05, a.o05, avg(h.o05,a.o05))}
+        ${row('Over 1.5',  h.o15, a.o15, avg(h.o15,a.o15))}
+        ${row('Over 2.5',  h.o25, a.o25, avg(h.o25,a.o25))}
+        ${row('Over 3.5',  h.o35, a.o35, avg(h.o35,a.o35))}
+        ${row('BTTS',      h.btts, a.btts, avg(h.btts,a.btts))}
+      </table>
+    </div>`;
+}
+
+/* --- Game Predictions con sparklines --- */
 function renderPredictions(homeTeam, awayTeam, homeLast, awayLast){
-  // Probabilidades (Match = promedio)
   const pO25 = Math.round((percentOver(homeLast,2.5)+percentOver(awayLast,2.5))/2);
   const pO15 = Math.round((percentOver(homeLast,1.5)+percentOver(awayLast,1.5))/2);
   const pBTTS = Math.round((percentBTTS(homeLast)+percentBTTS(awayLast))/2);
 
-  // Goles esperados FT (promedio de avgScored H como local + avgScored A como visitante)
   const hAvg = teamAverages(homeLast, homeTeam);
   const aAvg = teamAverages(awayLast, awayTeam);
   const expGoals = Math.round((parseFloat(hAvg.avgScored)+parseFloat(aAvg.avgScored)));
 
-  // Aproximación: goles de 2ª parte (no hay minutos -> usamos 46-FT)
-  const shGoals = secondHalfGoalsTotal(homeLast) + secondHalfGoalsTotal(awayLast);
-
-  // Corners promedio FT (estimado desde JSON)
   const avgCorners = Math.round((avgCornersFT(homeLast) + avgCornersFT(awayLast))/2);
+  const shGoals = secondHalfGoalsTotal(homeLast) + secondHalfGoalsTotal(awayLast);
 
   const pillClass = p => p>=70?'ok':(p>=50?'warn':'bad');
 
-  return `
+  // series para sparklines
+  const S = buildSeries(homeLast, awayLast);
+
+  // plantilla de pill con canvas
+  const pill = (key, big, caption, klass='')=>`
+    <div class="pill ${klass}">
+      <div class="big">${big}</div>
+      <div class="caption">${caption}</div>
+      <canvas class="spark" data-key="${key}"></canvas>
+    </div>`;
+
+  const html = `
     <div class="panel">
       <h3>Game Predictions</h3>
       <div class="pills">
-        <div class="pill ${pillClass(pO25)}">
-          <div class="big">${pO25}%</div>
-          <div class="caption">Over 2.5FT</div>
-        </div>
-        <div class="pill ${pillClass(pO15)}">
-          <div class="big">${pO15}%</div>
-          <div class="caption">Over 1.5FT</div>
-        </div>
-        <div class="pill ${pillClass(pBTTS)}">
-          <div class="big">${pBTTS}%</div>
-          <div class="caption">BTTS</div>
-        </div>
-        <div class="pill">
-          <div class="big">${expGoals}</div>
-          <div class="caption">Goals</div>
-        </div>
-        <div class="pill">
-          <div class="big">${avgCorners}</div>
-          <div class="caption">Corners</div>
-        </div>
-        <div class="pill">
-          <div class="big">${shGoals}</div>
-          <div class="caption" title="Estimación con goles de 2ª parte (no hay minutos)">Goals @ 76-FT</div>
-        </div>
+        ${pill('o25', `${pO25}%`, 'Over 2.5FT', pillClass(pO25))}
+        ${pill('o15', `${pO15}%`, 'Over 1.5FT', pillClass(pO15))}
+        ${pill('btts', `${pBTTS}%`, 'BTTS', pillClass(pBTTS))}
+        ${pill('goals', `${expGoals}`, 'Goals')}
+        ${pill('corners', `${avgCorners}`, 'Corners')}
+        ${pill('g76', `${shGoals}`, 'Goals @ 76-FT')}
       </div>
     </div>`;
+
+  // tras inyectar, pintamos las líneas
+  setTimeout(()=>{
+    document.querySelectorAll('.spark').forEach(cv=>{
+      const key = cv.dataset.key;
+      drawSpark(cv, S[key]);
+    });
+  },0);
+
+  return html;
 }
 
 function valueBox(prob, odd){
@@ -330,7 +468,7 @@ function valueBox(prob, odd){
     : `<div class="valueBox novalue">NO VALUE (Model ${prob}% vs ${implied}% imp.)</div>`;
 }
 
-/* Load */
+/* ---------- Load ---------- */
 document.getElementById("fileInput").addEventListener("change", (e)=>{
   const file = e.target.files[0]; if(!file) return;
   const rd = new FileReader();
@@ -385,9 +523,7 @@ document.getElementById("analyzeBtn").addEventListener("click", ()=>{
     ${renderHandicapTable(`${awayTeam} Handicap Goals`, awayLast, awayTeam)}
   `;
 
-  // Match O2.5 para borde
   const matchOver25 = Math.round((percentOver(homeLast,2.5)+percentOver(awayLast,2.5))/2);
-
   const valueOver = valueBox(matchOver25, oddOver);
   const valueUnder = valueBox(100-matchOver25, oddUnder);
 
