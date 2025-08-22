@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
 <meta charset="UTF-8">
-<title>Estadísticas de Ligas y Equipos</title>
+<title>Estadísticas Over/Under</title>
 <style>
   body {font-family: Arial, sans-serif; background:#0b1220; color:#fff; padding:20px;}
   h1, h2 {color:#06b6d4;}
@@ -10,10 +10,13 @@
   table {border-collapse: collapse; width:100%; margin-top:10px;}
   th, td {border:1px solid #444; padding:6px; text-align:center;}
   th {background:#06b6d4; color:#fff;}
+  .green {background:#16a34a;}
+  .orange {background:#f59e0b;}
+  .red {background:#dc2626;}
 </style>
 </head>
 <body>
-  <h1>Estadísticas últimos partidos</h1>
+  <h1>Estadísticas Over/Under (últimos 10)</h1>
   <input type="file" id="fileInput" accept=".json"><br><br>
   
   <label>Selecciona Liga:</label>
@@ -27,66 +30,62 @@
   <select id="awaySelect"></select>
   
   <br><br>
+  <label>Odd Over 2.5:</label>
+  <input type="number" id="oddOver" step="0.01">
+  <label>Odd Under 2.5:</label>
+  <input type="number" id="oddUnder" step="0.01">
+  
+  <br><br>
   <button id="analyzeBtn">Analizar</button>
   
-  <div class="section" id="homeStats"></div>
-  <div class="section" id="awayStats"></div>
+  <div id="results"></div>
   
 <script>
 let allMatches = [];
-let leagueTeams = [];
 
-function parseResult(result) {
-  let [home, away] = result.split("-").map(Number);
-  if (home > away) return "1";
-  if (home < away) return "2";
-  return "X";
+function getClass(p){
+  if (p >= 70) return "green";
+  if (p >= 50) return "orange";
+  return "red";
 }
 
-function calculateStats(matches, team, isHome=true) {
+function calcOver(matches, team, isHome, line){
   let filtered = matches.filter(m => 
     isHome ? m.Match.startsWith(team) : m.Match.endsWith(team)
-  ).slice(-10); // últimos 10
+  ).slice(-10);
 
-  let total = filtered.length;
-  if (total === 0) return {total:0,matches:[]};
-
-  let htGoals = filtered.filter(m => m["Result HT"] !== "0-0").length;
-  let over25 = filtered.filter(m => {
+  if (filtered.length === 0) return 0;
+  let count = filtered.filter(m=>{
     let [h,a] = m["Result FT"].split("-").map(Number);
-    return (h+a) > 2.5;
+    return (h+a) > line;
   }).length;
-  let wins = filtered.filter(m => parseResult(m["Result FT"]) === (isHome ? "1" : "2")).length;
-
-  return {
-    total,
-    htGoalRate: ((htGoals/total)*100).toFixed(1)+"%",
-    over25Rate: ((over25/total)*100).toFixed(1)+"%",
-    winRate: ((wins/total)*100).toFixed(1)+"%",
-    matches: filtered
-  };
+  return Math.round((count/filtered.length)*100);
 }
 
-function renderStats(container, stats, title){
-  if (stats.total === 0) {
-    document.getElementById(container).innerHTML = `<h2>${title}</h2><p>No hay partidos disponibles</p>`;
-    return;
-  }
-  let html = `<h2>${title}</h2>
-  <p>Partidos analizados: ${stats.total}</p>
-  <ul>
-    <li>Gol HT: ${stats.htGoalRate}</li>
-    <li>Over 2.5 FT: ${stats.over25Rate}</li>
-    <li>Victorias: ${stats.winRate}</li>
-  </ul>
-  <table>
-    <tr><th>Fecha</th><th>Partido</th><th>HT</th><th>FT</th></tr>
-    ${stats.matches.map(m=>`<tr>
-      <td>${m.Date}</td><td>${m.Match}</td>
-      <td>${m["Result HT"]}</td><td>${m["Result FT"]}</td>
-    </tr>`).join("")}
+function analyze(leagueMatches, homeTeam, awayTeam){
+  let overs = [0.5,1.5,2.5,3.5];
+  let rows = overs.map(line=>{
+    let home = calcOver(leagueMatches, homeTeam, true, line);
+    let away = calcOver(leagueMatches, awayTeam, false, line);
+    let avg = Math.round((home+away)/2);
+
+    return `<tr>
+      <td>Over ${line}</td>
+      <td class="${getClass(home)}">${home}%</td>
+      <td class="${getClass(away)}">${away}%</td>
+      <td class="${getClass(avg)}">${avg}%</td>
+    </tr>`;
+  }).join("");
+
+  return `<table>
+    <tr><th></th><th>Home</th><th>Away</th><th>Match</th></tr>
+    ${rows}
   </table>`;
-  document.getElementById(container).innerHTML = html;
+}
+
+function valueCheck(prob, odd){
+  let implied = 100/odd;
+  return prob > implied ? `<span class="green">Value Odd</span>` : `<span class="red">No Value</span>`;
 }
 
 // Cargar JSON
@@ -104,17 +103,14 @@ document.getElementById("fileInput").addEventListener("change", function(e){
   reader.readAsText(file);
 });
 
-// Al seleccionar liga, solo guardamos equipos, pero no llenamos selects
+// Al seleccionar liga, llenar equipos
 document.getElementById("leagueSelect").addEventListener("change", function(){
   let league = this.value;
   let leagueMatches = allMatches.filter(m=>m.League === league);
-  leagueTeams = [...new Set(leagueMatches.flatMap(m=>m.Match.split(" - ")))];
+  let teams = [...new Set(leagueMatches.flatMap(m=>m.Match.split(" - ")))];
   
-  // Reseteamos selects para que el usuario elija manualmente
-  document.getElementById("homeSelect").innerHTML = "<option value=''>--Selecciona equipo local--</option>" +
-    leagueTeams.map(t=>`<option value="${t}">${t}</option>`).join("");
-  document.getElementById("awaySelect").innerHTML = "<option value=''>--Selecciona equipo visitante--</option>" +
-    leagueTeams.map(t=>`<option value="${t}">${t}</option>`).join("");
+  document.getElementById("homeSelect").innerHTML = teams.map(t=>`<option value="${t}">${t}</option>`).join("");
+  document.getElementById("awaySelect").innerHTML = teams.map(t=>`<option value="${t}">${t}</option>`).join("");
 });
 
 // Botón analizar
@@ -122,19 +118,35 @@ document.getElementById("analyzeBtn").addEventListener("click", function(){
   let league = document.getElementById("leagueSelect").value;
   let homeTeam = document.getElementById("homeSelect").value;
   let awayTeam = document.getElementById("awaySelect").value;
-  
+  let oddOver = parseFloat(document.getElementById("oddOver").value);
+  let oddUnder = parseFloat(document.getElementById("oddUnder").value);
+
   if (!league || !homeTeam || !awayTeam) {
-    alert("Debes seleccionar liga, equipo local y visitante.");
+    alert("Debes seleccionar liga y equipos.");
     return;
   }
   
   let leagueMatches = allMatches.filter(m=>m.League === league);
-  
-  let homeStats = calculateStats(leagueMatches, homeTeam, true);
-  let awayStats = calculateStats(leagueMatches, awayTeam, false);
-  
-  renderStats("homeStats", homeStats, `Últimos 10 partidos de ${homeTeam} en casa`);
-  renderStats("awayStats", awayStats, `Últimos 10 partidos de ${awayTeam} de visita`);
+  let table = analyze(leagueMatches, homeTeam, awayTeam);
+
+  // cálculo específico para Over 2.5
+  let homeOver25 = calcOver(leagueMatches, homeTeam, true, 2.5);
+  let awayOver25 = calcOver(leagueMatches, awayTeam, false, 2.5);
+  let matchOver25 = Math.round((homeOver25+awayOver25)/2);
+
+  let valueOdds = "";
+  if (oddOver && oddUnder){
+    valueOdds = `
+      <p>Odd Over 2.5: ${oddOver} → ${valueCheck(matchOver25, oddOver)}</p>
+      <p>Odd Under 2.5: ${oddUnder} → ${valueCheck(100-matchOver25, oddUnder)}</p>
+    `;
+  }
+
+  document.getElementById("results").innerHTML = `
+    <h2>${homeTeam} (Home) vs ${awayTeam} (Away)</h2>
+    ${table}
+    ${valueOdds}
+  `;
 });
 </script>
 </body>
