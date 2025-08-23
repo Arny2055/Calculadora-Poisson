@@ -15,12 +15,12 @@
 
   .card{background:var(--card);border-radius:14px;padding:16px;margin:16px 0;border:3px solid transparent;transition:.2s border-color}
   label{display:block;margin:10px 0 6px;color:var(--muted);font-size:.95rem}
-  select,input,button{width:100%;padding:12px;border-radius:10px;border:1px solid var(--line);background:#0f1726;color:var(--text);font-size:16px}
+  select,input,button{width:100%;padding:12px;border-radius:10px;border:1px solid var(--line);background:#0f1726;color:#e5e7eb;font-size:16px}
   button{background:var(--accent);border-color:var(--accent);font-weight:600;cursor:pointer}
   button:hover{filter:brightness(1.05)}
 
   .tabs{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
-  .tab{flex:1;min-width:110px;background:#0f1726;border:1px solid var(--line);color:var(--muted);padding:10px;border-radius:10px;cursor:pointer;text-align:center}
+  .tab{flex:1;min-width:110px;background:#0f1726;border:1px solid var(--line);color:#94a3b8;padding:10px;border-radius:10px;cursor:pointer;text-align:center}
   .tab.active{background:var(--accent);color:#fff;border-color:var(--accent);font-weight:700}
 
   .grid{display:grid;gap:12px}
@@ -62,24 +62,9 @@
   .pill.ok{outline:2px solid var(--green)} .pill.warn{outline:2px solid var(--amber)} .pill.bad{outline:2px solid var(--red)}
   .spark{width:100%;height:28px}
 
-  :root{ --radius:14px; --field-h:56px; --font-base:16px; --font-field:18px; --font-label:1.05rem; --font-chip-lg:1.1rem; }
-  label{ font-size: var(--font-label); letter-spacing:.2px; }
-  select,input,button{ min-height: var(--field-h); font-size: var(--font-field); border-radius: var(--radius); }
-  select option{ font-size: 18px; }
-  .tab{ padding:12px; font-size:1rem; font-weight:600; }
-
-  .preview{
-    display:flex;gap:8px;flex-wrap:wrap;align-items:center;
-    background:#0f1726;border:1px solid var(--line);border-radius:16px;
-    padding:10px 12px;margin-top:12px
-  }
-  .preview .chip{
-    display:inline-flex;align-items:center;gap:8px;
-    background:#0b1324;border:1px solid var(--line);border-radius:999px;
-    padding:8px 12px;font-weight:700;
-    font-size: var(--font-chip-lg); color:#e5e7eb;
-    box-shadow:inset 0 -2px 0 rgba(255,255,255,.04);
-  }
+  :root{ --radius:14px; --field-h:56px; --font-field:18px; --font-label:1.05rem; --font-chip-lg:1.1rem; }
+  .preview{display:flex;gap:8px;flex-wrap:wrap;align-items:center;background:#0f1726;border:1px solid var(--line);border-radius:16px;padding:10px 12px;margin-top:12px}
+  .preview .chip{display:inline-flex;align-items:center;gap:8px;background:#0b1324;border:1px solid var(--line);border-radius:999px;padding:8px 12px;font-weight:700;font-size:var(--font-chip-lg);color:#e5e7eb;box-shadow:inset 0 -2px 0 rgba(255,255,255,.04)}
   .preview .chip .dot{width:8px;height:8px;border-radius:50%}
   .preview .chip.league .dot{background:var(--accent)}
   .preview .chip.home  .dot{background:var(--green)}
@@ -132,7 +117,6 @@
 
     <button id="analyzeBtn" style="margin-top:10px">Analizar</button>
 
-    <!-- Vista previa en chips grandes -->
     <div id="selectionPreview" class="preview" style="display:none">
       <div class="chip league"><span class="dot"></span><span id="pvLeague">—</span></div>
       <div class="chip home"><span class="dot"></span><span id="pvHome">—</span></div>
@@ -488,25 +472,29 @@ function valueBox(prob, odd){
     : `<div class="valueBox novalue">NO VALUE (Model ${prob}% vs ${implied}% imp.)</div>`;
 }
 
-/* ===== EXPLICACIÓN EN TEXTO (EXTENDIDA) ===== */
+/* ===== EXPLICACIÓN EN TEXTO (CONDICIONAL) ===== */
 function matchHistOver(homeLast, awayLast, line){
   return Math.round((percentOver(homeLast,line)+percentOver(awayLast,line))/2);
 }
+
+// Devuelve cadena HTML si hay “posibilidad” (consenso≥55% o value) o '' si NO debe mostrarse
 function shortAdvice({market, probHist, probPois, odd, sideLabel, lambdaH, lambdaA, risks=[]}){
   const hasPois = (typeof probPois === 'number' && !isNaN(probPois));
   const consensus = Math.round(hasPois ? (probHist*0.5 + probPois*0.5) : probHist);
   const implied = (odd && odd>1)? Math.round(100/odd) : null;
 
-  let verdict = '';
-  if(consensus>=70) verdict = `Apostar ${sideLabel} (${consensus}%)`;
-  else if(consensus>=55) verdict = `Considerar ${sideLabel} (${consensus}%)`;
-  else if(consensus>=45) verdict = `Evitar: 50/50 (${consensus}%)`;
-  else verdict = `No apostar ${sideLabel} (${consensus}%)`;
+  // Regla para mostrar texto:
+  const showBecauseConsensus = consensus >= 55;                // Considerar/Apostar
+  const showBecauseValue     = (implied!==null && consensus > implied); // value puro
+  if(!showBecauseConsensus && !showBecauseValue) return '';
+
+  let verdict = consensus>=70 ? `Apostar ${sideLabel} (${consensus}%)`
+              : `Considerar ${sideLabel} (${consensus}%)`;
 
   const reasons = [];
   reasons.push(`Histórico ${probHist}%`);
-  if(hasPois) reasons.push(`Poisson ${probPois}% con λ ${lambdaH.toFixed(2)}–${lambdaA.toFixed(2)}`);
-  if(implied!==null){ 
+  if(hasPois) reasons.push(`Poisson ${probPois}% · λ ${lambdaH.toFixed(2)}–${lambdaA.toFixed(2)}`);
+  if(implied!==null){
     const value = consensus > implied ? 'value' : 'sin value';
     reasons.push(`cuota ${odd} (imp. ${implied}%) → ${value}`);
   }
@@ -526,7 +514,8 @@ function renderTextExplanation({
   const poisBTTS = Math.round(probBTTS(lambdaH, lambdaA)*100);
   const lines = [0.5,1.5,2.5,3.5];
 
-  const oversText = lines.map(L=>{
+  // Over X.5 (solo si pasa el filtro)
+  const oversTextArr = lines.map(L=>{
     const hist = matchHistOver(homeLast, awayLast, L);
     const pois = poisOver(L);
     const useOdd = (L===2.5) ? oddOver : null;
@@ -535,8 +524,9 @@ function renderTextExplanation({
       probHist:hist, probPois:pois, odd:useOdd, sideLabel:`Over ${L.toFixed(1)}`,
       lambdaH, lambdaA
     });
-  }).join('<br><br>');
+  }).filter(Boolean);
 
+  // BTTS con riesgos (solo si pasa el filtro)
   const bttsHist = Math.round((percentBTTS(homeLast)+percentBTTS(awayLast))/2);
   const risksBTTS = [];
   if(homeStats.pNoScore>=30) risksBTTS.push(`local sin anotar ${homeStats.pNoScore}%`);
@@ -546,34 +536,36 @@ function renderTextExplanation({
     probHist:bttsHist, probPois:poisBTTS, odd:null, sideLabel:'BTTS',
     lambdaH, lambdaA, risks:risksBTTS
   });
+  if(bttsText) oversTextArr.push(bttsText);
 
-  let underText = '';
+  // Under 2.5 (solo si pasa el filtro y si hay cuota)
   if(oddUnder && oddUnder>1){
     const over25Hist = matchHistOver(homeLast, awayLast, 2.5);
     const over25Pois = poisOver(2.5);
     const histU = 100 - over25Hist;
     const poisU = 100 - over25Pois;
-    underText = shortAdvice({
+    const underText = shortAdvice({
       market:`Under 2.5 (${homeTeam} vs ${awayTeam})`,
       probHist:histU, probPois:poisU, odd:oddUnder, sideLabel:'Under 2.5',
       lambdaH, lambdaA
     });
+    if(underText) oversTextArr.push(underText);
   }
 
-  const note = `Nota: el consenso combina Histórico y Poisson. Si el consenso supera la prob. implícita de tu cuota, hay value; si no, mejor omitir. Cambia la pestaña (FT/1H/2H) para que todo se adapte a ese periodo.`;
+  if(oversTextArr.length===0) return ''; // Nada cumple => no se muestra el panel
 
+  const note = `Nota: se muestran solo mercados con prob. suficiente (≥55%) o con value vs cuota.`;
   return `
     <div class="panel">
       <h3>Explicación breve (texto)</h3>
       <div style="line-height:1.4">
-        ${oversText}<br><br>
-        ${bttsText}${underText?'<br><br>'+underText:''}<br><br>
+        ${oversTextArr.join('<br><br>')}<br><br>
         <span class="muted">${note}</span>
       </div>
     </div>
   `;
 }
-/* ===== FIN EXPLICACIÓN EN TEXTO (EXTENDIDA) ===== */
+/* ===== FIN EXPLICACIÓN EN TEXTO (CONDICIONAL) ===== */
 
 /* ---------- Load ---------- */
 document.getElementById("fileInput").addEventListener("change", (e)=>{
@@ -633,7 +625,7 @@ document.getElementById("analyzeBtn").addEventListener("click", ()=>{
   const poissonSummary = renderPoissonSummaryTable(homeTeam, awayTeam, homeLast, awayLast);
 
   const preds = renderPredictions(homeTeam, awayTeam, homeLast, awayLast);
-  const poissonPreds = renderPoissonPredictions(homeTeam, awayTeam, homeLast, awayLast); /* 👈 SOLO Expected Goals */
+  const poissonPreds = renderPoissonPredictions(homeTeam, awayTeam, homeLast, awayLast); // Solo Expected Goals
 
   // λ para explicación textual
   const hAvg = teamAverages(homeLast, homeTeam);
@@ -667,7 +659,6 @@ document.getElementById("analyzeBtn").addEventListener("click", ()=>{
       ${poissonSummary}
     </div>
 
-    <!-- Apilado: Histórico con sparklines y debajo Poisson (solo Expected Goals) -->
     <div style="margin-top:12px">
       ${preds}
       ${poissonPreds}
@@ -681,9 +672,7 @@ document.getElementById("analyzeBtn").addEventListener("click", ()=>{
       </div>
     </div>
 
-    <div style="margin-top:12px">
-      ${textExplain}
-    </div>
+    ${textExplain ? `<div style="margin-top:12px">${textExplain}</div>` : ``}
   `;
 
   if (matchOver25 >= 70) res.style.borderColor = "var(--green)";
