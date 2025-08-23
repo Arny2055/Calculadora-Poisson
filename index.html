@@ -35,6 +35,7 @@
   .badge{display:inline-block;min-width:52px;text-align:center;padding:3px 8px;border-radius:999px;font-weight:700;color:#fff}
   .b-green{background:var(--green)} .b-amber{background:var(--amber)} .b-red{background:var(--red)}
   .b-soft{background:#0f1726;border:1px solid var(--line);color:#cbd5e1}
+  .pp{font-size:.8rem;color:var(--muted);margin-left:6px;white-space:nowrap}
 
   table{width:100%;border-collapse:collapse;font-size:.95rem;margin-top:8px;overflow:hidden;border-radius:10px;border:1px solid var(--line)}
   th,td{padding:8px 10px;text-align:center;border-bottom:1px solid var(--line)}
@@ -70,8 +71,6 @@
   #status{margin-top:8px;font-size:.92rem}
   #status.ok{color:var(--green)}
   #status.err{color:var(--red)}
-
-  /* opcional: una línea sutil cuando uso "divider" */
   .divider{height:8px}
 </style>
 </head>
@@ -139,6 +138,12 @@ function tryParseJSON(text){
 function pct(a,b){ return b ? Math.round((a/b)*100) : 0; }
 function cls(p){ return p>=70?"b-green":(p>=50?"b-amber":"b-red"); }
 function badge(p){ return `<span class="badge ${cls(p)}">${p}%</span>`; }
+function ppDelta(v, base){
+  if(base===null || base===undefined) return '';
+  const d = v - base;
+  const sign = d>0? '+' : (d<0? '' : '');
+  return `<span class="pp">(${sign}${d}pp vs liga)</span>`;
+}
 function setStatus(msg, ok=false, err=false){
   const el = document.getElementById('status');
   el.textContent = msg || '';
@@ -175,11 +180,9 @@ function parseDateFlexible(v){
   // quitar prefijo de día de semana (es)
   s = s.replace(/^(lun|mar|mi[eé]|jue|vie|s[aá]b|dom)\.?,?\s*/i, '');
 
-  // Intento ISO / parsers nativos
   const dISO = Date.parse(s);
   if(!isNaN(dISO)) return dISO;
 
-  // dd/mm/yyyy o dd-mm-yyyy (opcional hora)
   let m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?$/);
   if(m){
     let dd=parseInt(m[1],10), mm=parseInt(m[2],10)-1, yy=parseInt(m[3],10);
@@ -188,7 +191,6 @@ function parseDateFlexible(v){
     return new Date(yy,mm,dd,hh,mi,ss).getTime();
   }
 
-  // mm/dd/yyyy
   m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?$/);
   if(m){
     let mm=parseInt(m[1],10)-1, dd=parseInt(m[2],10), yy=parseInt(m[3],10);
@@ -197,7 +199,6 @@ function parseDateFlexible(v){
     return new Date(yy,mm,dd,hh,mi,ss).getTime();
   }
 
-  // dd mes_es yyyy HH:MM
   const months = {
     'ene':'01','feb':'02','mar':'03','abr':'04','may':'05','jun':'06','jul':'07','ago':'08',
     'sep':'09','sept':'09','set':'09','oct':'10','nov':'11','dic':'12'
@@ -344,24 +345,37 @@ function buildSummaryStats(arr){
   };
 }
 
-/* ---------- Poisson helpers ---------- */
-function poisCDF(k, lambda){
-  let p0 = Math.exp(-lambda), sum = p0;
-  let p = p0;
-  for(let i=1;i<=k;i++){ p = p*(lambda/i); sum += p; }
-  return sum;
+/* ======== NUEVO: baseline de liga por ventana y rol ======== */
+function getLeagueTeams(leagueMatches){
+  return [...new Set(leagueMatches.flatMap(m=>[m.home, m.away]))].filter(Boolean);
 }
-function probTeamOver(lambda, lineHalf){
-  const k = Math.floor(lineHalf);
-  return 1 - poisCDF(k, lambda);
+function leagueWindowByRole(leagueMatches, role, n){
+  // concatena los últimos n por rol de cada equipo
+  const teams = getLeagueTeams(leagueMatches);
+  const all = [];
+  teams.forEach(t=>{
+    const arr = lastMatchesByRole(leagueMatches, t, role).slice(-n);
+    all.push(...arr);
+  });
+  return all;
 }
-function probTotalOver(lambdaH, lambdaA, lineHalf){
-  const L = lambdaH + lambdaA;
-  const k = Math.floor(lineHalf);
-  return 1 - poisCDF(k, L);
-}
-function probBTTS(lambdaH, lambdaA){
-  return 1 - Math.exp(-lambdaH) - Math.exp(-lambdaA) + Math.exp(-(lambdaH+lambdaA));
+function computeLeagueBaseline(leagueMatches, n){
+  const Lh = leagueWindowByRole(leagueMatches, 'home', n);
+  const La = leagueWindowByRole(leagueMatches, 'away', n);
+  const Bh = buildSummaryStats(Lh);
+  const Ba = buildSummaryStats(La);
+  const avg = (x,y)=>Math.round((x+y)/2);
+  return {
+    home: Bh,
+    away: Ba,
+    match: {
+      o05: avg(Bh.o05, Ba.o05),
+      o15: avg(Bh.o15, Ba.o15),
+      o25: avg(Bh.o25, Ba.o25),
+      o35: avg(Bh.o35, Ba.o35),
+      btts: avg(Bh.btts, Ba.btts)
+    }
+  };
 }
 
 /* ---------- Panels ---------- */
@@ -422,20 +436,23 @@ function renderSummaryTable(homeLast, awayLast){
     </div>`;
 }
 
-/* ---------- Summary por ventana N (3/5/10) ---------- */
-function renderSummaryTableN(homeLast10, awayLast10, n){
+/* ---------- Summary por ventana N (3/5/10) con baseline de liga ---------- */
+function renderSummaryTableN(homeLast10, awayLast10, n, leagueMatches){
   const hArr = homeLast10.slice(-n);
   const aArr = awayLast10.slice(-n);
   const H = buildSummaryStats(hArr);
   const A = buildSummaryStats(aArr);
+  const L = computeLeagueBaseline(leagueMatches, n);
+
   const avg = (x,y)=>Math.round((x+y)/2);
   const row = (label, key)=>`
     <tr>
       <td>${label}</td>
-      <td>${badge(H[key])}</td>
-      <td>${badge(A[key])}</td>
-      <td><span class="badge ${cls(avg(H[key],A[key]))}">${avg(H[key],A[key])}%</span></td>
+      <td>${badge(H[key])}${ppDelta(H[key], L.home[key])}</td>
+      <td>${badge(A[key])}${ppDelta(A[key], L.away[key])}</td>
+      <td><span class="badge ${cls(avg(H[key],A[key]))}">${avg(H[key],A[key])}%</span>${ppDelta(avg(H[key],A[key]), L.match[key])}</td>
     </tr>`;
+
   return `
     <div class="panel">
       <h3>Summary (Histórico · últimos ${n})</h3>
@@ -446,7 +463,16 @@ function renderSummaryTableN(homeLast10, awayLast10, n){
         ${row('Over 2.5','o25')}
         ${row('Over 3.5','o35')}
         ${row('BTTS','btts')}
+        <tr>
+          <td style="text-align:right;font-weight:600">Liga (baseline)</td>
+          <td class="muted">${L.home.o05}% / ${L.home.o15}% / ${L.home.o25}% / ${L.home.o35}% / BTTS ${L.home.btts}%</td>
+          <td class="muted">${L.away.o05}% / ${L.away.o15}% / ${L.away.o25}% / ${L.away.o35}% / BTTS ${L.away.btts}%</td>
+          <td class="muted">${L.match.o05}% / ${L.match.o15}% / ${L.match.o25}% / ${L.match.o35}% / BTTS ${L.match.btts}%</td>
+        </tr>
       </table>
+      <div class="muted" style="margin-top:6px;font-size:.9rem">
+        Baseline: promedio por rol en la liga, concatenando los últimos ${n} de cada equipo (home vs todos los home; away vs todos los away).
+      </div>
     </div>`;
 }
 
@@ -879,10 +905,10 @@ document.getElementById("analyzeBtn").addEventListener("click", ()=>{
     const homeStats = calcTeamBlock(leagueMatches, homeTeam, "home");
     const awayStats = calcTeamBlock(leagueMatches, awayTeam, "away");
 
-    /* summaries */
-    const summary3  = renderSummaryTableN(homeLast, awayLast, 3);
-    const summary5  = renderSummaryTableN(homeLast, awayLast, 5);
-    const summary10 = renderSummaryTableN(homeLast, awayLast, 10);
+    /* summaries con baseline de liga */
+    const summary3  = renderSummaryTableN(homeLast, awayLast, 3, leagueMatches);
+    const summary5  = renderSummaryTableN(homeLast, awayLast, 5, leagueMatches);
+    const summary10 = renderSummaryTableN(homeLast, awayLast, 10, leagueMatches);
     const poissonSummary = renderPoissonSummaryTable(homeTeam, awayTeam, homeLast, awayLast);
 
     const preds = renderPredictions(homeTeam, awayTeam, homeLast, awayLast);
@@ -916,7 +942,7 @@ document.getElementById("analyzeBtn").addEventListener("click", ()=>{
         ${renderTeamPanel(awayTeam, awayStats)}
       </div>
 
-      <!-- Summaries por ventanas -->
+      <!-- Summaries por ventanas con baseline de liga -->
       <div class="grid" style="margin-top:12px">
         ${summary3}
         ${summary5}
