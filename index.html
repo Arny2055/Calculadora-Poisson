@@ -402,7 +402,7 @@ function drawSpark(canvas, series){
   ctx.fill();
 }
 
-/* --- Game Predictions (Histórico) con sparklines --- */
+/* --- Game Predictions (Histórico) con sparklines + explicación --- */
 function renderPredictions(homeTeam, awayTeam, homeLast, awayLast){
   const pO05 = Math.round((percentOver(homeLast,0.5)+percentOver(awayLast,0.5))/2);
   const pO25 = Math.round((percentOver(homeLast,2.5)+percentOver(awayLast,2.5))/2);
@@ -434,13 +434,19 @@ function renderPredictions(homeTeam, awayTeam, homeLast, awayLast){
         ${pill('goals', `${expGoals}`, 'Goals')}
         ${pill('corners', `${avgCorners}`, 'Corners')}
       </div>
+      <!-- Nota metodológica (histórico) -->
+      <div class="muted" style="margin-top:8px;font-size:.92rem;line-height:1.35">
+        Los % reflejan la <strong>media</strong> del acierto de cada equipo en sus <strong>últimos 10 partidos</strong> en su rol (local/visitante) para el <strong>periodo activo</strong> (FT/1H/2H).<br>
+        La <em>línea</em> de cada píldora es la <strong>tendencia cronológica</strong> (más reciente a la derecha) del promedio de ambos equipos.<br>
+        <strong>Corners</strong> usa la media de córners totales FT de esos partidos.
+      </div>
     </div>`;
 
   setTimeout(()=>{ document.querySelectorAll('.spark').forEach(cv=>{ const key=cv.dataset.key; drawSpark(cv, S[key]); }); },0);
   return html;
 }
 
-/* --- Game Predictions (Poisson) — solo Expected Goals --- */
+/* --- Game Predictions (Poisson) — solo Expected Goals + explicación --- */
 function renderPoissonPredictions(homeTeam, awayTeam, homeLast, awayLast){
   const hAvg = teamAverages(homeLast, homeTeam);
   const aAvg = teamAverages(awayLast, awayTeam);
@@ -460,6 +466,11 @@ function renderPoissonPredictions(homeTeam, awayTeam, homeLast, awayLast){
       <div class="pills">
         ${pill(`${L.toFixed(2)}`, 'Expected Goals (λH+λA)')}
       </div>
+      <!-- Nota metodológica (Poisson) -->
+      <div class="muted" style="margin-top:8px;font-size:.92rem;line-height:1.35">
+        Los <strong>λ</strong> se estiman con el promedio de <strong>goles a favor</strong> de los <strong>últimos 10 partidos</strong> por rol en el periodo activo.
+        El valor mostrado es <strong>λH + λA</strong> (goles esperados del partido).
+      </div>
     </div>
   `;
 }
@@ -477,15 +488,14 @@ function matchHistOver(homeLast, awayLast, line){
   return Math.round((percentOver(homeLast,line)+percentOver(awayLast,line))/2);
 }
 
-// Devuelve cadena HTML si hay “posibilidad” (consenso≥55% o value) o '' si NO debe mostrarse
+// Muestra explicación solo si consenso suficientemente alto o hay value
 function shortAdvice({market, probHist, probPois, odd, sideLabel, lambdaH, lambdaA, risks=[]}){
   const hasPois = (typeof probPois === 'number' && !isNaN(probPois));
   const consensus = Math.round(hasPois ? (probHist*0.5 + probPois*0.5) : probHist);
   const implied = (odd && odd>1)? Math.round(100/odd) : null;
 
-  // Regla para mostrar texto:
-  const showBecauseConsensus = consensus >= 55;                // Considerar/Apostar
-  const showBecauseValue     = (implied!==null && consensus > implied); // value puro
+  const showBecauseConsensus = consensus >= 55;
+  const showBecauseValue     = (implied!==null && consensus > implied);
   if(!showBecauseConsensus && !showBecauseValue) return '';
 
   let verdict = consensus>=70 ? `Apostar ${sideLabel} (${consensus}%)`
@@ -514,7 +524,6 @@ function renderTextExplanation({
   const poisBTTS = Math.round(probBTTS(lambdaH, lambdaA)*100);
   const lines = [0.5,1.5,2.5,3.5];
 
-  // Over X.5 (solo si pasa el filtro)
   const oversTextArr = lines.map(L=>{
     const hist = matchHistOver(homeLast, awayLast, L);
     const pois = poisOver(L);
@@ -526,7 +535,6 @@ function renderTextExplanation({
     });
   }).filter(Boolean);
 
-  // BTTS con riesgos (solo si pasa el filtro)
   const bttsHist = Math.round((percentBTTS(homeLast)+percentBTTS(awayLast))/2);
   const risksBTTS = [];
   if(homeStats.pNoScore>=30) risksBTTS.push(`local sin anotar ${homeStats.pNoScore}%`);
@@ -538,7 +546,6 @@ function renderTextExplanation({
   });
   if(bttsText) oversTextArr.push(bttsText);
 
-  // Under 2.5 (solo si pasa el filtro y si hay cuota)
   if(oddUnder && oddUnder>1){
     const over25Hist = matchHistOver(homeLast, awayLast, 2.5);
     const over25Pois = poisOver(2.5);
@@ -552,8 +559,7 @@ function renderTextExplanation({
     if(underText) oversTextArr.push(underText);
   }
 
-  if(oversTextArr.length===0) return ''; // Nada cumple => no se muestra el panel
-
+  if(oversTextArr.length===0) return '';
   const note = `Nota: se muestran solo mercados con prob. suficiente (≥55%) o con value vs cuota.`;
   return `
     <div class="panel">
@@ -625,7 +631,7 @@ document.getElementById("analyzeBtn").addEventListener("click", ()=>{
   const poissonSummary = renderPoissonSummaryTable(homeTeam, awayTeam, homeLast, awayLast);
 
   const preds = renderPredictions(homeTeam, awayTeam, homeLast, awayLast);
-  const poissonPreds = renderPoissonPredictions(homeTeam, awayTeam, homeLast, awayLast); // Solo Expected Goals
+  const poissonPreds = renderPoissonPredictions(homeTeam, awayTeam, homeLast, awayLast); // Solo Expected Goals (con explicación)
 
   // λ para explicación textual
   const hAvg = teamAverages(homeLast, homeTeam);
