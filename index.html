@@ -201,13 +201,6 @@ function avgCornersFT(lastMatches){
 }
 
 /* ---------- Poisson helpers ---------- */
-function poisP0(lambda){ return Math.exp(-lambda); }
-function poisPMF(k, lambda){
-  if(k<0) return 0;
-  let p = Math.exp(-lambda), acc = (k===0)?p:0;
-  for(let i=1;i<=k;i++){ p = p * (lambda / i); if(i===k) return p; }
-  return 0;
-}
 function poisCDF(k, lambda){ // P(X<=k)
   let p0 = Math.exp(-lambda), sum = p0;
   let p = p0;
@@ -296,7 +289,7 @@ function renderSummaryTable(homeLast, awayLast){
     </div>`;
 }
 
-/* ---- NUEVO: Summary Poisson (Goles) ---- */
+/* ---- Summary Poisson (Goles) ---- */
 function renderPoissonSummaryTable(homeTeam, awayTeam, homeLast, awayLast){
   const hAvg = teamAverages(homeLast, homeTeam);
   const aAvg = teamAverages(awayLast, awayTeam);
@@ -471,89 +464,98 @@ function valueBox(prob, odd){
     : `<div class="valueBox novalue">NO VALUE (Model ${prob}% vs ${implied}% imp.)</div>`;
 }
 
-/* ===== EXPLICACIÓN EN TEXTO ===== */
-function shortAdvice({market, probHist, probPois, odd, sideLabel, lambdaH, lambdaA, pNoScoreH, pNoConcedeA}){
-  // Consenso simple entre histórico y Poisson (cuando exista)
-  const parts = [];
+/* ===== EXPLICACIÓN EN TEXTO (EXTENDIDA) ===== */
+function matchHistOver(homeLast, awayLast, line){
+  return Math.round((percentOver(homeLast,line)+percentOver(awayLast,line))/2);
+}
+function shortAdvice({market, probHist, probPois, odd, sideLabel, lambdaH, lambdaA, risks=[]}){
   const hasPois = (typeof probPois === 'number' && !isNaN(probPois));
   const consensus = Math.round(hasPois ? (probHist*0.5 + probPois*0.5) : probHist);
   const implied = (odd && odd>1)? Math.round(100/odd) : null;
 
-  // Decisión
   let verdict = '';
   if(consensus>=70) verdict = `Apostar ${sideLabel} (${consensus}%)`;
-  else if(consensus>=55) verdict = `Se puede considerar ${sideLabel} (${consensus}%)`;
-  else if(consensus>=45) verdict = `Evitar: moneda al aire (${consensus}%)`;
+  else if(consensus>=55) verdict = `Considerar ${sideLabel} (${consensus}%)`;
+  else if(consensus>=45) verdict = `Evitar: 50/50 (${consensus}%)`;
   else verdict = `No apostar ${sideLabel} (${consensus}%)`;
 
-  parts.push(`• ${market}: ${verdict}.`);
-
-  // Justificación breve
   const reasons = [];
   reasons.push(`Histórico ${probHist}%`);
   if(hasPois) reasons.push(`Poisson ${probPois}% con λ ${lambdaH.toFixed(2)}–${lambdaA.toFixed(2)}`);
-  if(implied){ 
+  if(implied!==null){ 
     const value = consensus > implied ? 'value' : 'sin value';
     reasons.push(`cuota ${odd} (imp. ${implied}%) → ${value}`);
   }
-  parts.push(`  Razones: ${reasons.join(' · ')}.`);
+  const riskTxt = risks.length ? `<br>  Riesgos: ${risks.join(' · ')}.` : '';
 
-  // Riesgos comunes (si hay equipo que no anota o no concede con frecuencia)
-  const riskFlags = [];
-  if(typeof pNoScoreH==='number' && pNoScoreH>=30 && /BTTS/.test(market)) riskFlags.push(`local sin anotar ${pNoScoreH}%`);
-  if(typeof pNoConcedeA==='number' && pNoConcedeA>=35 && /BTTS/.test(market)) riskFlags.push(`visitante deja en 0 al rival ${pNoConcedeA}%`);
-  if(riskFlags.length) parts.push(`  Riesgos: ${riskFlags.join(' · ')}.`);
-
-  return parts.join('<br>');
+  return `• ${market}: ${verdict}.<br>  Razones: ${reasons.join(' · ')}.${riskTxt}`;
 }
 
 function renderTextExplanation({
   homeTeam, awayTeam,
   homeStats, awayStats,
-  pO25_hist, pBTTS_hist,
+  homeLast, awayLast,
   lambdaH, lambdaA,
   oddOver, oddUnder
 }){
-  // Poisson match-level
-  const over25_pois = Math.round(probTotalOver(lambdaH, lambdaA, 2.5)*100);
-  const btts_pois   = Math.round(probBTTS(lambdaH, lambdaA)*100);
+  // Probabilidades Poisson a nivel partido
+  const poisOver = L => Math.round(probTotalOver(lambdaH, lambdaA, L)*100);
+  const poisBTTS = Math.round(probBTTS(lambdaH, lambdaA)*100);
 
-  // Consejos Over 2.5 y BTTS
-  const over25Txt = shortAdvice({
-    market:`Over 2.5 (${homeTeam} vs ${awayTeam})`,
-    probHist:pO25_hist,
-    probPois:over25_pois,
-    odd:oddOver,
-    sideLabel:'Over 2.5',
-    lambdaH, lambdaA
-  });
+  // Líneas Over a explicar
+  const lines = [0.5,1.5,2.5,3.5];
 
-  const bttsTxt = shortAdvice({
+  // Construir explicaciones para cada Over
+  const oversText = lines.map(L=>{
+    const hist = matchHistOver(homeLast, awayLast, L);
+    const pois = poisOver(L);
+    const useOdd = (L===2.5) ? oddOver : null; // solo pedimos cuota para Over 2.5
+    return shortAdvice({
+      market:`Over ${L.toFixed(1)} (${homeTeam} vs ${awayTeam})`,
+      probHist:hist, probPois:pois, odd:useOdd, sideLabel:`Over ${L.toFixed(1)}`,
+      lambdaH, lambdaA
+    });
+  }).join('<br><br>');
+
+  // BTTS con riesgos
+  const bttsHist = Math.round((percentBTTS(homeLast)+percentBTTS(awayLast))/2);
+  const risksBTTS = [];
+  if(homeStats.pNoScore>=30) risksBTTS.push(`local sin anotar ${homeStats.pNoScore}%`);
+  if(awayStats.pNoConcede>=35) risksBTTS.push(`visitante deja en 0 al rival ${awayStats.pNoConcede}%`);
+  const bttsText = shortAdvice({
     market:`BTTS (${homeTeam} vs ${awayTeam})`,
-    probHist:pBTTS_hist,
-    probPois:btts_pois,
-    odd:null,
-    sideLabel:'BTTS',
-    lambdaH, lambdaA,
-    pNoScoreH: homeStats.pNoScore,
-    pNoConcedeA: awayStats.pNoConcede
+    probHist:bttsHist, probPois:poisBTTS, odd:null, sideLabel:'BTTS',
+    lambdaH, lambdaA, risks:risksBTTS
   });
 
-  // Nota general muy breve
-  const note = `Nota: usa el consenso (Histórico+Poisson). Si el consenso supera la probabilidad implícita de tu cuota, hay value; si queda por debajo, es mejor pasar.`;
+  // Under 2.5 (si hay cuota), usando complemento del consenso
+  let underText = '';
+  if(oddUnder && oddUnder>1){
+    const over25Hist = matchHistOver(homeLast, awayLast, 2.5);
+    const over25Pois = poisOver(2.5);
+    const histU = 100 - over25Hist;
+    const poisU = 100 - over25Pois;
+    underText = shortAdvice({
+      market:`Under 2.5 (${homeTeam} vs ${awayTeam})`,
+      probHist:histU, probPois:poisU, odd:oddUnder, sideLabel:'Under 2.5',
+      lambdaH, lambdaA
+    });
+  }
+
+  const note = `Nota: el consenso combina Histórico y Poisson. Si el consenso supera la prob. implícita de tu cuota, hay value; si no, mejor omitir. Cambia la pestaña (FT/1H/2H) para que todo se adapte a ese periodo.`;
 
   return `
     <div class="panel">
       <h3>Explicación breve (texto)</h3>
       <div style="line-height:1.4">
-        ${over25Txt}<br><br>
-        ${bttsTxt}<br><br>
+        ${oversText}<br><br>
+        ${bttsText}${underText?'<br><br>'+underText:''}<br><br>
         <span class="muted">${note}</span>
       </div>
     </div>
   `;
 }
-/* ===== FIN EXPLICACIÓN EN TEXTO ===== */
+/* ===== FIN EXPLICACIÓN EN TEXTO (EXTENDIDA) ===== */
 
 /* ---------- Load ---------- */
 document.getElementById("fileInput").addEventListener("change", (e)=>{
@@ -614,9 +616,6 @@ document.getElementById("analyzeBtn").addEventListener("click", ()=>{
 
   const preds = renderPredictions(homeTeam, awayTeam, homeLast, awayLast);
 
-  const matchOver25 = Math.round((percentOver(homeLast,2.5)+percentOver(awayLast,2.5))/2);
-  const pBTTS_hist  = Math.round((percentBTTS(homeLast)+percentBTTS(awayLast))/2);
-
   // λ para explicación textual
   const hAvg = teamAverages(homeLast, homeTeam);
   const aAvg = teamAverages(awayLast, awayTeam);
@@ -626,12 +625,13 @@ document.getElementById("analyzeBtn").addEventListener("click", ()=>{
   const textExplain = renderTextExplanation({
     homeTeam, awayTeam,
     homeStats, awayStats,
-    pO25_hist: matchOver25,
-    pBTTS_hist: pBTTS_hist,
+    homeLast, awayLast,
     lambdaH, lambdaA,
     oddOver, oddUnder
   });
 
+  // Value Check con 2.5 (opcional visual)
+  const matchOver25 = Math.round((percentOver(homeLast,2.5)+percentOver(awayLast,2.5))/2);
   const valueOver = valueBox(matchOver25, oddOver);
   const valueUnder = valueBox(100-matchOver25, oddUnder);
 
@@ -661,6 +661,7 @@ document.getElementById("analyzeBtn").addEventListener("click", ()=>{
       ${textExplain}
     </div>
   `;
+
   if (matchOver25 >= 70) res.style.borderColor = "var(--green)";
   else if (matchOver25 >= 50) res.style.borderColor = "var(--amber)";
   else res.style.borderColor = "var(--red)";
