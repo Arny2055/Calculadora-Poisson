@@ -69,13 +69,6 @@
   .preview .chip.league .dot{background:var(--accent)}
   .preview .chip.home  .dot{background:var(--green)}
   .preview .chip.away  .dot{background:var(--red)}
-
-  @media (max-width:480px){
-    body{padding:12px}
-    .card{padding:14px}
-    h1{font-size:1.25rem}
-    :root{ --font-field:19px; --field-h:58px; --font-chip-lg:1.15rem; }
-  }
 </style>
 </head>
 <body>
@@ -402,7 +395,7 @@ function drawSpark(canvas, series){
   ctx.fill();
 }
 
-/* --- Game Predictions (Histórico) con sparklines + explicación --- */
+/* --- Game Predictions (Histórico) con sparklines --- */
 function renderPredictions(homeTeam, awayTeam, homeLast, awayLast){
   const pO05 = Math.round((percentOver(homeLast,0.5)+percentOver(awayLast,0.5))/2);
   const pO25 = Math.round((percentOver(homeLast,2.5)+percentOver(awayLast,2.5))/2);
@@ -423,7 +416,9 @@ function renderPredictions(homeTeam, awayTeam, homeLast, awayLast){
       <canvas class="spark" data-key="${key}"></canvas>
     </div>`;
 
-  const html = `
+  setTimeout(()=>{ document.querySelectorAll('.spark').forEach(cv=>{ const key=cv.dataset.key; drawSpark(cv, S[key]); }); },0);
+
+  return `
     <div class="panel">
       <h3>Game Predictions</h3>
       <div class="pills">
@@ -434,19 +429,10 @@ function renderPredictions(homeTeam, awayTeam, homeLast, awayLast){
         ${pill('goals', `${expGoals}`, 'Goals')}
         ${pill('corners', `${avgCorners}`, 'Corners')}
       </div>
-      <!-- Nota metodológica (histórico) -->
-      <div class="muted" style="margin-top:8px;font-size:.92rem;line-height:1.35">
-        Los % reflejan la <strong>media</strong> del acierto de cada equipo en sus <strong>últimos 10 partidos</strong> en su rol (local/visitante) para el <strong>periodo activo</strong> (FT/1H/2H).<br>
-        La <em>línea</em> de cada píldora es la <strong>tendencia cronológica</strong> (más reciente a la derecha) del promedio de ambos equipos.<br>
-        <strong>Corners</strong> usa la media de córners totales FT de esos partidos.
-      </div>
     </div>`;
-
-  setTimeout(()=>{ document.querySelectorAll('.spark').forEach(cv=>{ const key=cv.dataset.key; drawSpark(cv, S[key]); }); },0);
-  return html;
 }
 
-/* --- Game Predictions (Poisson) — solo Expected Goals + explicación --- */
+/* --- Game Predictions (Poisson) — solo Expected Goals --- */
 function renderPoissonPredictions(homeTeam, awayTeam, homeLast, awayLast){
   const hAvg = teamAverages(homeLast, homeTeam);
   const aAvg = teamAverages(awayLast, awayTeam);
@@ -466,112 +452,129 @@ function renderPoissonPredictions(homeTeam, awayTeam, homeLast, awayLast){
       <div class="pills">
         ${pill(`${L.toFixed(2)}`, 'Expected Goals (λH+λA)')}
       </div>
-      <!-- Nota metodológica (Poisson) -->
-      <div class="muted" style="margin-top:8px;font-size:.92rem;line-height:1.35">
-        Los <strong>λ</strong> se estiman con el promedio de <strong>goles a favor</strong> de los <strong>últimos 10 partidos</strong> por rol en el periodo activo.
-        El valor mostrado es <strong>λH + λA</strong> (goles esperados del partido).
-      </div>
     </div>
   `;
 }
 
-function valueBox(prob, odd){
-  if(!odd || odd<=1) return "";
-  const implied = Math.round(100/odd);
-  return prob > implied
-    ? `<div class="valueBox value">VALUE (Model ${prob}% vs ${implied}% imp.)</div>`
-    : `<div class="valueBox novalue">NO VALUE (Model ${prob}% vs ${implied}% imp.)</div>`;
+/* ===== Rentabilidad O2.5 (últimos 10 por rol) ===== */
+function ftTotalGoals(m){
+  const [hFT, aFT] = parseScore(m["Result FT"]);
+  return (hFT + aFT);
 }
+function getOver25Odd(m){
+  // Intentos directos comunes
+  const direct = m.O25 ?? m.o25 ?? m["Over 2.5"] ?? m.over25 ?? m.over_2_5 ?? m["Odd Over 2.5"] ?? m.odd_o25 ?? m.o2_5 ?? m["Odds Over 2.5"] ?? m["over2.5"];
+  let val = Number(direct);
+  if(!isNaN(val) && val>1) return val;
 
-/* ===== EXPLICACIÓN EN TEXTO (CONDICIONAL) ===== */
-function matchHistOver(homeLast, awayLast, line){
-  return Math.round((percentOver(homeLast,line)+percentOver(awayLast,line))/2);
-}
-
-// Muestra explicación solo si consenso suficientemente alto o hay value
-function shortAdvice({market, probHist, probPois, odd, sideLabel, lambdaH, lambdaA, risks=[]}){
-  const hasPois = (typeof probPois === 'number' && !isNaN(probPois));
-  const consensus = Math.round(hasPois ? (probHist*0.5 + probPois*0.5) : probHist);
-  const implied = (odd && odd>1)? Math.round(100/odd) : null;
-
-  const showBecauseConsensus = consensus >= 55;
-  const showBecauseValue     = (implied!==null && consensus > implied);
-  if(!showBecauseConsensus && !showBecauseValue) return '';
-
-  let verdict = consensus>=70 ? `Apostar ${sideLabel} (${consensus}%)`
-              : `Considerar ${sideLabel} (${consensus}%)`;
-
-  const reasons = [];
-  reasons.push(`Histórico ${probHist}%`);
-  if(hasPois) reasons.push(`Poisson ${probPois}% · λ ${lambdaH.toFixed(2)}–${lambdaA.toFixed(2)}`);
-  if(implied!==null){
-    const value = consensus > implied ? 'value' : 'sin value';
-    reasons.push(`cuota ${odd} (imp. ${implied}%) → ${value}`);
+  // Búsqueda flexible por clave
+  for(const k of Object.keys(m)){
+    const lk = k.toLowerCase();
+    if( /(over|o)\s*2[._\s-]*5/.test(lk) && /(odd|cuota|price|odds|pre)/.test(lk) ){
+      const v = Number(m[k]);
+      if(!isNaN(v) && v>1) return v;
+    }
   }
-  const riskTxt = risks.length ? `<br>  Riesgos: ${risks.join(' · ')}.` : '';
-
-  return `• ${market}: ${verdict}.<br>  Razones: ${reasons.join(' · ')}.${riskTxt}`;
+  return null;
 }
-
-function renderTextExplanation({
-  homeTeam, awayTeam,
-  homeStats, awayStats,
-  homeLast, awayLast,
-  lambdaH, lambdaA,
-  oddOver, oddUnder
-}){
-  const poisOver = L => Math.round(probTotalOver(lambdaH, lambdaA, L)*100);
-  const poisBTTS = Math.round(probBTTS(lambdaH, lambdaA)*100);
-  const lines = [0.5,1.5,2.5,3.5];
-
-  const oversTextArr = lines.map(L=>{
-    const hist = matchHistOver(homeLast, awayLast, L);
-    const pois = poisOver(L);
-    const useOdd = (L===2.5) ? oddOver : null;
-    return shortAdvice({
-      market:`Over ${L.toFixed(1)} (${homeTeam} vs ${awayTeam})`,
-      probHist:hist, probPois:pois, odd:useOdd, sideLabel:`Over ${L.toFixed(1)}`,
-      lambdaH, lambdaA
+function computeO25PnlForRole(matches, team, role){
+  const last = lastMatchesByRole(matches, team, role).slice(-10);
+  let considered=0, hits=0, fails=0, sumOdds=0, profit=0;
+  const details = [];
+  last.forEach((m, idx)=>{
+    const odd = getOver25Odd(m);
+    const tg = ftTotalGoals(m);
+    const hit = tg > 2.5;
+    let stakeProfit = null;
+    if(odd && odd>1){
+      considered++;
+      if(hit){ hits++; stakeProfit = +(odd-1).toFixed(4); profit += (odd-1); }
+      else   { fails++; stakeProfit = -1; profit -= 1; }
+      sumOdds += odd;
+    }
+    details.push({
+      idx: idx+1,
+      match: m.Match || '',
+      result_ft: m["Result FT"] || '',
+      odd_o25: (odd && odd>1)? odd : '',
+      hit: (odd && odd>1)? (hit?'✔':'✘') : '—',
+      pnl: (odd && odd>1)? stakeProfit : '—'
     });
-  }).filter(Boolean);
-
-  const bttsHist = Math.round((percentBTTS(homeLast)+percentBTTS(awayLast))/2);
-  const risksBTTS = [];
-  if(homeStats.pNoScore>=30) risksBTTS.push(`local sin anotar ${homeStats.pNoScore}%`);
-  if(awayStats.pNoConcede>=35) risksBTTS.push(`visitante deja en 0 al rival ${awayStats.pNoConcede}%`);
-  const bttsText = shortAdvice({
-    market:`BTTS (${homeTeam} vs ${awayTeam})`,
-    probHist:bttsHist, probPois:poisBTTS, odd:null, sideLabel:'BTTS',
-    lambdaH, lambdaA, risks:risksBTTS
   });
-  if(bttsText) oversTextArr.push(bttsText);
+  const avgOdd = considered ? (sumOdds/considered) : 0;
+  const roi = considered ? (profit/considered)*100 : 0;
+  return { team, role, played:last.length, considered, hits, fails, avgOdd, profit, roi, details };
+}
+function renderProfitabilityPanel(leagueMatches, homeTeam, awayTeam){
+  const homeRes = computeO25PnlForRole(leagueMatches, homeTeam, 'home');
+  const awayRes = computeO25PnlForRole(leagueMatches, awayTeam, 'away');
 
-  if(oddUnder && oddUnder>1){
-    const over25Hist = matchHistOver(homeLast, awayLast, 2.5);
-    const over25Pois = poisOver(2.5);
-    const histU = 100 - over25Hist;
-    const poisU = 100 - over25Pois;
-    const underText = shortAdvice({
-      market:`Under 2.5 (${homeTeam} vs ${awayTeam})`,
-      probHist:histU, probPois:poisU, odd:oddUnder, sideLabel:'Under 2.5',
-      lambdaH, lambdaA
-    });
-    if(underText) oversTextArr.push(underText);
-  }
+  const row = r => `
+    <tr>
+      <td>${r.team}</td>
+      <td>${r.role.toUpperCase()}</td>
+      <td>${r.played}</td>
+      <td>${r.considered}</td>
+      <td>${r.hits}</td>
+      <td>${r.fails}</td>
+      <td>${r.avgOdd? r.avgOdd.toFixed(2) : '—'}</td>
+      <td style="font-weight:700; ${r.profit>=0?'color:#10b981':'color:#ef4444'}">${r.profit.toFixed(2)}</td>
+      <td style="${r.roi>=0?'color:#10b981':'color:#ef4444'}">${r.roi.toFixed(1)}%</td>
+    </tr>`;
 
-  if(oversTextArr.length===0) return '';
-  const note = `Nota: se muestran solo mercados con prob. suficiente (≥55%) o con value vs cuota.`;
-  return `
-    <div class="panel">
-      <h3>Explicación breve (texto)</h3>
-      <div style="line-height:1.4">
-        ${oversTextArr.join('<br><br>')}<br><br>
-        <span class="muted">${note}</span>
+  // CSV (detalle + resumen)
+  const csvRows = [
+    ['Tipo','Equipo','Rol','N°','Match','Result FT','Odd O2.5','Hit','PnL'],
+    ...homeRes.details.map(d=>['Detalle', homeRes.team, 'Home', d.idx, d.match, d.result_ft, d.odd_o25, d.hit, d.pnl]),
+    ...awayRes.details.map(d=>['Detalle', awayRes.team, 'Away', d.idx, d.match, d.result_ft, d.odd_o25, d.hit, d.pnl]),
+    [],
+    ['Resumen','Equipo','Rol','Jugados','Considerados','Hits','Fails','Odd media','Profit','ROI%'],
+    ['Resumen', homeRes.team, 'Home', homeRes.played, homeRes.considered, homeRes.hits, homeRes.fails, homeRes.avgOdd.toFixed(2), homeRes.profit.toFixed(2), homeRes.roi.toFixed(1)],
+    ['Resumen', awayRes.team, 'Away', awayRes.played, awayRes.considered, awayRes.hits, awayRes.fails, awayRes.avgOdd.toFixed(2), awayRes.profit.toFixed(2), awayRes.roi.toFixed(1)]
+  ];
+  const csv = csvRows.map(r=>r.map(v=>{
+    const s = (v===null||v===undefined)? '' : String(v);
+    return /[",\n]/.test(s) ? `"${s.replace(/"/g,'""')}"` : s;
+  }).join(',')).join('\n');
+
+  const panel = `
+    <div class="panel" id="profitPanel">
+      <h3>Rentabilidad O2.5 (últimos 10 por rol · stake 1u)</h3>
+      <table>
+        <tr>
+          <th>Equipo</th><th>Rol</th><th>Jugados</th><th>Considerados</th>
+          <th>Hits</th><th>Fails</th><th>Odd media</th><th>Profit (u)</th><th>ROI</th>
+        </tr>
+        ${row(homeRes)}${row(awayRes)}
+      </table>
+      <button id="downloadCsvBtn" style="margin-top:10px">Descargar CSV (Excel)</button>
+      <div class="muted" style="margin-top:6px;font-size:.9rem">
+        Nota: “Considerados” excluye partidos sin cuota válida O2.5. Profit = +odd−1 en acierto, −1 en fallo.
       </div>
     </div>
   `;
+
+  // Insertar evento de descarga después de pintar
+  setTimeout(()=>{
+    const btn = document.getElementById('downloadCsvBtn');
+    if(btn){
+      btn.onclick = ()=>{
+        const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `rentabilidad_o25_${homeTeam}_home_${awayTeam}_away.csv`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+      };
+    }
+  },0);
+
+  return panel;
 }
-/* ===== FIN EXPLICACIÓN EN TEXTO (CONDICIONAL) ===== */
+/* ===== FIN Rentabilidad ===== */
 
 /* ---------- Load ---------- */
 document.getElementById("fileInput").addEventListener("change", (e)=>{
@@ -629,28 +632,21 @@ document.getElementById("analyzeBtn").addEventListener("click", ()=>{
 
   const summary = renderSummaryTable(homeLast, awayLast);
   const poissonSummary = renderPoissonSummaryTable(homeTeam, awayTeam, homeLast, awayLast);
-
   const preds = renderPredictions(homeTeam, awayTeam, homeLast, awayLast);
-  const poissonPreds = renderPoissonPredictions(homeTeam, awayTeam, homeLast, awayLast); // Solo Expected Goals (con explicación)
+  const poissonPreds = renderPoissonPredictions(homeTeam, awayTeam, homeLast, awayLast);
 
-  // λ para explicación textual
   const hAvg = teamAverages(homeLast, homeTeam);
   const aAvg = teamAverages(awayLast, awayTeam);
   const lambdaH = Math.max(0, parseFloat(hAvg.avgScored)||0);
   const lambdaA = Math.max(0, parseFloat(aAvg.avgScored)||0);
 
-  const textExplain = renderTextExplanation({
-    homeTeam, awayTeam,
-    homeStats, awayStats,
-    homeLast, awayLast,
-    lambdaH, lambdaA,
-    oddOver, oddUnder
-  });
-
-  // Value Check con 2.5 (visual)
+  // Value Check visual (solo referencia rápida)
   const matchOver25 = Math.round((percentOver(homeLast,2.5)+percentOver(awayLast,2.5))/2);
   const valueOver = valueBox(matchOver25, oddOver);
   const valueUnder = valueBox(100-matchOver25, oddUnder);
+
+  // Rentabilidad O2.5 panel
+  const pnlPanel = renderProfitabilityPanel(leagueMatches, homeTeam, awayTeam);
 
   const res = document.getElementById("results");
   res.innerHTML = `
@@ -664,12 +660,10 @@ document.getElementById("analyzeBtn").addEventListener("click", ()=>{
       ${summary}
       ${poissonSummary}
     </div>
-
     <div style="margin-top:12px">
       ${preds}
       ${poissonPreds}
     </div>
-
     <div class="panel" style="margin-top:12px">
       <h3>Value Check</h3>
       <div class="grid">
@@ -677,8 +671,7 @@ document.getElementById("analyzeBtn").addEventListener("click", ()=>{
         <div class="panel"><h3>Under 2.5</h3>${valueUnder||'<div class="muted">Ingresa Odd Under 2.5</div>'}</div>
       </div>
     </div>
-
-    ${textExplain ? `<div style="margin-top:12px">${textExplain}</div>` : ``}
+    ${pnlPanel}
   `;
 
   if (matchOver25 >= 70) res.style.borderColor = "var(--green)";
