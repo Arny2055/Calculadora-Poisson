@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Estadísticas Over/Under (últimos 10 por fecha)</title>
+<title>Estadísticas Over/Under (soporta fecha ES y Odd O25)</title>
 <style>
   :root{
     --bg:#0a0f1c; --card:#121826; --panel:#1a2333; --text:#e5e7eb; --muted:#94a3b8;
@@ -155,25 +155,28 @@ function splitTeams(matchStr){
   if(parts.length>=2) return [parts[0].trim(), parts[1].trim()];
   return [null,null];
 }
+
+/* === NUEVO: parser de fecha en español === */
 function parseDateFlexible(v){
   if(v===null || v===undefined || v==='') return null;
 
-  // Si viene numérico (posible timestamp)
   if(typeof v === 'number'){
-    // Heurística: segundos vs milisegundos
-    if(v > 1e12) return v;            // ya en ms
-    if(v > 1e9)  return v * 1000;     // en s -> ms
+    if(v > 1e12) return v;          // ms
+    if(v > 1e9)  return v * 1000;   // s -> ms
     return null;
   }
 
   if(typeof v !== 'string') return null;
-  const s = v.trim();
+  let s = v.trim();
 
-  // ISO u otros parseables por Date
+  // quitar prefijo de día de semana (es) tipo "dom.,", "mié.", "jue", etc.
+  s = s.replace(/^(lun|mar|mi[eé]|jue|vie|s[aá]b|dom)\.?,?\s*/i, '');
+
+  // Intento ISO / parsers nativos
   const dISO = Date.parse(s);
   if(!isNaN(dISO)) return dISO;
 
-  // dd/mm/yyyy o dd-mm-yyyy (con o sin hora)
+  // dd/mm/yyyy o dd-mm-yyyy (opcional hora)
   let m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?$/);
   if(m){
     let dd=parseInt(m[1],10), mm=parseInt(m[2],10)-1, yy=parseInt(m[3],10);
@@ -191,9 +194,39 @@ function parseDateFlexible(v){
     return new Date(yy,mm,dd,hh,mi,ss).getTime();
   }
 
+  // dd mes_es yyyy HH:MM  (e.g., "20 ago. 2023 18:30", "7 sept 2024 21:00")
+  const months = {
+    'ene':'01','feb':'02','mar':'03','abr':'04','may':'05','jun':'06','jul':'07','ago':'08',
+    'sep':'09','sept':'09','set':'09','oct':'10','nov':'11','dic':'12'
+  };
+  m = s.match(/^(\d{1,2})\s+([a-záéíóúñ\.]+)\s+(\d{2,4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/i);
+  if(m){
+    let dd = parseInt(m[1],10);
+    let mon = (m[2]||'').toLowerCase().replace(/\./g,'').normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+    let yy = parseInt(m[3],10); if(yy<100) yy += 2000;
+    let hh = parseInt(m[4]||'0',10), mi=parseInt(m[5]||'0',10), ss=parseInt(m[6]||'0',10);
+    const mm = months[mon];
+    if(mm){
+      return new Date(`${yy}-${mm}-${String(dd).padStart(2,'0')}T${String(hh).padStart(2,'0')}:${String(mi).padStart(2,'0')}:${String(ss).padStart(2,'0')}`).getTime();
+    }
+  }
+
   return null;
 }
+
+/* === NUEVO: cuota O2.5 desde Desired Outcome + Odd === */
+function isDesiredO25(x){
+  if(!x) return false;
+  const s = String(x).toLowerCase().replace(/\s+/g,'');
+  return s==='o25' || s==='o2.5' || s==='over2.5' || s==='over25' || s==='over_2_5';
+}
 function extractOddO25(m){
+  // 1) Si Desired Outcome indica O25, tomar Odd
+  if(isDesiredO25(m['Desired Outcome']) || isDesiredO25(m['DesiredOutcome'])){
+    const od = toNum(m.Odd ?? m.odd ?? m['Odd PreMatch'] ?? m['Odd Prematch'] ?? m['Precio'] ?? m['Price']);
+    if(od && od>1) return od;
+  }
+  // 2) Resto de heurísticas como fallback
   const direct = m.O25 ?? m.o25 ?? m["Over 2.5"] ?? m["over2.5"] ?? m.over25 ?? m.over_2_5 ??
                  m["Odd Over 2.5"] ?? m.odd_o25 ?? m.o2_5 ?? m["Odds Over 2.5"] ?? m.price_o25 ?? m.pre_o25;
   let val = toNum(direct);
@@ -206,6 +239,7 @@ function extractOddO25(m){
   }
   return null;
 }
+
 function normalizeRow(m, idx){
   // Liga
   const league = getVal(m, ['League','league','Liga','liga','Competition','competition','league_name']) || '';
@@ -235,7 +269,7 @@ function normalizeRow(m, idx){
   const hcft = toNum(getVal(m, ['Home Corners at FT','home_corners_ft','home_corners','corners_home_ft']));
   const acft = toNum(getVal(m, ['Away Corners at FT','away_corners_ft','away_corners','corners_away_ft']));
 
-  // Fecha
+  // Fecha (incluye español)
   const dateRaw = getVal(m, [
     'Date','date','Fecha','fecha','Match Date','match_date','Kickoff','kickoff','Start','start','UtcDate','utcDate','game_date','time','timestamp','ts','datetime'
   ]);
@@ -258,15 +292,12 @@ function normalizeRow(m, idx){
 }
 
 /* ===== Funciones core (sobre datos normalizados) ===== */
-function parseScore(txt){ if(!txt) return [0,0]; const m = txt.split("-").map(x=>parseInt(x,10)); return [m[0]||0,m[1]||0]; }
-function periodGoals(m){
-  const [hHT,aHT] = [m.htHome, m.htAway]; const [hFT,aFT] = [m.ftHome, m.ftAway];
-  if(currentPeriod==="FT") return [hFT,aFT];
-  if(currentPeriod==="1H") return [hHT,aHT];
-  return [(hFT-hHT),(aFT-aHT)];
+function periodGoalsN(m){
+  if(currentPeriod==="FT") return [m.ftHome, m.ftAway];
+  if(currentPeriod==="1H") return [m.htHome, m.htAway];
+  return [(m.ftHome - m.htHome), (m.ftAway - m.htAway)];
 }
 function lastMatchesByRole(matches, team, role){
-  // Filtra por rol y ordena por fecha (ts asc, luego idx asc)
   const arr = matches
     .filter(m => role==="home" ? m.home===team : m.away===team)
     .sort((a,b)=>{
@@ -279,20 +310,20 @@ function lastMatchesByRole(matches, team, role){
 }
 function percentOver(lastMatches, line){
   const n = lastMatches.length; let over=0;
-  lastMatches.forEach(m=>{ const [h,a]=periodGoals(m); if(h+a>line) over++; });
+  lastMatches.forEach(m=>{ const [h,a]=periodGoalsN(m); if(h+a>line) over++; });
   return pct(over,n);
 }
 function percentBTTS(lastMatches){
   const n = lastMatches.length; let yes=0;
-  lastMatches.forEach(m=>{ const [h,a]=periodGoals(m); if(h>0 && a>0) yes++; });
+  lastMatches.forEach(m=>{ const [h,a]=periodGoalsN(m); if(h>0 && a>0) yes++; });
   return pct(yes,n);
 }
 function teamAverages(lastMatches, team){
   let s=0,c=0,t=0,n=lastMatches.length||1;
   lastMatches.forEach(m=>{
-    const [h,a]=periodGoals(m);
-    const forTeam=(team===m.home)?h:(team===m.away)?a:null;
-    const opp=(team===m.home)?a:(team===m.away)?h:null;
+    const [h,a]=periodGoalsN(m);
+    const forTeam = (team===m.home)? h : (team===m.away)? a : null;
+    const opp     = (team===m.home)? a : (team===m.away)? h : null;
     if(forTeam==null) return;
     s+=forTeam; c+=opp; t+=forTeam+opp;
   });
@@ -332,7 +363,7 @@ function calcTeamBlock(matches, team, role){
   const last = lastMatchesByRole(matches, team, role); const n = last.length;
   let noScore=0, noConcede=0, s=0,c=0,t=0;
   last.forEach(m=>{
-    const [h,a]=periodGoals(m);
+    const [h,a]=periodGoalsN(m);
     const forTeam=(team===m.home)?h:(team===m.away)?a:null;
     const opp=(team===m.home)?a:(team===m.away)?h:null;
     if(forTeam==null) return; if(forTeam===0) noScore++; if(opp===0) noConcede++; s+=forTeam; c+=opp; t+=forTeam+opp;
@@ -434,7 +465,7 @@ function buildSeries(homeLast, awayLast){
   const sOver = line => {
     const out=[];
     for(let i=0;i<len;i++){
-      const [h1,a1]=periodGoals(H[i]); const [h2,a2]=periodGoals(A[i]);
+      const [h1,a1]=periodGoalsN(H[i]); const [h2,a2]=periodGoalsN(A[i]);
       const v1=(h1+a1>line)?1:0, v2=(h2+a2>line)?1:0;
       out.push( (v1+v2)/2 * 100 );
     }
@@ -443,7 +474,7 @@ function buildSeries(homeLast, awayLast){
   const sBTTS = ()=>{
     const out=[];
     for(let i=0;i<len;i++){
-      const [h1,a1]=periodGoals(H[i]); const [h2,a2]=periodGoals(A[i]);
+      const [h1,a1]=periodGoalsN(H[i]); const [h2,a2]=periodGoalsN(A[i]);
       const v1=(h1>0&&a1>0)?1:0, v2=(h2>0&&a2>0)?1:0;
       out.push( (v1+v2)/2 * 100 );
     }
@@ -452,7 +483,7 @@ function buildSeries(homeLast, awayLast){
   const sGoals = ()=>{
     const out=[];
     for(let i=0;i<len;i++){
-      const [h1,a1]=periodGoals(H[i]); const [h2,a2]=periodGoals(A[i]);
+      const [h1,a1]=periodGoalsN(H[i]); const [h2,a2]=periodGoalsN(A[i]);
       out.push( (h1+h2 + a1+a2)/2 );
     }
     return out;
@@ -548,6 +579,14 @@ function renderPoissonPredictions(homeTeam, awayTeam, homeLast, awayLast){
       </div>
     </div>
   `;
+}
+
+function valueBox(prob, odd){
+  if(!odd || odd<=1) return "";
+  const implied = Math.round(100/odd);
+  return prob > implied
+    ? `<div class="valueBox value">VALUE (Model ${prob}% vs ${implied}% imp.)</div>`
+    : `<div class="valueBox novalue">NO VALUE (Model ${prob}% vs ${implied}% imp.)</div>`;
 }
 
 /* ===== EXPLICACIÓN EN TEXTO (CONDICIONAL) ===== */
@@ -711,7 +750,7 @@ function renderProfitabilityPanel(leagueMatches, homeTeam, awayTeam){
       </table>
       <button id="downloadCsvBtn" style="margin-top:10px">Descargar CSV (Excel)</button>
       <div class="muted" style="margin-top:6px;font-size:.9rem">
-        Nota: ordenamos por fecha (si existe); si no hay fecha, usamos el orden del archivo. “Considerados” excluye partidos sin cuota válida O2.5.
+        Nota: “Considerados” excluye partidos sin cuota O2.5 válida. Ordenamos por fecha cuando existe; si no, por el orden del archivo.
       </div>
     </div>
   `;
