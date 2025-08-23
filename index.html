@@ -169,7 +169,7 @@ function parseDateFlexible(v){
   if(typeof v !== 'string') return null;
   let s = v.trim();
 
-  // quitar prefijo de día de semana (es) tipo "dom.,", "mié.", "jue", etc.
+  // quitar prefijo de día de semana (es)
   s = s.replace(/^(lun|mar|mi[eé]|jue|vie|s[aá]b|dom)\.?,?\s*/i, '');
 
   // Intento ISO / parsers nativos
@@ -194,7 +194,7 @@ function parseDateFlexible(v){
     return new Date(yy,mm,dd,hh,mi,ss).getTime();
   }
 
-  // dd mes_es yyyy HH:MM  (e.g., "20 ago. 2023 18:30", "7 sept 2024 21:00")
+  // dd mes_es yyyy HH:MM
   const months = {
     'ene':'01','feb':'02','mar':'03','abr':'04','may':'05','jun':'06','jul':'07','ago':'08',
     'sep':'09','sept':'09','set':'09','oct':'10','nov':'11','dic':'12'
@@ -320,7 +320,7 @@ function percentBTTS(lastMatches){
 }
 function teamAverages(lastMatches, team){
   let s=0,c=0,t=0,n=lastMatches.length||1;
-  lastMatches.forEach(m=>{
+  last.forEach(m=>{
     const [h,a]=periodGoalsN(m);
     const forTeam = (team===m.home)? h : (team===m.away)? a : null;
     const opp     = (team===m.home)? a : (team===m.away)? h : null;
@@ -331,11 +331,22 @@ function teamAverages(lastMatches, team){
 }
 function avgCornersFT(lastMatches){
   let sum=0, n=0;
-  lastMatches.forEach(m=>{
+  last.forEach(m=>{
     const c = Number(m.home_corners_ft||0) + Number(m.away_corners_ft||0);
     if(!isNaN(c)){ sum += c; n++; }
   });
   return n? (sum/n) : 0;
+}
+
+/* ---------- NUEVO: helpers de summary 3/5/10 ---------- */
+function buildSummaryStats(arr){
+  return {
+    o05: percentOver(arr,0.5),
+    o15: percentOver(arr,1.5),
+    o25: percentOver(arr,2.5),
+    o35: percentOver(arr,3.5),
+    btts: percentBTTS(arr)
+  };
 }
 
 /* ---------- Poisson helpers ---------- */
@@ -389,6 +400,8 @@ function renderTeamPanel(title, stats){
     <div class="kv"><span>Games without Conceding</span><span><span class="badge ${cls(stats.pNoConcede)}">${stats.pNoConcede}%</span></span></div>
   </div>`;
 }
+
+/* (conservamos tu summary original si lo quieres usar) */
 function renderSummaryTable(homeLast, awayLast){
   const h = { o05: percentOver(homeLast,0.5), o15: percentOver(homeLast,1.5), o25: percentOver(homeLast,2.5), o35: percentOver(homeLast,3.5), btts: percentBTTS(homeLast) };
   const a = { o05: percentOver(awayLast,0.5), o15: percentOver(awayLast,1.5), o25: percentOver(awayLast,2.5), o35: percentOver(awayLast,3.5), btts: percentBTTS(awayLast) };
@@ -413,6 +426,35 @@ function renderSummaryTable(homeLast, awayLast){
       </table>
     </div>`;
 }
+
+/* ---------- NUEVO: summary por ventana N (3/5/10) ---------- */
+function renderSummaryTableN(homeLast10, awayLast10, n){
+  const hArr = homeLast10.slice(-n);
+  const aArr = awayLast10.slice(-n);
+  const H = buildSummaryStats(hArr);
+  const A = buildSummaryStats(aArr);
+  const avg = (x,y)=>Math.round((x+y)/2);
+  const row = (label, key)=>`
+    <tr>
+      <td>${label}</td>
+      <td>${badge(H[key])}</td>
+      <td>${badge(A[key])}</td>
+      <td><span class="badge ${cls(avg(H[key],A[key]))}">${avg(H[key],A[key])}%</span></td>
+    </tr>`;
+  return `
+    <div class="panel">
+      <h3>Summary (Histórico · últimos ${n})</h3>
+      <table>
+        <tr><th></th><th>Home</th><th>Away</th><th>Match</th></tr>
+        ${row('Over 0.5','o05')}
+        ${row('Over 1.5','o15')}
+        ${row('Over 2.5','o25')}
+        ${row('Over 3.5','o35')}
+        ${row('BTTS','btts')}
+      </table>
+    </div>`;
+}
+
 function renderPoissonSummaryTable(homeTeam, awayTeam, homeLast, awayLast){
   const hAvg = teamAverages(homeLast, homeTeam);
   const aAvg = teamAverages(awayLast, awayTeam);
@@ -843,8 +885,12 @@ document.getElementById("analyzeBtn").addEventListener("click", ()=>{
     const homeStats = calcTeamBlock(leagueMatches, homeTeam, "home");
     const awayStats = calcTeamBlock(leagueMatches, awayTeam, "away");
 
-    const summary = renderSummaryTable(homeLast, awayLast);
+    /* summaries */
+    const summary3  = renderSummaryTableN(homeLast, awayLast, 3);
+    const summary5  = renderSummaryTableN(homeLast, awayLast, 5);
+    const summary10 = renderSummaryTableN(homeLast, awayLast, 10);
     const poissonSummary = renderPoissonSummaryTable(homeTeam, awayTeam, homeLast, awayLast);
+
     const preds = renderPredictions(homeTeam, awayTeam, homeLast, awayLast);
     const poissonPreds = renderPoissonPredictions(homeTeam, awayTeam, homeLast, awayLast);
 
@@ -875,10 +921,17 @@ document.getElementById("analyzeBtn").addEventListener("click", ()=>{
         ${renderTeamPanel(homeTeam, homeStats)}
         ${renderTeamPanel(awayTeam, awayStats)}
       </div>
+
+      <!-- Summaries por ventanas -->
       <div class="grid" style="margin-top:12px">
-        ${summary}
+        ${summary3}
+        ${summary5}
+      </div>
+      <div class="grid" style="margin-top:12px">
+        ${summary10}
         ${poissonSummary}
       </div>
+
       <div style="margin-top:12px">
         ${preds}
         ${poissonPreds}
