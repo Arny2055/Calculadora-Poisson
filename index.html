@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Estadísticas Over/Under (robusto)</title>
+<title>Estadísticas Over/Under (últimos 10 por fecha)</title>
 <style>
   :root{
     --bg:#0a0f1c; --card:#121826; --panel:#1a2333; --text:#e5e7eb; --muted:#94a3b8;
@@ -44,7 +44,6 @@
   .valueBox{margin-top:10px;padding:10px;border-radius:10px;text-align:center;font-weight:800}
   .value{background:var(--green);color:#fff} .novalue{background:var(--red);color:#fff}
 
-  .divider{height:1px;background:var(--line);margin:8px 0;border-radius:1px}
   .row{display:grid;gap:10px}
   @media(min-width:640px){.row{grid-template-columns:1fr 1fr}}
 
@@ -61,20 +60,13 @@
   .pill.ok{outline:2px solid var(--green)} .pill.warn{outline:2px solid var(--amber)} .pill.bad{outline:2px solid var(--red)}
   .spark{width:100%;height:28px}
 
-  .preview{
-    display:flex;gap:8px;flex-wrap:wrap;align-items:center;background:#0f1726;border:1px solid var(--line);
-    border-radius:16px;padding:10px 12px;margin-top:12px
-  }
-  .preview .chip{
-    display:inline-flex;align-items:center;gap:8px;background:#0b1324;border:1px solid var(--line);border-radius:999px;
-    padding:8px 12px;font-weight:700;color:#e5e7eb;box-shadow:inset 0 -2px 0 rgba(255,255,255,.04)
-  }
+  .preview{display:flex;gap:8px;flex-wrap:wrap;align-items:center;background:#0f1726;border:1px solid var(--line);border-radius:16px;padding:10px 12px;margin-top:12px}
+  .preview .chip{display:inline-flex;align-items:center;gap:8px;background:#0b1324;border:1px solid var(--line);border-radius:999px;padding:8px 12px;font-weight:700;color:#e5e7eb;box-shadow:inset 0 -2px 0 rgba(255,255,255,.04)}
   .preview .chip .dot{width:8px;height:8px;border-radius:50%}
   .preview .chip.league .dot{background:var(--accent)}
   .preview .chip.home  .dot{background:var(--green)}
   .preview .chip.away  .dot{background:var(--red)}
 
-  /* Estado */
   #status{margin-top:8px;font-size:.92rem}
   #status.ok{color:var(--green)}
   #status.err{color:var(--red)}
@@ -131,23 +123,26 @@
 
 <script>
 let rawMatches = [];
-let allMatches = []; // normalizados
+let allMatches = []; // normalizados + ts + idx
 let currentPeriod = "FT";
 
 /* ---------- Utils ---------- */
 const toNum = v => (v===null||v===undefined||v==='')? null : Number(v);
 function tryParseJSON(text){
   try { return JSON.parse(text); } catch(e){}
-  // Tolerante a NDJSON/objetos por línea
-  const wrapped = "[" + text.trim()
-    .replace(/(^,)|(,$)/g,"")
-    .replace(/\n+/g,"\n")
-    .replace(/\}\s*,\s*\{/g,"},{") + "]";
+  const wrapped = "[" + text.trim().replace(/(^,)|(,$)/g,"").replace(/\n+/g,"\n").replace(/\}\s*,\s*\{/g,"},{") + "]";
   try { return JSON.parse(wrapped); } catch(e2){ return []; }
 }
 function pct(a,b){ return b ? Math.round((a/b)*100) : 0; }
 function cls(p){ return p>=70?"b-green":(p>=50?"b-amber":"b-red"); }
 function badge(p){ return `<span class="badge ${cls(p)}">${p}%</span>`; }
+function setStatus(msg, ok=false, err=false){
+  const el = document.getElementById('status');
+  el.textContent = msg || '';
+  el.classList.remove('ok','err');
+  if(ok) el.classList.add('ok');
+  if(err) el.classList.add('err');
+}
 
 /* ===== Normalización robusta ===== */
 function getVal(obj, keys){
@@ -160,20 +155,49 @@ function splitTeams(matchStr){
   if(parts.length>=2) return [parts[0].trim(), parts[1].trim()];
   return [null,null];
 }
-function parseScoreStr(s){
-  if(typeof s === 'string' && /-/.test(s)){
-    const [a,b] = s.split('-').map(x=>parseInt(x,10));
-    return [isNaN(a)?0:a, isNaN(b)?0:b];
+function parseDateFlexible(v){
+  if(v===null || v===undefined || v==='') return null;
+
+  // Si viene numérico (posible timestamp)
+  if(typeof v === 'number'){
+    // Heurística: segundos vs milisegundos
+    if(v > 1e12) return v;            // ya en ms
+    if(v > 1e9)  return v * 1000;     // en s -> ms
+    return null;
   }
-  return [null,null];
+
+  if(typeof v !== 'string') return null;
+  const s = v.trim();
+
+  // ISO u otros parseables por Date
+  const dISO = Date.parse(s);
+  if(!isNaN(dISO)) return dISO;
+
+  // dd/mm/yyyy o dd-mm-yyyy (con o sin hora)
+  let m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?$/);
+  if(m){
+    let dd=parseInt(m[1],10), mm=parseInt(m[2],10)-1, yy=parseInt(m[3],10);
+    if(yy<100) yy += 2000;
+    let hh=parseInt(m[4]||'0',10), mi=parseInt(m[5]||'0',10), ss=parseInt(m[6]||'0',10);
+    return new Date(yy,mm,dd,hh,mi,ss).getTime();
+  }
+
+  // mm/dd/yyyy
+  m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?$/);
+  if(m){
+    let mm=parseInt(m[1],10)-1, dd=parseInt(m[2],10), yy=parseInt(m[3],10);
+    if(yy<100) yy += 2000;
+    let hh=parseInt(m[4]||'0',10), mi=parseInt(m[5]||'0',10), ss=parseInt(m[6]||'0',10);
+    return new Date(yy,mm,dd,hh,mi,ss).getTime();
+  }
+
+  return null;
 }
 function extractOddO25(m){
-  // intentos directos
   const direct = m.O25 ?? m.o25 ?? m["Over 2.5"] ?? m["over2.5"] ?? m.over25 ?? m.over_2_5 ??
                  m["Odd Over 2.5"] ?? m.odd_o25 ?? m.o2_5 ?? m["Odds Over 2.5"] ?? m.price_o25 ?? m.pre_o25;
   let val = toNum(direct);
   if(val && val>1) return val;
-  // búsqueda flexible por clave
   for(const k of Object.keys(m)){
     const lk = k.toLowerCase();
     if( /(over|o)\s*2[._\s-]*5/.test(lk) && /(odd|cuota|price|odds|pre)/.test(lk) ){
@@ -182,7 +206,7 @@ function extractOddO25(m){
   }
   return null;
 }
-function normalizeRow(m){
+function normalizeRow(m, idx){
   // Liga
   const league = getVal(m, ['League','league','Liga','liga','Competition','competition','league_name']) || '';
   // Equipos
@@ -194,11 +218,14 @@ function normalizeRow(m){
   home = (home||'').toString().trim();
   away = (away||'').toString().trim();
 
-  // HT / FT
-  // Cadenas tipo "1-0"
-  const [htH1, htA1] = parseScoreStr(getVal(m, ['Result HT','result_ht','HT','ht','Half Time','halftime']));
-  const [ftH1, ftA1] = parseScoreStr(getVal(m, ['Result FT','result_ft','FT','ft','Full Time','fulltime','score']));
-  // Números en campos separados
+  // Marcadores
+  const getScore = (keysStr) => {
+    const s = getVal(m, keysStr);
+    if(typeof s==='string' && /-/.test(s)){ const [a,b]=s.split('-').map(x=>parseInt(x,10)); return [a||0,b||0]; }
+    return [null,null];
+  };
+  const [htH1, htA1] = getScore(['Result HT','result_ht','HT','ht','Half Time','halftime']);
+  const [ftH1, ftA1] = getScore(['Result FT','result_ft','FT','ft','Full Time','fulltime','score']);
   const htH = (htH1!==null) ? htH1 : (toNum(getVal(m, ['home_ht','ht_home','Home HT'])) ?? 0);
   const htA = (htA1!==null) ? htA1 : (toNum(getVal(m, ['away_ht','ht_away','Away HT'])) ?? 0);
   const ftH = (ftH1!==null) ? ftH1 : (toNum(getVal(m, ['home_ft','ft_home','Home FT','home_goals','goals_home'])) ?? 0);
@@ -208,10 +235,17 @@ function normalizeRow(m){
   const hcft = toNum(getVal(m, ['Home Corners at FT','home_corners_ft','home_corners','corners_home_ft']));
   const acft = toNum(getVal(m, ['Away Corners at FT','away_corners_ft','away_corners','corners_away_ft']));
 
+  // Fecha
+  const dateRaw = getVal(m, [
+    'Date','date','Fecha','fecha','Match Date','match_date','Kickoff','kickoff','Start','start','UtcDate','utcDate','game_date','time','timestamp','ts','datetime'
+  ]);
+  const ts = parseDateFlexible(dateRaw);
+
   // Odd O2.5
   const oddO25 = extractOddO25(m);
 
   return {
+    idx, ts: (ts||null),
     league,
     home, away,
     Match: (home && away) ? `${home} - ${away}` : (matchStr || ''),
@@ -224,31 +258,41 @@ function normalizeRow(m){
 }
 
 /* ===== Funciones core (sobre datos normalizados) ===== */
-function periodGoalsN(m){
-  if(currentPeriod==="FT") return [m.ftHome, m.ftAway];
-  if(currentPeriod==="1H") return [m.htHome, m.htAway];
-  return [(m.ftHome - m.htHome), (m.ftAway - m.htAway)];
+function parseScore(txt){ if(!txt) return [0,0]; const m = txt.split("-").map(x=>parseInt(x,10)); return [m[0]||0,m[1]||0]; }
+function periodGoals(m){
+  const [hHT,aHT] = [m.htHome, m.htAway]; const [hFT,aFT] = [m.ftHome, m.ftAway];
+  if(currentPeriod==="FT") return [hFT,aFT];
+  if(currentPeriod==="1H") return [hHT,aHT];
+  return [(hFT-hHT),(aFT-aHT)];
 }
 function lastMatchesByRole(matches, team, role){
-  const arr = matches.filter(m => role==="home" ? m.home===team : m.away===team);
+  // Filtra por rol y ordena por fecha (ts asc, luego idx asc)
+  const arr = matches
+    .filter(m => role==="home" ? m.home===team : m.away===team)
+    .sort((a,b)=>{
+      if(a.ts && b.ts) return a.ts - b.ts;
+      if(a.ts && !b.ts) return 1;
+      if(!a.ts && b.ts) return -1;
+      return a.idx - b.idx;
+    });
   return arr.slice(-10);
 }
 function percentOver(lastMatches, line){
   const n = lastMatches.length; let over=0;
-  lastMatches.forEach(m=>{ const [h,a]=periodGoalsN(m); if(h+a>line) over++; });
+  lastMatches.forEach(m=>{ const [h,a]=periodGoals(m); if(h+a>line) over++; });
   return pct(over,n);
 }
 function percentBTTS(lastMatches){
   const n = lastMatches.length; let yes=0;
-  lastMatches.forEach(m=>{ const [h,a]=periodGoalsN(m); if(h>0 && a>0) yes++; });
+  lastMatches.forEach(m=>{ const [h,a]=periodGoals(m); if(h>0 && a>0) yes++; });
   return pct(yes,n);
 }
 function teamAverages(lastMatches, team){
   let s=0,c=0,t=0,n=lastMatches.length||1;
   lastMatches.forEach(m=>{
-    const [h,a]=periodGoalsN(m);
-    const forTeam = (team===m.home)? h : (team===m.away)? a : null;
-    const opp     = (team===m.home)? a : (team===m.away)? h : null;
+    const [h,a]=periodGoals(m);
+    const forTeam=(team===m.home)?h:(team===m.away)?a:null;
+    const opp=(team===m.home)?a:(team===m.away)?h:null;
     if(forTeam==null) return;
     s+=forTeam; c+=opp; t+=forTeam+opp;
   });
@@ -288,7 +332,7 @@ function calcTeamBlock(matches, team, role){
   const last = lastMatchesByRole(matches, team, role); const n = last.length;
   let noScore=0, noConcede=0, s=0,c=0,t=0;
   last.forEach(m=>{
-    const [h,a]=periodGoalsN(m);
+    const [h,a]=periodGoals(m);
     const forTeam=(team===m.home)?h:(team===m.away)?a:null;
     const opp=(team===m.home)?a:(team===m.away)?h:null;
     if(forTeam==null) return; if(forTeam===0) noScore++; if(opp===0) noConcede++; s+=forTeam; c+=opp; t+=forTeam+opp;
@@ -390,7 +434,7 @@ function buildSeries(homeLast, awayLast){
   const sOver = line => {
     const out=[];
     for(let i=0;i<len;i++){
-      const [h1,a1]=periodGoalsN(H[i]); const [h2,a2]=periodGoalsN(A[i]);
+      const [h1,a1]=periodGoals(H[i]); const [h2,a2]=periodGoals(A[i]);
       const v1=(h1+a1>line)?1:0, v2=(h2+a2>line)?1:0;
       out.push( (v1+v2)/2 * 100 );
     }
@@ -399,7 +443,7 @@ function buildSeries(homeLast, awayLast){
   const sBTTS = ()=>{
     const out=[];
     for(let i=0;i<len;i++){
-      const [h1,a1]=periodGoalsN(H[i]); const [h2,a2]=periodGoalsN(A[i]);
+      const [h1,a1]=periodGoals(H[i]); const [h2,a2]=periodGoals(A[i]);
       const v1=(h1>0&&a1>0)?1:0, v2=(h2>0&&a2>0)?1:0;
       out.push( (v1+v2)/2 * 100 );
     }
@@ -408,7 +452,7 @@ function buildSeries(homeLast, awayLast){
   const sGoals = ()=>{
     const out=[];
     for(let i=0;i<len;i++){
-      const [h1,a1]=periodGoalsN(H[i]); const [h2,a2]=periodGoalsN(A[i]);
+      const [h1,a1]=periodGoals(H[i]); const [h2,a2]=periodGoals(A[i]);
       out.push( (h1+h2 + a1+a2)/2 );
     }
     return out;
@@ -504,14 +548,6 @@ function renderPoissonPredictions(homeTeam, awayTeam, homeLast, awayLast){
       </div>
     </div>
   `;
-}
-
-function valueBox(prob, odd){
-  if(!odd || odd<=1) return "";
-  const implied = Math.round(100/odd);
-  return prob > implied
-    ? `<div class="valueBox value">VALUE (Model ${prob}% vs ${implied}% imp.)</div>`
-    : `<div class="valueBox novalue">NO VALUE (Model ${prob}% vs ${implied}% imp.)</div>`;
 }
 
 /* ===== EXPLICACIÓN EN TEXTO (CONDICIONAL) ===== */
@@ -675,12 +711,11 @@ function renderProfitabilityPanel(leagueMatches, homeTeam, awayTeam){
       </table>
       <button id="downloadCsvBtn" style="margin-top:10px">Descargar CSV (Excel)</button>
       <div class="muted" style="margin-top:6px;font-size:.9rem">
-        Nota: “Considerados” excluye partidos sin cuota válida O2.5. Profit = +odd−1 en acierto, −1 en fallo.
+        Nota: ordenamos por fecha (si existe); si no hay fecha, usamos el orden del archivo. “Considerados” excluye partidos sin cuota válida O2.5.
       </div>
     </div>
   `;
 
-  // Insertar evento de descarga después de pintar
   setTimeout(()=>{
     const btn = document.getElementById('downloadCsvBtn');
     if(btn){
@@ -702,14 +737,7 @@ function renderProfitabilityPanel(leagueMatches, homeTeam, awayTeam){
 }
 /* ===== FIN Rentabilidad ===== */
 
-/* ---------- Carga de archivo y población de selects ---------- */
-function setStatus(msg, ok=false, err=false){
-  const el = document.getElementById('status');
-  el.textContent = msg || '';
-  el.classList.remove('ok','err');
-  if(ok) el.classList.add('ok');
-  if(err) el.classList.add('err');
-}
+/* ---------- Carga ---------- */
 document.getElementById("fileInput").addEventListener("change", (e)=>{
   const file = e.target.files[0]; if(!file){ setStatus('No se seleccionó archivo.', false, true); return; }
   const rd = new FileReader();
@@ -717,7 +745,7 @@ document.getElementById("fileInput").addEventListener("change", (e)=>{
     try{
       rawMatches = tryParseJSON(ev.target.result);
       if(!Array.isArray(rawMatches) || rawMatches.length===0){ setStatus('No se pudo leer JSON o está vacío.', false, true); return; }
-      allMatches = rawMatches.map(normalizeRow).filter(r => r.home && r.away);
+      allMatches = rawMatches.map((m,idx)=>normalizeRow(m, idx)).filter(r => r.home && r.away);
       if(allMatches.length===0){ setStatus('No se encontraron partidos válidos tras normalizar.', false, true); return; }
 
       const leagues = [...new Set(allMatches.map(m=>m.league).filter(Boolean))].sort();
@@ -737,10 +765,8 @@ document.getElementById("leagueSelect").addEventListener("change", function(){
   const league = this.value;
   const leagueMatches = allMatches.filter(m=>m.league===league);
   const teams = [...new Set(leagueMatches.flatMap(m=>[m.home, m.away]))].sort();
-  const homeSel = document.getElementById("homeSelect");
-  const awaySel = document.getElementById("awaySelect");
-  homeSel.innerHTML = teams.map(t=>`<option>${t}</option>`).join("");
-  awaySel.innerHTML = teams.map(t=>`<option>${t}</option>`).join("");
+  document.getElementById("homeSelect").innerHTML = teams.map(t=>`<option>${t}</option>`).join("");
+  document.getElementById("awaySelect").innerHTML = teams.map(t=>`<option>${t}</option>`).join("");
   setStatus(league ? `Liga: ${league} · ${leagueMatches.length} partidos` : '');
   setTimeout(updateSelectionPreview,0);
 });
@@ -751,7 +777,7 @@ document.getElementById("tabs").addEventListener("click", (e)=>{
   t.classList.add("active"); currentPeriod = t.dataset.period;
 });
 
-/* ---------- Botón Analizar ---------- */
+/* ---------- Analizar ---------- */
 document.getElementById("analyzeBtn").addEventListener("click", ()=>{
   try{
     updateSelectionPreview();
@@ -772,11 +798,8 @@ document.getElementById("analyzeBtn").addEventListener("click", ()=>{
 
     const homeLast = lastMatchesByRole(leagueMatches, homeTeam, "home");
     const awayLast = lastMatchesByRole(leagueMatches, awayTeam, "away");
-    if(homeLast.length===0 || awayLast.length===0){
-      setStatus('No hay últimos partidos suficientes para uno de los equipos en su rol.', false, true);
-    } else {
-      setStatus(`OK · Analizado ${homeTeam} (home) y ${awayTeam} (away).`, true, false);
-    }
+
+    setStatus(`OK · ${homeTeam} (home): ${homeLast.length} partidos · ${awayTeam} (away): ${awayLast.length} partidos.`, true, false);
 
     const homeStats = calcTeamBlock(leagueMatches, homeTeam, "home");
     const awayStats = calcTeamBlock(leagueMatches, awayTeam, "away");
@@ -786,7 +809,6 @@ document.getElementById("analyzeBtn").addEventListener("click", ()=>{
     const preds = renderPredictions(homeTeam, awayTeam, homeLast, awayLast);
     const poissonPreds = renderPoissonPredictions(homeTeam, awayTeam, homeLast, awayLast);
 
-    // λ para explicación textual
     const hAvg = teamAverages(homeLast, homeTeam);
     const aAvg = teamAverages(awayLast, awayTeam);
     const lambdaH = Math.max(0, parseFloat(hAvg.avgScored)||0);
@@ -800,12 +822,10 @@ document.getElementById("analyzeBtn").addEventListener("click", ()=>{
       oddOver, oddUnder
     });
 
-    // Value Check con 2.5 (visual)
     const matchOver25 = Math.round((percentOver(homeLast,2.5)+percentOver(awayLast,2.5))/2);
     const valueOver = valueBox(matchOver25, oddOver);
     const valueUnder = valueBox(100-matchOver25, oddUnder);
 
-    // Rentabilidad O2.5 panel
     const pnlPanel = renderProfitabilityPanel(leagueMatches, homeTeam, awayTeam);
 
     const res = document.getElementById("results");
@@ -838,7 +858,6 @@ document.getElementById("analyzeBtn").addEventListener("click", ()=>{
     if (matchOver25 >= 70) res.style.borderColor = "var(--green)";
     else if (matchOver25 >= 50) res.style.borderColor = "var(--amber)";
     else res.style.borderColor = "var(--red)";
-
   }catch(err){
     console.error(err);
     setStatus('Ocurrió un error al analizar. Revisa la consola.', false, true);
