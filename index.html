@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Estadísticas Over/Under</title>
+<title>Estadísticas Over/Under (robusto)</title>
 <style>
   :root{
     --bg:#0a0f1c; --card:#121826; --panel:#1a2333; --text:#e5e7eb; --muted:#94a3b8;
@@ -44,7 +44,6 @@
   .valueBox{margin-top:10px;padding:10px;border-radius:10px;text-align:center;font-weight:800}
   .value{background:var(--green);color:#fff} .novalue{background:var(--red);color:#fff}
 
-  .sub{display:flex;align-items:center;gap:8px;color:#cbd5e1;margin:8px 0 4px}
   .divider{height:1px;background:var(--line);margin:8px 0;border-radius:1px}
   .row{display:grid;gap:10px}
   @media(min-width:640px){.row{grid-template-columns:1fr 1fr}}
@@ -62,13 +61,23 @@
   .pill.ok{outline:2px solid var(--green)} .pill.warn{outline:2px solid var(--amber)} .pill.bad{outline:2px solid var(--red)}
   .spark{width:100%;height:28px}
 
-  :root{ --radius:14px; --field-h:56px; --font-field:18px; --font-label:1.05rem; --font-chip-lg:1.1rem; }
-  .preview{display:flex;gap:8px;flex-wrap:wrap;align-items:center;background:#0f1726;border:1px solid var(--line);border-radius:16px;padding:10px 12px;margin-top:12px}
-  .preview .chip{display:inline-flex;align-items:center;gap:8px;background:#0b1324;border:1px solid var(--line);border-radius:999px;padding:8px 12px;font-weight:700;font-size:var(--font-chip-lg);color:#e5e7eb;box-shadow:inset 0 -2px 0 rgba(255,255,255,.04)}
+  .preview{
+    display:flex;gap:8px;flex-wrap:wrap;align-items:center;background:#0f1726;border:1px solid var(--line);
+    border-radius:16px;padding:10px 12px;margin-top:12px
+  }
+  .preview .chip{
+    display:inline-flex;align-items:center;gap:8px;background:#0b1324;border:1px solid var(--line);border-radius:999px;
+    padding:8px 12px;font-weight:700;color:#e5e7eb;box-shadow:inset 0 -2px 0 rgba(255,255,255,.04)
+  }
   .preview .chip .dot{width:8px;height:8px;border-radius:50%}
   .preview .chip.league .dot{background:var(--accent)}
   .preview .chip.home  .dot{background:var(--green)}
   .preview .chip.away  .dot{background:var(--red)}
+
+  /* Estado */
+  #status{margin-top:8px;font-size:.92rem}
+  #status.ok{color:var(--green)}
+  #status.err{color:var(--red)}
 </style>
 </head>
 <body>
@@ -109,6 +118,7 @@
     </div>
 
     <button id="analyzeBtn" style="margin-top:10px">Analizar</button>
+    <div id="status" class="muted"></div>
 
     <div id="selectionPreview" class="preview" style="display:none">
       <div class="chip league"><span class="dot"></span><span id="pvLeague">—</span></div>
@@ -120,59 +130,135 @@
   <div id="results" class="card"></div>
 
 <script>
-let allMatches = [];
+let rawMatches = [];
+let allMatches = []; // normalizados
 let currentPeriod = "FT";
 
 /* ---------- Utils ---------- */
+const toNum = v => (v===null||v===undefined||v==='')? null : Number(v);
 function tryParseJSON(text){
   try { return JSON.parse(text); } catch(e){}
-  const wrapped = "[" + text.trim().replace(/(^,)|(,$)/g,"").replace(/\n+/g,"\n").replace(/\}\s*,\s*\{/g,"},{") + "]";
+  // Tolerante a NDJSON/objetos por línea
+  const wrapped = "[" + text.trim()
+    .replace(/(^,)|(,$)/g,"")
+    .replace(/\n+/g,"\n")
+    .replace(/\}\s*,\s*\{/g,"},{") + "]";
   try { return JSON.parse(wrapped); } catch(e2){ return []; }
 }
 function pct(a,b){ return b ? Math.round((a/b)*100) : 0; }
 function cls(p){ return p>=70?"b-green":(p>=50?"b-amber":"b-red"); }
 function badge(p){ return `<span class="badge ${cls(p)}">${p}%</span>`; }
-function parseScore(txt){ if(!txt) return [0,0]; const m = txt.split("-").map(x=>parseInt(x,10)); return [m[0]||0,m[1]||0]; }
-function periodGoals(m){
-  const [hHT,aHT] = parseScore(m["Result HT"]); const [hFT,aFT] = parseScore(m["Result FT"]);
-  if(currentPeriod==="FT") return [hFT,aFT];
-  if(currentPeriod==="1H") return [hHT,aHT];
-  return [(hFT-hHT),(aFT-aHT)];
+
+/* ===== Normalización robusta ===== */
+function getVal(obj, keys){
+  for(const k of keys){ if(obj[k]!==undefined && obj[k]!==null && obj[k]!=='') return obj[k]; }
+  return undefined;
+}
+function splitTeams(matchStr){
+  if(typeof matchStr !== 'string') return [null,null];
+  const parts = matchStr.split(/\s+-\s+|\s+vs\.?\s+|\s+v\s+/i);
+  if(parts.length>=2) return [parts[0].trim(), parts[1].trim()];
+  return [null,null];
+}
+function parseScoreStr(s){
+  if(typeof s === 'string' && /-/.test(s)){
+    const [a,b] = s.split('-').map(x=>parseInt(x,10));
+    return [isNaN(a)?0:a, isNaN(b)?0:b];
+  }
+  return [null,null];
+}
+function extractOddO25(m){
+  // intentos directos
+  const direct = m.O25 ?? m.o25 ?? m["Over 2.5"] ?? m["over2.5"] ?? m.over25 ?? m.over_2_5 ??
+                 m["Odd Over 2.5"] ?? m.odd_o25 ?? m.o2_5 ?? m["Odds Over 2.5"] ?? m.price_o25 ?? m.pre_o25;
+  let val = toNum(direct);
+  if(val && val>1) return val;
+  // búsqueda flexible por clave
+  for(const k of Object.keys(m)){
+    const lk = k.toLowerCase();
+    if( /(over|o)\s*2[._\s-]*5/.test(lk) && /(odd|cuota|price|odds|pre)/.test(lk) ){
+      const v = toNum(m[k]); if(v && v>1) return v;
+    }
+  }
+  return null;
+}
+function normalizeRow(m){
+  // Liga
+  const league = getVal(m, ['League','league','Liga','liga','Competition','competition','league_name']) || '';
+  // Equipos
+  let home = null, away = null;
+  const matchStr = getVal(m, ['Match','match','Partido','fixture','evento']);
+  if(matchStr){ [home, away] = splitTeams(matchStr); }
+  if(!home) home = getVal(m, ['Home','home','Home Team','home_team','team_home','Local','local']);
+  if(!away) away = getVal(m, ['Away','away','Away Team','away_team','team_away','Visitante','visitante']);
+  home = (home||'').toString().trim();
+  away = (away||'').toString().trim();
+
+  // HT / FT
+  // Cadenas tipo "1-0"
+  const [htH1, htA1] = parseScoreStr(getVal(m, ['Result HT','result_ht','HT','ht','Half Time','halftime']));
+  const [ftH1, ftA1] = parseScoreStr(getVal(m, ['Result FT','result_ft','FT','ft','Full Time','fulltime','score']));
+  // Números en campos separados
+  const htH = (htH1!==null) ? htH1 : (toNum(getVal(m, ['home_ht','ht_home','Home HT'])) ?? 0);
+  const htA = (htA1!==null) ? htA1 : (toNum(getVal(m, ['away_ht','ht_away','Away HT'])) ?? 0);
+  const ftH = (ftH1!==null) ? ftH1 : (toNum(getVal(m, ['home_ft','ft_home','Home FT','home_goals','goals_home'])) ?? 0);
+  const ftA = (ftA1!==null) ? ftA1 : (toNum(getVal(m, ['away_ft','ft_away','Away FT','away_goals','goals_away'])) ?? 0);
+
+  // Córners FT
+  const hcft = toNum(getVal(m, ['Home Corners at FT','home_corners_ft','home_corners','corners_home_ft']));
+  const acft = toNum(getVal(m, ['Away Corners at FT','away_corners_ft','away_corners','corners_away_ft']));
+
+  // Odd O2.5
+  const oddO25 = extractOddO25(m);
+
+  return {
+    league,
+    home, away,
+    Match: (home && away) ? `${home} - ${away}` : (matchStr || ''),
+    htHome: htH||0, htAway: htA||0,
+    ftHome: ftH||0, ftAway: ftA||0,
+    home_corners_ft: hcft ?? 0,
+    away_corners_ft: acft ?? 0,
+    odd_o25: oddO25
+  };
+}
+
+/* ===== Funciones core (sobre datos normalizados) ===== */
+function periodGoalsN(m){
+  if(currentPeriod==="FT") return [m.ftHome, m.ftAway];
+  if(currentPeriod==="1H") return [m.htHome, m.htAway];
+  return [(m.ftHome - m.htHome), (m.ftAway - m.htAway)];
 }
 function lastMatchesByRole(matches, team, role){
-  const arr = matches.filter(m=>{
-    const [h,a]=m.Match.split(" - "); return role==="home"? h===team : a===team;
-  });
+  const arr = matches.filter(m => role==="home" ? m.home===team : m.away===team);
   return arr.slice(-10);
 }
 function percentOver(lastMatches, line){
   const n = lastMatches.length; let over=0;
-  lastMatches.forEach(m=>{ const [h,a]=periodGoals(m); if(h+a>line) over++; });
+  lastMatches.forEach(m=>{ const [h,a]=periodGoalsN(m); if(h+a>line) over++; });
   return pct(over,n);
 }
 function percentBTTS(lastMatches){
   const n = lastMatches.length; let yes=0;
-  lastMatches.forEach(m=>{ const [h,a]=periodGoals(m); if(h>0 && a>0) yes++; });
+  lastMatches.forEach(m=>{ const [h,a]=periodGoalsN(m); if(h>0 && a>0) yes++; });
   return pct(yes,n);
 }
 function teamAverages(lastMatches, team){
   let s=0,c=0,t=0,n=lastMatches.length||1;
   lastMatches.forEach(m=>{
-    const [home,away]=m.Match.split(" - ");
-    const [h,a]=periodGoals(m);
-    const forTeam=(team===home)?h:(team===away)?a:null;
-    const opp=(team===home)?a:(team===away)?h:null;
+    const [h,a]=periodGoalsN(m);
+    const forTeam = (team===m.home)? h : (team===m.away)? a : null;
+    const opp     = (team===m.home)? a : (team===m.away)? h : null;
     if(forTeam==null) return;
-    s+=forTeam; c+=opp; t+=(forTeam+opp);
+    s+=forTeam; c+=opp; t+=forTeam+opp;
   });
   return {avgScored:(s/n).toFixed(1), avgConceded:(c/n).toFixed(1), avgGoals:(t/n).toFixed(1)};
 }
 function avgCornersFT(lastMatches){
   let sum=0, n=0;
   lastMatches.forEach(m=>{
-    const hc = Number(m["Home Corners at FT"]||m.home_corners_ft||m.home_corners||0);
-    const ac = Number(m["Away Corners at FT"]||m.away_corners_ft||m.away_corners||0);
-    if(!isNaN(hc+ac)){ sum += (hc+ac); n++; }
+    const c = Number(m.home_corners_ft||0) + Number(m.away_corners_ft||0);
+    if(!isNaN(c)){ sum += c; n++; }
   });
   return n? (sum/n) : 0;
 }
@@ -197,13 +283,14 @@ function probBTTS(lambdaH, lambdaA){
   return 1 - Math.exp(-lambdaH) - Math.exp(-lambdaA) + Math.exp(-(lambdaH+lambdaA));
 }
 
-/* ---------- Blocks ---------- */
+/* ---------- Panels ---------- */
 function calcTeamBlock(matches, team, role){
   const last = lastMatchesByRole(matches, team, role); const n = last.length;
   let noScore=0, noConcede=0, s=0,c=0,t=0;
   last.forEach(m=>{
-    const [home,away]=m.Match.split(" - "); const [h,a]=periodGoals(m);
-    const forTeam=(team===home)?h:(team===away)?a:null; const opp=(team===home)?a:(team===away)?h:null;
+    const [h,a]=periodGoalsN(m);
+    const forTeam=(team===m.home)?h:(team===m.away)?a:null;
+    const opp=(team===m.home)?a:(team===m.away)?h:null;
     if(forTeam==null) return; if(forTeam===0) noScore++; if(opp===0) noConcede++; s+=forTeam; c+=opp; t+=forTeam+opp;
   });
   return {
@@ -215,11 +302,10 @@ function calcTeamBlock(matches, team, role){
     pNoConcede: pct(noConcede,n)
   };
 }
-
 function renderTeamPanel(title, stats){
   return `
   <div class="panel">
-    <div class="sub"><strong>${title}</strong></div>
+    <div class="kv"><span class="muted"><strong>${title}</strong></span><span class="mono"></span></div>
     <div class="kv"><span class="muted">Avg. Scored</span><span class="mono">${stats.avgScored}</span></div>
     <div class="kv"><span class="muted">Avg. Suffer</span><span class="mono">${stats.avgConceded}</span></div>
     <div class="kv"><span class="muted">Avg. Goals</span><span class="mono">${stats.avgGoals}</span></div>
@@ -228,22 +314,9 @@ function renderTeamPanel(title, stats){
     <div class="kv"><span>Games without Conceding</span><span><span class="badge ${cls(stats.pNoConcede)}">${stats.pNoConcede}%</span></span></div>
   </div>`;
 }
-
 function renderSummaryTable(homeLast, awayLast){
-  const h = {
-    o05: percentOver(homeLast,0.5),
-    o15: percentOver(homeLast,1.5),
-    o25: percentOver(homeLast,2.5),
-    o35: percentOver(homeLast,3.5),
-    btts: percentBTTS(homeLast)
-  };
-  const a = {
-    o05: percentOver(awayLast,0.5),
-    o15: percentOver(awayLast,1.5),
-    o25: percentOver(awayLast,2.5),
-    o35: percentOver(awayLast,3.5),
-    btts: percentBTTS(awayLast)
-  };
+  const h = { o05: percentOver(homeLast,0.5), o15: percentOver(homeLast,1.5), o25: percentOver(homeLast,2.5), o35: percentOver(homeLast,3.5), btts: percentBTTS(homeLast) };
+  const a = { o05: percentOver(awayLast,0.5), o15: percentOver(awayLast,1.5), o25: percentOver(awayLast,2.5), o35: percentOver(awayLast,3.5), btts: percentBTTS(awayLast) };
   const avg = (x,y)=>Math.round((x+y)/2);
   const row = (label, hv, av, mv)=>`
     <tr>
@@ -265,8 +338,6 @@ function renderSummaryTable(homeLast, awayLast){
       </table>
     </div>`;
 }
-
-/* ---- Summary Poisson (Goles) ---- */
 function renderPoissonSummaryTable(homeTeam, awayTeam, homeLast, awayLast){
   const hAvg = teamAverages(homeLast, homeTeam);
   const aAvg = teamAverages(awayLast, awayTeam);
@@ -274,7 +345,6 @@ function renderPoissonSummaryTable(homeTeam, awayTeam, homeLast, awayLast){
   const lambdaA = Math.max(0, parseFloat(aAvg.avgScored)||0);
 
   const lines = [0.5,1.5,2.5,3.5];
-
   const row = (L)=>{
     const ph = Math.round(probTeamOver(lambdaH, L)*100);
     const pa = Math.round(probTeamOver(lambdaA, L)*100);
@@ -287,7 +357,6 @@ function renderPoissonSummaryTable(homeTeam, awayTeam, homeLast, awayLast){
         <td><span class="badge ${cls(pm)}">${pm}%</span></td>
       </tr>`;
   };
-
   const bttsHome = Math.round((1 - Math.exp(-lambdaH))*100);
   const bttsAway = Math.round((1 - Math.exp(-lambdaA))*100);
   const bttsMatch = Math.round(probBTTS(lambdaH, lambdaA)*100);
@@ -321,7 +390,7 @@ function buildSeries(homeLast, awayLast){
   const sOver = line => {
     const out=[];
     for(let i=0;i<len;i++){
-      const [h1,a1]=periodGoals(H[i]); const [h2,a2]=periodGoals(A[i]);
+      const [h1,a1]=periodGoalsN(H[i]); const [h2,a2]=periodGoalsN(A[i]);
       const v1=(h1+a1>line)?1:0, v2=(h2+a2>line)?1:0;
       out.push( (v1+v2)/2 * 100 );
     }
@@ -330,7 +399,7 @@ function buildSeries(homeLast, awayLast){
   const sBTTS = ()=>{
     const out=[];
     for(let i=0;i<len;i++){
-      const [h1,a1]=periodGoals(H[i]); const [h2,a2]=periodGoals(A[i]);
+      const [h1,a1]=periodGoalsN(H[i]); const [h2,a2]=periodGoalsN(A[i]);
       const v1=(h1>0&&a1>0)?1:0, v2=(h2>0&&a2>0)?1:0;
       out.push( (v1+v2)/2 * 100 );
     }
@@ -339,7 +408,7 @@ function buildSeries(homeLast, awayLast){
   const sGoals = ()=>{
     const out=[];
     for(let i=0;i<len;i++){
-      const [h1,a1]=periodGoals(H[i]); const [h2,a2]=periodGoals(A[i]);
+      const [h1,a1]=periodGoalsN(H[i]); const [h2,a2]=periodGoalsN(A[i]);
       out.push( (h1+h2 + a1+a2)/2 );
     }
     return out;
@@ -347,18 +416,14 @@ function buildSeries(homeLast, awayLast){
   const sCorners = ()=>{
     const out=[];
     for(let i=0;i<len;i++){
-      const c1 = (Number(H[i]["Home Corners at FT"]||H[i].home_corners_ft||H[i].home_corners||0)+
-                  Number(H[i]["Away Corners at FT"]||H[i].away_corners_ft||H[i].away_corners||0));
-      const c2 = (Number(A[i]["Home Corners at FT"]||A[i].home_corners_ft||A[i].home_corners||0)+
-                  Number(A[i]["Away Corners at FT"]||A[i].away_corners_ft||A[i].away_corners||0));
+      const c1 = Number(H[i].home_corners_ft||0) + Number(H[i].away_corners_ft||0);
+      const c2 = Number(A[i].home_corners_ft||0) + Number(A[i].away_corners_ft||0);
       out.push((c1+c2)/2);
     }
     return out;
   };
-
   return { o05: sOver(0.5), o25: sOver(2.5), o15: sOver(1.5), btts: sBTTS(), goals: sGoals(), corners: sCorners() };
 }
-
 function drawSpark(canvas, series){
   if(!canvas) return;
   const dpr = window.devicePixelRatio||1;
@@ -368,34 +433,19 @@ function drawSpark(canvas, series){
   ctx.scale(dpr,dpr);
   ctx.clearRect(0,0,w,h);
   if(!series || series.length===0){ return; }
-
   let min = Math.min(...series), max = Math.max(...series);
   if (min===max){ min = min-1; max = max+1; }
   const nx = i => (i/(series.length-1))*(w-4)+2;
   const ny = v => h-2 - ((v-min)/(max-min))*(h-6);
-
-  ctx.beginPath();
-  ctx.lineWidth = 2;
-  ctx.strokeStyle = '#22d3ee';
-  for(let i=0;i<series.length;i++){
-    const x = nx(i), y = ny(series[i]);
-    if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
-  }
+  ctx.beginPath(); ctx.lineWidth = 2; ctx.strokeStyle = '#22d3ee';
+  for(let i=0;i<series.length;i++){ const x = nx(i), y = ny(series[i]); if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y); }
   ctx.stroke();
-
-  const lastY = ny(series[series.length-1]);
-  const lastX = nx(series.length-1);
-  ctx.lineTo(lastX,h-2); ctx.lineTo(2,h-2); ctx.closePath();
-  ctx.fillStyle = 'rgba(34,211,238,0.10)';
-  ctx.fill();
-
-  ctx.beginPath();
-  ctx.arc(lastX,lastY,2.5,0,Math.PI*2);
-  ctx.fillStyle = '#22d3ee';
-  ctx.fill();
+  const lastY = ny(series[series.length-1]); const lastX = nx(series.length-1);
+  ctx.lineTo(lastX,h-2); ctx.lineTo(2,h-2); ctx.closePath(); ctx.fillStyle = 'rgba(34,211,238,0.10)'; ctx.fill();
+  ctx.beginPath(); ctx.arc(lastX,lastY,2.5,0,Math.PI*2); ctx.fillStyle = '#22d3ee'; ctx.fill();
 }
 
-/* --- Game Predictions (Histórico) con sparklines --- */
+/* --- Game Predictions (Histórico) --- */
 function renderPredictions(homeTeam, awayTeam, homeLast, awayLast){
   const pO05 = Math.round((percentOver(homeLast,0.5)+percentOver(awayLast,0.5))/2);
   const pO25 = Math.round((percentOver(homeLast,2.5)+percentOver(awayLast,2.5))/2);
@@ -456,27 +506,103 @@ function renderPoissonPredictions(homeTeam, awayTeam, homeLast, awayLast){
   `;
 }
 
-/* ===== Rentabilidad O2.5 (últimos 10 por rol) ===== */
-function ftTotalGoals(m){
-  const [hFT, aFT] = parseScore(m["Result FT"]);
-  return (hFT + aFT);
+function valueBox(prob, odd){
+  if(!odd || odd<=1) return "";
+  const implied = Math.round(100/odd);
+  return prob > implied
+    ? `<div class="valueBox value">VALUE (Model ${prob}% vs ${implied}% imp.)</div>`
+    : `<div class="valueBox novalue">NO VALUE (Model ${prob}% vs ${implied}% imp.)</div>`;
 }
-function getOver25Odd(m){
-  // Intentos directos comunes
-  const direct = m.O25 ?? m.o25 ?? m["Over 2.5"] ?? m.over25 ?? m.over_2_5 ?? m["Odd Over 2.5"] ?? m.odd_o25 ?? m.o2_5 ?? m["Odds Over 2.5"] ?? m["over2.5"];
-  let val = Number(direct);
-  if(!isNaN(val) && val>1) return val;
 
-  // Búsqueda flexible por clave
-  for(const k of Object.keys(m)){
-    const lk = k.toLowerCase();
-    if( /(over|o)\s*2[._\s-]*5/.test(lk) && /(odd|cuota|price|odds|pre)/.test(lk) ){
-      const v = Number(m[k]);
-      if(!isNaN(v) && v>1) return v;
-    }
-  }
-  return null;
+/* ===== EXPLICACIÓN EN TEXTO (CONDICIONAL) ===== */
+function matchHistOver(homeLast, awayLast, line){
+  return Math.round((percentOver(homeLast,line)+percentOver(awayLast,line))/2);
 }
+function shortAdvice({market, probHist, probPois, odd, sideLabel, lambdaH, lambdaA, risks=[]}){
+  const hasPois = (typeof probPois === 'number' && !isNaN(probPois));
+  const consensus = Math.round(hasPois ? (probHist*0.5 + probPois*0.5) : probHist);
+  const implied = (odd && odd>1)? Math.round(100/odd) : null;
+
+  const showBecauseConsensus = consensus >= 55;
+  const showBecauseValue     = (implied!==null && consensus > implied);
+  if(!showBecauseConsensus && !showBecauseValue) return '';
+
+  let verdict = consensus>=70 ? `Apostar ${sideLabel} (${consensus}%)`
+              : `Considerar ${sideLabel} (${consensus}%)`;
+
+  const reasons = [];
+  reasons.push(`Histórico ${probHist}%`);
+  if(hasPois) reasons.push(`Poisson ${probPois}% · λ ${lambdaH.toFixed(2)}–${lambdaA.toFixed(2)}`);
+  if(implied!==null){
+    const value = consensus > implied ? 'value' : 'sin value';
+    reasons.push(`cuota ${odd} (imp. ${implied}%) → ${value}`);
+  }
+  const riskTxt = risks.length ? `<br>  Riesgos: ${risks.join(' · ')}.` : '';
+
+  return `• ${market}: ${verdict}.<br>  Razones: ${reasons.join(' · ')}.${riskTxt}`;
+}
+function renderTextExplanation({
+  homeTeam, awayTeam,
+  homeStats, awayStats,
+  homeLast, awayLast,
+  lambdaH, lambdaA,
+  oddOver, oddUnder
+}){
+  const poisOver = L => Math.round(probTotalOver(lambdaH, lambdaA, L)*100);
+  const poisBTTS = Math.round(probBTTS(lambdaH, lambdaA)*100);
+  const lines = [0.5,1.5,2.5,3.5];
+
+  const oversTextArr = lines.map(L=>{
+    const hist = matchHistOver(homeLast, awayLast, L);
+    const pois = poisOver(L);
+    const useOdd = (L===2.5) ? oddOver : null;
+    return shortAdvice({
+      market:`Over ${L.toFixed(1)} (${homeTeam} vs ${awayTeam})`,
+      probHist:hist, probPois:pois, odd:useOdd, sideLabel:`Over ${L.toFixed(1)}`,
+      lambdaH, lambdaA
+    });
+  }).filter(Boolean);
+
+  const bttsHist = Math.round((percentBTTS(homeLast)+percentBTTS(awayLast))/2);
+  const risksBTTS = [];
+  if(homeStats.pNoScore>=30) risksBTTS.push(`local sin anotar ${homeStats.pNoScore}%`);
+  if(awayStats.pNoConcede>=35) risksBTTS.push(`visitante deja en 0 al rival ${awayStats.pNoConcede}%`);
+  const bttsText = shortAdvice({
+    market:`BTTS (${homeTeam} vs ${awayTeam})`,
+    probHist:bttsHist, probPois:poisBTTS, odd:null, sideLabel:'BTTS',
+    lambdaH, lambdaA, risks:risksBTTS
+  });
+  if(bttsText) oversTextArr.push(bttsText);
+
+  if(oddUnder && oddUnder>1){
+    const over25Hist = matchHistOver(homeLast, awayLast, 2.5);
+    const over25Pois = poisOver(2.5);
+    const histU = 100 - over25Hist;
+    const poisU = 100 - over25Pois;
+    const underText = shortAdvice({
+      market:`Under 2.5 (${homeTeam} vs ${awayTeam})`,
+      probHist:histU, probPois:poisU, odd:oddUnder, sideLabel:'Under 2.5',
+      lambdaH, lambdaA
+    });
+    if(underText) oversTextArr.push(underText);
+  }
+
+  if(oversTextArr.length===0) return '';
+  const note = `Nota: se muestran solo mercados con prob. suficiente (≥55%) o con value vs cuota.`;
+  return `
+    <div class="panel">
+      <h3>Explicación breve (texto)</h3>
+      <div style="line-height:1.4">
+        ${oversTextArr.join('<br><br>')}<br><br>
+        <span class="muted">${note}</span>
+      </div>
+    </div>
+  `;
+}
+
+/* ===== Rentabilidad O2.5 (últimos 10 por rol) ===== */
+function ftTotalGoals(m){ return (m.ftHome + m.ftAway); }
+function getOver25Odd(m){ return (m.odd_o25 && m.odd_o25>1)? m.odd_o25 : null; }
 function computeO25PnlForRole(matches, team, role){
   const last = lastMatchesByRole(matches, team, role).slice(-10);
   let considered=0, hits=0, fails=0, sumOdds=0, profit=0;
@@ -494,8 +620,8 @@ function computeO25PnlForRole(matches, team, role){
     }
     details.push({
       idx: idx+1,
-      match: m.Match || '',
-      result_ft: m["Result FT"] || '',
+      match: m.Match || `${m.home} - ${m.away}`,
+      result_ft: `${m.ftHome}-${m.ftAway}`,
       odd_o25: (odd && odd>1)? odd : '',
       hit: (odd && odd>1)? (hit?'✔':'✘') : '—',
       pnl: (odd && odd>1)? stakeProfit : '—'
@@ -576,35 +702,46 @@ function renderProfitabilityPanel(leagueMatches, homeTeam, awayTeam){
 }
 /* ===== FIN Rentabilidad ===== */
 
-/* ---------- Load ---------- */
+/* ---------- Carga de archivo y población de selects ---------- */
+function setStatus(msg, ok=false, err=false){
+  const el = document.getElementById('status');
+  el.textContent = msg || '';
+  el.classList.remove('ok','err');
+  if(ok) el.classList.add('ok');
+  if(err) el.classList.add('err');
+}
 document.getElementById("fileInput").addEventListener("change", (e)=>{
-  const file = e.target.files[0]; if(!file) return;
+  const file = e.target.files[0]; if(!file){ setStatus('No se seleccionó archivo.', false, true); return; }
   const rd = new FileReader();
   rd.onload = ev=>{
-    allMatches = tryParseJSON(ev.target.result).map(m=>({
-      ...m,
-      League: m.League || m.league || "",
-      Match: m.Match || m.match || "",
-      "Result HT": m["Result HT"] || m.result_ht || m.ht || "0-0",
-      "Result FT": m["Result FT"] || m.result_ft || m.ft || "0-0",
-      "Home Corners at FT": m["Home Corners at FT"]||m.home_corners_ft||m.home_corners||0,
-      "Away Corners at FT": m["Away Corners at FT"]||m.away_corners_ft||m.away_corners||0,
-      "Home Corners at HT": m["Home Corners at HT"]||m.home_corners_ht||undefined,
-      "Away Corners at HT": m["Away Corners at HT"]||m.away_corners_ht||undefined
-    }));
-    const leagues = [...new Set(allMatches.map(m=>m.League).filter(Boolean))].sort();
-    document.getElementById("leagueSelect").innerHTML = "<option value=''>--Selecciona--</option>" + leagues.map(l=>`<option>${l}</option>`).join("");
-    updateSelectionPreview();
+    try{
+      rawMatches = tryParseJSON(ev.target.result);
+      if(!Array.isArray(rawMatches) || rawMatches.length===0){ setStatus('No se pudo leer JSON o está vacío.', false, true); return; }
+      allMatches = rawMatches.map(normalizeRow).filter(r => r.home && r.away);
+      if(allMatches.length===0){ setStatus('No se encontraron partidos válidos tras normalizar.', false, true); return; }
+
+      const leagues = [...new Set(allMatches.map(m=>m.league).filter(Boolean))].sort();
+      const leagueSel = document.getElementById("leagueSelect");
+      leagueSel.innerHTML = "<option value=''>--Selecciona--</option>" + leagues.map(l=>`<option>${l}</option>`).join("");
+      setStatus(`Cargados ${allMatches.length} partidos · ${leagues.length} ligas`, true, false);
+      updateSelectionPreview();
+    }catch(err){
+      console.error(err);
+      setStatus('Error al procesar el archivo. Revisa la consola.', false, true);
+    }
   };
   rd.readAsText(file);
 });
 
 document.getElementById("leagueSelect").addEventListener("change", function(){
   const league = this.value;
-  const leagueMatches = allMatches.filter(m=>m.League===league);
-  const teams = [...new Set(leagueMatches.flatMap(m=>m.Match.split(" - ")))].sort();
-  document.getElementById("homeSelect").innerHTML = teams.map(t=>`<option>${t}</option>`).join("");
-  document.getElementById("awaySelect").innerHTML = teams.map(t=>`<option>${t}</option>`).join("");
+  const leagueMatches = allMatches.filter(m=>m.league===league);
+  const teams = [...new Set(leagueMatches.flatMap(m=>[m.home, m.away]))].sort();
+  const homeSel = document.getElementById("homeSelect");
+  const awaySel = document.getElementById("awaySelect");
+  homeSel.innerHTML = teams.map(t=>`<option>${t}</option>`).join("");
+  awaySel.innerHTML = teams.map(t=>`<option>${t}</option>`).join("");
+  setStatus(league ? `Liga: ${league} · ${leagueMatches.length} partidos` : '');
   setTimeout(updateSelectionPreview,0);
 });
 
@@ -614,69 +751,98 @@ document.getElementById("tabs").addEventListener("click", (e)=>{
   t.classList.add("active"); currentPeriod = t.dataset.period;
 });
 
+/* ---------- Botón Analizar ---------- */
 document.getElementById("analyzeBtn").addEventListener("click", ()=>{
-  updateSelectionPreview();
+  try{
+    updateSelectionPreview();
 
-  const league = document.getElementById("leagueSelect").value;
-  const homeTeam = document.getElementById("homeSelect").value;
-  const awayTeam = document.getElementById("awaySelect").value;
-  const oddOver = parseFloat(document.getElementById("oddOver").value);
-  const oddUnder = parseFloat(document.getElementById("oddUnder").value);
-  if(!league || !homeTeam || !awayTeam || homeTeam===awayTeam){ alert("Selecciona liga y equipos (distintos)."); return; }
+    const league = document.getElementById("leagueSelect").value;
+    const homeTeam = document.getElementById("homeSelect").value;
+    const awayTeam = document.getElementById("awaySelect").value;
 
-  const leagueMatches = allMatches.filter(m=>m.League===league);
-  const homeLast = lastMatchesByRole(leagueMatches, homeTeam, "home");
-  const awayLast = lastMatchesByRole(leagueMatches, awayTeam, "away");
-  const homeStats = calcTeamBlock(leagueMatches, homeTeam, "home");
-  const awayStats = calcTeamBlock(leagueMatches, awayTeam, "away");
+    if(!allMatches.length){ setStatus('Primero carga un archivo JSON.', false, true); return; }
+    if(!league){ setStatus('Selecciona liga.', false, true); return; }
+    if(!homeTeam || !awayTeam || homeTeam===awayTeam){ setStatus('Selecciona equipos válidos (distintos).', false, true); return; }
 
-  const summary = renderSummaryTable(homeLast, awayLast);
-  const poissonSummary = renderPoissonSummaryTable(homeTeam, awayTeam, homeLast, awayLast);
-  const preds = renderPredictions(homeTeam, awayTeam, homeLast, awayLast);
-  const poissonPreds = renderPoissonPredictions(homeTeam, awayTeam, homeLast, awayLast);
+    const oddOver = parseFloat(document.getElementById("oddOver").value);
+    const oddUnder = parseFloat(document.getElementById("oddUnder").value);
 
-  const hAvg = teamAverages(homeLast, homeTeam);
-  const aAvg = teamAverages(awayLast, awayTeam);
-  const lambdaH = Math.max(0, parseFloat(hAvg.avgScored)||0);
-  const lambdaA = Math.max(0, parseFloat(aAvg.avgScored)||0);
+    const leagueMatches = allMatches.filter(m=>m.league===league);
+    if(leagueMatches.length===0){ setStatus('La liga seleccionada no tiene partidos válidos.', false, true); return; }
 
-  // Value Check visual (solo referencia rápida)
-  const matchOver25 = Math.round((percentOver(homeLast,2.5)+percentOver(awayLast,2.5))/2);
-  const valueOver = valueBox(matchOver25, oddOver);
-  const valueUnder = valueBox(100-matchOver25, oddUnder);
+    const homeLast = lastMatchesByRole(leagueMatches, homeTeam, "home");
+    const awayLast = lastMatchesByRole(leagueMatches, awayTeam, "away");
+    if(homeLast.length===0 || awayLast.length===0){
+      setStatus('No hay últimos partidos suficientes para uno de los equipos en su rol.', false, true);
+    } else {
+      setStatus(`OK · Analizado ${homeTeam} (home) y ${awayTeam} (away).`, true, false);
+    }
 
-  // Rentabilidad O2.5 panel
-  const pnlPanel = renderProfitabilityPanel(leagueMatches, homeTeam, awayTeam);
+    const homeStats = calcTeamBlock(leagueMatches, homeTeam, "home");
+    const awayStats = calcTeamBlock(leagueMatches, awayTeam, "away");
 
-  const res = document.getElementById("results");
-  res.innerHTML = `
-    <div class="kv"><span class="muted">Periodo activo</span><span class="badge b-soft">${currentPeriod}</span></div>
-    <div class="divider"></div>
-    <div class="grid">
-      ${renderTeamPanel(homeTeam, homeStats)}
-      ${renderTeamPanel(awayTeam, awayStats)}
-    </div>
-    <div class="grid" style="margin-top:12px">
-      ${summary}
-      ${poissonSummary}
-    </div>
-    <div style="margin-top:12px">
-      ${preds}
-      ${poissonPreds}
-    </div>
-    <div class="panel" style="margin-top:12px">
-      <h3>Value Check</h3>
+    const summary = renderSummaryTable(homeLast, awayLast);
+    const poissonSummary = renderPoissonSummaryTable(homeTeam, awayTeam, homeLast, awayLast);
+    const preds = renderPredictions(homeTeam, awayTeam, homeLast, awayLast);
+    const poissonPreds = renderPoissonPredictions(homeTeam, awayTeam, homeLast, awayLast);
+
+    // λ para explicación textual
+    const hAvg = teamAverages(homeLast, homeTeam);
+    const aAvg = teamAverages(awayLast, awayTeam);
+    const lambdaH = Math.max(0, parseFloat(hAvg.avgScored)||0);
+    const lambdaA = Math.max(0, parseFloat(aAvg.avgScored)||0);
+
+    const textExplain = renderTextExplanation({
+      homeTeam, awayTeam,
+      homeStats, awayStats,
+      homeLast, awayLast,
+      lambdaH, lambdaA,
+      oddOver, oddUnder
+    });
+
+    // Value Check con 2.5 (visual)
+    const matchOver25 = Math.round((percentOver(homeLast,2.5)+percentOver(awayLast,2.5))/2);
+    const valueOver = valueBox(matchOver25, oddOver);
+    const valueUnder = valueBox(100-matchOver25, oddUnder);
+
+    // Rentabilidad O2.5 panel
+    const pnlPanel = renderProfitabilityPanel(leagueMatches, homeTeam, awayTeam);
+
+    const res = document.getElementById("results");
+    res.innerHTML = `
+      <div class="kv"><span class="muted">Periodo activo</span><span class="badge b-soft">${currentPeriod}</span></div>
+      <div class="divider"></div>
       <div class="grid">
-        <div class="panel"><h3>Over 2.5</h3>${valueOver||'<div class="muted">Ingresa Odd Over 2.5</div>'}</div>
-        <div class="panel"><h3>Under 2.5</h3>${valueUnder||'<div class="muted">Ingresa Odd Under 2.5</div>'}</div>
+        ${renderTeamPanel(homeTeam, homeStats)}
+        ${renderTeamPanel(awayTeam, awayStats)}
       </div>
-    </div>
-    ${pnlPanel}
-  `;
+      <div class="grid" style="margin-top:12px">
+        ${summary}
+        ${poissonSummary}
+      </div>
+      <div style="margin-top:12px">
+        ${preds}
+        ${poissonPreds}
+      </div>
+      <div class="panel" style="margin-top:12px">
+        <h3>Value Check</h3>
+        <div class="grid">
+          <div class="panel"><h3>Over 2.5</h3>${valueOver||'<div class="muted">Ingresa Odd Over 2.5</div>'}</div>
+          <div class="panel"><h3>Under 2.5</h3>${valueUnder||'<div class="muted">Ingresa Odd Under 2.5</div>'}</div>
+        </div>
+      </div>
+      ${pnlPanel}
+      ${textExplain ? `<div style="margin-top:12px">${textExplain}</div>` : ``}
+    `;
 
-  if (matchOver25 >= 70) res.style.borderColor = "var(--green)";
-  else if (matchOver25 >= 50) res.style.borderColor = "var(--amber)";
-  else res.style.borderColor = "var(--red)";
+    if (matchOver25 >= 70) res.style.borderColor = "var(--green)";
+    else if (matchOver25 >= 50) res.style.borderColor = "var(--amber)";
+    else res.style.borderColor = "var(--red)";
+
+  }catch(err){
+    console.error(err);
+    setStatus('Ocurrió un error al analizar. Revisa la consola.', false, true);
+  }
 });
 
 /* ===== Vista previa de selección (chips) ===== */
