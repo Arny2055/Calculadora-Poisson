@@ -70,6 +70,9 @@
   #status{margin-top:8px;font-size:.92rem}
   #status.ok{color:var(--green)}
   #status.err{color:var(--red)}
+
+  /* opcional: una línea sutil cuando uso "divider" */
+  .divider{height:8px}
 </style>
 </head>
 <body>
@@ -156,7 +159,7 @@ function splitTeams(matchStr){
   return [null,null];
 }
 
-/* === NUEVO: parser de fecha en español === */
+/* === Parser de fecha flexible (ES/ISO) === */
 function parseDateFlexible(v){
   if(v===null || v===undefined || v==='') return null;
 
@@ -214,19 +217,17 @@ function parseDateFlexible(v){
   return null;
 }
 
-/* === NUEVO: cuota O2.5 desde Desired Outcome + Odd === */
+/* === Cuota O2.5 desde Desired Outcome + Odd === */
 function isDesiredO25(x){
   if(!x) return false;
   const s = String(x).toLowerCase().replace(/\s+/g,'');
   return s==='o25' || s==='o2.5' || s==='over2.5' || s==='over25' || s==='over_2_5';
 }
 function extractOddO25(m){
-  // 1) Si Desired Outcome indica O25, tomar Odd
   if(isDesiredO25(m['Desired Outcome']) || isDesiredO25(m['DesiredOutcome'])){
     const od = toNum(m.Odd ?? m.odd ?? m['Odd PreMatch'] ?? m['Odd Prematch'] ?? m['Precio'] ?? m['Price']);
     if(od && od>1) return od;
   }
-  // 2) Resto de heurísticas como fallback
   const direct = m.O25 ?? m.o25 ?? m["Over 2.5"] ?? m["over2.5"] ?? m.over25 ?? m.over_2_5 ??
                  m["Odd Over 2.5"] ?? m.odd_o25 ?? m.o2_5 ?? m["Odds Over 2.5"] ?? m.price_o25 ?? m.pre_o25;
   let val = toNum(direct);
@@ -241,9 +242,7 @@ function extractOddO25(m){
 }
 
 function normalizeRow(m, idx){
-  // Liga
   const league = getVal(m, ['League','league','Liga','liga','Competition','competition','league_name']) || '';
-  // Equipos
   let home = null, away = null;
   const matchStr = getVal(m, ['Match','match','Partido','fixture','evento']);
   if(matchStr){ [home, away] = splitTeams(matchStr); }
@@ -252,7 +251,6 @@ function normalizeRow(m, idx){
   home = (home||'').toString().trim();
   away = (away||'').toString().trim();
 
-  // Marcadores
   const getScore = (keysStr) => {
     const s = getVal(m, keysStr);
     if(typeof s==='string' && /-/.test(s)){ const [a,b]=s.split('-').map(x=>parseInt(x,10)); return [a||0,b||0]; }
@@ -265,17 +263,14 @@ function normalizeRow(m, idx){
   const ftH = (ftH1!==null) ? ftH1 : (toNum(getVal(m, ['home_ft','ft_home','Home FT','home_goals','goals_home'])) ?? 0);
   const ftA = (ftA1!==null) ? ftA1 : (toNum(getVal(m, ['away_ft','ft_away','Away FT','away_goals','goals_away'])) ?? 0);
 
-  // Córners FT
   const hcft = toNum(getVal(m, ['Home Corners at FT','home_corners_ft','home_corners','corners_home_ft']));
   const acft = toNum(getVal(m, ['Away Corners at FT','away_corners_ft','away_corners','corners_away_ft']));
 
-  // Fecha (incluye español)
   const dateRaw = getVal(m, [
     'Date','date','Fecha','fecha','Match Date','match_date','Kickoff','kickoff','Start','start','UtcDate','utcDate','game_date','time','timestamp','ts','datetime'
   ]);
   const ts = parseDateFlexible(dateRaw);
 
-  // Odd O2.5
   const oddO25 = extractOddO25(m);
 
   return {
@@ -291,7 +286,7 @@ function normalizeRow(m, idx){
   };
 }
 
-/* ===== Funciones core (sobre datos normalizados) ===== */
+/* ===== Core (sobre datos normalizados) ===== */
 function periodGoalsN(m){
   if(currentPeriod==="FT") return [m.ftHome, m.ftAway];
   if(currentPeriod==="1H") return [m.htHome, m.htAway];
@@ -320,7 +315,7 @@ function percentBTTS(lastMatches){
 }
 function teamAverages(lastMatches, team){
   let s=0,c=0,t=0,n=lastMatches.length||1;
-  last.forEach(m=>{
+  lastMatches.forEach(m=>{
     const [h,a]=periodGoalsN(m);
     const forTeam = (team===m.home)? h : (team===m.away)? a : null;
     const opp     = (team===m.home)? a : (team===m.away)? h : null;
@@ -331,14 +326,14 @@ function teamAverages(lastMatches, team){
 }
 function avgCornersFT(lastMatches){
   let sum=0, n=0;
-  last.forEach(m=>{
+  lastMatches.forEach(m=>{
     const c = Number(m.home_corners_ft||0) + Number(m.away_corners_ft||0);
     if(!isNaN(c)){ sum += c; n++; }
   });
   return n? (sum/n) : 0;
 }
 
-/* ---------- NUEVO: helpers de summary 3/5/10 ---------- */
+/* ---------- Helpers de summary 3/5/10 ---------- */
 function buildSummaryStats(arr){
   return {
     o05: percentOver(arr,0.5),
@@ -401,7 +396,7 @@ function renderTeamPanel(title, stats){
   </div>`;
 }
 
-/* (conservamos tu summary original si lo quieres usar) */
+/* Summary original (opcional) */
 function renderSummaryTable(homeLast, awayLast){
   const h = { o05: percentOver(homeLast,0.5), o15: percentOver(homeLast,1.5), o25: percentOver(homeLast,2.5), o35: percentOver(homeLast,3.5), btts: percentBTTS(homeLast) };
   const a = { o05: percentOver(awayLast,0.5), o15: percentOver(awayLast,1.5), o25: percentOver(awayLast,2.5), o35: percentOver(awayLast,3.5), btts: percentBTTS(awayLast) };
@@ -427,7 +422,7 @@ function renderSummaryTable(homeLast, awayLast){
     </div>`;
 }
 
-/* ---------- NUEVO: summary por ventana N (3/5/10) ---------- */
+/* ---------- Summary por ventana N (3/5/10) ---------- */
 function renderSummaryTableN(homeLast10, awayLast10, n){
   const hArr = homeLast10.slice(-n);
   const aArr = awayLast10.slice(-n);
@@ -631,7 +626,7 @@ function valueBox(prob, odd){
     : `<div class="valueBox novalue">NO VALUE (Model ${prob}% vs ${implied}% imp.)</div>`;
 }
 
-/* ===== EXPLICACIÓN EN TEXTO (CONDICIONAL) ===== */
+/* ===== Explicación breve (texto) ===== */
 function matchHistOver(homeLast, awayLast, line){
   return Math.round((percentOver(homeLast,line)+percentOver(awayLast,line))/2);
 }
@@ -765,7 +760,6 @@ function renderProfitabilityPanel(leagueMatches, homeTeam, awayTeam){
       <td style="${r.roi>=0?'color:#10b981':'color:#ef4444'}">${r.roi.toFixed(1)}%</td>
     </tr>`;
 
-  // CSV (detalle + resumen)
   const csvRows = [
     ['Tipo','Equipo','Rol','N°','Match','Result FT','Odd O2.5','Hit','PnL'],
     ...homeRes.details.map(d=>['Detalle', homeRes.team, 'Home', d.idx, d.match, d.result_ft, d.odd_o25, d.hit, d.pnl]),
