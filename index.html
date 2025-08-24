@@ -343,32 +343,47 @@ function renderTeamPanel(title, stats){
     <div class="kv"><span>Games without Conceding</span><span><span class="badge ${cls(stats.pNoConcede)}">${stats.pNoConcede}%</span></span></div>
   </div>`;
 }
-function renderSummaryTableN(homeLast10, awayLast10, n, leagueMatches){
-  const H=buildSummaryStats(homeLast10.slice(-n));
-  const A=buildSummaryStats(awayLast10.slice(-n));
-  const L=computeLeagueBaseline(leagueMatches,n);
-  const avg=(x,y)=>Math.round((x+y)/2);
-  const row=(label,key)=>`
-    <tr>
-      <td>${label}</td>
-      <td>${badge(H[key])}${ppDelta(H[key],L.home[key])}</td>
-      <td>${badge(A[key])}${ppDelta(A[key],L.away[key])}</td>
-      <td><span class="badge ${cls(avg(H[key],A[key]))}">${avg(H[key],A[key])}%</span>${ppDelta(avg(H[key],A[key]),L.match[key])}</td>
-    </tr>`;
+
+/* >>> FALTABA ESTA FUNCIÓN <<< */
+function renderPoissonSummaryTable(homeTeam, awayTeam, homeLast, awayLast){
+  const hAvg = teamAverages(homeLast, homeTeam);
+  const aAvg = teamAverages(awayLast, awayTeam);
+  const lambdaH = Math.max(0, parseFloat(hAvg.avgScored)||0);
+  const lambdaA = Math.max(0, parseFloat(aAvg.avgScored)||0);
+
+  const lines = [0.5,1.5,2.5,3.5];
+  const row = (L)=>{
+    const ph = Math.round(probTeamOver(lambdaH, L)*100);
+    const pa = Math.round(probTeamOver(lambdaA, L)*100);
+    const pm = Math.round(probTotalOver(lambdaH, lambdaA, L)*100);
+    return `
+      <tr>
+        <td>Over ${L.toFixed(1)}</td>
+        <td>${badge(ph)}</td>
+        <td>${badge(pa)}</td>
+        <td><span class="badge ${cls(pm)}">${pm}%</span></td>
+      </tr>`;
+  };
+  const bttsHome = Math.round((1 - Math.exp(-lambdaH))*100);
+  const bttsAway = Math.round((1 - Math.exp(-lambdaA))*100);
+  const bttsMatch = Math.round(probBTTS(lambdaH, lambdaA)*100);
+
   return `
     <div class="panel">
-      <h3>Summary (Histórico · últimos ${n})</h3>
+      <h3>Summary (Poisson · ${currentPeriod})</h3>
+      <div class="kv"><span class="muted">λ Home</span><span class="mono">${lambdaH.toFixed(2)}</span></div>
+      <div class="kv"><span class="muted">λ Away</span><span class="mono">${lambdaA.toFixed(2)}</span></div>
+      <div class="divider"></div>
       <table>
         <tr><th></th><th>Home</th><th>Away</th><th>Match</th></tr>
-        ${row('Over 0.5','o05')}
-        ${row('Over 1.5','o15')}
-        ${row('Over 2.5','o25')}
-        ${row('Over 3.5','o35')}
-        ${row('BTTS','btts')}
+        ${lines.map(row).join("")}
+        <tr>
+          <td>BTTS</td>
+          <td>${badge(bttsHome)}</td>
+          <td>${badge(bttsAway)}</td>
+          <td><span class="badge ${cls(bttsMatch)}">${bttsMatch}%</span></td>
+        </tr>
       </table>
-      <div class="muted" style="margin-top:6px;font-size:.9rem">
-        Baseline: promedio por rol en la liga, concatenando los últimos ${n} por equipo (home vs home; away vs away).
-      </div>
     </div>`;
 }
 
@@ -598,8 +613,7 @@ function teamWindowStatsByRole(leagueMatches, team, role, n){
   return buildSummaryStats(arr);
 }
 function colorForPercent(p){
-  // p: 0..100 → HSL hue 0 (rojo) a 140 (verde)
-  const hue = Math.round((p/100)*140);
+  const hue = Math.round((p/100)*140); /* rojo→verde */
   return `hsl(${hue} 70% 35%)`;
 }
 function renderHeatmap(leagueMatches){
@@ -648,21 +662,16 @@ function renderHeatmap(leagueMatches){
     const metric = container.querySelector('#hmMetric').value;
     const sortBy = container.querySelector('#hmSort').value;
 
-    // baseline por rol/ventana (precalcular para todas las métricas)
-    const baseAll = computeLeagueBaseline(leagueMatches, n)[role]; // {o05,o15,o25,o35,btts}
+    const baseAll = computeLeagueBaseline(leagueMatches, n)[role];
 
-    // calcular stats por equipo
     let rows = teams.map(t=>{
       const s = teamWindowStatsByRole(leagueMatches, t, role, n);
       const val = s[metric] ?? 0;
       return { team:t, val, all:s };
     });
 
-    if(sortBy==='metric'){
-      rows.sort((a,b)=> b.val - a.val || a.team.localeCompare(b.team));
-    }else{
-      rows.sort((a,b)=> a.team.localeCompare(b.team));
-    }
+    if(sortBy==='metric'){ rows.sort((a,b)=> b.val - a.val || a.team.localeCompare(b.team)); }
+    else{ rows.sort((a,b)=> a.team.localeCompare(b.team)); }
 
     const cols = [
       {key:'o05', label:'Over 0.5'},
@@ -804,7 +813,6 @@ document.getElementById("analyzeBtn").addEventListener("click",()=>{
 
     const pnlPanel=renderProfitabilityPanel(leagueMatches,homeTeam,awayTeam);
 
-    /* HEATMAP de la liga */
     const heatmapHTML = renderHeatmap(leagueMatches);
 
     const res=document.getElementById("results");
