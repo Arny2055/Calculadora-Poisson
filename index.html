@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Estadísticas Over/Under (limpio + comparación liga)</title>
+<title>Estadísticas Over/Under (limpio + comparación liga + tendencias)</title>
 <style>
   :root{
     --bg:#0b1220; --card:#101827; --panel:#111b2b; --text:#e6eaf2; --muted:#9aa6b2;
@@ -66,7 +66,7 @@
   .delta.neu{color:#93a3b5}
   .arrow{font-weight:900;margin-right:4px}
 
-  /* Pills */
+  /* Pills + Sparklines */
   .pills{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
   @media(min-width:980px){.pills{grid-template-columns:repeat(3,1fr)}}
   .pill{
@@ -77,6 +77,12 @@
   .pill .big{font-weight:900;font-size:1.05rem}
   .pill .caption{color:#cbd5e1;font-weight:700}
   .pill.ok{outline:2px solid var(--green)} .pill.warn{outline:2px solid var(--amber)} .pill.bad{outline:2px solid var(--red)}
+  .spark{
+    width:100%;
+    height:30px;
+    display:block;
+    margin-top:6px;
+  }
 
   /* Value */
   .valueBox{margin-top:10px;padding:12px;border-radius:10px;text-align:center;font-weight:900}
@@ -431,7 +437,94 @@ function avgCornersFT(lastMatches){
   return n? (sum/n) : 0;
 }
 
-/* ===== Predicciones (histórico, compacto) ===== */
+/* ===== Tendencia (sparklines) ===== */
+function buildSeries(homeLast, awayLast){
+  const len = Math.min(homeLast.length, awayLast.length, 10);
+  const H = homeLast.slice(-len);
+  const A = awayLast.slice(-len);
+
+  const sOver = line => {
+    const out=[];
+    for(let i=0;i<len;i++){
+      const [h1,a1]=periodGoalsN(H[i]);
+      const [h2,a2]=periodGoalsN(A[i]);
+      const v1=(h1+a1>line)?1:0;
+      const v2=(h2+a2>line)?1:0;
+      out.push(((v1+v2)/2)*100);
+    }
+    return out;
+  };
+  const sBTTS = ()=>{
+    const out=[];
+    for(let i=0;i<len;i++){
+      const [h1,a1]=periodGoalsN(H[i]);
+      const [h2,a2]=periodGoalsN(A[i]);
+      const v1=(h1>0&&a1>0)?1:0;
+      const v2=(h2>0&&a2>0)?1:0;
+      out.push(((v1+v2)/2)*100);
+    }
+    return out;
+  };
+  const sGoals = ()=>{
+    const out=[];
+    for(let i=0;i<len;i++){
+      const [h1,a1]=periodGoalsN(H[i]);
+      const [h2,a2]=periodGoalsN(A[i]);
+      out.push(((h1+h2)+(a1+a2))/2);
+    }
+    return out;
+  };
+  const sCorners = ()=>{
+    const out=[];
+    for(let i=0;i<len;i++){
+      const c1=Number(H[i].home_corners_ft||0)+Number(H[i].away_corners_ft||0);
+      const c2=Number(A[i].home_corners_ft||0)+Number(A[i].away_corners_ft||0);
+      out.push((c1+c2)/2);
+    }
+    return out;
+  };
+  return { o05:sOver(0.5), o15:sOver(1.5), o25:sOver(2.5), btts:sBTTS(), goals:sGoals(), corners:sCorners() };
+}
+function drawSpark(canvas, series){
+  if(!canvas || !series || !series.length) return;
+  const dpr=window.devicePixelRatio||1;
+  const w=canvas.clientWidth, h=canvas.clientHeight;
+  canvas.width=Math.round(w*dpr); canvas.height=Math.round(h*dpr);
+  const ctx=canvas.getContext('2d'); ctx.scale(dpr,dpr);
+  ctx.clearRect(0,0,w,h);
+
+  let min=Math.min(...series), max=Math.max(...series);
+  if(min===max){ min=min-1; max=max+1; }
+
+  const nx=i=> (i/(series.length-1))*(w-6)+3;
+  const ny=v=> h-3 - ((v-min)/(max-min))*(h-8);
+
+  // Estilo marcado para que se note la tendencia
+  ctx.lineWidth=2.5;
+  ctx.strokeStyle='#22d3ee';
+  ctx.fillStyle='rgba(34,211,238,0.14)';
+
+  // Trazo principal
+  ctx.beginPath();
+  for(let i=0;i<series.length;i++){
+    const x=nx(i), y=ny(series[i]);
+    if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+  }
+  ctx.stroke();
+
+  // Relleno
+  const lastX=nx(series.length-1), lastY=ny(series[series.length-1]);
+  ctx.lineTo(lastX,h-3); ctx.lineTo(nx(0),h-3); ctx.closePath();
+  ctx.fill();
+
+  // Punto final
+  ctx.beginPath();
+  ctx.arc(lastX,lastY,3.2,0,Math.PI*2);
+  ctx.fillStyle='#22d3ee';
+  ctx.fill();
+}
+
+/* ===== Predicciones (histórico, con sparklines) ===== */
 function renderPredictions(homeTeam, awayTeam, homeLast, awayLast){
   const percentOverArr=(arr,line)=>pct(arr.filter(m=>{const[g1,g2]=periodGoalsN(m);return g1+g2>line;}).length,arr.length);
   const pO05=Math.round((percentOverArr(homeLast,0.5)+percentOverArr(awayLast,0.5))/2);
@@ -445,20 +538,39 @@ function renderPredictions(homeTeam, awayTeam, homeLast, awayLast){
   const expGoals=Math.round((parseFloat(hAvg.avgScored)+parseFloat(aAvg.avgScored)));
   const avgCorners=Math.round((avgCornersFT(homeLast)+avgCornersFT(awayLast))/2);
 
+  // series para tendencia
+  const S = buildSeries(homeLast, awayLast);
+
   const pillClass=p=>p>=70?'ok':(p>=50?'warn':'bad');
-  const pill=(big,caption,klass='')=>`<div class="pill ${klass}"><div class="big">${big}</div><div class="caption">${caption}</div></div>`;
-  return `
+  const pill = (key, val, caption, klass='') => `
+    <div class="pill ${klass}">
+      <div class="big">${val}</div>
+      <div class="caption">${caption}</div>
+      <canvas class="spark" data-key="${key}"></canvas>
+    </div>`;
+
+  const html = `
     <div class="panel">
       <h3>Game Predictions</h3>
       <div class="pills">
-        ${pill(`${pO05}%`,'Over 0.5FT',pillClass(pO05))}
-        ${pill(`${pO15}%`,'Over 1.5FT',pillClass(pO15))}
-        ${pill(`${pO25}%`,'Over 2.5FT',pillClass(pO25))}
-        ${pill(`${pBTTS}%`,'BTTS',pillClass(pBTTS))}
-        ${pill(`${expGoals}`,'Goals')}
-        ${pill(`${avgCorners}`,'Corners')}
+        ${pill('o05', `${pO05}%`, 'Over 0.5FT', pillClass(pO05))}
+        ${pill('o15', `${pO15}%`, 'Over 1.5FT', pillClass(pO15))}
+        ${pill('o25', `${pO25}%`, 'Over 2.5FT', pillClass(pO25))}
+        ${pill('btts', `${pBTTS}%`, 'BTTS', pillClass(pBTTS))}
+        ${pill('goals', `${expGoals}`, 'Goals')}
+        ${pill('corners', `${avgCorners}`, 'Corners')}
       </div>
     </div>`;
+
+  // Dibujar las líneas tras insertar el HTML
+  setTimeout(()=>{
+    document.querySelectorAll('.spark').forEach(cv=>{
+      const key=cv.dataset.key;
+      drawSpark(cv, S[key]);
+    });
+  },0);
+
+  return html;
 }
 
 /* ===== Poisson (compacto) ===== */
