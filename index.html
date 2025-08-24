@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Estadísticas Over/Under (limpio + comparación liga + tendencias + AI pick)</title>
+<title>Estadísticas Over/Under (ChatGPt)</title>
 <style>
   :root{
     --bg:#0b1220; --card:#101827; --panel:#111b2b; --text:#e6eaf2; --muted:#9aa6b2;
@@ -84,7 +84,7 @@
   .valueBox{margin-top:10px;padding:12px;border-radius:10px;text-align:center;font-weight:900}
   .value{background:var(--green);color:#fff} .novalue{background:var(--red);color:#fff}
 
-  /* AI Pick Panel */
+  /* ChatGPt Pick Panel */
   .ai-wrap{display:flex;flex-direction:column;gap:10px}
   .ai-cta{display:grid;grid-template-columns:1fr;gap:10px}
   @media(min-width:640px){.ai-cta{grid-template-columns:1fr 1fr}}
@@ -101,6 +101,9 @@
     display:inline-flex;align-items:center;gap:8px;padding:6px 10px;border-radius:999px;
     background:#0f1c34;border:1px solid var(--line);font-weight:800
   }
+  .avatar{
+    width:20px;height:20px;border-radius:50%;background:linear-gradient(135deg,#3b82f6,#22d3ee);display:inline-block
+  }
   .pulse{animation:pulse 1.6s ease-in-out infinite}
   @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(59,130,246,.35)}70%{box-shadow:0 0 0 10px rgba(59,130,246,0)}100%{box-shadow:0 0 0 0 rgba(59,130,246,0)}}
   .copy-btn{margin-top:8px;width:auto;padding:8px 12px}
@@ -108,7 +111,7 @@
 </style>
 </head>
 <body>
-  <h1>Estadísticas Over/Under</h1>
+  <h1>Estadísticas Over/Under <span style="opacity:.8;font-weight:700">· by ChatGPt</span></h1>
 
   <div class="card">
     <input type="file" id="fileInput" accept=".json,.txt"><br>
@@ -146,7 +149,7 @@
 
     <div class="row-actions" style="margin-top:10px">
       <button id="analyzeBtn">Analizar</button>
-      <button id="aiBtn" title="Generar pick basado en modelo">💡 Pronóstico del asistente</button>
+      <button id="aiBtn" title="Generar pick con ChatGPt">🤖 ChatGPt: pronóstico</button>
     </div>
 
     <div id="status" class="muted"></div>
@@ -755,7 +758,7 @@ function updateSelectionPreview(){
   pv.style.display=(league&&home&&away&&home!==away)?"flex":"none";
 }
 
-/* ===== Lógica del pronóstico del asistente ===== */
+/* ===== Lógica del pronóstico de ChatGPt ===== */
 function aiConsensusPick({homeTeam,awayTeam,homeLast,awayLast,lambdaH,lambdaA,oddOver,oddUnder}){
   const histOver = L => Math.round((percentOver(homeLast,L)+percentOver(awayLast,L))/2);
   const poisCDFlocal=(k,l)=>{let p0=Math.exp(-l),sum=p0,p=p0;for(let i=1;i<=k;i++){p=p*(l/i);sum+=p}return sum};
@@ -777,7 +780,6 @@ function aiConsensusPick({homeTeam,awayTeam,homeLast,awayLast,lambdaH,lambdaA,od
     return {...m,hist,pois,consensus,implied,edge};
   });
 
-  // También evaluar Under 2.5 si hay cuota
   if(oddUnder && oddUnder>1){
     const o25 = scored.find(x=>x.key==='O2.5');
     const consensusU = 100 - o25.consensus;
@@ -785,22 +787,20 @@ function aiConsensusPick({homeTeam,awayTeam,homeLast,awayLast,lambdaH,lambdaA,od
     scored.push({key:'U2.5',label:'Under 2.5',line:2.5,odd:oddUnder,hist:100-o25.hist,pois:100-o25.pois,consensus:consensusU,implied:impliedU,edge:consensusU - impliedU});
   }
 
-  // Criterio: primero mayor edge > 3pp; si nadie cumple, mayor consenso >=60; sino el top consenso
   const byEdge = scored.filter(x=>x.edge!==null).sort((a,b)=>b.edge-a.edge);
   let best = byEdge.length && byEdge[0].edge>3 ? byEdge[0] : null;
   if(!best){
     const byConsensus = [...scored].sort((a,b)=>b.consensus-a.consensus);
     best = byConsensus[0];
-    if(best.consensus<60 && byEdge.length){ best = byEdge[0]; } // fallback por value aunque consenso sea menor
+    if(best.consensus<60 && byEdge.length){ best = byEdge[0]; }
   }
 
-  // Leans (siguientes 2)
   const sortedAll = [...scored].sort((a,b)=>{
     const ea=(a.edge??-999), eb=(b.edge??-999);
     if(ea!==eb) return eb-ea;
     return b.consensus - a.consensus;
   });
-  const leans = sortedAll.filter(x=>x.key!==best.key).slice(0,2);
+  const leans = sortedAll.filter(x=>x.key!==best.key).slice(0,2); // (por si quieres mostrarlos después)
 
   const conf = best.consensus>=70 ? 'Alta' : best.consensus>=60 ? 'Media' : 'Baja';
   const title = `${homeTeam} vs ${awayTeam}`;
@@ -810,7 +810,7 @@ function aiConsensusPick({homeTeam,awayTeam,homeLast,awayLast,lambdaH,lambdaA,od
 
   return {
     title, pick:`${linestr}`, confidence:conf, detail, why,
-    copyText:`${title}\nPick: ${linestr}\nConfianza: ${conf}\n${detail}\nRazones: ${why}`
+    copyText:`${title}\nChatGPt recomienda: ${linestr}\nConfianza: ${conf}\n${detail}\nRazones: ${why}`
   };
 }
 function renderAiPanel(ai){
@@ -818,7 +818,7 @@ function renderAiPanel(ai){
     <div class="panel ai-wrap">
       <div class="ai-cta">
         <div class="ticket">
-          <h4>🎯 Pronóstico del asistente</h4>
+          <h4><span class="avatar"></span> ChatGPt recomienda</h4>
           <div class="pill-badge pulse">Pick: <span style="font-weight:900">${ai.pick}</span></div>
           <div style="margin-top:8px"><strong>Confianza:</strong> ${ai.confidence}</div>
           <div class="muted" style="margin-top:6px">${ai.detail}</div>
@@ -830,7 +830,7 @@ function renderAiPanel(ai){
 }
 
 /* ===== Analizar (flujo principal) ===== */
-let lastContext = null; // cache del último análisis para el botón AI
+let lastContext = null;
 
 document.getElementById("fileInput").addEventListener("change",(e)=>{
   const file=e.target.files[0]; if(!file){ setStatus('No se seleccionó archivo.',false,true); return; }
@@ -863,7 +863,8 @@ document.getElementById("leagueSelect").addEventListener("change",function(){
 document.getElementById("tabs").addEventListener("click",(e)=>{
   const t=e.target.closest(".tab"); if(!t) return;
   document.querySelectorAll(".tab").forEach(x=>x.classList.remove("active"));
-  t.classList.add("active"); currentPeriod=t.dataset.period;
+  t.classList.addClass? t.classList.add('active') : t.className += ' active';
+  currentPeriod=t.dataset.period;
 });
 
 document.getElementById("analyzeBtn").addEventListener("click",()=>{
@@ -953,7 +954,7 @@ document.getElementById("analyzeBtn").addEventListener("click",()=>{
     else if(matchOver25>=50) res.style.borderColor="var(--amber)";
     else res.style.borderColor="var(--red)";
 
-    // Guardar contexto para el botón AI
+    // Guardar contexto para ChatGPt
     lastContext = { league, homeTeam, awayTeam, homeLast, awayLast, lambdaH, lambdaA, oddOver, oddUnder };
 
   }catch(err){
@@ -962,7 +963,7 @@ document.getElementById("analyzeBtn").addEventListener("click",()=>{
   }
 });
 
-/* Botón: Pronóstico del asistente */
+/* Botón: ChatGPt pronóstico */
 document.getElementById("aiBtn").addEventListener("click",()=>{
   try{
     if(!lastContext){ setStatus('Primero presiona “Analizar” para cargar el contexto del partido.',false,true); return; }
@@ -982,7 +983,7 @@ document.getElementById("aiBtn").addEventListener("click",()=>{
         catch(e){ alert('No se pudo copiar :('); }
       };
     }
-    setStatus('Pronóstico generado.',true,false);
+    setStatus('Pronóstico de ChatGPt generado.',true,false);
   }catch(err){
     console.error(err);
     setStatus('No se pudo generar el pronóstico.',false,true);
