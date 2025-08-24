@@ -73,13 +73,21 @@
   #status.ok{color:var(--green)} #status.err{color:var(--red)}
   .divider{height:8px}
 
-  /* Heatmap */
-  .heat-controls{display:flex;flex-wrap:wrap;gap:8px;margin:6px 0 0}
-  .heat-controls select{width:auto;padding:8px 10px}
-  .heatmap table{table-layout:fixed}
-  .heatmap th:first-child, .heatmap td:first-child{position:sticky;left:0;background:#0f1726;z-index:1}
-  .cell{border-radius:6px;padding:6px 8px;display:inline-block;min-width:64px;font-weight:700}
-  .cell small{display:block;font-weight:600;color:#cbd5e1}
+  /* ====== HEATMAP ====== */
+  .hm-wrap{display:grid;gap:12px}
+  .hm{border:1px solid var(--line);border-radius:14px;overflow:hidden}
+  .hm .hdr{display:grid;grid-template-columns:180px repeat(10,1fr);background:#0f1726;border-bottom:1px solid var(--line)}
+  .hm .hdr div{padding:8px 6px;text-align:center;font-weight:700;color:#cbd5e1}
+  .hm .row{display:grid;grid-template-columns:180px repeat(10,1fr)}
+  .hm .row .lbl{padding:8px 10px;color:#cbd5e1;border-right:1px solid var(--line);background:#0f1726}
+  .hm .cell{height:28px;border-left:1px solid var(--line);border-bottom:1px solid var(--line);position:relative}
+  .hm .cell.good{background:rgba(16,185,129,0.9)}
+  .hm .cell.bad{background:rgba(239,68,68,0.85)}
+  .hm .cell.na{background:#0b1324}
+  .hm .cell.goals{background:linear-gradient(180deg, rgba(59,130,246,0.9), rgba(59,130,246,0.25))}
+  .hm .cell::after{content:attr(data-tip);position:absolute;left:50%;transform:translateX(-50%);bottom:2px;font-size:.7rem;color:rgba(255,255,255,0.85)}
+  .legend{display:flex;gap:10px;flex-wrap:wrap;margin-top:8px;color:#cbd5e1;font-size:.9rem}
+  .dot{width:12px;height:12px;border-radius:3px;display:inline-block;margin-right:6px;vertical-align:middle}
 </style>
 </head>
 <body>
@@ -173,66 +181,103 @@ function splitTeams(matchStr){
   return [null,null];
 }
 
-/* Fecha flexible */
+/* Fecha flexible (prioriza formatos ES/DDD antes que Date.parse para evitar ambigüedades) */
 function parseDateFlexible(v){
   if(v===null || v===undefined || v==='') return null;
-  if(typeof v === 'number'){ if(v>1e12) return v; if(v>1e9) return v*1000; return null; }
+  if(typeof v === 'number'){
+    if(v > 1e12) return v; if(v > 1e9) return v*1000; return null;
+  }
   if(typeof v !== 'string') return null;
-  let s=v.trim();
-  s=s.replace(/^(lun|mar|mi[eé]|jue|vie|s[aá]b|dom)\.?,?\s*/i,'');
-  let m=s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?$/);
-  if(m){ let dd=+m[1],mm=+m[2]-1,yy=+m[3]; if(yy<100) yy+=2000; let hh=+(m[4]||0),mi=+(m[5]||0),ss=+(m[6]||0); return new Date(yy,mm,dd,hh,mi,ss).getTime(); }
-  const months={ene:'01',feb:'02',mar:'03',abr:'04',may:'05',jun:'06',jul:'07',ago:'08',sep:'09',sept:'09',set:'09',oct:'10',nov:'11',dic:'12'};
-  m=s.match(/^(\d{1,2})\s+([a-záéíóúñ\.]+)\s+(\d{2,4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/i);
-  if(m){ let dd=+m[1]; let mon=(m[2]||'').toLowerCase().replace(/\./g,'').normalize('NFD').replace(/[\u0300-\u036f]/g,''); let yy=+m[3]; if(yy<100) yy+=2000; let hh=+(m[4]||0),mi=+(m[5]||0),ss=+(m[6]||0); const mm=months[mon]; if(mm){ return new Date(`${yy}-${mm}-${String(dd).padStart(2,'0')}T${String(hh).padStart(2,'0')}:${String(mi).padStart(2,'0')}:${String(ss).padStart(2,'0')}`).getTime(); } }
-  m=s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?$/);
-  if(m){ let mm=+m[1]-1,dd=+m[2],yy=+m[3]; if(yy<100) yy+=2000; let hh=+(m[4]||0),mi=+(m[5]||0),ss=+(m[6]||0); return new Date(yy,mm,dd,hh,mi,ss).getTime(); }
-  const dISO=Date.parse(s); return isNaN(dISO)?null:dISO;
+  let s = v.trim();
+
+  // quitar prefijos de días ES
+  s = s.replace(/^(lun|mar|mi[eé]|jue|vie|s[aá]b|dom)\.?,?\s*/i, '');
+
+  // dd/mm/yyyy ó dd-mm-yyyy (opcional hora)
+  let m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?$/);
+  if(m){
+    let dd=+m[1], mm=+m[2]-1, yy=+m[3]; if(yy<100) yy+=2000;
+    let hh=+(m[4]||0), mi=+(m[5]||0), ss=+(m[6]||0);
+    return new Date(yy,mm,dd,hh,mi,ss).getTime();
+  }
+  // dd mes yyyy
+  const months = { ene:'01',feb:'02',mar:'03',abr:'04',may:'05',jun:'06',jul:'07',ago:'08',sep:'09',sept:'09',set:'09',oct:'10',nov:'11',dic:'12' };
+  m = s.match(/^(\d{1,2})\s+([a-záéíóúñ\.]+)\s+(\d{2,4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/i);
+  if(m){
+    let dd=+m[1];
+    let mon=(m[2]||'').toLowerCase().replace(/\./g,'').normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+    let yy=+m[3]; if(yy<100) yy+=2000;
+    let hh=+(m[4]||0), mi=+(m[5]||0), ss=+(m[6]||0);
+    const mm=months[mon]; if(mm){ return new Date(`${yy}-${mm}-${String(dd).padStart(2,'0')}T${String(hh).padStart(2,'0')}:${String(mi).padStart(2,'0')}:${String(ss).padStart(2,'0')}`).getTime(); }
+  }
+  // mm/dd/yyyy (opcional hora)
+  m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?$/);
+  if(m){
+    let mm=+m[1]-1, dd=+m[2], yy=+m[3]; if(yy<100) yy+=2000;
+    let hh=+(m[4]||0), mi=+(m[5]||0), ss=+(m[6]||0);
+    return new Date(yy,mm,dd,hh,mi,ss).getTime();
+  }
+  // fallback
+  const dISO = Date.parse(s);
+  return isNaN(dISO) ? null : dISO;
 }
 
-/* Odd O2.5 por heurística */
-function isDesiredO25(x){ if(!x) return false; const s=String(x).toLowerCase().replace(/\s+/g,''); return s==='o25'||s==='o2.5'||s==='over2.5'||s==='over25'||s==='over_2_5'; }
+function isDesiredO25(x){
+  if(!x) return false;
+  const s = String(x).toLowerCase().replace(/\s+/g,'');
+  return s==='o25'||s==='o2.5'||s==='over2.5'||s==='over25'||s==='over_2_5';
+}
 function extractOddO25(m){
-  if(isDesiredO25(m['Desired Outcome'])||isDesiredO25(m['DesiredOutcome'])){
-    const od=toNum(m.Odd ?? m.odd ?? m['Odd PreMatch'] ?? m['Odd Prematch'] ?? m['Precio'] ?? m['Price']);
+  if(isDesiredO25(m['Desired Outcome']) || isDesiredO25(m['DesiredOutcome'])){
+    const od = toNum(m.Odd ?? m.odd ?? m['Odd PreMatch'] ?? m['Odd Prematch'] ?? m['Precio'] ?? m['Price']);
     if(od && od>1) return od;
   }
-  const direct=m.O25 ?? m.o25 ?? m["Over 2.5"] ?? m["over2.5"] ?? m.over25 ?? m.over_2_5 ?? m["Odd Over 2.5"] ?? m.odd_o25 ?? m.o2_5 ?? m["Odds Over 2.5"] ?? m.price_o25 ?? m.pre_o25;
-  let val=toNum(direct); if(val && val>1) return val;
-  for(const k of Object.keys(m)){ const lk=k.toLowerCase(); if(/(over|o)\s*2[._\s-]*5/.test(lk) && /(odd|cuota|price|odds|pre)/.test(lk)){ const v=toNum(m[k]); if(v && v>1) return v; } }
+  const direct = m.O25 ?? m.o25 ?? m["Over 2.5"] ?? m["over2.5"] ?? m.over25 ?? m.over_2_5 ??
+                 m["Odd Over 2.5"] ?? m.odd_o25 ?? m.o2_5 ?? m["Odds Over 2.5"] ?? m.price_o25 ?? m.pre_o25;
+  let val = toNum(direct); if(val && val>1) return val;
+  for(const k of Object.keys(m)){
+    const lk = k.toLowerCase();
+    if(/(over|o)\s*2[._\s-]*5/.test(lk) && /(odd|cuota|price|odds|pre)/.test(lk)){
+      const v = toNum(m[k]); if(v && v>1) return v;
+    }
+  }
   return null;
 }
 
 function normalizeRow(m, idx){
-  const league=getVal(m,['League','league','Liga','liga','Competition','competition','league_name'])||'';
-  let home=null,away=null;
-  const matchStr=getVal(m,['Match','match','Partido','fixture','evento']);
-  if(matchStr){ [home,away]=splitTeams(matchStr); }
-  if(!home) home=getVal(m,['Home','home','Home Team','home_team','team_home','Local','local']);
-  if(!away) away=getVal(m,['Away','away','Away Team','away_team','team_away','Visitante','visitante']);
-  home=(home||'').toString().trim(); away=(away||'').toString().trim();
+  const league = getVal(m, ['League','league','Liga','liga','Competition','competition','league_name']) || '';
+  let home=null, away=null;
+  const matchStr = getVal(m, ['Match','match','Partido','fixture','evento']);
+  if(matchStr){ [home,away] = splitTeams(matchStr); }
+  if(!home) home = getVal(m, ['Home','home','Home Team','home_team','team_home','Local','local']);
+  if(!away) away = getVal(m, ['Away','away','Away Team','away_team','team_away','Visitante','visitante']);
+  home = (home||'').toString().trim(); away = (away||'').toString().trim();
 
-  const getScore=keys=>{ const s=getVal(m,keys); if(typeof s==='string' && /-/.test(s)){ const [a,b]=s.split('-').map(x=>parseInt(x,10)); return [a||0,b||0]; } return [null,null]; };
-  const [htH1,htA1]=getScore(['Result HT','result_ht','HT','ht','Half Time','halftime']);
-  const [ftH1,ftA1]=getScore(['Result FT','result_ft','FT','ft','Full Time','fulltime','score']);
-  const htH=(htH1!==null)?htH1:(toNum(getVal(m,['home_ht','ht_home','Home HT'])) ?? 0);
-  const htA=(htA1!==null)?htA1:(toNum(getVal(m,['away_ht','ht_away','Away HT'])) ?? 0);
-  const ftH=(ftH1!==null)?ftH1:(toNum(getVal(m,['home_ft','ft_home','Home FT','home_goals','goals_home'])) ?? 0);
-  const ftA=(ftA1!==null)?ftA1:(toNum(getVal(m,['away_ft','ft_away','Away FT','away_goals','goals_away'])) ?? 0);
+  const getScore = keys => {
+    const s = getVal(m, keys);
+    if(typeof s==='string' && /-/.test(s)){ const [a,b]=s.split('-').map(x=>parseInt(x,10)); return [a||0,b||0]; }
+    return [null,null];
+  };
+  const [htH1,htA1] = getScore(['Result HT','result_ht','HT','ht','Half Time','halftime']);
+  const [ftH1,ftA1] = getScore(['Result FT','result_ft','FT','ft','Full Time','fulltime','score']);
+  const htH = (htH1!==null) ? htH1 : (toNum(getVal(m, ['home_ht','ht_home','Home HT'])) ?? 0);
+  const htA = (htA1!==null) ? htA1 : (toNum(getVal(m, ['away_ht','ht_away','Away HT'])) ?? 0);
+  const ftH = (ftH1!==null) ? ftH1 : (toNum(getVal(m, ['home_ft','ft_home','Home FT','home_goals','goals_home'])) ?? 0);
+  const ftA = (ftA1!==null) ? ftA1 : (toNum(getVal(m, ['away_ft','ft_away','Away FT','away_goals','goals_away'])) ?? 0);
 
-  const hcft=toNum(getVal(m,['Home Corners at FT','home_corners_ft','home_corners','corners_home_ft']));
-  const acft=toNum(getVal(m,['Away Corners at FT','away_corners_ft','away_corners','corners_away_ft']));
+  const hcft = toNum(getVal(m, ['Home Corners at FT','home_corners_ft','home_corners','corners_home_ft']));
+  const acft = toNum(getVal(m, ['Away Corners at FT','away_corners_ft','away_corners','corners_away_ft']));
 
-  const dateRaw=getVal(m,['Date','date','Fecha','fecha','Match Date','match_date','Kickoff','kickoff','Start','start','UtcDate','utcDate','game_date','time','timestamp','ts','datetime']);
-  const ts=parseDateFlexible(dateRaw);
+  const dateRaw = getVal(m, ['Date','date','Fecha','fecha','Match Date','match_date','Kickoff','kickoff','Start','start','UtcDate','utcDate','game_date','time','timestamp','ts','datetime']);
+  const ts = parseDateFlexible(dateRaw);
 
-  const oddO25=extractOddO25(m);
+  const oddO25 = extractOddO25(m);
 
   return {
-    idx, ts:ts||null, league,
-    home, away, Match:(home&&away)?`${home} - ${away}`:(matchStr||''),
-    htHome:htH||0, htAway:htA||0, ftHome:ftH||0, ftAway:ftA||0,
-    home_corners_ft:hcft ?? 0, away_corners_ft:acft ?? 0,
+    idx, ts: ts||null, league,
+    home, away, Match: (home && away) ? `${home} - ${away}` : (matchStr || ''),
+    htHome: htH||0, htAway: htA||0, ftHome: ftH||0, ftAway: ftA||0,
+    home_corners_ft: hcft ?? 0, away_corners_ft: acft ?? 0,
     odd_o25: oddO25
   };
 }
@@ -244,29 +289,29 @@ function periodGoalsN(m){
   return [(m.ftHome-m.htHome),(m.ftAway-m.htAway)];
 }
 function lastMatchesByRole(matches, team, role){
-  const arr=matches
-    .filter(m=> role==="home" ? m.home===team : m.away===team)
+  const arr = matches
+    .filter(m => role==="home" ? m.home===team : m.away===team)
     .sort((a,b)=>{
-      if(a.ts && b.ts) return a.ts-b.ts;
+      if(a.ts && b.ts) return a.ts - b.ts;
       if(a.ts && !b.ts) return 1;
       if(!a.ts && b.ts) return -1;
-      return a.idx-b.idx;
+      return a.idx - b.idx;
     });
   return arr.slice(-10);
 }
-function percentOver(arr,line){
-  const n=arr.length; let over=0;
-  arr.forEach(m=>{ const [h,a]=periodGoalsN(m); if(h+a>line) over++; });
+function percentOver(lastMatches, line){
+  const n=lastMatches.length; let over=0;
+  lastMatches.forEach(m=>{ const [h,a]=periodGoalsN(m); if(h+a>line) over++; });
   return pct(over,n);
 }
-function percentBTTS(arr){
-  const n=arr.length; let yes=0;
-  arr.forEach(m=>{ const [h,a]=periodGoalsN(m); if(h>0 && a>0) yes++; });
+function percentBTTS(lastMatches){
+  const n=lastMatches.length; let yes=0;
+  lastMatches.forEach(m=>{ const [h,a]=periodGoalsN(m); if(h>0 && a>0) yes++; });
   return pct(yes,n);
 }
-function teamAverages(arr, team){
-  let s=0,c=0,t=0,n=arr.length||1;
-  arr.forEach(m=>{
+function teamAverages(lastMatches, team){
+  let s=0,c=0,t=0,n=lastMatches.length||1;
+  lastMatches.forEach(m=>{
     const [h,a]=periodGoalsN(m);
     const forTeam=(team===m.home)?h:(team===m.away)?a:null;
     const opp=(team===m.home)?a:(team===m.away)?h:null;
@@ -275,9 +320,12 @@ function teamAverages(arr, team){
   });
   return {avgScored:(s/n).toFixed(1), avgConceded:(c/n).toFixed(1), avgGoals:(t/n).toFixed(1)};
 }
-function avgCornersFT(arr){
+function avgCornersFT(lastMatches){
   let sum=0,n=0;
-  arr.forEach(m=>{ const c=Number(m.home_corners_ft||0)+Number(m.away_corners_ft||0); if(!isNaN(c)){ sum+=c; n++; }});
+  lastMatches.forEach(m=>{
+    const c=Number(m.home_corners_ft||0)+Number(m.away_corners_ft||0);
+    if(!isNaN(c)){ sum+=c; n++; }
+  });
   return n? (sum/n) : 0;
 }
 function buildSummaryStats(arr){
@@ -289,27 +337,30 @@ function getLeagueTeams(leagueMatches){
   return [...new Set(leagueMatches.flatMap(m=>[m.home,m.away]))].filter(Boolean);
 }
 function leagueWindowByRole(leagueMatches, role, n){
-  const teams=getLeagueTeams(leagueMatches);
-  const all=[];
+  const teams = getLeagueTeams(leagueMatches);
+  const all = [];
   teams.forEach(t=>{
-    const arr=lastMatchesByRole(leagueMatches,t,role).slice(-n);
+    const arr = lastMatchesByRole(leagueMatches, t, role).slice(-n);
     all.push(...arr);
   });
   return all;
 }
 function computeLeagueBaseline(leagueMatches, n){
-  const Lh=leagueWindowByRole(leagueMatches,'home',n);
-  const La=leagueWindowByRole(leagueMatches,'away',n);
-  const Bh=buildSummaryStats(Lh);
-  const Ba=buildSummaryStats(La);
-  const avg=(x,y)=>Math.round((x+y)/2);
-  return { home:Bh, away:Ba, match:{ o05:avg(Bh.o05,Ba.o05), o15:avg(Bh.o15,Ba.o15), o25:avg(Bh.o25,Ba.o25), o35:avg(Bh.o35,Ba.o35), btts:avg(Bh.btts,Ba.btts) } };
+  const Lh = leagueWindowByRole(leagueMatches,'home',n);
+  const La = leagueWindowByRole(leagueMatches,'away',n);
+  const Bh = buildSummaryStats(Lh);
+  const Ba = buildSummaryStats(La);
+  const avg = (x,y)=>Math.round((x+y)/2);
+  return {
+    home: Bh, away: Ba,
+    match: { o05:avg(Bh.o05,Ba.o05), o15:avg(Bh.o15,Ba.o15), o25:avg(Bh.o25,Ba.o25), o35:avg(Bh.o35,Ba.o35), btts:avg(Bh.btts,Ba.btts) }
+  };
 }
 
 /* ===== Poisson ===== */
 function poisCDF(k, lambda){
   let p0=Math.exp(-lambda), sum=p0, p=p0;
-  for(let i=1;i<=k;i++){ p=p*(lambda/i); sum+=p; }
+  for(let i=1;i<=k;i++){ p = p*(lambda/i); sum += p; }
   return sum;
 }
 function probTeamOver(lambda, lineHalf){ const k=Math.floor(lineHalf); return 1 - poisCDF(k, lambda); }
@@ -318,7 +369,7 @@ function probBTTS(lambdaH, lambdaA){ return 1 - Math.exp(-lambdaH) - Math.exp(-l
 
 /* ===== Panels ===== */
 function calcTeamBlock(matches, team, role){
-  const last=lastMatchesByRole(matches,team,role); const n=last.length;
+  const last = lastMatchesByRole(matches, team, role); const n=last.length;
   let noScore=0,noConcede=0,s=0,c=0,t=0;
   last.forEach(m=>{
     const [h,a]=periodGoalsN(m);
@@ -344,30 +395,60 @@ function renderTeamPanel(title, stats){
   </div>`;
 }
 
-/* Poisson Summary (tabla) */
+/* Summary por ventana N (3/5/10) con baseline y deltas coloreados */
+function renderSummaryTableN(homeLast10, awayLast10, n, leagueMatches){
+  const hArr = homeLast10.slice(-n);
+  const aArr = awayLast10.slice(-n);
+  const H = buildSummaryStats(hArr);
+  const A = buildSummaryStats(aArr);
+  const L = computeLeagueBaseline(leagueMatches, n);
+  const avg = (x,y)=>Math.round((x+y)/2);
+  const row = (label, key)=>`
+    <tr>
+      <td>${label}</td>
+      <td>${badge(H[key])}${ppDelta(H[key], L.home[key])}</td>
+      <td>${badge(A[key])}${ppDelta(A[key], L.away[key])}</td>
+      <td><span class="badge ${cls(avg(H[key],A[key]))}">${avg(H[key],A[key])}%</span>${ppDelta(avg(H[key],A[key]), L.match[key])}</td>
+    </tr>`;
+  return `
+    <div class="panel">
+      <h3>Summary (Histórico · últimos ${n})</h3>
+      <table>
+        <tr><th></th><th>Home</th><th>Away</th><th>Match</th></tr>
+        ${row('Over 0.5','o05')}
+        ${row('Over 1.5','o15')}
+        ${row('Over 2.5','o25')}
+        ${row('Over 3.5','o35')}
+        ${row('BTTS','btts')}
+        <tr>
+          <td style="text-align:right;font-weight:600">Liga (baseline)</td>
+          <td class="muted">${L.home.o05}% / ${L.home.o15}% / ${L.home.o25}% / ${L.home.o35}% / BTTS ${L.home.btts}%</td>
+          <td class="muted">${L.away.o05}% / ${L.away.o15}% / ${L.away.o25}% / ${L.away.o35}% / BTTS ${L.away.btts}%</td>
+          <td class="muted">${L.match.o05}% / ${L.match.o15}% / ${L.match.o25}% / ${L.match.o35}% / BTTS ${L.match.btts}%</td>
+        </tr>
+      </table>
+      <div class="muted" style="margin-top:6px;font-size:.9rem">
+        Baseline: promedio por rol en la liga, concatenando los últimos ${n} por equipo (home vs todos los home; away vs todos los away).
+      </div>
+    </div>`;
+}
+
+/* Poisson Summary */
 function renderPoissonSummaryTable(homeTeam, awayTeam, homeLast, awayLast){
   const hAvg = teamAverages(homeLast, homeTeam);
   const aAvg = teamAverages(awayLast, awayTeam);
   const lambdaH = Math.max(0, parseFloat(hAvg.avgScored)||0);
   const lambdaA = Math.max(0, parseFloat(aAvg.avgScored)||0);
-
-  const lines = [0.5,1.5,2.5,3.5];
-  const row = (L)=>{
-    const ph = Math.round(probTeamOver(lambdaH, L)*100);
-    const pa = Math.round(probTeamOver(lambdaA, L)*100);
-    const pm = Math.round(probTotalOver(lambdaH, lambdaA, L)*100);
-    return `
-      <tr>
-        <td>Over ${L.toFixed(1)}</td>
-        <td>${badge(ph)}</td>
-        <td>${badge(pa)}</td>
-        <td><span class="badge ${cls(pm)}">${pm}%</span></td>
-      </tr>`;
+  const lines=[0.5,1.5,2.5,3.5];
+  const row = L=>{
+    const ph=Math.round(probTeamOver(lambdaH,L)*100);
+    const pa=Math.round(probTeamOver(lambdaA,L)*100);
+    const pm=Math.round(probTotalOver(lambdaH,lambdaA,L)*100);
+    return `<tr><td>Over ${L.toFixed(1)}</td><td>${badge(ph)}</td><td>${badge(pa)}</td><td><span class="badge ${cls(pm)}">${pm}%</span></td></tr>`;
   };
-  const bttsHome = Math.round((1 - Math.exp(-lambdaH))*100);
-  const bttsAway = Math.round((1 - Math.exp(-lambdaA))*100);
-  const bttsMatch = Math.round(probBTTS(lambdaH, lambdaA)*100);
-
+  const bttsHome=Math.round((1-Math.exp(-lambdaH))*100);
+  const bttsAway=Math.round((1-Math.exp(-lambdaA))*100);
+  const bttsMatch=Math.round(probBTTS(lambdaH,lambdaA)*100);
   return `
     <div class="panel">
       <h3>Summary (Poisson · ${currentPeriod})</h3>
@@ -377,12 +458,7 @@ function renderPoissonSummaryTable(homeTeam, awayTeam, homeLast, awayLast){
       <table>
         <tr><th></th><th>Home</th><th>Away</th><th>Match</th></tr>
         ${lines.map(row).join("")}
-        <tr>
-          <td>BTTS</td>
-          <td>${badge(bttsHome)}</td>
-          <td>${badge(bttsAway)}</td>
-          <td><span class="badge ${cls(bttsMatch)}">${bttsMatch}%</span></td>
-        </tr>
+        <tr><td>BTTS</td><td>${badge(bttsHome)}</td><td>${badge(bttsAway)}</td><td><span class="badge ${cls(bttsMatch)}">${bttsMatch}%</span></td></tr>
       </table>
     </div>`;
 }
@@ -392,58 +468,30 @@ function buildSeries(homeLast, awayLast){
   const len = Math.min(homeLast.length, awayLast.length, 10);
   const H = homeLast.slice(-len); const A = awayLast.slice(-len);
   const sOver = line => {
-    const out=[]; for(let i=0;i<len;i++){ const [h1,a1]=periodGoalsN(H[i]); const [h2,a2]=periodGoalsN(A[i]); const v1=(h1+a1>line)?1:0, v2=(h2+a2>line)?1:0; out.push(((v1+v2)/2)*100); }
+    const out=[]; for(let i=0;i<len;i++){ const [h1,a1]=periodGoalsN(H[i]); const [h2,a2]=periodGoalsN(A[i]); const v1=(h1+a1>line)?1:0; const v2=(h2+a2>line)?1:0; out.push(((v1+v2)/2)*100); }
     return out;
   };
-  const sBTTS = ()=>{ const out=[]; for(let i=0;i<len;i++){ const [h1,a1]=periodGoalsN(H[i]); const [h2,a2]=periodGoalsN(A[i]); const v1=(h1>0&&a1>0)?1:0, v2=(h2>0&&a2>0)?1:0; out.push(((v1+v2)/2)*100); } return out; };
+  const sBTTS = ()=>{ const out=[]; for(let i=0;i<len;i++){ const [h1,a1]=periodGoalsN(H[i]); const [h2,a2]=periodGoalsN(A[i]); const v1=(h1>0&&a1>0)?1:0; const v2=(h2>0&&a2>0)?1:0; out.push(((v1+v2)/2)*100); } return out; };
   const sGoals = ()=>{ const out=[]; for(let i=0;i<len;i++){ const [h1,a1]=periodGoalsN(H[i]); const [h2,a2]=periodGoalsN(A[i]); out.push(((h1+h2)+(a1+a2))/2); } return out; };
   const sCorners = ()=>{ const out=[]; for(let i=0;i<len;i++){ const c1=Number(H[i].home_corners_ft||0)+Number(H[i].away_corners_ft||0); const c2=Number(A[i].home_corners_ft||0)+Number(A[i].away_corners_ft||0); out.push((c1+c2)/2); } return out; };
   return { o05:sOver(0.5), o25:sOver(2.5), o15:sOver(1.5), btts:sBTTS(), goals:sGoals(), corners:sCorners() };
 }
 function drawSpark(canvas, series){
   if(!canvas) return;
-  const dpr = window.devicePixelRatio || 1;
-  const w = canvas.clientWidth || 120;
-  const h = canvas.clientHeight || 28;
-  canvas.width = Math.round(w * dpr);
-  canvas.height = Math.round(h * dpr);
-
-  const ctx = canvas.getContext('2d');
-  ctx.scale(dpr, dpr);
-  ctx.clearRect(0, 0, w, h);
-
-  if(!series || series.length === 0) return;
-
-  // Caso especial: solo 1 dato
-  if(series.length === 1){
-    const x = w/2, y = h/2;
-    ctx.beginPath();
-    ctx.arc(x, y, 2.5, 0, Math.PI*2);
-    ctx.fillStyle = '#22d3ee';
-    ctx.fill();
-    return;
-  }
-
-  let min = Math.min(...series), max = Math.max(...series);
-  if (min === max){ min -= 1; max += 1; }
-
-  const nx = i => (i/(series.length-1))*(w-4)+2;
-  const ny = v => h-2 - ((v-min)/(max-min))*(h-6);
-
-  ctx.beginPath(); ctx.lineWidth = 2; ctx.strokeStyle = '#22d3ee';
-  for(let i=0;i<series.length;i++){
-    const x = nx(i), y = ny(series[i]);
-    if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
-  }
+  const dpr=window.devicePixelRatio||1, w=canvas.clientWidth, h=canvas.clientHeight;
+  canvas.width=Math.round(w*dpr); canvas.height=Math.round(h*dpr);
+  const ctx=canvas.getContext('2d'); ctx.scale(dpr,dpr); ctx.clearRect(0,0,w,h);
+  if(!series||series.length===0) return;
+  let min=Math.min(...series), max=Math.max(...series);
+  if(min===max){ min=min-1; max=max+1; }
+  const nx=i=> (i/(series.length-1))*(w-4)+2;
+  const ny=v=> h-2 - ((v-min)/(max-min))*(h-6);
+  ctx.beginPath(); ctx.lineWidth=2; ctx.strokeStyle='#22d3ee';
+  for(let i=0;i<series.length;i++){ const x=nx(i), y=ny(series[i]); if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y); }
   ctx.stroke();
-
-  const lastY = ny(series[series.length-1]);
-  const lastX = nx(series.length-1);
-  ctx.lineTo(lastX,h-2); ctx.lineTo(2,h-2); ctx.closePath();
-  ctx.fillStyle = 'rgba(34,211,238,0.10)'; ctx.fill();
-
-  ctx.beginPath(); ctx.arc(lastX,lastY,2.5,0,Math.PI*2);
-  ctx.fillStyle = '#22d3ee'; ctx.fill();
+  const lastY=ny(series[series.length-1]), lastX=nx(series.length-1);
+  ctx.lineTo(lastX,h-2); ctx.lineTo(2,h-2); ctx.closePath(); ctx.fillStyle='rgba(34,211,238,0.10)'; ctx.fill();
+  ctx.beginPath(); ctx.arc(lastX,lastY,2.5,0,Math.PI*2); ctx.fillStyle='#22d3ee'; ctx.fill();
 }
 
 /* Game Predictions (Histórico) */
@@ -525,14 +573,14 @@ function shortAdvice({market, probHist, probPois, odd, sideLabel, lambdaH, lambd
   return `• ${market}: ${verdict}.<br>  Razones: ${reasons.join(' · ')}.${riskTxt}`;
 }
 function renderTextExplanation({homeTeam, awayTeam, homeStats, awayStats, homeLast, awayLast, lambdaH, lambdaA, oddOver, oddUnder}){
-  const poisOver=L=>Math.round(probTotalOver(lambdaH, lambdaA, L)*100);
-  const poisBTTS=Math.round(probBTTS(lambdaH, lambdaA)*100);
+  const poisOver=L=>Math.round(probTotalOver(lambdaH,lambdaA,L)*100);
+  const poisBTTS=Math.round(probBTTS(lambdaH,lambdaA)*100);
   const lines=[0.5,1.5,2.5,3.5];
 
   const oversTextArr = lines.map(L=>{
-    const hist=matchHistOver(homeLast, awayLast, L);
+    const hist=matchHistOver(homeLast,awayLast,L);
     const pois=poisOver(L);
-    const useOdd=(L===2.5) ? oddOver : null;
+    const useOdd=(L===2.5)? oddOver : null;
     return shortAdvice({market:`Over ${L.toFixed(1)} (${homeTeam} vs ${awayTeam})`, probHist:hist, probPois:pois, odd:useOdd, sideLabel:`Over ${L.toFixed(1)}`, lambdaH, lambdaA});
   }).filter(Boolean);
 
@@ -577,12 +625,13 @@ function computeO25PnlForRole(matches, team, role){
     if(odd && odd>1){
       considered++;
       if(hit){ hits++; stakeProfit=+(odd-1).toFixed(4); profit+=(odd-1); }
-      else   { fails++; stakeProfit=-1; profit-=1; }
-      sumOdds += odd;
+      else{ fails++; stakeProfit=-1; profit-=1; }
+      sumOdds+=odd;
     }
-    details.push({ idx:idx+1, match:m.Match || `${m.home} - ${m.away}`, result_ft:`${m.ftHome}-${m.ftAway}`, odd_o25:(odd && odd>1)? odd : '', hit:(odd && odd>1)? (hit?'✔':'✘') : '—', pnl:(odd && odd>1)? stakeProfit : '—' });
+    const dt = m.ts? new Date(m.ts).toLocaleDateString('es-MX') : '';
+    details.push({ idx:idx+1, match:m.Match || `${m.home} - ${m.away}`, result_ft:`${m.ftHome}-${m.ftAway}`, odd_o25:(odd&&odd>1)?odd:'', hit:(odd&&odd>1)?(hit?'✔':'✘'):'—', pnl:(odd&&odd>1)?stakeProfit:'—', date:dt });
   });
-  const avgOdd=considered? (sumOdds/considered) : 0;
+  const avgOdd=considered?(sumOdds/considered):0;
   const roi=considered? (profit/considered)*100 : 0;
   return { team, role, played:last.length, considered, hits, fails, avgOdd, profit, roi, details };
 }
@@ -592,23 +641,20 @@ function renderProfitabilityPanel(leagueMatches, homeTeam, awayTeam){
   const row=r=>`
     <tr>
       <td>${r.team}</td><td>${r.role.toUpperCase()}</td><td>${r.played}</td><td>${r.considered}</td>
-      <td>${r.hits}</td><td>${r.fails}</td><td>${r.avgOdd? r.avgOdd.toFixed(2) : '—'}</td>
-      <td style="font-weight:700; ${r.profit>=0?'color:#10b981':'color:#ef4444'}">${r.profit.toFixed(2)}</td>
+      <td>${r.hits}</td><td>${r.fails}</td><td>${r.avgOdd?r.avgOdd.toFixed(2):'—'}</td>
+      <td style="font-weight:700;${r.profit>=0?'color:#10b981':'color:#ef4444'}">${r.profit.toFixed(2)}</td>
       <td style="${r.roi>=0?'color:#10b981':'color:#ef4444'}">${r.roi.toFixed(1)}%</td>
     </tr>`;
   const csvRows = [
-    ['Tipo','Equipo','Rol','N°','Match','Result FT','Odd O2.5','Hit','PnL'],
-    ...homeRes.details.map(d=>['Detalle', homeRes.team, 'Home', d.idx, d.match, d.result_ft, d.odd_o25, d.hit, d.pnl]),
-    ...awayRes.details.map(d=>['Detalle', awayRes.team, 'Away', d.idx, d.match, d.result_ft, d.odd_o25, d.hit, d.pnl]),
+    ['Tipo','Equipo','Rol','#','Fecha','Match','Result FT','Odd O2.5','Hit','PnL'],
+    ...homeRes.details.map(d=>['Detalle',homeRes.team,'Home',d.idx,d.date,d.match,d.result_ft,d.odd_o25,d.hit,d.pnl]),
+    ...awayRes.details.map(d=>['Detalle',awayRes.team,'Away',d.idx,d.date,d.match,d.result_ft,d.odd_o25,d.hit,d.pnl]),
     [],
     ['Resumen','Equipo','Rol','Jugados','Considerados','Hits','Fails','Odd media','Profit','ROI%'],
-    ['Resumen', homeRes.team, 'Home', homeRes.played, homeRes.considered, homeRes.hits, homeRes.fails, homeRes.avgOdd.toFixed(2), homeRes.profit.toFixed(2), homeRes.roi.toFixed(1)],
-    ['Resumen', awayRes.team, 'Away', awayRes.played, awayRes.considered, awayRes.hits, awayRes.fails, awayRes.avgOdd.toFixed(2), awayRes.profit.toFixed(2), awayRes.roi.toFixed(1)]
+    ['Resumen',homeRes.team,'Home',homeRes.played,homeRes.considered,homeRes.hits,homeRes.fails,homeRes.avgOdd.toFixed(2),homeRes.profit.toFixed(2),homeRes.roi.toFixed(1)],
+    ['Resumen',awayRes.team,'Away',awayRes.played,awayRes.considered,awayRes.hits,awayRes.fails,awayRes.avgOdd.toFixed(2),awayRes.profit.toFixed(2),awayRes.roi.toFixed(1)]
   ];
-  const csv = csvRows.map(r=>r.map(v=>{
-    const s=(v===null||v===undefined)? '' : String(v);
-    return /[",\n]/.test(s) ? `"${s.replace(/"/g,'""')}"` : s;
-  }).join(',')).join('\n');
+  const csv = csvRows.map(r=>r.map(v=>{ const s=(v===null||v===undefined)?'':String(v); return /[",\n]/.test(s)?`"${s.replace(/"/g,'""')}"`:s; }).join(',')).join('\n');
 
   const panel = `
     <div class="panel" id="profitPanel">
@@ -626,8 +672,7 @@ function renderProfitabilityPanel(leagueMatches, homeTeam, awayTeam){
       btn.onclick=()=>{
         const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'});
         const url=URL.createObjectURL(blob);
-        const a=document.createElement('a');
-        a.href=url; a.download=`rentabilidad_o25_${homeTeam}_home_${awayTeam}_away.csv`;
+        const a=document.createElement('a'); a.href=url; a.download=`rentabilidad_o25_${homeTeam}_home_${awayTeam}_away.csv`;
         document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
       };
     }
@@ -635,124 +680,154 @@ function renderProfitabilityPanel(leagueMatches, homeTeam, awayTeam){
   return panel;
 }
 
-/* ===== HEATMAP DE LIGA ===== */
-function teamWindowStatsByRole(leagueMatches, team, role, n){
-  const arr = lastMatchesByRole(leagueMatches, team, role).slice(-n);
-  return buildSummaryStats(arr);
+/* ========= HEATMAP ========= */
+function buildHeatRow(matches, market){
+  // return array of length 10 with {cls, tip}
+  const last = matches.slice(-10);
+  const out = [];
+  last.forEach(m=>{
+    const [h,a]=periodGoalsN(m);
+    const sum=h+a;
+    let good=null, tip='';
+    if(market==='O0.5') { good = sum>0.5; tip='Over 0.5'; }
+    else if(market==='O1.5') { good = sum>1.5; tip='Over 1.5'; }
+    else if(market==='O2.5') { good = sum>2.5; tip='Over 2.5'; }
+    else if(market==='O3.5') { good = sum>3.5; tip='Over 3.5'; }
+    else if(market==='BTTS') { good = (h>0 && a>0); tip='BTTS'; }
+
+    const scoreFT = `${m.ftHome}-${m.ftAway}`;
+    const dateTxt = m.ts? new Date(m.ts).toLocaleDateString('es-MX') : '—';
+    const cell = { cls: (good===null?'na':(good?'good':'bad')), tip: `${tip} · ${dateTxt} · FT ${scoreFT}` };
+    out.push(cell);
+  });
+  // left-pad if <10
+  while(out.length<10) out.unshift({cls:'na', tip:'—'});
+  return out;
 }
-function colorForPercent(p){
-  const hue = Math.round((p/100)*140); /* rojo→verde */
-  return `hsl(${hue} 70% 35%)`;
+function buildGoalsRow(matches){
+  const last = matches.slice(-10);
+  const out=[];
+  last.forEach(m=>{
+    const [h,a]=periodGoalsN(m);
+    const sum=h+a;
+    const dateTxt = m.ts? new Date(m.ts).toLocaleDateString('es-MX') : '—';
+    out.push({ cls:'goals', tip:`Goals ${sum} · ${dateTxt} · FT ${m.ftHome}-${m.ftAway}`, val:sum });
+  });
+  while(out.length<10) out.unshift({cls:'na', tip:'—', val:0});
+  return out;
 }
-function renderHeatmap(leagueMatches){
-  const teams = getLeagueTeams(leagueMatches).sort((a,b)=>a.localeCompare(b));
-  const container = document.createElement('div');
-  container.className = 'panel heatmap';
-  container.innerHTML = `
-    <h3>Heatmap Liga</h3>
-    <div class="heat-controls">
-      <label>Ventana
-        <select id="hmN">
-          <option value="3">3</option>
-          <option value="5">5</option>
-          <option value="10" selected>10</option>
-        </select>
-      </label>
-      <label>Rol
-        <select id="hmRole">
-          <option value="home" selected>Home</option>
-          <option value="away">Away</option>
-        </select>
-      </label>
-      <label>Métrica
-        <select id="hmMetric">
-          <option value="o05">Over 0.5</option>
-          <option value="o15">Over 1.5</option>
-          <option value="o25" selected>Over 2.5</option>
-          <option value="o35">Over 3.5</option>
-          <option value="btts">BTTS</option>
-        </select>
-      </label>
-      <label>Ordenar por
-        <select id="hmSort">
-          <option value="metric" selected>Métrica</option>
-          <option value="name">Equipo (A-Z)</option>
-        </select>
-      </label>
-    </div>
-    <div id="hmTableWrap" style="overflow:auto; margin-top:8px;"></div>
-    <div class="muted" style="margin-top:6px;font-size:.9rem">Los colores reflejan el % (0–100) en cada métrica. Debajo de cada % se muestra Δpp vs baseline de liga (rol/ventana).</div>
-  `;
+function renderHeatmapBlock(title, matches){
+  const rows = [
+    {label:'Over 0.5', key:'O0.5'},
+    {label:'Over 1.5', key:'O1.5'},
+    {label:'Over 2.5', key:'O2.5'},
+    {label:'Over 3.5', key:'O3.5'},
+    {label:'BTTS', key:'BTTS'},
+    {label:'Goals', key:'GOALS'}
+  ];
+  const rowHtml = rows.map(r=>{
+    const data = (r.key==='GOALS')? buildGoalsRow(matches) : buildHeatRow(matches, r.key);
+    const cells = data.map(d=>`<div class="cell ${d.cls}" data-tip=""></div>`);
+    return `<div class="row">
+      <div class="lbl">${r.label}</div>
+      ${cells.join('')}
+    </div>`;
+  }).join('');
 
-  function buildTable(){
-    const n = parseInt(container.querySelector('#hmN').value,10);
-    const role = container.querySelector('#hmRole').value;
-    const metric = container.querySelector('#hmMetric').value;
-    const sortBy = container.querySelector('#hmSort').value;
-
-    const baseAll = computeLeagueBaseline(leagueMatches, n)[role];
-
-    let rows = teams.map(t=>{
-      const s = teamWindowStatsByRole(leagueMatches, t, role, n);
-      const val = s[metric] ?? 0;
-      return { team:t, val, all:s };
-    });
-
-    if(sortBy==='metric'){ rows.sort((a,b)=> b.val - a.val || a.team.localeCompare(b.team)); }
-    else{ rows.sort((a,b)=> a.team.localeCompare(b.team)); }
-
-    const cols = [
-      {key:'o05', label:'Over 0.5'},
-      {key:'o15', label:'Over 1.5'},
-      {key:'o25', label:'Over 2.5'},
-      {key:'o35', label:'Over 3.5'},
-      {key:'btts', label:'BTTS'}
-    ];
-
-    const tbl = document.createElement('table');
-    tbl.innerHTML = `
-      <tr>
-        <th style="min-width:180px;text-align:left;position:sticky;left:0;z-index:2">Equipo</th>
-        ${cols.map(c=>`<th>${c.label}</th>`).join('')}
-      </tr>
-      ${rows.map(r=>{
-        return `<tr>
-          <td style="text-align:left;position:sticky;left:0;background:#0f1726;z-index:1">${r.team}</td>
-          ${cols.map(c=>{
-            const v = r.all[c.key] ?? 0;
-            const bg = colorForPercent(v);
-            const d = v - baseAll[c.key];
-            const sign = d>0? '+' : '';
-            return `<td><span class="cell" style="background:${bg}">${v}%<small>${sign}${d}pp</small></span></td>`;
-          }).join('')}
-        </tr>`;
-      }).join('')}
-      <tr>
-        <td style="text-align:left;font-weight:700">Liga (baseline ${role})</td>
-        ${cols.map(c=>{
-          const baseCol = baseAll[c.key];
-          const bg = colorForPercent(baseCol);
-          return `<td><span class="cell" style="background:${bg}">${baseCol}%<small>—</small></span></td>`;
-        }).join('')}
-      </tr>
-    `;
-
-    const wrap = container.querySelector('#hmTableWrap');
-    wrap.innerHTML = '';
-    wrap.appendChild(tbl);
-  }
-
-  container.addEventListener('change', (e)=>{
-    if(['hmN','hmRole','hmMetric','hmSort'].includes(e.target.id)){
-      buildTable();
+  const header = Array.from({length:10},(_,i)=>`<div>${i+1}</div>`).join('');
+  const html = `
+    <div class="panel">
+      <h3>Heatmap · ${title} (últimos 10 · ${currentPeriod})</h3>
+      <div class="hm">
+        <div class="hdr"><div></div>${header}</div>
+        ${rowHtml}
+      </div>
+      <div class="legend">
+        <span><span class="dot" style="background:rgba(16,185,129,0.9)"></span> Acierto</span>
+        <span><span class="dot" style="background:rgba(239,68,68,0.85)"></span> Fallo</span>
+        <span><span class="dot" style="background:#0b1324;border:1px solid var(--line)"></span> N/A</span>
+        <span><span class="dot" style="background:linear-gradient(180deg, rgba(59,130,246,0.9), rgba(59,130,246,0.25))"></span> Goals (continuo)</span>
+        <span class="muted">* Columna 10 = más reciente</span>
+      </div>
+    </div>`;
+  // defer tooltips + goals intensities to after insert
+  setTimeout(()=>{
+    // Fill tooltips and goals opacity
+    const rowsEls = document.querySelectorAll('.panel h3:contains("Heatmap")'); // no-op; left for clarity
+  },0);
+  return html;
+}
+// helper: safe :contains polyfill usage in setHeatmapTooltips (we'll select by structure instead)
+function setHeatmapTooltips(container, matches){
+  // write tooltips for each row
+  const rDefs = [
+    {key:'O0.5', selIdx:0},
+    {key:'O1.5', selIdx:1},
+    {key:'O2.5', selIdx:2},
+    {key:'O3.5', selIdx:3},
+    {key:'BTTS', selIdx:4},
+    {key:'GOALS', selIdx:5},
+  ];
+  const last = matches.slice(-10);
+  // pad left
+  const pad = 10 - last.length;
+  rDefs.forEach(def=>{
+    const rowEl = container.querySelectorAll('.hm .row')[def.selIdx];
+    const cells = Array.from(rowEl.querySelectorAll('.cell'));
+    // goals needs scale + tips
+    if(def.key==='GOALS'){
+      for(let i=0;i<10;i++){
+        if(i<pad){ cells[i].setAttribute('data-tip','—'); continue; }
+        const m = last[i-pad];
+        const [h,a]=periodGoalsN(m);
+        const sum=h+a;
+        const dateTxt = m.ts? new Date(m.ts).toLocaleDateString('es-MX') : '—';
+        cells[i].classList.add('goals');
+        cells[i].style.opacity = 0.5 + Math.min(sum,6)/12; // simple intensity 0.5..1.0
+        cells[i].setAttribute('data-tip', `Goals ${sum} · ${dateTxt} · FT ${m.ftHome}-${m.ftAway}`);
+      }
+    }else{
+      const lineMap={'O0.5':0.5,'O1.5':1.5,'O2.5':2.5,'O3.5':3.5};
+      for(let i=0;i<10;i++){
+        if(i<pad){ cells[i].setAttribute('data-tip','—'); continue; }
+        const m = last[i-pad];
+        const [h,a]=periodGoalsN(m);
+        const sum=h+a;
+        const dateTxt = m.ts? new Date(m.ts).toLocaleDateString('es-MX') : '—';
+        const key=def.key;
+        const ok = key==='BTTS' ? (h>0 && a>0) : (sum > lineMap[key]);
+        cells[i].classList.add(ok?'good':'bad');
+        const label = key==='BTTS' ? 'BTTS' : key.replace('O','Over ');
+        cells[i].setAttribute('data-tip', `${label} · ${dateTxt} · FT ${m.ftHome}-${m.ftAway}`);
+      }
     }
   });
-
-  buildTable();
-  return container.outerHTML;
+}
+function renderHeatmaps(homeTeam, awayTeam, homeLast, awayLast){
+  const blockHome = renderHeatmapBlock(`${homeTeam} (home)`, homeLast);
+  const blockAway = renderHeatmapBlock(`${awayTeam} (away)`, awayLast);
+  const html = `
+    <div class="panel">
+      <h3>Heatmap (rol específico)</h3>
+      <div class="hm-wrap" id="hmWrap">
+        ${blockHome}
+        ${blockAway}
+      </div>
+    </div>`;
+  setTimeout(()=>{
+    const wrap = document.getElementById('hmWrap');
+    // blocks are two .panel children inside wrap; get their content .hm containers
+    const panels = wrap.querySelectorAll('.panel');
+    // first panel -> home
+    const hm1 = panels[0];
+    const hm2 = panels[1];
+    setHeatmapTooltips(hm1, homeLast);
+    setHeatmapTooltips(hm2, awayLast);
+  },0);
+  return html;
 }
 
-/* ===== Carga y UI ===== */
+/* ===== Carga ===== */
 document.getElementById("fileInput").addEventListener("change",(e)=>{
   const file=e.target.files[0]; if(!file){ setStatus('No se seleccionó archivo.',false,true); return; }
   const rd=new FileReader();
@@ -841,7 +916,7 @@ document.getElementById("analyzeBtn").addEventListener("click",()=>{
 
     const pnlPanel=renderProfitabilityPanel(leagueMatches,homeTeam,awayTeam);
 
-    const heatmapHTML = renderHeatmap(leagueMatches);
+    const heatmaps = renderHeatmaps(homeTeam, awayTeam, homeLast, awayLast);
 
     const res=document.getElementById("results");
     res.innerHTML = `
@@ -866,6 +941,8 @@ document.getElementById("analyzeBtn").addEventListener("click",()=>{
         ${poissonPreds}
       </div>
 
+      ${heatmaps}
+
       <div class="panel" style="margin-top:12px">
         <h3>Value Check</h3>
         <div class="grid">
@@ -875,9 +952,6 @@ document.getElementById("analyzeBtn").addEventListener("click",()=>{
       </div>
 
       ${pnlPanel}
-
-      <div style="margin-top:12px">${heatmapHTML}</div>
-
       ${textExplain ? `<div style="margin-top:12px">${textExplain}</div>` : ``}
     `;
 
@@ -886,7 +960,7 @@ document.getElementById("analyzeBtn").addEventListener("click",()=>{
     else res.style.borderColor="var(--red)";
   }catch(err){
     console.error(err);
-    setStatus('Ocurrió un error al analizar: ' + (err && err.message ? err.message : err), false, true);
+    setStatus('Ocurrió un error al analizar. Revisa la consola.',false,true);
   }
 });
 
