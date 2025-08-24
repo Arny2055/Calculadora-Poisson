@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Estadísticas Over/Under (soporta fecha ES y Odd O25)</title>
+<title>Estadísticas Over/Under (con acordeones)</title>
 <style>
   :root{
     --bg:#0a0f1c; --card:#121826; --panel:#1a2333; --text:#e5e7eb; --muted:#94a3b8;
@@ -71,8 +71,18 @@
   #status.ok{color:var(--green)}
   #status.err{color:var(--red)}
 
-  /* opcional: una línea sutil cuando uso "divider" */
   .divider{height:8px}
+
+  /* Acordeones */
+  details.acc{background:var(--panel);border:1px solid var(--line);border-radius:14px;margin-top:12px;overflow:hidden}
+  details.acc>summary{
+    list-style:none;cursor:pointer;padding:14px 16px;font-weight:700;letter-spacing:.2px;
+    display:flex;justify-content:space-between;align-items:center
+  }
+  details.acc>summary::-webkit-details-marker{display:none}
+  .chev{transition:.2s transform}
+  details[open] .chev{transform:rotate(180deg)}
+  .acc-body{padding:0 14px 14px}
 </style>
 </head>
 <body>
@@ -103,8 +113,26 @@
       </div>
     </div>
 
-    <label>Equipo Visitante</label>
-    <select id="awaySelect"></select>
+    <div class="row">
+      <div>
+        <label>Odd 1</label>
+        <input type="number" id="odd1" step="0.01" placeholder="Ej: 2.10">
+      </div>
+      <div>
+        <label>Odd X</label>
+        <input type="number" id="oddX" step="0.01" placeholder="Ej: 3.20">
+      </div>
+    </div>
+    <div class="row">
+      <div>
+        <label>Odd 2</label>
+        <input type="number" id="odd2" step="0.01" placeholder="Ej: 3.50">
+      </div>
+      <div>
+        <label>Línea Corners FT (opcional)</label>
+        <input type="number" id="cornersLine" step="0.5" placeholder="Ej: 9.5">
+      </div>
+    </div>
 
     <div class="tabs" id="tabs">
       <div class="tab active" data-period="FT">Full Time</div>
@@ -146,6 +174,13 @@ function setStatus(msg, ok=false, err=false){
   if(ok) el.classList.add('ok');
   if(err) el.classList.add('err');
 }
+function acc(title, bodyHtml){
+  return `
+  <details class="acc">
+    <summary>${title}<svg class="chev" width="18" height="18" viewBox="0 0 24 24"><path fill="#94a3b8" d="M7 10l5 5 5-5z"/></svg></summary>
+    <div class="acc-body">${bodyHtml}</div>
+  </details>`;
+}
 
 /* ===== Normalización robusta ===== */
 function getVal(obj, keys){
@@ -164,22 +199,19 @@ function parseDateFlexible(v){
   if(v===null || v===undefined || v==='') return null;
 
   if(typeof v === 'number'){
-    if(v > 1e12) return v;          // ms
-    if(v > 1e9)  return v * 1000;   // s -> ms
+    if(v > 1e12) return v;
+    if(v > 1e9)  return v * 1000;
     return null;
   }
 
   if(typeof v !== 'string') return null;
   let s = v.trim();
 
-  // quitar prefijo de día de semana (es)
   s = s.replace(/^(lun|mar|mi[eé]|jue|vie|s[aá]b|dom)\.?,?\s*/i, '');
 
-  // Intento ISO / parsers nativos
   const dISO = Date.parse(s);
   if(!isNaN(dISO)) return dISO;
 
-  // dd/mm/yyyy o dd-mm-yyyy (opcional hora)
   let m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?$/);
   if(m){
     let dd=parseInt(m[1],10), mm=parseInt(m[2],10)-1, yy=parseInt(m[3],10);
@@ -188,7 +220,6 @@ function parseDateFlexible(v){
     return new Date(yy,mm,dd,hh,mi,ss).getTime();
   }
 
-  // mm/dd/yyyy
   m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?$/);
   if(m){
     let mm=parseInt(m[1],10)-1, dd=parseInt(m[2],10), yy=parseInt(m[3],10);
@@ -197,11 +228,7 @@ function parseDateFlexible(v){
     return new Date(yy,mm,dd,hh,mi,ss).getTime();
   }
 
-  // dd mes_es yyyy HH:MM
-  const months = {
-    'ene':'01','feb':'02','mar':'03','abr':'04','may':'05','jun':'06','jul':'07','ago':'08',
-    'sep':'09','sept':'09','set':'09','oct':'10','nov':'11','dic':'12'
-  };
+  const months = {'ene':'01','feb':'02','mar':'03','abr':'04','may':'05','jun':'06','jul':'07','ago':'08','sep':'09','sept':'09','set':'09','oct':'10','nov':'11','dic':'12'};
   m = s.match(/^(\d{1,2})\s+([a-záéíóúñ\.]+)\s+(\d{2,4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/i);
   if(m){
     let dd = parseInt(m[1],10);
@@ -213,7 +240,6 @@ function parseDateFlexible(v){
       return new Date(`${yy}-${mm}-${String(dd).padStart(2,'0')}T${String(hh).padStart(2,'0')}:${String(mi).padStart(2,'0')}:${String(ss).padStart(2,'0')}`).getTime();
     }
   }
-
   return null;
 }
 
@@ -287,10 +313,13 @@ function normalizeRow(m, idx){
 }
 
 /* ===== Core (sobre datos normalizados) ===== */
-function periodGoalsN(m){
-  if(currentPeriod==="FT") return [m.ftHome, m.ftAway];
-  if(currentPeriod==="1H") return [m.htHome, m.htAway];
+function goalsByPeriod(m, period){
+  if(period==="FT") return [m.ftHome, m.ftAway];
+  if(period==="1H") return [m.htHome, m.htAway];
   return [(m.ftHome - m.htHome), (m.ftAway - m.htAway)];
+}
+function periodGoalsN(m){
+  return goalsByPeriod(m, currentPeriod);
 }
 function lastMatchesByRole(matches, team, role){
   const arr = matches
@@ -313,16 +342,20 @@ function percentBTTS(lastMatches){
   lastMatches.forEach(m=>{ const [h,a]=periodGoalsN(m); if(h>0 && a>0) yes++; });
   return pct(yes,n);
 }
-function teamAverages(lastMatches, team){
+function teamAveragesForPeriod(lastMatches, team, period){
   let s=0,c=0,t=0,n=lastMatches.length||1;
   lastMatches.forEach(m=>{
-    const [h,a]=periodGoalsN(m);
+    const [h,a]=goalsByPeriod(m, period);
     const forTeam = (team===m.home)? h : (team===m.away)? a : null;
     const opp     = (team===m.home)? a : (team===m.away)? h : null;
     if(forTeam==null) return;
     s+=forTeam; c+=opp; t+=forTeam+opp;
   });
-  return {avgScored:(s/n).toFixed(1), avgConceded:(c/n).toFixed(1), avgGoals:(t/n).toFixed(1)};
+  return {avgScored:(s/n), avgConceded:(c/n), avgGoals:(t/n)};
+}
+function teamAverages(lastMatches, team){
+  const o = teamAveragesForPeriod(lastMatches, team, currentPeriod);
+  return {avgScored:o.avgScored.toFixed(1), avgConceded:o.avgConceded.toFixed(1), avgGoals:o.avgGoals.toFixed(1)};
 }
 function avgCornersFT(lastMatches){
   let sum=0, n=0;
@@ -335,36 +368,37 @@ function avgCornersFT(lastMatches){
 
 /* ---------- Helpers de summary 3/5/10 ---------- */
 function buildSummaryStats(arr){
-  return {
-    o05: percentOver(arr,0.5),
-    o15: percentOver(arr,1.5),
-    o25: percentOver(arr,2.5),
-    o35: percentOver(arr,3.5),
-    btts: percentBTTS(arr)
-  };
+  return { o05: percentOver(arr,0.5), o15: percentOver(arr,1.5), o25: percentOver(arr,2.5), o35: percentOver(arr,3.5), btts: percentBTTS(arr) };
 }
 
 /* ---------- Poisson helpers ---------- */
+function poisPMF(k, lambda){ return Math.exp(-lambda)*Math.pow(lambda,k)/fact(k); }
+const factMemo=[1]; function fact(n){ if(factMemo[n]!=null) return factMemo[n]; let r=factMemo[factMemo.length-1],i=factMemo.length; for(;i<=n;i++) r=factMemo[i]=r*i; return r; }
 function poisCDF(k, lambda){
   let p0 = Math.exp(-lambda), sum = p0;
   let p = p0;
   for(let i=1;i<=k;i++){ p = p*(lambda/i); sum += p; }
   return sum;
 }
-function probTeamOver(lambda, lineHalf){
-  const k = Math.floor(lineHalf);
-  return 1 - poisCDF(k, lambda);
-}
-function probTotalOver(lambdaH, lambdaA, lineHalf){
-  const L = lambdaH + lambdaA;
-  const k = Math.floor(lineHalf);
-  return 1 - poisCDF(k, L);
-}
-function probBTTS(lambdaH, lambdaA){
-  return 1 - Math.exp(-lambdaH) - Math.exp(-lambdaA) + Math.exp(-(lambdaH+lambdaA));
+function probTeamOver(lambda, lineHalf){ const k = Math.floor(lineHalf); return 1 - poisCDF(k, lambda); }
+function probTotalOver(lambdaH, lambdaA, lineHalf){ const L = lambdaH + lambdaA; const k = Math.floor(lineHalf); return 1 - poisCDF(k, L); }
+function probBTTS(lambdaH, lambdaA){ return 1 - Math.exp(-lambdaH) - Math.exp(-lambdaA) + Math.exp(-(lambdaH+lambdaA)); }
+function matrix1X2(lambdaH, lambdaA, maxG=12){
+  const pH = Array.from({length:maxG+1},(_,h)=>poisPMF(h,lambdaH));
+  const pA = Array.from({length:maxG+1},(_,a)=>poisPMF(a,lambdaA));
+  let p1=0,pX=0,p2=0;
+  for(let h=0;h<=maxG;h++){
+    for(let a=0;a<=maxG;a++){
+      const p = pH[h]*pA[a];
+      if(h>a) p1+=p; else if(h===a) pX+=p; else p2+=p;
+    }
+  }
+  const rem1 = 1 - (p1+pX+p2); // masa truncada
+  // reparte sobrante según tendencia
+  const tot = p1+pX+p2; return {p1:p1/(tot), pX:pX/(tot), p2:p2/(tot), trunc:rem1};
 }
 
-/* ---------- Panels ---------- */
+/* ---------- Panels ya existentes ---------- */
 function calcTeamBlock(matches, team, role){
   const last = lastMatchesByRole(matches, team, role); const n = last.length;
   let noScore=0, noConcede=0, s=0,c=0,t=0;
@@ -396,33 +430,7 @@ function renderTeamPanel(title, stats){
   </div>`;
 }
 
-/* Summary original (opcional) */
-function renderSummaryTable(homeLast, awayLast){
-  const h = { o05: percentOver(homeLast,0.5), o15: percentOver(homeLast,1.5), o25: percentOver(homeLast,2.5), o35: percentOver(homeLast,3.5), btts: percentBTTS(homeLast) };
-  const a = { o05: percentOver(awayLast,0.5), o15: percentOver(awayLast,1.5), o25: percentOver(awayLast,2.5), o35: percentOver(awayLast,3.5), btts: percentBTTS(awayLast) };
-  const avg = (x,y)=>Math.round((x+y)/2);
-  const row = (label, hv, av, mv)=>`
-    <tr>
-      <td>${label}</td>
-      <td>${badge(hv)}</td>
-      <td>${badge(av)}</td>
-      <td><span class="badge ${cls(mv)}">${mv}%</span></td>
-    </tr>`;
-  return `
-    <div class="panel">
-      <h3>Summary (Histórico)</h3>
-      <table>
-        <tr><th></th><th>Home</th><th>Away</th><th>Match</th></tr>
-        ${row('Over 0.5',  h.o05, a.o05, avg(h.o05,a.o05))}
-        ${row('Over 1.5',  h.o15, a.o15, avg(h.o15,a.o15))}
-        ${row('Over 2.5',  h.o25, a.o25, avg(h.o25,a.o25))}
-        ${row('Over 3.5',  h.o35, a.o35, avg(h.o35,a.o35))}
-        ${row('BTTS',      h.btts, a.btts, avg(h.btts,a.btts))}
-      </table>
-    </div>`;
-}
-
-/* ---------- Summary por ventana N (3/5/10) ---------- */
+/* Summary básico */
 function renderSummaryTableN(homeLast10, awayLast10, n){
   const hArr = homeLast10.slice(-n);
   const aArr = awayLast10.slice(-n);
@@ -450,90 +458,16 @@ function renderSummaryTableN(homeLast10, awayLast10, n){
     </div>`;
 }
 
-function renderPoissonSummaryTable(homeTeam, awayTeam, homeLast, awayLast){
-  const hAvg = teamAverages(homeLast, homeTeam);
-  const aAvg = teamAverages(awayLast, awayTeam);
-  const lambdaH = Math.max(0, parseFloat(hAvg.avgScored)||0);
-  const lambdaA = Math.max(0, parseFloat(aAvg.avgScored)||0);
-
-  const lines = [0.5,1.5,2.5,3.5];
-  const row = (L)=>{
-    const ph = Math.round(probTeamOver(lambdaH, L)*100);
-    const pa = Math.round(probTeamOver(lambdaA, L)*100);
-    const pm = Math.round(probTotalOver(lambdaH, lambdaA, L)*100);
-    return `
-      <tr>
-        <td>Over ${L.toFixed(1)}</td>
-        <td>${badge(ph)}</td>
-        <td>${badge(pa)}</td>
-        <td><span class="badge ${cls(pm)}">${pm}%</span></td>
-      </tr>`;
-  };
-  const bttsHome = Math.round((1 - Math.exp(-lambdaH))*100);
-  const bttsAway = Math.round((1 - Math.exp(-lambdaA))*100);
-  const bttsMatch = Math.round(probBTTS(lambdaH, lambdaA)*100);
-
-  return `
-    <div class="panel">
-      <h3>Summary (Poisson · ${currentPeriod})</h3>
-      <div class="kv"><span class="muted">λ Home</span><span class="mono">${lambdaH.toFixed(2)}</span></div>
-      <div class="kv"><span class="muted">λ Away</span><span class="mono">${lambdaA.toFixed(2)}</span></div>
-      <div class="divider"></div>
-      <table>
-        <tr><th></th><th>Home</th><th>Away</th><th>Match</th></tr>
-        ${lines.map(row).join("")}
-        <tr>
-          <td>BTTS</td>
-          <td>${badge(bttsHome)}</td>
-          <td>${badge(bttsAway)}</td>
-          <td><span class="badge ${cls(bttsMatch)}">${bttsMatch}%</span></td>
-        </tr>
-      </table>
-    </div>
-  `;
-}
-
-/* ---------- SPARKLINES ---------- */
+/* ----- Predicciones & Poisson resumidos (para acordeones) ----- */
 function buildSeries(homeLast, awayLast){
   const len = Math.min(homeLast.length, awayLast.length, 10);
   const H = homeLast.slice(-len);
   const A = awayLast.slice(-len);
 
-  const sOver = line => {
-    const out=[];
-    for(let i=0;i<len;i++){
-      const [h1,a1]=periodGoalsN(H[i]); const [h2,a2]=periodGoalsN(A[i]);
-      const v1=(h1+a1>line)?1:0, v2=(h2+a2>line)?1:0;
-      out.push( (v1+v2)/2 * 100 );
-    }
-    return out;
-  };
-  const sBTTS = ()=>{
-    const out=[];
-    for(let i=0;i<len;i++){
-      const [h1,a1]=periodGoalsN(H[i]); const [h2,a2]=periodGoalsN(A[i]);
-      const v1=(h1>0&&a1>0)?1:0, v2=(h2>0&&a2>0)?1:0;
-      out.push( (v1+v2)/2 * 100 );
-    }
-    return out;
-  };
-  const sGoals = ()=>{
-    const out=[];
-    for(let i=0;i<len;i++){
-      const [h1,a1]=periodGoalsN(H[i]); const [h2,a2]=periodGoalsN(A[i]);
-      out.push( (h1+h2 + a1+a2)/2 );
-    }
-    return out;
-  };
-  const sCorners = ()=>{
-    const out=[];
-    for(let i=0;i<len;i++){
-      const c1 = Number(H[i].home_corners_ft||0) + Number(H[i].away_corners_ft||0);
-      const c2 = Number(A[i].home_corners_ft||0) + Number(A[i].away_corners_ft||0);
-      out.push((c1+c2)/2);
-    }
-    return out;
-  };
+  const sOver = line => { const out=[]; for(let i=0;i<len;i++){ const [h1,a1]=goalsByPeriod(H[i], currentPeriod); const [h2,a2]=goalsByPeriod(A[i], currentPeriod); const v1=(h1+a1>line)?1:0, v2=(h2+a2>line)?1:0; out.push( (v1+v2)/2 * 100 ); } return out; };
+  const sBTTS = ()=>{ const out=[]; for(let i=0;i<len;i++){ const [h1,a1]=goalsByPeriod(H[i], currentPeriod); const [h2,a2]=goalsByPeriod(A[i], currentPeriod); const v1=(h1>0&&a1>0)?1:0, v2=(h2>0&&a2>0)?1:0; out.push( (v1+v2)/2 * 100 ); } return out; };
+  const sGoals = ()=>{ const out=[]; for(let i=0;i<len;i++){ const [h1,a1]=goalsByPeriod(H[i], currentPeriod); const [h2,a2]=goalsByPeriod(A[i], currentPeriod); out.push( (h1+h2 + a1+a2)/2 ); } return out; };
+  const sCorners = ()=>{ const out=[]; for(let i=0;i<len;i++){ const c1 = Number(H[i].home_corners_ft||0) + Number(H[i].away_corners_ft||0); const c2 = Number(A[i].home_corners_ft||0) + Number(A[i].away_corners_ft||0); out.push((c1+c2)/2); } return out; };
   return { o05: sOver(0.5), o25: sOver(2.5), o15: sOver(1.5), btts: sBTTS(), goals: sGoals(), corners: sCorners() };
 }
 function drawSpark(canvas, series){
@@ -542,8 +476,7 @@ function drawSpark(canvas, series){
   const w = canvas.clientWidth, h = canvas.clientHeight;
   canvas.width = Math.round(w*dpr); canvas.height = Math.round(h*dpr);
   const ctx = canvas.getContext('2d');
-  ctx.scale(dpr,dpr);
-  ctx.clearRect(0,0,w,h);
+  ctx.scale(dpr,dpr); ctx.clearRect(0,0,w,h);
   if(!series || series.length===0){ return; }
   let min = Math.min(...series), max = Math.max(...series);
   if (min===max){ min = min-1; max = max+1; }
@@ -556,160 +489,47 @@ function drawSpark(canvas, series){
   ctx.lineTo(lastX,h-2); ctx.lineTo(2,h-2); ctx.closePath(); ctx.fillStyle = 'rgba(34,211,238,0.10)'; ctx.fill();
   ctx.beginPath(); ctx.arc(lastX,lastY,2.5,0,Math.PI*2); ctx.fillStyle = '#22d3ee'; ctx.fill();
 }
+function smallPill(big, caption, klass=''){
+  return `<div class="pill ${klass}"><div class="big">${big}</div><div class="caption">${caption}</div><canvas class="spark"></canvas></div>`;
+}
 
-/* --- Game Predictions (Histórico) --- */
+/* --- Game Predictions (histórico simple) --- */
 function renderPredictions(homeTeam, awayTeam, homeLast, awayLast){
   const pO05 = Math.round((percentOver(homeLast,0.5)+percentOver(awayLast,0.5))/2);
   const pO25 = Math.round((percentOver(homeLast,2.5)+percentOver(awayLast,2.5))/2);
   const pO15 = Math.round((percentOver(homeLast,1.5)+percentOver(awayLast,1.5))/2);
   const pBTTS = Math.round((percentBTTS(homeLast)+percentBTTS(awayLast))/2);
 
-  const hAvg = teamAverages(homeLast, homeTeam);
-  const aAvg = teamAverages(awayLast, awayTeam);
-  const expGoals = Math.round((parseFloat(hAvg.avgScored)+parseFloat(aAvg.avgScored)));
+  const hAvg = teamAveragesForPeriod(homeLast, homeTeam, currentPeriod);
+  const aAvg = teamAveragesForPeriod(awayLast, awayTeam, currentPeriod);
+  const expGoals = Math.round((hAvg.avgScored+aAvg.avgScored));
   const avgCorners = Math.round((avgCornersFT(homeLast) + avgCornersFT(awayLast))/2);
 
   const pillClass = p => p>=70?'ok':(p>=50?'warn':'bad');
   const S = buildSeries(homeLast, awayLast);
-  const pill = (key, big, caption, klass='')=>`
-    <div class="pill ${klass}">
-      <div class="big">${big}</div>
-      <div class="caption">${caption}</div>
-      <canvas class="spark" data-key="${key}"></canvas>
-    </div>`;
 
-  setTimeout(()=>{ document.querySelectorAll('.spark').forEach(cv=>{ const key=cv.dataset.key; drawSpark(cv, S[key]); }); },0);
+  setTimeout(()=>{ document.querySelectorAll('.spark').forEach((cv,i)=>{
+    const keys=['o05','o15','o25','btts','goals','corners']; drawSpark(cv, S[keys[i%keys.length]]);
+  }); },0);
 
   return `
-    <div class="panel">
-      <h3>Game Predictions</h3>
-      <div class="pills">
-        ${pill('o05', `${pO05}%`, 'Over 0.5FT', pillClass(pO05))}
-        ${pill('o15', `${pO15}%`, 'Over 1.5FT', pillClass(pO15))}
-        ${pill('o25', `${pO25}%`, 'Over 2.5FT', pillClass(pO25))}
-        ${pill('btts', `${pBTTS}%`, 'BTTS', pillClass(pBTTS))}
-        ${pill('goals', `${expGoals}`, 'Goals')}
-        ${pill('corners', `${avgCorners}`, 'Corners')}
-      </div>
+    <div class="pills">
+      ${smallPill(`${pO05}%`, 'Over 0.5FT', pillClass(pO05))}
+      ${smallPill(`${pO15}%`, 'Over 1.5FT', pillClass(pO15))}
+      ${smallPill(`${pO25}%`, 'Over 2.5FT', pillClass(pO25))}
+      ${smallPill(`${pBTTS}%`, 'BTTS', pillClass(pBTTS))}
+      ${smallPill(`${expGoals}`, 'Goals')}
+      ${smallPill(`${avgCorners}`, 'Corners')}
     </div>`;
 }
 
-/* --- Game Predictions (Poisson) — solo Expected Goals --- */
-function renderPoissonPredictions(homeTeam, awayTeam, homeLast, awayLast){
-  const hAvg = teamAverages(homeLast, homeTeam);
-  const aAvg = teamAverages(awayLast, awayTeam);
-  const lambdaH = Math.max(0, parseFloat(hAvg.avgScored)||0);
-  const lambdaA = Math.max(0, parseFloat(aAvg.avgScored)||0);
-  const L = lambdaH + lambdaA;
-
-  const pill = (big, caption)=>`
-    <div class="pill">
-      <div class="big">${big}</div>
-      <div class="caption">${caption}</div>
-    </div>`;
-
-  return `
-    <div class="panel">
-      <h3>Game Predictions (Poisson)</h3>
-      <div class="pills">
-        ${pill(`${L.toFixed(2)}`, 'Expected Goals (λH+λA)')}
-      </div>
-    </div>
-  `;
-}
-
+/* --- Poisson total & 1X2 --- */
 function valueBox(prob, odd){
   if(!odd || odd<=1) return "";
   const implied = Math.round(100/odd);
   return prob > implied
-    ? `<div class="valueBox value">VALUE (Model ${prob}% vs ${implied}% imp.)</div>`
-    : `<div class="valueBox novalue">NO VALUE (Model ${prob}% vs ${implied}% imp.)</div>`;
-}
-
-/* ===== Explicación breve (texto) ===== */
-function matchHistOver(homeLast, awayLast, line){
-  return Math.round((percentOver(homeLast,line)+percentOver(awayLast,line))/2);
-}
-function shortAdvice({market, probHist, probPois, odd, sideLabel, lambdaH, lambdaA, risks=[]}){
-  const hasPois = (typeof probPois === 'number' && !isNaN(probPois));
-  const consensus = Math.round(hasPois ? (probHist*0.5 + probPois*0.5) : probHist);
-  const implied = (odd && odd>1)? Math.round(100/odd) : null;
-
-  const showBecauseConsensus = consensus >= 55;
-  const showBecauseValue     = (implied!==null && consensus > implied);
-  if(!showBecauseConsensus && !showBecauseValue) return '';
-
-  let verdict = consensus>=70 ? `Apostar ${sideLabel} (${consensus}%)`
-              : `Considerar ${sideLabel} (${consensus}%)`;
-
-  const reasons = [];
-  reasons.push(`Histórico ${probHist}%`);
-  if(hasPois) reasons.push(`Poisson ${probPois}% · λ ${lambdaH.toFixed(2)}–${lambdaA.toFixed(2)}`);
-  if(implied!==null){
-    const value = consensus > implied ? 'value' : 'sin value';
-    reasons.push(`cuota ${odd} (imp. ${implied}%) → ${value}`);
-  }
-  const riskTxt = risks.length ? `<br>  Riesgos: ${risks.join(' · ')}.` : '';
-
-  return `• ${market}: ${verdict}.<br>  Razones: ${reasons.join(' · ')}.${riskTxt}`;
-}
-function renderTextExplanation({
-  homeTeam, awayTeam,
-  homeStats, awayStats,
-  homeLast, awayLast,
-  lambdaH, lambdaA,
-  oddOver, oddUnder
-}){
-  const poisOver = L => Math.round(probTotalOver(lambdaH, lambdaA, L)*100);
-  const poisBTTS = Math.round(probBTTS(lambdaH, lambdaA)*100);
-  const lines = [0.5,1.5,2.5,3.5];
-
-  const oversTextArr = lines.map(L=>{
-    const hist = matchHistOver(homeLast, awayLast, L);
-    const pois = poisOver(L);
-    const useOdd = (L===2.5) ? oddOver : null;
-    return shortAdvice({
-      market:`Over ${L.toFixed(1)} (${homeTeam} vs ${awayTeam})`,
-      probHist:hist, probPois:pois, odd:useOdd, sideLabel:`Over ${L.toFixed(1)}`,
-      lambdaH, lambdaA
-    });
-  }).filter(Boolean);
-
-  const bttsHist = Math.round((percentBTTS(homeLast)+percentBTTS(awayLast))/2);
-  const risksBTTS = [];
-  if(homeStats.pNoScore>=30) risksBTTS.push(`local sin anotar ${homeStats.pNoScore}%`);
-  if(awayStats.pNoConcede>=35) risksBTTS.push(`visitante deja en 0 al rival ${awayStats.pNoConcede}%`);
-  const bttsText = shortAdvice({
-    market:`BTTS (${homeTeam} vs ${awayTeam})`,
-    probHist:bttsHist, probPois:poisBTTS, odd:null, sideLabel:'BTTS',
-    lambdaH, lambdaA, risks:risksBTTS
-  });
-  if(bttsText) oversTextArr.push(bttsText);
-
-  if(oddUnder && oddUnder>1){
-    const over25Hist = matchHistOver(homeLast, awayLast, 2.5);
-    const over25Pois = poisOver(2.5);
-    const histU = 100 - over25Hist;
-    const poisU = 100 - over25Pois;
-    const underText = shortAdvice({
-      market:`Under 2.5 (${homeTeam} vs ${awayTeam})`,
-      probHist:histU, probPois:poisU, odd:oddUnder, sideLabel:'Under 2.5',
-      lambdaH, lambdaA
-    });
-    if(underText) oversTextArr.push(underText);
-  }
-
-  if(oversTextArr.length===0) return '';
-  const note = `Nota: se muestran solo mercados con prob. suficiente (≥55%) o con value vs cuota.`;
-  return `
-    <div class="panel">
-      <h3>Explicación breve (texto)</h3>
-      <div style="line-height:1.4">
-        ${oversTextArr.join('<br><br>')}<br><br>
-        <span class="muted">${note}</span>
-      </div>
-    </div>
-  `;
+    ? `<div class="valueBox value">VALUE (Modelo ${prob}% vs ${implied}% imp.)</div>`
+    : `<div class="valueBox novalue">NO VALUE (Modelo ${prob}% vs ${implied}% imp.)</div>`;
 }
 
 /* ===== Rentabilidad O2.5 (últimos 10 por rol) ===== */
@@ -730,14 +550,7 @@ function computeO25PnlForRole(matches, team, role){
       else   { fails++; stakeProfit = -1; profit -= 1; }
       sumOdds += odd;
     }
-    details.push({
-      idx: idx+1,
-      match: m.Match || `${m.home} - ${m.away}`,
-      result_ft: `${m.ftHome}-${m.ftAway}`,
-      odd_o25: (odd && odd>1)? odd : '',
-      hit: (odd && odd>1)? (hit?'✔':'✘') : '—',
-      pnl: (odd && odd>1)? stakeProfit : '—'
-    });
+    details.push({idx: idx+1, match: m.Match || `${m.home} - ${m.away}`, result_ft: `${m.ftHome}-${m.ftAway}`, odd_o25: (odd && odd>1)? odd : '', hit: (odd && odd>1)? (hit?'✔':'✘') : '—', pnl: (odd && odd>1)? stakeProfit : '—'});
   });
   const avgOdd = considered ? (sumOdds/considered) : 0;
   const roi = considered ? (profit/considered)*100 : 0;
@@ -746,7 +559,6 @@ function computeO25PnlForRole(matches, team, role){
 function renderProfitabilityPanel(leagueMatches, homeTeam, awayTeam){
   const homeRes = computeO25PnlForRole(leagueMatches, homeTeam, 'home');
   const awayRes = computeO25PnlForRole(leagueMatches, awayTeam, 'away');
-
   const row = r => `
     <tr>
       <td>${r.team}</td>
@@ -759,23 +571,8 @@ function renderProfitabilityPanel(leagueMatches, homeTeam, awayTeam){
       <td style="font-weight:700; ${r.profit>=0?'color:#10b981':'color:#ef4444'}">${r.profit.toFixed(2)}</td>
       <td style="${r.roi>=0?'color:#10b981':'color:#ef4444'}">${r.roi.toFixed(1)}%</td>
     </tr>`;
-
-  const csvRows = [
-    ['Tipo','Equipo','Rol','N°','Match','Result FT','Odd O2.5','Hit','PnL'],
-    ...homeRes.details.map(d=>['Detalle', homeRes.team, 'Home', d.idx, d.match, d.result_ft, d.odd_o25, d.hit, d.pnl]),
-    ...awayRes.details.map(d=>['Detalle', awayRes.team, 'Away', d.idx, d.match, d.result_ft, d.odd_o25, d.hit, d.pnl]),
-    [],
-    ['Resumen','Equipo','Rol','Jugados','Considerados','Hits','Fails','Odd media','Profit','ROI%'],
-    ['Resumen', homeRes.team, 'Home', homeRes.played, homeRes.considered, homeRes.hits, homeRes.fails, homeRes.avgOdd.toFixed(2), homeRes.profit.toFixed(2), homeRes.roi.toFixed(1)],
-    ['Resumen', awayRes.team, 'Away', awayRes.played, awayRes.considered, awayRes.hits, awayRes.fails, awayRes.avgOdd.toFixed(2), awayRes.profit.toFixed(2), awayRes.roi.toFixed(1)]
-  ];
-  const csv = csvRows.map(r=>r.map(v=>{
-    const s = (v===null||v===undefined)? '' : String(v);
-    return /[",\n]/.test(s) ? `"${s.replace(/"/g,'""')}"` : s;
-  }).join(',')).join('\n');
-
-  const panel = `
-    <div class="panel" id="profitPanel">
+  return `
+    <div class="panel">
       <h3>Rentabilidad O2.5 (últimos 10 por rol · stake 1u)</h3>
       <table>
         <tr>
@@ -784,31 +581,10 @@ function renderProfitabilityPanel(leagueMatches, homeTeam, awayTeam){
         </tr>
         ${row(homeRes)}${row(awayRes)}
       </table>
-      <button id="downloadCsvBtn" style="margin-top:10px">Descargar CSV (Excel)</button>
       <div class="muted" style="margin-top:6px;font-size:.9rem">
         Nota: “Considerados” excluye partidos sin cuota O2.5 válida. Ordenamos por fecha cuando existe; si no, por el orden del archivo.
       </div>
-    </div>
-  `;
-
-  setTimeout(()=>{
-    const btn = document.getElementById('downloadCsvBtn');
-    if(btn){
-      btn.onclick = ()=>{
-        const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `rentabilidad_o25_${homeTeam}_home_${awayTeam}_away.csv`;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        URL.revokeObjectURL(url);
-      };
-    }
-  },0);
-
-  return panel;
+    </div>`;
 }
 /* ===== FIN Rentabilidad ===== */
 
@@ -828,10 +604,7 @@ document.getElementById("fileInput").addEventListener("change", (e)=>{
       leagueSel.innerHTML = "<option value=''>--Selecciona--</option>" + leagues.map(l=>`<option>${l}</option>`).join("");
       setStatus(`Cargados ${allMatches.length} partidos · ${leagues.length} ligas`, true, false);
       updateSelectionPreview();
-    }catch(err){
-      console.error(err);
-      setStatus('Error al procesar el archivo. Revisa la consola.', false, true);
-    }
+    }catch(err){ console.error(err); setStatus('Error al procesar el archivo. Revisa la consola.', false, true); }
   };
   rd.readAsText(file);
 });
@@ -867,87 +640,215 @@ document.getElementById("analyzeBtn").addEventListener("click", ()=>{
 
     const oddOver = parseFloat(document.getElementById("oddOver").value);
     const oddUnder = parseFloat(document.getElementById("oddUnder").value);
+    const odd1 = parseFloat(document.getElementById("odd1").value);
+    const oddX = parseFloat(document.getElementById("oddX").value);
+    const odd2 = parseFloat(document.getElementById("odd2").value);
+    const cornersLine = parseFloat(document.getElementById("cornersLine").value);
 
     const leagueMatches = allMatches.filter(m=>m.league===league);
     if(leagueMatches.length===0){ setStatus('La liga seleccionada no tiene partidos válidos.', false, true); return; }
 
     const homeLast = lastMatchesByRole(leagueMatches, homeTeam, "home");
     const awayLast = lastMatchesByRole(leagueMatches, awayTeam, "away");
-
     setStatus(`OK · ${homeTeam} (home): ${homeLast.length} partidos · ${awayTeam} (away): ${awayLast.length} partidos.`, true, false);
 
     const homeStats = calcTeamBlock(leagueMatches, homeTeam, "home");
     const awayStats = calcTeamBlock(leagueMatches, awayTeam, "away");
 
-    /* summaries */
+    /* Lambdas FT y 1H para 1X2 y HT/FT */
+    const hFT = teamAveragesForPeriod(homeLast, homeTeam, "FT");
+    const aFT = teamAveragesForPeriod(awayLast, awayTeam, "FT");
+    const lambdaH_FT = Math.max(0, hFT.avgScored||0);
+    const lambdaA_FT = Math.max(0, aFT.avgScored||0);
+
+    const h1H = teamAveragesForPeriod(homeLast, homeTeam, "1H");
+    const a1H = teamAveragesForPeriod(awayLast, awayTeam, "1H");
+    const lambdaH_HT = Math.max(0, h1H.avgScored||0);
+    const lambdaA_HT = Math.max(0, a1H.avgScored||0);
+
+    /* ---- Acordeones ---- */
+
+    // Cabecera equipos
+    const teamsGrid = `
+      <div class="grid">
+        ${renderTeamPanel(homeTeam, homeStats)}
+        ${renderTeamPanel(awayTeam, awayStats)}
+      </div>`;
+
+    // Goles Under/Over (resúmenes + Poisson)
     const summary3  = renderSummaryTableN(homeLast, awayLast, 3);
     const summary5  = renderSummaryTableN(homeLast, awayLast, 5);
     const summary10 = renderSummaryTableN(homeLast, awayLast, 10);
-    const poissonSummary = renderPoissonSummaryTable(homeTeam, awayTeam, homeLast, awayLast);
+    const poissonOU = (()=> {
+      const lines=[0.5,1.5,2.5,3.5];
+      const rows = lines.map(L=>{
+        const ph = Math.round(probTeamOver(lambdaH_FT, L)*100);
+        const pa = Math.round(probTeamOver(lambdaA_FT, L)*100);
+        const pm = Math.round(probTotalOver(lambdaH_FT, lambdaA_FT, L)*100);
+        return `<tr><td>Over ${L.toFixed(1)}</td><td>${badge(ph)}</td><td>${badge(pa)}</td><td><span class="badge ${cls(pm)}">${pm}%</span></td></tr>`;
+      }).join("");
+      const bttsMatch = Math.round(probBTTS(lambdaH_FT, lambdaA_FT)*100);
+      return `
+        <div class="panel">
+          <h3>Poisson (FT)</h3>
+          <table>
+            <tr><th></th><th>Home</th><th>Away</th><th>Match</th></tr>
+            ${rows}
+            <tr><td>BTTS</td><td colspan="2"></td><td><span class="badge ${cls(bttsMatch)}">${bttsMatch}%</span></td></tr>
+          </table>
+        </div>`;
+    })();
 
-    const preds = renderPredictions(homeTeam, awayTeam, homeLast, awayLast);
-    const poissonPreds = renderPoissonPredictions(homeTeam, awayTeam, homeLast, awayLast);
+    // GG/NG (BTTS)
+    const pBTTS_hist = Math.round((percentBTTS(homeLast)+percentBTTS(awayLast))/2);
+    const pBTTS_pois = Math.round(probBTTS(lambdaH_FT, lambdaA_FT)*100);
+    const bttsPanel = `
+      <div class="panel">
+        <h3>GG / NG (BTTS)</h3>
+        <div class="kv"><span>Histórico</span><span class="badge ${cls(pBTTS_hist)}">${pBTTS_hist}%</span></div>
+        <div class="kv"><span>Poisson</span><span class="badge ${cls(pBTTS_pois)}">${pBTTS_pois}%</span></div>
+      </div>`;
 
-    const hAvg = teamAverages(homeLast, homeTeam);
-    const aAvg = teamAverages(awayLast, awayTeam);
-    const lambdaH = Math.max(0, parseFloat(hAvg.avgScored)||0);
-    const lambdaA = Math.max(0, parseFloat(aAvg.avgScored)||0);
+    // 1X2 (Poisson + Value)
+    const m1x2 = matrix1X2(lambdaH_FT, lambdaA_FT, 12);
+    const p1 = Math.round(m1x2.p1*100), pX = Math.round(m1x2.pX*100), p2 = Math.round(m1x2.p2*100);
+    const oneXtwoPanel = `
+      <div class="panel">
+        <h3>1X2 (Poisson + Value)</h3>
+        <table>
+          <tr><th>Selección</th><th>% Modelo</th><th>Cuota</th><th>Implícita</th></tr>
+          <tr><td>1</td><td>${badge(p1)}</td><td>${isNaN(odd1)?'—':odd1}</td><td>${!isNaN(odd1)? Math.round(100/odd1)+'%':'—'}</td></tr>
+          <tr><td>X</td><td>${badge(pX)}</td><td>${isNaN(oddX)?'—':oddX}</td><td>${!isNaN(oddX)? Math.round(100/oddX)+'%':'—'}</td></tr>
+          <tr><td>2</td><td>${badge(p2)}</td><td>${isNaN(odd2)?'—':odd2}</td><td>${!isNaN(odd2)? Math.round(100/odd2)+'%':'—'}</td></tr>
+        </table>
+        ${valueBox(p1, odd1)}
+        ${valueBox(pX, oddX)}
+        ${valueBox(p2, odd2)}
+        <div class="muted" style="margin-top:6px">Nota: matriz truncada a 12 goles por lado (masa perdida: ${(m1x2.trunc*100).toFixed(2)}%).</div>
+      </div>`;
 
-    const textExplain = renderTextExplanation({
-      homeTeam, awayTeam,
-      homeStats, awayStats,
-      homeLast, awayLast,
-      lambdaH, lambdaA,
-      oddOver, oddUnder
-    });
+    // Doble oportunidad
+    const p1X = p1 + pX, p12 = p1 + p2, pX2 = pX + p2;
+    const doubleChance = `
+      <div class="panel">
+        <h3>Doble oportunidad</h3>
+        <table>
+          <tr><th>Mercado</th><th>% Modelo</th></tr>
+          <tr><td>1X</td><td>${badge(p1X)}</td></tr>
+          <tr><td>12</td><td>${badge(p12)}</td></tr>
+          <tr><td>X2</td><td>${badge(pX2)}</td></tr>
+        </table>
+      </div>`;
 
+    // Goles totales (exactos)
+    const L = lambdaH_FT + lambdaA_FT;
+    const exactRows = [0,1,2,3,4,5].map(k=>`<tr><td>${k}</td><td><span class="badge ${cls(Math.round(poisPMF(k,L)*100))}">${Math.round(poisPMF(k,L)*100)}%</span></td></tr>`).join("");
+    const p4plus = Math.max(0, 100 - Math.round([0,1,2,3].reduce((s,k)=>s+poisPMF(k,L),0)*100));
+    const totalsPanel = `
+      <div class="panel">
+        <h3>Goles totales (Poisson FT)</h3>
+        <table>
+          <tr><th>Total</th><th>%</th></tr>
+          ${exactRows}
+          <tr><td>4+</td><td><span class="badge ${cls(p4plus)}">${p4plus}%</span></td></tr>
+        </table>
+      </div>`;
+
+    // Corners Under/Over (histórico)
+    let cornersHTML = '';
+    const avgC_H = avgCornersFT(homeLast), avgC_A = avgCornersFT(awayLast);
+    const avgC = (avgC_H + avgC_A)/2;
+    cornersHTML += `<div class="kv"><span>Promedio corners (últ.10 por rol)</span><span class="mono">${avgC.toFixed(1)}</span></div>`;
+    if(!isNaN(cornersLine)){
+      let over=0, n=0;
+      const both = [...homeLast, ...awayLast].slice(-20);
+      both.forEach(m=>{ const c=(m.home_corners_ft||0)+(m.away_corners_ft||0); if(c!==0||c===0){ n++; if(c>cornersLine) over++; }});
+      const pOverC = pct(over,n);
+      cornersHTML += `<div class="kv"><span>Prob. histórica Over ${cornersLine.toFixed(1)}</span><span class="badge ${cls(pOverC)}">${pOverC}%</span></div>`;
+    }
+    const cornersPanel = `<div class="panel"><h3>Corners Under / Over</h3>${cornersHTML}</div>`;
+
+    // Partidos sin encajar (clean sheets)
+    const cleanPanel = `
+      <div class="panel">
+        <h3>Partidos sin encajar goles</h3>
+        <div class="kv"><span>${homeTeam} (home) no concede</span><span class="badge ${cls(homeStats.pNoConcede)}">${homeStats.pNoConcede}%</span></div>
+        <div class="kv"><span>${awayTeam} (away) no concede</span><span class="badge ${cls(awayStats.pNoConcede)}">${awayStats.pNoConcede}%</span></div>
+        <div class="kv"><span>${homeTeam} (home) no anota</span><span class="badge ${cls(homeStats.pNoScore)}">${homeStats.pNoScore}%</span></div>
+        <div class="kv"><span>${awayTeam} (away) no anota</span><span class="badge ${cls(awayStats.pNoScore)}">${awayStats.pNoScore}%</span></div>
+      </div>`;
+
+    // 1X2 HT/FT (aprox. independencia entre periodos)
+    const ht = matrix1X2(lambdaH_HT, lambdaA_HT, 8);
+    const pHT = {H:Math.round(ht.p1*100), X:Math.round(ht.pX*100), A:Math.round(ht.p2*100)};
+    const ft = {H:p1, X:pX, A:p2}; // de FT
+    const combos = [
+      ['1/1','H','H'],['1/X','H','X'],['1/2','H','A'],
+      ['X/1','X','H'],['X/X','X','X'],['X/2','X','A'],
+      ['2/1','A','H'],['2/X','A','X'],['2/2','A','A'],
+    ];
+    const rowsHTFT = combos.map(([lbl,hf,ff])=>{
+      const p = Math.round((pHT[hf]*ft[ff])/100); // producto simple
+      return `<tr><td>${lbl}</td><td><span class="badge ${cls(p)}">${p}%</span></td></tr>`;
+    }).join("");
+    const htftPanel = `
+      <div class="panel">
+        <h3>1X2 HT/FT (aprox.)</h3>
+        <table><tr><th>Combo</th><th>%</th></tr>${rowsHTFT}</table>
+        <div class="muted" style="margin-top:6px">Aproximación multiplicativa (HT independiente de FT). Úsalo como guía.</div>
+      </div>`;
+
+    // Value Check OU rápido
     const matchOver25 = Math.round((percentOver(homeLast,2.5)+percentOver(awayLast,2.5))/2);
     const valueOver = valueBox(matchOver25, oddOver);
     const valueUnder = valueBox(100-matchOver25, oddUnder);
 
+    // Rentabilidad O2.5
     const pnlPanel = renderProfitabilityPanel(leagueMatches, homeTeam, awayTeam);
 
-    const res = document.getElementById("results");
-    res.innerHTML = `
+    // Acordeones ensamblados
+    const resultsHTML = `
       <div class="kv"><span class="muted">Periodo activo</span><span class="badge b-soft">${currentPeriod}</span></div>
       <div class="divider"></div>
-      <div class="grid">
-        ${renderTeamPanel(homeTeam, homeStats)}
-        ${renderTeamPanel(awayTeam, awayStats)}
-      </div>
+      ${teamsGrid}
 
-      <!-- Summaries por ventanas -->
-      <div class="grid" style="margin-top:12px">
-        ${summary3}
-        ${summary5}
-      </div>
-      <div class="grid" style="margin-top:12px">
-        ${summary10}
-        ${poissonSummary}
-      </div>
-
-      <div style="margin-top:12px">
-        ${preds}
-        ${poissonPreds}
-      </div>
-      <div class="panel" style="margin-top:12px">
-        <h3>Value Check</h3>
-        <div class="grid">
-          <div class="panel"><h3>Over 2.5</h3>${valueOver||'<div class="muted">Ingresa Odd Over 2.5</div>'}</div>
-          <div class="panel"><h3>Under 2.5</h3>${valueUnder||'<div class="muted">Ingresa Odd Under 2.5</div>'}</div>
+      ${acc('GOLES UNDER / OVER', `
+        <div class="grid" style="margin-top:12px">${summary3}${summary5}</div>
+        <div class="grid" style="margin-top:12px">${summary10}${poissonOU}</div>
+        <div class="panel" style="margin-top:12px"><h3>Value Check O/U 2.5</h3>
+          <div class="grid">
+            <div class="panel"><h3>Over 2.5</h3>${valueOver||'<div class="muted">Ingresa Odd Over 2.5</div>'}</div>
+            <div class="panel"><h3>Under 2.5</h3>${valueUnder||'<div class="muted">Ingresa Odd Under 2.5</div>'}</div>
+          </div>
         </div>
-      </div>
-      ${pnlPanel}
-      ${textExplain ? `<div style="margin-top:12px">${textExplain}</div>` : ``}
+      `)}
+
+      ${acc('GG / NG', bttsPanel)}
+
+      ${acc('1X2', oneXtwoPanel)}
+
+      ${acc('DOBLE OPORT.', doubleChance)}
+
+      ${acc('GOLES TOTALES', totalsPanel)}
+
+      ${acc('CORNERS UNDER / OVER', cornersPanel)}
+
+      ${acc('PARTIDOS SIN ENCAJAR GOLES', cleanPanel)}
+
+      ${acc('1X2 HT/FT', htftPanel)}
+
+      ${acc('Game Predicción (histórico con tendencia)', '<div class=\"panel\">'+renderPredictions(homeTeam, awayTeam, homeLast, awayLast)+'</div>')}
+
+      ${acc('Rentabilidad O2.5 (últimos 10 por rol)', pnlPanel)}
     `;
+
+    const res = document.getElementById("results");
+    res.innerHTML = resultsHTML;
 
     if (matchOver25 >= 70) res.style.borderColor = "var(--green)";
     else if (matchOver25 >= 50) res.style.borderColor = "var(--amber)";
     else res.style.borderColor = "var(--red)";
-  }catch(err){
-    console.error(err);
-    setStatus('Ocurrió un error al analizar. Revisa la consola.', false, true);
-  }
+  }catch(err){ console.error(err); setStatus('Ocurrió un error al analizar. Revisa la consola.', false, true); }
 });
 
 /* ===== Vista previa de selección (chips) ===== */
