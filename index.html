@@ -1,969 +1,632 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Estadísticas Over/Under (soporta fecha ES y Odd O25)</title>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Predicción Fútbol — GBDT-free (Logística + Calibración + Edge)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <style>
   :root{
-    --bg:#0a0f1c; --card:#121826; --panel:#1a2333; --text:#e5e7eb; --muted:#94a3b8;
-    --accent:#3b82f6; --green:#10b981; --amber:#f59e0b; --red:#ef4444; --line:#263143;
+    --bg:#0f1115; --panel:#171a21; --panel2:#1f2430; --text:#e6eaf2; --muted:#9aa3b2;
+    --accent:#7aa2ff; --accent2:#5dd4a4; --warn:#ffb84d; --danger:#ff6b6b; --ok:#79e2a6;
+    --border:#2a3140;
   }
   *{box-sizing:border-box}
-  body{font-family:Inter,system-ui,Segoe UI,Arial,sans-serif;background:var(--bg);color:var(--text);margin:0;padding:16px}
-  h1{color:var(--accent);text-align:center;margin:8px 0 16px}
-
-  .card{background:var(--card);border-radius:14px;padding:16px;margin:16px 0;border:3px solid transparent;transition:.2s border-color}
-  label{display:block;margin:10px 0 6px;color:var(--muted);font-size:.95rem}
-  select,input,button{width:100%;padding:12px;border-radius:10px;border:1px solid var(--line);background:#0f1726;color:#e5e7eb;font-size:16px}
-  button{background:var(--accent);border-color:var(--accent);font-weight:600;cursor:pointer}
-  button:hover{filter:brightness(1.05)}
-
-  .tabs{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
-  .tab{flex:1;min-width:110px;background:#0f1726;border:1px solid var(--line);color:#94a3b8;padding:10px;border-radius:10px;cursor:pointer;text-align:center}
-  .tab.active{background:var(--accent);color:#fff;border-color:var(--accent);font-weight:700}
-
-  .grid{display:grid;gap:12px}
-  @media(min-width:900px){.grid{grid-template-columns:1fr 1fr}}
-  .panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px}
-  .panel h3{margin:0 0 10px;font-size:1.05rem;color:#cbd5e1}
-
-  .kv{display:flex;justify-content:space-between;align-items:center;padding:8px 10px;border-bottom:1px dashed var(--line)}
-  .kv:last-child{border-bottom:0}
-  .muted{color:var(--muted)}
-  .mono{font-variant-numeric:tabular-nums}
-  .badge{display:inline-block;min-width:52px;text-align:center;padding:3px 8px;border-radius:999px;font-weight:700;color:#fff}
-  .b-green{background:var(--green)} .b-amber{background:var(--amber)} .b-red{background:var(--red)}
-  .b-soft{background:#0f1726;border:1px solid var(--line);color:#cbd5e1}
-
-  table{width:100%;border-collapse:collapse;font-size:.95rem;margin-top:8px;overflow:hidden;border-radius:10px;border:1px solid var(--line)}
-  th,td{padding:8px 10px;text-align:center;border-bottom:1px solid var(--line)}
-  th{background:#0f1726;color:#cbd5e1;font-weight:600}
-  tr:last-child td{border-bottom:0}
-
-  .valueBox{margin-top:10px;padding:10px;border-radius:10px;text-align:center;font-weight:800}
-  .value{background:var(--green);color:#fff} .novalue{background:var(--red);color:#fff}
-
-  .row{display:grid;gap:10px}
-  @media(min-width:640px){.row{grid-template-columns:1fr 1fr}}
-
-  .pills{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
-  @media(min-width:900px){.pills{grid-template-columns:repeat(3,1fr)}}
-  .pill{
-    position:relative;background:#0f1726;border:1px solid var(--line);
-    border-radius:18px;padding:12px 12px 6px;text-align:center;min-height:84px;
-    display:flex;flex-direction:column;justify-content:space-between;gap:6px;
-    box-shadow:inset 0 -3px 0 0 rgba(255,255,255,0.06);
-  }
-  .pill .big{font-weight:800;font-size:1.05rem}
-  .pill .caption{color:#cbd5e1;font-weight:600}
-  .pill.ok{outline:2px solid var(--green)} .pill.warn{outline:2px solid var(--amber)} .pill.bad{outline:2px solid var(--red)}
-  .spark{width:100%;height:28px}
-
-  .preview{display:flex;gap:8px;flex-wrap:wrap;align-items:center;background:#0f1726;border:1px solid var(--line);border-radius:16px;padding:10px 12px;margin-top:12px}
-  .preview .chip{display:inline-flex;align-items:center;gap:8px;background:#0b1324;border:1px solid var(--line);border-radius:999px;padding:8px 12px;font-weight:700;color:#e5e7eb;box-shadow:inset 0 -2px 0 rgba(255,255,255,.04)}
-  .preview .chip .dot{width:8px;height:8px;border-radius:50%}
-  .preview .chip.league .dot{background:var(--accent)}
-  .preview .chip.home  .dot{background:var(--green)}
-  .preview .chip.away  .dot{background:var(--red)}
-
-  #status{margin-top:8px;font-size:.92rem}
-  #status.ok{color:var(--green)}
-  #status.err{color:var(--red)}
-
-  /* opcional: una línea sutil cuando uso "divider" */
-  .divider{height:8px}
+  html,body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 "Inter",system-ui,-apple-system,Segoe UI,Roboto}
+  main{max-width:1200px;margin:24px auto;padding:0 16px}
+  h1{font-size:22px;font-weight:800;letter-spacing:.2px;margin:0 0 12px}
+  h2{font-size:16px;font-weight:700;margin:18px 0 10px;color:var(--accent)}
+  .sub{color:var(--muted);font-size:13px;margin-top:2px}
+  .grid{display:grid;gap:16px}
+  .g-3{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .g-2{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .card{background:linear-gradient(180deg,var(--panel),var(--panel2));border:1px solid var(--border);border-radius:16px;padding:16px;box-shadow:0 4px 16px #0005}
+  .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  .btn{background:var(--accent);border:none;color:#0b1020;font-weight:700;padding:10px 14px;border-radius:12px;cursor:pointer}
+  .btn.alt{background:var(--accent2)}
+  .btn.ghost{background:transparent;border:1px solid var(--border);color:var(--text)}
+  .btn.warn{background:var(--warn);color:#000}
+  .btn:disabled{opacity:.55;cursor:not-allowed}
+  label{display:block;font-size:12px;color:var(--muted);margin-bottom:6px}
+  input,select{width:100%;padding:10px 12px;border-radius:10px;border:1px solid var(--border);background:#111521;color:#fff}
+  input[type="number"]{text-align:right}
+  input[type="file"]{padding:10px;background:#0b1020}
+  table{width:100%;border-collapse:collapse}
+  th,td{padding:10px;border-bottom:1px solid var(--border);text-align:left}
+  th{font-size:12px;color:var(--muted);font-weight:600}
+  tr:hover td{background:#0f1422}
+  .badge{display:inline-block;padding:3px 8px;border-radius:999px;font-size:11px;font-weight:700}
+  .good{background:#0a3823;color:#94f3c1;border:1px solid #1a7b50}
+  .bad{background:#3a1c1c;color:#ffb3b3;border:1px solid #7b1f1f}
+  .mid{background:#2c2a11;color:#ffe9a1;border:1px solid #685c1c}
+  .knum{font-variant-numeric:tabular-nums}
+  .footer{color:var(--muted);font-size:12px;margin:24px 0 16px}
+  .code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;background:#0c1020;border:1px dashed var(--border);border-radius:10px;padding:8px}
+  .pill{background:#121a2a;border:1px solid var(--border);color:#9aa3b2;padding:6px 10px;border-radius:999px;font-size:12px}
+  .split{display:flex;gap:16px;flex-wrap:wrap}
+  canvas{max-height:280px}
 </style>
 </head>
 <body>
-  <h1>Estadísticas Over/Under</h1>
+<main>
+  <h1>Predicción de Fútbol — Logística + Calibración + Edge (sin Poisson/Monte Carlo)</h1>
+  <div class="sub">Carga <b>CSV o JSON</b>, entreno Over 2.5 y BTTS, calibro, comparo contra cuotas y calculo stakes Kelly.</div>
 
-  <div class="card">
-    <input type="file" id="fileInput" accept=".json,.txt"><br>
-
-    <div class="row">
-      <div>
-        <label>Selecciona Liga</label>
-        <select id="leagueSelect"></select>
+  <!-- CONTROLES PRINCIPALES -->
+  <section class="grid g-3" style="margin-top:16px">
+    <div class="card">
+      <h2>1) Datos</h2>
+      <div class="row">
+        <input id="file" type="file" accept=".csv,.txt,.json,application/json" />
+        <button class="btn ghost" id="btnDemoCSV">Demo CSV</button>
+        <button class="btn ghost" id="btnDemoJSON">Demo JSON</button>
       </div>
-      <div>
-        <label>Odd Over 2.5</label>
-        <input type="number" id="oddOver" step="0.01" placeholder="Ej: 1.90">
-      </div>
+      <p class="sub" style="margin-top:8px">Tu formato con columnas tipo <span class="pill">Match</span>, <span class="pill">Date</span>, <span class="pill">Odd</span>, <span class="pill">Home OnGoal Shots at FT</span> será adaptado automáticamente.</p>
     </div>
 
-    <div class="row">
-      <div>
-        <label>Equipo Local</label>
-        <select id="homeSelect"></select>
-      </div>
-      <div>
-        <label>Odd Under 2.5</label>
-        <input type="number" id="oddUnder" step="0.01" placeholder="Ej: 2.00">
-      </div>
-    </div>
-
-    <label>Equipo Visitante</label>
-    <select id="awaySelect"></select>
-
-    <div class="tabs" id="tabs">
-      <div class="tab active" data-period="FT">Full Time</div>
-      <div class="tab" data-period="1H">First Half</div>
-      <div class="tab" data-period="2H">Second Half</div>
-    </div>
-
-    <button id="analyzeBtn" style="margin-top:10px">Analizar</button>
-    <div id="status" class="muted"></div>
-
-    <div id="selectionPreview" class="preview" style="display:none">
-      <div class="chip league"><span class="dot"></span><span id="pvLeague">—</span></div>
-      <div class="chip home"><span class="dot"></span><span id="pvHome">—</span></div>
-      <div class="chip away"><span class="dot"></span><span id="pvAway">—</span></div>
-    </div>
-  </div>
-
-  <div id="results" class="card"></div>
-
-<script>
-let rawMatches = [];
-let allMatches = []; // normalizados + ts + idx
-let currentPeriod = "FT";
-
-/* ---------- Utils ---------- */
-const toNum = v => (v===null||v===undefined||v==='')? null : Number(v);
-function tryParseJSON(text){
-  try { return JSON.parse(text); } catch(e){}
-  const wrapped = "[" + text.trim().replace(/(^,)|(,$)/g,"").replace(/\n+/g,"\n").replace(/\}\s*,\s*\{/g,"},{") + "]";
-  try { return JSON.parse(wrapped); } catch(e2){ return []; }
-}
-function pct(a,b){ return b ? Math.round((a/b)*100) : 0; }
-function cls(p){ return p>=70?"b-green":(p>=50?"b-amber":"b-red"); }
-function badge(p){ return `<span class="badge ${cls(p)}">${p}%</span>`; }
-function setStatus(msg, ok=false, err=false){
-  const el = document.getElementById('status');
-  el.textContent = msg || '';
-  el.classList.remove('ok','err');
-  if(ok) el.classList.add('ok');
-  if(err) el.classList.add('err');
-}
-
-/* ===== Normalización robusta ===== */
-function getVal(obj, keys){
-  for(const k of keys){ if(obj[k]!==undefined && obj[k]!==null && obj[k]!=='') return obj[k]; }
-  return undefined;
-}
-function splitTeams(matchStr){
-  if(typeof matchStr !== 'string') return [null,null];
-  const parts = matchStr.split(/\s+-\s+|\s+vs\.?\s+|\s+v\s+/i);
-  if(parts.length>=2) return [parts[0].trim(), parts[1].trim()];
-  return [null,null];
-}
-
-/* === Parser de fecha flexible (ES/ISO) === */
-function parseDateFlexible(v){
-  if(v===null || v===undefined || v==='') return null;
-
-  if(typeof v === 'number'){
-    if(v > 1e12) return v;          // ms
-    if(v > 1e9)  return v * 1000;   // s -> ms
-    return null;
-  }
-
-  if(typeof v !== 'string') return null;
-  let s = v.trim();
-
-  // quitar prefijo de día de semana (es)
-  s = s.replace(/^(lun|mar|mi[eé]|jue|vie|s[aá]b|dom)\.?,?\s*/i, '');
-
-  // Intento ISO / parsers nativos
-  const dISO = Date.parse(s);
-  if(!isNaN(dISO)) return dISO;
-
-  // dd/mm/yyyy o dd-mm-yyyy (opcional hora)
-  let m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?$/);
-  if(m){
-    let dd=parseInt(m[1],10), mm=parseInt(m[2],10)-1, yy=parseInt(m[3],10);
-    if(yy<100) yy += 2000;
-    let hh=parseInt(m[4]||'0',10), mi=parseInt(m[5]||'0',10), ss=parseInt(m[6]||'0',10);
-    return new Date(yy,mm,dd,hh,mi,ss).getTime();
-  }
-
-  // mm/dd/yyyy
-  m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?$/);
-  if(m){
-    let mm=parseInt(m[1],10)-1, dd=parseInt(m[2],10), yy=parseInt(m[3],10);
-    if(yy<100) yy += 2000;
-    let hh=parseInt(m[4]||'0',10), mi=parseInt(m[5]||'0',10), ss=parseInt(m[6]||'0',10);
-    return new Date(yy,mm,dd,hh,mi,ss).getTime();
-  }
-
-  // dd mes_es yyyy HH:MM
-  const months = {
-    'ene':'01','feb':'02','mar':'03','abr':'04','may':'05','jun':'06','jul':'07','ago':'08',
-    'sep':'09','sept':'09','set':'09','oct':'10','nov':'11','dic':'12'
-  };
-  m = s.match(/^(\d{1,2})\s+([a-záéíóúñ\.]+)\s+(\d{2,4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/i);
-  if(m){
-    let dd = parseInt(m[1],10);
-    let mon = (m[2]||'').toLowerCase().replace(/\./g,'').normalize('NFD').replace(/[\u0300-\u036f]/g,'');
-    let yy = parseInt(m[3],10); if(yy<100) yy += 2000;
-    let hh = parseInt(m[4]||'0',10), mi=parseInt(m[5]||'0',10), ss=parseInt(m[6]||'0',10);
-    const mm = months[mon];
-    if(mm){
-      return new Date(`${yy}-${mm}-${String(dd).padStart(2,'0')}T${String(hh).padStart(2,'0')}:${String(mi).padStart(2,'0')}:${String(ss).padStart(2,'0')}`).getTime();
-    }
-  }
-
-  return null;
-}
-
-/* === Cuota O2.5 desde Desired Outcome + Odd === */
-function isDesiredO25(x){
-  if(!x) return false;
-  const s = String(x).toLowerCase().replace(/\s+/g,'');
-  return s==='o25' || s==='o2.5' || s==='over2.5' || s==='over25' || s==='over_2_5';
-}
-function extractOddO25(m){
-  if(isDesiredO25(m['Desired Outcome']) || isDesiredO25(m['DesiredOutcome'])){
-    const od = toNum(m.Odd ?? m.odd ?? m['Odd PreMatch'] ?? m['Odd Prematch'] ?? m['Precio'] ?? m['Price']);
-    if(od && od>1) return od;
-  }
-  const direct = m.O25 ?? m.o25 ?? m["Over 2.5"] ?? m["over2.5"] ?? m.over25 ?? m.over_2_5 ??
-                 m["Odd Over 2.5"] ?? m.odd_o25 ?? m.o2_5 ?? m["Odds Over 2.5"] ?? m.price_o25 ?? m.pre_o25;
-  let val = toNum(direct);
-  if(val && val>1) return val;
-  for(const k of Object.keys(m)){
-    const lk = k.toLowerCase();
-    if( /(over|o)\s*2[._\s-]*5/.test(lk) && /(odd|cuota|price|odds|pre)/.test(lk) ){
-      const v = toNum(m[k]); if(v && v>1) return v;
-    }
-  }
-  return null;
-}
-
-function normalizeRow(m, idx){
-  const league = getVal(m, ['League','league','Liga','liga','Competition','competition','league_name']) || '';
-  let home = null, away = null;
-  const matchStr = getVal(m, ['Match','match','Partido','fixture','evento']);
-  if(matchStr){ [home, away] = splitTeams(matchStr); }
-  if(!home) home = getVal(m, ['Home','home','Home Team','home_team','team_home','Local','local']);
-  if(!away) away = getVal(m, ['Away','away','Away Team','away_team','team_away','Visitante','visitante']);
-  home = (home||'').toString().trim();
-  away = (away||'').toString().trim();
-
-  const getScore = (keysStr) => {
-    const s = getVal(m, keysStr);
-    if(typeof s==='string' && /-/.test(s)){ const [a,b]=s.split('-').map(x=>parseInt(x,10)); return [a||0,b||0]; }
-    return [null,null];
-  };
-  const [htH1, htA1] = getScore(['Result HT','result_ht','HT','ht','Half Time','halftime']);
-  const [ftH1, ftA1] = getScore(['Result FT','result_ft','FT','ft','Full Time','fulltime','score']);
-  const htH = (htH1!==null) ? htH1 : (toNum(getVal(m, ['home_ht','ht_home','Home HT'])) ?? 0);
-  const htA = (htA1!==null) ? htA1 : (toNum(getVal(m, ['away_ht','ht_away','Away HT'])) ?? 0);
-  const ftH = (ftH1!==null) ? ftH1 : (toNum(getVal(m, ['home_ft','ft_home','Home FT','home_goals','goals_home'])) ?? 0);
-  const ftA = (ftA1!==null) ? ftA1 : (toNum(getVal(m, ['away_ft','ft_away','Away FT','away_goals','goals_away'])) ?? 0);
-
-  const hcft = toNum(getVal(m, ['Home Corners at FT','home_corners_ft','home_corners','corners_home_ft']));
-  const acft = toNum(getVal(m, ['Away Corners at FT','away_corners_ft','away_corners','corners_away_ft']));
-
-  const dateRaw = getVal(m, [
-    'Date','date','Fecha','fecha','Match Date','match_date','Kickoff','kickoff','Start','start','UtcDate','utcDate','game_date','time','timestamp','ts','datetime'
-  ]);
-  const ts = parseDateFlexible(dateRaw);
-
-  const oddO25 = extractOddO25(m);
-
-  return {
-    idx, ts: (ts||null),
-    league,
-    home, away,
-    Match: (home && away) ? `${home} - ${away}` : (matchStr || ''),
-    htHome: htH||0, htAway: htA||0,
-    ftHome: ftH||0, ftAway: ftA||0,
-    home_corners_ft: hcft ?? 0,
-    away_corners_ft: acft ?? 0,
-    odd_o25: oddO25
-  };
-}
-
-/* ===== Core (sobre datos normalizados) ===== */
-function periodGoalsN(m){
-  if(currentPeriod==="FT") return [m.ftHome, m.ftAway];
-  if(currentPeriod==="1H") return [m.htHome, m.htAway];
-  return [(m.ftHome - m.htHome), (m.ftAway - m.htAway)];
-}
-function lastMatchesByRole(matches, team, role){
-  const arr = matches
-    .filter(m => role==="home" ? m.home===team : m.away===team)
-    .sort((a,b)=>{
-      if(a.ts && b.ts) return a.ts - b.ts;
-      if(a.ts && !b.ts) return 1;
-      if(!a.ts && b.ts) return -1;
-      return a.idx - b.idx;
-    });
-  return arr.slice(-10);
-}
-function percentOver(lastMatches, line){
-  const n = lastMatches.length; let over=0;
-  lastMatches.forEach(m=>{ const [h,a]=periodGoalsN(m); if(h+a>line) over++; });
-  return pct(over,n);
-}
-function percentBTTS(lastMatches){
-  const n = lastMatches.length; let yes=0;
-  lastMatches.forEach(m=>{ const [h,a]=periodGoalsN(m); if(h>0 && a>0) yes++; });
-  return pct(yes,n);
-}
-function teamAverages(lastMatches, team){
-  let s=0,c=0,t=0,n=lastMatches.length||1;
-  lastMatches.forEach(m=>{
-    const [h,a]=periodGoalsN(m);
-    const forTeam = (team===m.home)? h : (team===m.away)? a : null;
-    const opp     = (team===m.home)? a : (team===m.away)? h : null;
-    if(forTeam==null) return;
-    s+=forTeam; c+=opp; t+=forTeam+opp;
-  });
-  return {avgScored:(s/n).toFixed(1), avgConceded:(c/n).toFixed(1), avgGoals:(t/n).toFixed(1)};
-}
-function avgCornersFT(lastMatches){
-  let sum=0, n=0;
-  lastMatches.forEach(m=>{
-    const c = Number(m.home_corners_ft||0) + Number(m.away_corners_ft||0);
-    if(!isNaN(c)){ sum += c; n++; }
-  });
-  return n? (sum/n) : 0;
-}
-
-/* ---------- Helpers de summary 3/5/10 ---------- */
-function buildSummaryStats(arr){
-  return {
-    o05: percentOver(arr,0.5),
-    o15: percentOver(arr,1.5),
-    o25: percentOver(arr,2.5),
-    o35: percentOver(arr,3.5),
-    btts: percentBTTS(arr)
-  };
-}
-
-/* ---------- Poisson helpers ---------- */
-function poisCDF(k, lambda){
-  let p0 = Math.exp(-lambda), sum = p0;
-  let p = p0;
-  for(let i=1;i<=k;i++){ p = p*(lambda/i); sum += p; }
-  return sum;
-}
-function probTeamOver(lambda, lineHalf){
-  const k = Math.floor(lineHalf);
-  return 1 - poisCDF(k, lambda);
-}
-function probTotalOver(lambdaH, lambdaA, lineHalf){
-  const L = lambdaH + lambdaA;
-  const k = Math.floor(lineHalf);
-  return 1 - poisCDF(k, L);
-}
-function probBTTS(lambdaH, lambdaA){
-  return 1 - Math.exp(-lambdaH) - Math.exp(-lambdaA) + Math.exp(-(lambdaH+lambdaA));
-}
-
-/* ---------- Panels ---------- */
-function calcTeamBlock(matches, team, role){
-  const last = lastMatchesByRole(matches, team, role); const n = last.length;
-  let noScore=0, noConcede=0, s=0,c=0,t=0;
-  last.forEach(m=>{
-    const [h,a]=periodGoalsN(m);
-    const forTeam=(team===m.home)?h:(team===m.away)?a:null;
-    const opp=(team===m.home)?a:(team===m.away)?h:null;
-    if(forTeam==null) return; if(forTeam===0) noScore++; if(opp===0) noConcede++; s+=forTeam; c+=opp; t+=forTeam+opp;
-  });
-  return {
-    n, last,
-    avgScored: n?(s/n).toFixed(1):"0.0",
-    avgConceded: n?(c/n).toFixed(1):"0.0",
-    avgGoals: n?(t/n).toFixed(1):"0.0",
-    pNoScore: pct(noScore,n),
-    pNoConcede: pct(noConcede,n)
-  };
-}
-function renderTeamPanel(title, stats){
-  return `
-  <div class="panel">
-    <div class="kv"><span class="muted"><strong>${title}</strong></span><span class="mono"></span></div>
-    <div class="kv"><span class="muted">Avg. Scored</span><span class="mono">${stats.avgScored}</span></div>
-    <div class="kv"><span class="muted">Avg. Suffer</span><span class="mono">${stats.avgConceded}</span></div>
-    <div class="kv"><span class="muted">Avg. Goals</span><span class="mono">${stats.avgGoals}</span></div>
-    <div class="divider"></div>
-    <div class="kv"><span>Games without Scoring</span><span><span class="badge ${cls(stats.pNoScore)}">${stats.pNoScore}%</span></span></div>
-    <div class="kv"><span>Games without Conceding</span><span><span class="badge ${cls(stats.pNoConcede)}">${stats.pNoConcede}%</span></span></div>
-  </div>`;
-}
-
-/* Summary original (opcional) */
-function renderSummaryTable(homeLast, awayLast){
-  const h = { o05: percentOver(homeLast,0.5), o15: percentOver(homeLast,1.5), o25: percentOver(homeLast,2.5), o35: percentOver(homeLast,3.5), btts: percentBTTS(homeLast) };
-  const a = { o05: percentOver(awayLast,0.5), o15: percentOver(awayLast,1.5), o25: percentOver(awayLast,2.5), o35: percentOver(awayLast,3.5), btts: percentBTTS(awayLast) };
-  const avg = (x,y)=>Math.round((x+y)/2);
-  const row = (label, hv, av, mv)=>`
-    <tr>
-      <td>${label}</td>
-      <td>${badge(hv)}</td>
-      <td>${badge(av)}</td>
-      <td><span class="badge ${cls(mv)}">${mv}%</span></td>
-    </tr>`;
-  return `
-    <div class="panel">
-      <h3>Summary (Histórico)</h3>
-      <table>
-        <tr><th></th><th>Home</th><th>Away</th><th>Match</th></tr>
-        ${row('Over 0.5',  h.o05, a.o05, avg(h.o05,a.o05))}
-        ${row('Over 1.5',  h.o15, a.o15, avg(h.o15,a.o15))}
-        ${row('Over 2.5',  h.o25, a.o25, avg(h.o25,a.o25))}
-        ${row('Over 3.5',  h.o35, a.o35, avg(h.o35,a.o35))}
-        ${row('BTTS',      h.btts, a.btts, avg(h.btts,a.btts))}
-      </table>
-    </div>`;
-}
-
-/* ---------- Summary por ventana N (3/5/10) ---------- */
-function renderSummaryTableN(homeLast10, awayLast10, n){
-  const hArr = homeLast10.slice(-n);
-  const aArr = awayLast10.slice(-n);
-  const H = buildSummaryStats(hArr);
-  const A = buildSummaryStats(aArr);
-  const avg = (x,y)=>Math.round((x+y)/2);
-  const row = (label, key)=>`
-    <tr>
-      <td>${label}</td>
-      <td>${badge(H[key])}</td>
-      <td>${badge(A[key])}</td>
-      <td><span class="badge ${cls(avg(H[key],A[key]))}">${avg(H[key],A[key])}%</span></td>
-    </tr>`;
-  return `
-    <div class="panel">
-      <h3>Summary (Histórico · últimos ${n})</h3>
-      <table>
-        <tr><th></th><th>Home</th><th>Away</th><th>Match</th></tr>
-        ${row('Over 0.5','o05')}
-        ${row('Over 1.5','o15')}
-        ${row('Over 2.5','o25')}
-        ${row('Over 3.5','o35')}
-        ${row('BTTS','btts')}
-      </table>
-    </div>`;
-}
-
-function renderPoissonSummaryTable(homeTeam, awayTeam, homeLast, awayLast){
-  const hAvg = teamAverages(homeLast, homeTeam);
-  const aAvg = teamAverages(awayLast, awayTeam);
-  const lambdaH = Math.max(0, parseFloat(hAvg.avgScored)||0);
-  const lambdaA = Math.max(0, parseFloat(aAvg.avgScored)||0);
-
-  const lines = [0.5,1.5,2.5,3.5];
-  const row = (L)=>{
-    const ph = Math.round(probTeamOver(lambdaH, L)*100);
-    const pa = Math.round(probTeamOver(lambdaA, L)*100);
-    const pm = Math.round(probTotalOver(lambdaH, lambdaA, L)*100);
-    return `
-      <tr>
-        <td>Over ${L.toFixed(1)}</td>
-        <td>${badge(ph)}</td>
-        <td>${badge(pa)}</td>
-        <td><span class="badge ${cls(pm)}">${pm}%</span></td>
-      </tr>`;
-  };
-  const bttsHome = Math.round((1 - Math.exp(-lambdaH))*100);
-  const bttsAway = Math.round((1 - Math.exp(-lambdaA))*100);
-  const bttsMatch = Math.round(probBTTS(lambdaH, lambdaA)*100);
-
-  return `
-    <div class="panel">
-      <h3>Summary (Poisson · ${currentPeriod})</h3>
-      <div class="kv"><span class="muted">λ Home</span><span class="mono">${lambdaH.toFixed(2)}</span></div>
-      <div class="kv"><span class="muted">λ Away</span><span class="mono">${lambdaA.toFixed(2)}</span></div>
-      <div class="divider"></div>
-      <table>
-        <tr><th></th><th>Home</th><th>Away</th><th>Match</th></tr>
-        ${lines.map(row).join("")}
-        <tr>
-          <td>BTTS</td>
-          <td>${badge(bttsHome)}</td>
-          <td>${badge(bttsAway)}</td>
-          <td><span class="badge ${cls(bttsMatch)}">${bttsMatch}%</span></td>
-        </tr>
-      </table>
-    </div>
-  `;
-}
-
-/* ---------- SPARKLINES ---------- */
-function buildSeries(homeLast, awayLast){
-  const len = Math.min(homeLast.length, awayLast.length, 10);
-  const H = homeLast.slice(-len);
-  const A = awayLast.slice(-len);
-
-  const sOver = line => {
-    const out=[];
-    for(let i=0;i<len;i++){
-      const [h1,a1]=periodGoalsN(H[i]); const [h2,a2]=periodGoalsN(A[i]);
-      const v1=(h1+a1>line)?1:0, v2=(h2+a2>line)?1:0;
-      out.push( (v1+v2)/2 * 100 );
-    }
-    return out;
-  };
-  const sBTTS = ()=>{
-    const out=[];
-    for(let i=0;i<len;i++){
-      const [h1,a1]=periodGoalsN(H[i]); const [h2,a2]=periodGoalsN(A[i]);
-      const v1=(h1>0&&a1>0)?1:0, v2=(h2>0&&a2>0)?1:0;
-      out.push( (v1+v2)/2 * 100 );
-    }
-    return out;
-  };
-  const sGoals = ()=>{
-    const out=[];
-    for(let i=0;i<len;i++){
-      const [h1,a1]=periodGoalsN(H[i]); const [h2,a2]=periodGoalsN(A[i]);
-      out.push( (h1+h2 + a1+a2)/2 );
-    }
-    return out;
-  };
-  const sCorners = ()=>{
-    const out=[];
-    for(let i=0;i<len;i++){
-      const c1 = Number(H[i].home_corners_ft||0) + Number(H[i].away_corners_ft||0);
-      const c2 = Number(A[i].home_corners_ft||0) + Number(A[i].away_corners_ft||0);
-      out.push((c1+c2)/2);
-    }
-    return out;
-  };
-  return { o05: sOver(0.5), o25: sOver(2.5), o15: sOver(1.5), btts: sBTTS(), goals: sGoals(), corners: sCorners() };
-}
-function drawSpark(canvas, series){
-  if(!canvas) return;
-  const dpr = window.devicePixelRatio||1;
-  const w = canvas.clientWidth, h = canvas.clientHeight;
-  canvas.width = Math.round(w*dpr); canvas.height = Math.round(h*dpr);
-  const ctx = canvas.getContext('2d');
-  ctx.scale(dpr,dpr);
-  ctx.clearRect(0,0,w,h);
-  if(!series || series.length===0){ return; }
-  let min = Math.min(...series), max = Math.max(...series);
-  if (min===max){ min = min-1; max = max+1; }
-  const nx = i => (i/(series.length-1))*(w-4)+2;
-  const ny = v => h-2 - ((v-min)/(max-min))*(h-6);
-  ctx.beginPath(); ctx.lineWidth = 2; ctx.strokeStyle = '#22d3ee';
-  for(let i=0;i<series.length;i++){ const x = nx(i), y = ny(series[i]); if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y); }
-  ctx.stroke();
-  const lastY = ny(series[series.length-1]); const lastX = nx(series.length-1);
-  ctx.lineTo(lastX,h-2); ctx.lineTo(2,h-2); ctx.closePath(); ctx.fillStyle = 'rgba(34,211,238,0.10)'; ctx.fill();
-  ctx.beginPath(); ctx.arc(lastX,lastY,2.5,0,Math.PI*2); ctx.fillStyle = '#22d3ee'; ctx.fill();
-}
-
-/* --- Game Predictions (Histórico) --- */
-function renderPredictions(homeTeam, awayTeam, homeLast, awayLast){
-  const pO05 = Math.round((percentOver(homeLast,0.5)+percentOver(awayLast,0.5))/2);
-  const pO25 = Math.round((percentOver(homeLast,2.5)+percentOver(awayLast,2.5))/2);
-  const pO15 = Math.round((percentOver(homeLast,1.5)+percentOver(awayLast,1.5))/2);
-  const pBTTS = Math.round((percentBTTS(homeLast)+percentBTTS(awayLast))/2);
-
-  const hAvg = teamAverages(homeLast, homeTeam);
-  const aAvg = teamAverages(awayLast, awayTeam);
-  const expGoals = Math.round((parseFloat(hAvg.avgScored)+parseFloat(aAvg.avgScored)));
-  const avgCorners = Math.round((avgCornersFT(homeLast) + avgCornersFT(awayLast))/2);
-
-  const pillClass = p => p>=70?'ok':(p>=50?'warn':'bad');
-  const S = buildSeries(homeLast, awayLast);
-  const pill = (key, big, caption, klass='')=>`
-    <div class="pill ${klass}">
-      <div class="big">${big}</div>
-      <div class="caption">${caption}</div>
-      <canvas class="spark" data-key="${key}"></canvas>
-    </div>`;
-
-  setTimeout(()=>{ document.querySelectorAll('.spark').forEach(cv=>{ const key=cv.dataset.key; drawSpark(cv, S[key]); }); },0);
-
-  return `
-    <div class="panel">
-      <h3>Game Predictions</h3>
-      <div class="pills">
-        ${pill('o05', `${pO05}%`, 'Over 0.5FT', pillClass(pO05))}
-        ${pill('o15', `${pO15}%`, 'Over 1.5FT', pillClass(pO15))}
-        ${pill('o25', `${pO25}%`, 'Over 2.5FT', pillClass(pO25))}
-        ${pill('btts', `${pBTTS}%`, 'BTTS', pillClass(pBTTS))}
-        ${pill('goals', `${expGoals}`, 'Goals')}
-        ${pill('corners', `${avgCorners}`, 'Corners')}
-      </div>
-    </div>`;
-}
-
-/* --- Game Predictions (Poisson) — solo Expected Goals --- */
-function renderPoissonPredictions(homeTeam, awayTeam, homeLast, awayLast){
-  const hAvg = teamAverages(homeLast, homeTeam);
-  const aAvg = teamAverages(awayLast, awayTeam);
-  const lambdaH = Math.max(0, parseFloat(hAvg.avgScored)||0);
-  const lambdaA = Math.max(0, parseFloat(aAvg.avgScored)||0);
-  const L = lambdaH + lambdaA;
-
-  const pill = (big, caption)=>`
-    <div class="pill">
-      <div class="big">${big}</div>
-      <div class="caption">${caption}</div>
-    </div>`;
-
-  return `
-    <div class="panel">
-      <h3>Game Predictions (Poisson)</h3>
-      <div class="pills">
-        ${pill(`${L.toFixed(2)}`, 'Expected Goals (λH+λA)')}
-      </div>
-    </div>
-  `;
-}
-
-function valueBox(prob, odd){
-  if(!odd || odd<=1) return "";
-  const implied = Math.round(100/odd);
-  return prob > implied
-    ? `<div class="valueBox value">VALUE (Model ${prob}% vs ${implied}% imp.)</div>`
-    : `<div class="valueBox novalue">NO VALUE (Model ${prob}% vs ${implied}% imp.)</div>`;
-}
-
-/* ===== Explicación breve (texto) ===== */
-function matchHistOver(homeLast, awayLast, line){
-  return Math.round((percentOver(homeLast,line)+percentOver(awayLast,line))/2);
-}
-function shortAdvice({market, probHist, probPois, odd, sideLabel, lambdaH, lambdaA, risks=[]}){
-  const hasPois = (typeof probPois === 'number' && !isNaN(probPois));
-  const consensus = Math.round(hasPois ? (probHist*0.5 + probPois*0.5) : probHist);
-  const implied = (odd && odd>1)? Math.round(100/odd) : null;
-
-  const showBecauseConsensus = consensus >= 55;
-  const showBecauseValue     = (implied!==null && consensus > implied);
-  if(!showBecauseConsensus && !showBecauseValue) return '';
-
-  let verdict = consensus>=70 ? `Apostar ${sideLabel} (${consensus}%)`
-              : `Considerar ${sideLabel} (${consensus}%)`;
-
-  const reasons = [];
-  reasons.push(`Histórico ${probHist}%`);
-  if(hasPois) reasons.push(`Poisson ${probPois}% · λ ${lambdaH.toFixed(2)}–${lambdaA.toFixed(2)}`);
-  if(implied!==null){
-    const value = consensus > implied ? 'value' : 'sin value';
-    reasons.push(`cuota ${odd} (imp. ${implied}%) → ${value}`);
-  }
-  const riskTxt = risks.length ? `<br>  Riesgos: ${risks.join(' · ')}.` : '';
-
-  return `• ${market}: ${verdict}.<br>  Razones: ${reasons.join(' · ')}.${riskTxt}`;
-}
-function renderTextExplanation({
-  homeTeam, awayTeam,
-  homeStats, awayStats,
-  homeLast, awayLast,
-  lambdaH, lambdaA,
-  oddOver, oddUnder
-}){
-  const poisOver = L => Math.round(probTotalOver(lambdaH, lambdaA, L)*100);
-  const poisBTTS = Math.round(probBTTS(lambdaH, lambdaA)*100);
-  const lines = [0.5,1.5,2.5,3.5];
-
-  const oversTextArr = lines.map(L=>{
-    const hist = matchHistOver(homeLast, awayLast, L);
-    const pois = poisOver(L);
-    const useOdd = (L===2.5) ? oddOver : null;
-    return shortAdvice({
-      market:`Over ${L.toFixed(1)} (${homeTeam} vs ${awayTeam})`,
-      probHist:hist, probPois:pois, odd:useOdd, sideLabel:`Over ${L.toFixed(1)}`,
-      lambdaH, lambdaA
-    });
-  }).filter(Boolean);
-
-  const bttsHist = Math.round((percentBTTS(homeLast)+percentBTTS(awayLast))/2);
-  const risksBTTS = [];
-  if(homeStats.pNoScore>=30) risksBTTS.push(`local sin anotar ${homeStats.pNoScore}%`);
-  if(awayStats.pNoConcede>=35) risksBTTS.push(`visitante deja en 0 al rival ${awayStats.pNoConcede}%`);
-  const bttsText = shortAdvice({
-    market:`BTTS (${homeTeam} vs ${awayTeam})`,
-    probHist:bttsHist, probPois:poisBTTS, odd:null, sideLabel:'BTTS',
-    lambdaH, lambdaA, risks:risksBTTS
-  });
-  if(bttsText) oversTextArr.push(bttsText);
-
-  if(oddUnder && oddUnder>1){
-    const over25Hist = matchHistOver(homeLast, awayLast, 2.5);
-    const over25Pois = poisOver(2.5);
-    const histU = 100 - over25Hist;
-    const poisU = 100 - over25Pois;
-    const underText = shortAdvice({
-      market:`Under 2.5 (${homeTeam} vs ${awayTeam})`,
-      probHist:histU, probPois:poisU, odd:oddUnder, sideLabel:'Under 2.5',
-      lambdaH, lambdaA
-    });
-    if(underText) oversTextArr.push(underText);
-  }
-
-  if(oversTextArr.length===0) return '';
-  const note = `Nota: se muestran solo mercados con prob. suficiente (≥55%) o con value vs cuota.`;
-  return `
-    <div class="panel">
-      <h3>Explicación breve (texto)</h3>
-      <div style="line-height:1.4">
-        ${oversTextArr.join('<br><br>')}<br><br>
-        <span class="muted">${note}</span>
-      </div>
-    </div>
-  `;
-}
-
-/* ===== Rentabilidad O2.5 (últimos 10 por rol) ===== */
-function ftTotalGoals(m){ return (m.ftHome + m.ftAway); }
-function getOver25Odd(m){ return (m.odd_o25 && m.odd_o25>1)? m.odd_o25 : null; }
-function computeO25PnlForRole(matches, team, role){
-  const last = lastMatchesByRole(matches, team, role).slice(-10);
-  let considered=0, hits=0, fails=0, sumOdds=0, profit=0;
-  const details = [];
-  last.forEach((m, idx)=>{
-    const odd = getOver25Odd(m);
-    const tg = ftTotalGoals(m);
-    const hit = tg > 2.5;
-    let stakeProfit = null;
-    if(odd && odd>1){
-      considered++;
-      if(hit){ hits++; stakeProfit = +(odd-1).toFixed(4); profit += (odd-1); }
-      else   { fails++; stakeProfit = -1; profit -= 1; }
-      sumOdds += odd;
-    }
-    details.push({
-      idx: idx+1,
-      match: m.Match || `${m.home} - ${m.away}`,
-      result_ft: `${m.ftHome}-${m.ftAway}`,
-      odd_o25: (odd && odd>1)? odd : '',
-      hit: (odd && odd>1)? (hit?'✔':'✘') : '—',
-      pnl: (odd && odd>1)? stakeProfit : '—'
-    });
-  });
-  const avgOdd = considered ? (sumOdds/considered) : 0;
-  const roi = considered ? (profit/considered)*100 : 0;
-  return { team, role, played:last.length, considered, hits, fails, avgOdd, profit, roi, details };
-}
-function renderProfitabilityPanel(leagueMatches, homeTeam, awayTeam){
-  const homeRes = computeO25PnlForRole(leagueMatches, homeTeam, 'home');
-  const awayRes = computeO25PnlForRole(leagueMatches, awayTeam, 'away');
-
-  const row = r => `
-    <tr>
-      <td>${r.team}</td>
-      <td>${r.role.toUpperCase()}</td>
-      <td>${r.played}</td>
-      <td>${r.considered}</td>
-      <td>${r.hits}</td>
-      <td>${r.fails}</td>
-      <td>${r.avgOdd? r.avgOdd.toFixed(2) : '—'}</td>
-      <td style="font-weight:700; ${r.profit>=0?'color:#10b981':'color:#ef4444'}">${r.profit.toFixed(2)}</td>
-      <td style="${r.roi>=0?'color:#10b981':'color:#ef4444'}">${r.roi.toFixed(1)}%</td>
-    </tr>`;
-
-  const csvRows = [
-    ['Tipo','Equipo','Rol','N°','Match','Result FT','Odd O2.5','Hit','PnL'],
-    ...homeRes.details.map(d=>['Detalle', homeRes.team, 'Home', d.idx, d.match, d.result_ft, d.odd_o25, d.hit, d.pnl]),
-    ...awayRes.details.map(d=>['Detalle', awayRes.team, 'Away', d.idx, d.match, d.result_ft, d.odd_o25, d.hit, d.pnl]),
-    [],
-    ['Resumen','Equipo','Rol','Jugados','Considerados','Hits','Fails','Odd media','Profit','ROI%'],
-    ['Resumen', homeRes.team, 'Home', homeRes.played, homeRes.considered, homeRes.hits, homeRes.fails, homeRes.avgOdd.toFixed(2), homeRes.profit.toFixed(2), homeRes.roi.toFixed(1)],
-    ['Resumen', awayRes.team, 'Away', awayRes.played, awayRes.considered, awayRes.hits, awayRes.fails, awayRes.avgOdd.toFixed(2), awayRes.profit.toFixed(2), awayRes.roi.toFixed(1)]
-  ];
-  const csv = csvRows.map(r=>r.map(v=>{
-    const s = (v===null||v===undefined)? '' : String(v);
-    return /[",\n]/.test(s) ? `"${s.replace(/"/g,'""')}"` : s;
-  }).join(',')).join('\n');
-
-  const panel = `
-    <div class="panel" id="profitPanel">
-      <h3>Rentabilidad O2.5 (últimos 10 por rol · stake 1u)</h3>
-      <table>
-        <tr>
-          <th>Equipo</th><th>Rol</th><th>Jugados</th><th>Considerados</th>
-          <th>Hits</th><th>Fails</th><th>Odd media</th><th>Profit (u)</th><th>ROI</th>
-        </tr>
-        ${row(homeRes)}${row(awayRes)}
-      </table>
-      <button id="downloadCsvBtn" style="margin-top:10px">Descargar CSV (Excel)</button>
-      <div class="muted" style="margin-top:6px;font-size:.9rem">
-        Nota: “Considerados” excluye partidos sin cuota O2.5 válida. Ordenamos por fecha cuando existe; si no, por el orden del archivo.
-      </div>
-    </div>
-  `;
-
-  setTimeout(()=>{
-    const btn = document.getElementById('downloadCsvBtn');
-    if(btn){
-      btn.onclick = ()=>{
-        const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `rentabilidad_o25_${homeTeam}_home_${awayTeam}_away.csv`;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        URL.revokeObjectURL(url);
-      };
-    }
-  },0);
-
-  return panel;
-}
-/* ===== FIN Rentabilidad ===== */
-
-/* ---------- Carga ---------- */
-document.getElementById("fileInput").addEventListener("change", (e)=>{
-  const file = e.target.files[0]; if(!file){ setStatus('No se seleccionó archivo.', false, true); return; }
-  const rd = new FileReader();
-  rd.onload = ev=>{
-    try{
-      rawMatches = tryParseJSON(ev.target.result);
-      if(!Array.isArray(rawMatches) || rawMatches.length===0){ setStatus('No se pudo leer JSON o está vacío.', false, true); return; }
-      allMatches = rawMatches.map((m,idx)=>normalizeRow(m, idx)).filter(r => r.home && r.away);
-      if(allMatches.length===0){ setStatus('No se encontraron partidos válidos tras normalizar.', false, true); return; }
-
-      const leagues = [...new Set(allMatches.map(m=>m.league).filter(Boolean))].sort();
-      const leagueSel = document.getElementById("leagueSelect");
-      leagueSel.innerHTML = "<option value=''>--Selecciona--</option>" + leagues.map(l=>`<option>${l}</option>`).join("");
-      setStatus(`Cargados ${allMatches.length} partidos · ${leagues.length} ligas`, true, false);
-      updateSelectionPreview();
-    }catch(err){
-      console.error(err);
-      setStatus('Error al procesar el archivo. Revisa la consola.', false, true);
-    }
-  };
-  rd.readAsText(file);
-});
-
-document.getElementById("leagueSelect").addEventListener("change", function(){
-  const league = this.value;
-  const leagueMatches = allMatches.filter(m=>m.league===league);
-  const teams = [...new Set(leagueMatches.flatMap(m=>[m.home, m.away]))].sort();
-  document.getElementById("homeSelect").innerHTML = teams.map(t=>`<option>${t}</option>`).join("");
-  document.getElementById("awaySelect").innerHTML = teams.map(t=>`<option>${t}</option>`).join("");
-  setStatus(league ? `Liga: ${league} · ${leagueMatches.length} partidos` : '');
-  setTimeout(updateSelectionPreview,0);
-});
-
-document.getElementById("tabs").addEventListener("click", (e)=>{
-  const t = e.target.closest(".tab"); if(!t) return;
-  document.querySelectorAll(".tab").forEach(x=>x.classList.remove("active"));
-  t.classList.add("active"); currentPeriod = t.dataset.period;
-});
-
-/* ---------- Analizar ---------- */
-document.getElementById("analyzeBtn").addEventListener("click", ()=>{
-  try{
-    updateSelectionPreview();
-
-    const league = document.getElementById("leagueSelect").value;
-    const homeTeam = document.getElementById("homeSelect").value;
-    const awayTeam = document.getElementById("awaySelect").value;
-
-    if(!allMatches.length){ setStatus('Primero carga un archivo JSON.', false, true); return; }
-    if(!league){ setStatus('Selecciona liga.', false, true); return; }
-    if(!homeTeam || !awayTeam || homeTeam===awayTeam){ setStatus('Selecciona equipos válidos (distintos).', false, true); return; }
-
-    const oddOver = parseFloat(document.getElementById("oddOver").value);
-    const oddUnder = parseFloat(document.getElementById("oddUnder").value);
-
-    const leagueMatches = allMatches.filter(m=>m.league===league);
-    if(leagueMatches.length===0){ setStatus('La liga seleccionada no tiene partidos válidos.', false, true); return; }
-
-    const homeLast = lastMatchesByRole(leagueMatches, homeTeam, "home");
-    const awayLast = lastMatchesByRole(leagueMatches, awayTeam, "away");
-
-    setStatus(`OK · ${homeTeam} (home): ${homeLast.length} partidos · ${awayTeam} (away): ${awayLast.length} partidos.`, true, false);
-
-    const homeStats = calcTeamBlock(leagueMatches, homeTeam, "home");
-    const awayStats = calcTeamBlock(leagueMatches, awayTeam, "away");
-
-    /* summaries */
-    const summary3  = renderSummaryTableN(homeLast, awayLast, 3);
-    const summary5  = renderSummaryTableN(homeLast, awayLast, 5);
-    const summary10 = renderSummaryTableN(homeLast, awayLast, 10);
-    const poissonSummary = renderPoissonSummaryTable(homeTeam, awayTeam, homeLast, awayLast);
-
-    const preds = renderPredictions(homeTeam, awayTeam, homeLast, awayLast);
-    const poissonPreds = renderPoissonPredictions(homeTeam, awayTeam, homeLast, awayLast);
-
-    const hAvg = teamAverages(homeLast, homeTeam);
-    const aAvg = teamAverages(awayLast, awayTeam);
-    const lambdaH = Math.max(0, parseFloat(hAvg.avgScored)||0);
-    const lambdaA = Math.max(0, parseFloat(aAvg.avgScored)||0);
-
-    const textExplain = renderTextExplanation({
-      homeTeam, awayTeam,
-      homeStats, awayStats,
-      homeLast, awayLast,
-      lambdaH, lambdaA,
-      oddOver, oddUnder
-    });
-
-    const matchOver25 = Math.round((percentOver(homeLast,2.5)+percentOver(awayLast,2.5))/2);
-    const valueOver = valueBox(matchOver25, oddOver);
-    const valueUnder = valueBox(100-matchOver25, oddUnder);
-
-    const pnlPanel = renderProfitabilityPanel(leagueMatches, homeTeam, awayTeam);
-
-    const res = document.getElementById("results");
-    res.innerHTML = `
-      <div class="kv"><span class="muted">Periodo activo</span><span class="badge b-soft">${currentPeriod}</span></div>
-      <div class="divider"></div>
-      <div class="grid">
-        ${renderTeamPanel(homeTeam, homeStats)}
-        ${renderTeamPanel(awayTeam, awayStats)}
-      </div>
-
-      <!-- Summaries por ventanas -->
-      <div class="grid" style="margin-top:12px">
-        ${summary3}
-        ${summary5}
-      </div>
-      <div class="grid" style="margin-top:12px">
-        ${summary10}
-        ${poissonSummary}
-      </div>
-
-      <div style="margin-top:12px">
-        ${preds}
-        ${poissonPreds}
-      </div>
-      <div class="panel" style="margin-top:12px">
-        <h3>Value Check</h3>
-        <div class="grid">
-          <div class="panel"><h3>Over 2.5</h3>${valueOver||'<div class="muted">Ingresa Odd Over 2.5</div>'}</div>
-          <div class="panel"><h3>Under 2.5</h3>${valueUnder||'<div class="muted">Ingresa Odd Under 2.5</div>'}</div>
+    <div class="card">
+      <h2>2) Configuración</h2>
+      <div class="grid g-2">
+        <div>
+          <label>Rolling ventana corta</label>
+          <input id="rollShort" type="number" value="5" min="3" max="12"/>
+        </div>
+        <div>
+          <label>Rolling ventana larga</label>
+          <input id="rollLong" type="number" value="10" min="5" max="30"/>
+        </div>
+        <div>
+          <label>Umbral Edge (p_model - p_implícita)</label>
+          <input id="edgeThr" type="number" step="0.005" value="0.03"/>
+        </div>
+        <div>
+          <label>Kelly fracción</label>
+          <input id="kellyFrac" type="number" step="0.05" value="0.25"/>
+        </div>
+        <div>
+          <label>Interpretar columna “Odd” como</label>
+          <select id="oddAs">
+            <option value="ignore">(Ignorar)</option>
+            <option value="over" selected>Over 2.5</option>
+            <option value="btts">BTTS (Yes)</option>
+          </select>
         </div>
       </div>
-      ${pnlPanel}
-      ${textExplain ? `<div style="margin-top:12px">${textExplain}</div>` : ``}
-    `;
+      <div class="row" style="margin-top:8px">
+        <button id="btnEntrenar" class="btn">Entrenar modelos</button>
+        <button id="btnPicks" class="btn alt" disabled>Generar picks</button>
+        <button id="btnExport" class="btn ghost" disabled>Exportar picks (CSV)</button>
+      </div>
+    </div>
 
-    if (matchOver25 >= 70) res.style.borderColor = "var(--green)";
-    else if (matchOver25 >= 50) res.style.borderColor = "var(--amber)";
-    else res.style.borderColor = "var(--red)";
-  }catch(err){
-    console.error(err);
-    setStatus('Ocurrió un error al analizar. Revisa la consola.', false, true);
+    <div class="card">
+      <h2>3) Filtros</h2>
+      <div class="grid g-2">
+        <div>
+          <label>Liga</label>
+          <select id="fLeague"><option value="">(Todas)</option></select>
+        </div>
+        <div>
+          <label>Fecha mínima (validación)</label>
+          <input id="minDate" type="date"/>
+        </div>
+      </div>
+      <p class="sub">Split temporal: 80% train / 20% valid.</p>
+    </div>
+  </section>
+
+  <!-- MÉTRICAS Y GRÁFICOS -->
+  <section class="grid g-2" style="margin-top:16px">
+    <div class="card">
+      <h2>Métricas — Over 2.5</h2>
+      <div class="split">
+        <div>
+          <div class="sub">Brier: <b id="brierO" class="knum">—</b> · LogLoss: <b id="loglossO" class="knum">—</b></div>
+          <div class="sub">Calibración: <span id="calibO" class="badge mid">—</span></div>
+        </div>
+      </div>
+      <canvas id="chartReliabO"></canvas>
+    </div>
+    <div class="card">
+      <h2>Métricas — BTTS</h2>
+      <div class="split">
+        <div>
+          <div class="sub">Brier: <b id="brierB" class="knum">—</b> · LogLoss: <b id="loglossB" class="knum">—</b></div>
+          <div class="sub">Calibración: <span id="calibB" class="badge mid">—</span></div>
+        </div>
+      </div>
+      <canvas id="chartReliabB"></canvas>
+    </div>
+  </section>
+
+  <!-- TABLAS DE PICKS -->
+  <section class="grid g-2" style="margin-top:16px">
+    <div class="card">
+      <h2>Picks — Over 2.5</h2>
+      <table id="tblOver">
+        <thead><tr>
+          <th>Fecha</th><th>Liga</th><th>Partido</th>
+          <th>p_model</th><th>p_implícita</th><th>Edge</th><th>Cuota</th><th>Kelly</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <div class="card">
+      <h2>Picks — BTTS</h2>
+      <table id="tblBTTS">
+        <thead><tr>
+          <th>Fecha</th><th>Liga</th><th>Partido</th>
+          <th>p_model</th><th>p_implícita</th><th>Edge</th><th>Cuota</th><th>Kelly</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <div class="footer">Notas: logística L2 + isotónica. Features: forma rolling (xG, tiros a puerta), PPDA (si lo tienes), descanso, clima, árbitro, localía y señales de mercado. Apuesta si <span class="code">p_model − p_implícita &gt; umbral</span>; stake = Kelly×fracción.</div>
+</main>
+
+<script>
+// =================== UTILIDADES BÁSICAS ===================
+const parseCSV = (text) => {
+  const lines = text.replace(/\r/g,'').split('\n').filter(l=>l.trim().length>0)
+  const head = lines[0].split(',').map(h=>h.trim())
+  const rows = []
+  for(let i=1;i<lines.length;i++){
+    const raw = lines[i]
+    const vals = []
+    let cur='', inQ=false
+    for(let j=0;j<raw.length;j++){
+      const c = raw[j]
+      if(c==='"') { inQ=!inQ; continue }
+      if(c===',' && !inQ){ vals.push(cur); cur=''; }
+      else cur+=c
+    }
+    vals.push(cur)
+    const obj = {}
+    head.forEach((h,idx)=> obj[h]= (vals[idx]??'').trim() )
+    rows.push(obj)
   }
-});
-
-/* ===== Vista previa de selección (chips) ===== */
-function updateSelectionPreview(){
-  const league = document.getElementById("leagueSelect").value || "";
-  const home   = document.getElementById("homeSelect").value || "";
-  const away   = document.getElementById("awaySelect").value || "";
-  const pv     = document.getElementById("selectionPreview");
-  document.getElementById("pvLeague").textContent = league || "—";
-  document.getElementById("pvHome").textContent   = home   || "—";
-  document.getElementById("pvAway").textContent   = away   || "—";
-  pv.style.display = (league && home && away && home!==away) ? "flex" : "none";
+  return {columns: head, data: rows}
 }
-["leagueSelect","homeSelect","awaySelect"].forEach(id=>{
-  document.getElementById(id).addEventListener("change", updateSelectionPreview);
-});
+const toNum = (v)=> v===''||v==null? null : Number(v)
+const implied = (odds)=> odds? 1/Number(odds) : null
+const clamp=(x,a,b)=> Math.max(a, Math.min(b, x))
+
+// Normaliza keys: snake_case
+function normalizeObjects(arr){
+  const normKey = (k)=> k.toLowerCase().trim().replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,'')
+  return arr.map(r=>{ const o={}; for(const k of Object.keys(r)){ o[normKey(k)] = (''+r[k]).trim() } return o })
+}
+
+// Fecha “vie., 28 jul. 2023 18:30” -> YYYY-MM-DD
+function parseSpanishDate(s){
+  if(!s) return null;
+  const months={ene:1,feb:2,mar:3,abr:4,may:5,jun:6,jul:7,ago:8,sep:9,oct:10,nov:11,dic:12};
+  const m = String(s).toLowerCase().match(/(\d{1,2})\s+([a-záéíóú\.]{3,})\.?\s+(\d{4})/i);
+  if(!m){ const d=new Date(s); return isNaN(d)? null : d.toISOString().slice(0,10) }
+  const day = String(m[1]).padStart(2,'0');
+  const monKey = m[2].slice(0,3).normalize('NFD').replace(/[\u0300-\u036f\.]/g,'');
+  const mon = months[monKey]; const year=m[3];
+  if(!mon) return null;
+  return `${year}-${String(mon).padStart(2,'0')}-${day}`;
+}
+function splitMatch(s){ if(!s) return {home:null,away:null}; const p=String(s).split('-'); return {home:(p[0]||'').trim(), away:(p[1]||'').trim()} }
+function numSafe(v){ const n=Number(String(v).replace(/[^0-9\.-]/g,'')); return isNaN(n)? null : n }
+
+// =================== ADAPTADOR DE TU ESQUEMA ===================
+function adaptFromCustomSchema(arr){
+  const oddAs = (document.getElementById('oddAs')?.value)||'over';
+  return arr.map(r=>{
+    // Si ya viene normalizado (date/home/away), se respeta
+    if(r.date && r.home && r.away) return r;
+
+    const out = {};
+    // Fecha y liga
+    out.date = r.date || parseSpanishDate(r.date) || parseSpanishDate(r._date) || parseSpanishDate(r.league) || parseSpanishDate(r.name) || null;
+    out.league = r.league || r.name || r.argentina_liga_profesional_de_futbol || r.argentina_liga_profesional || '';
+
+    // Match -> home/away
+    const m = splitMatch(r.match);
+    out.home = m.home || r.home;
+    out.away = m.away || r.away;
+
+    // Resultado FT "2-1"
+    if(r.result_ft){
+      const mm = String(r.result_ft).match(/(\d+)\s*-\s*(\d+)/);
+      if(mm){ out.home_goals=numSafe(mm[1]); out.away_goals=numSafe(mm[2]); }
+    }
+
+    // Stats fáciles
+    out.home_shotsOT = numSafe(r.home_ongoal_shots_at_ft);
+    out.away_shotsOT = numSafe(r.away_ongoal_shots_at_ft);
+    out.home_total_shots = numSafe(r.home_total_shots_at_ft);
+    out.away_total_shots = numSafe(r.away_total_shots_at_ft);
+    out.home_poss = numSafe(r.home_ball_possession_at_ft);
+    out.away_poss = numSafe(r.away_ball_possession_at_ft);
+    out.home_corners = numSafe(r.home_corners_at_ft);
+    out.away_corners = numSafe(r.away_corners_at_ft);
+    out.home_yellowcards_at_ft = numSafe(r.home_yellowcards_at_ft);
+    out.away_yellowcards_at_ft = numSafe(r.away_yellowcards_at_ft);
+    out.home_redcards_at_ft = numSafe(r.home_redcards_at_ft);
+    out.away_redcards_at_ft = numSafe(r.away_redcards_at_ft);
+
+    // Odd única → Over/BTTS/ignorar
+    const odd = numSafe(r.odd);
+    if(oddAs==='over') out.odds_over25 = odd;
+    else if(oddAs==='btts') out.odds_btts = odd;
+
+    // 1X2 (por si quieres ampliar features de mercado)
+    out.odd_1_prematch = numSafe(r.odd_1_prematch);
+    out.odd_x_prematch = numSafe(r.odd_x_prematch);
+    out.odd_2_prematch = numSafe(r.odd_2_prematch);
+
+    // Campos opcionales que el motor entiende (se dejan nulos si no están)
+    out.home_xg = numSafe(out.home_xg);
+    out.away_xg = numSafe(out.away_xg);
+    out.home_ppda = numSafe(out.home_ppda);
+    out.away_ppda = numSafe(out.away_ppda);
+    out.home_rest = numSafe(out.home_rest);
+    out.away_rest = numSafe(out.away_rest);
+    out.referee_fouls_pg = numSafe(out.referee_fouls_pg);
+    out.humidity = numSafe(out.humidity);
+    out.temp = numSafe(out.temp);
+
+    return out;
+  });
+}
+
+// =================== FEATURE ENGINEERING ===================
+function engineerFeatures(rows, opts){
+  const rS = Number(opts.rollShort||5), rL = Number(opts.rollLong||10)
+  rows.sort((a,b)=> (a.date||'').localeCompare(b.date||''))
+  for(const r of rows){
+    r.home_goals = toNum(r.home_goals); r.away_goals = toNum(r.away_goals)
+    ;['odds_over25','odds_btts','home_xg','away_xg','home_shotsOT','away_shotsOT','home_ppda','away_ppda','home_rest','away_rest','referee_fouls_pg','humidity','temp']
+      .forEach(k=> r[k] = toNum(r[k]))
+  }
+  const hist = new Map()
+  function pushTeam(team, isHome, m){
+    const key = team||'__NA__'
+    if(!hist.has(key)) hist.set(key, [])
+    const entry = {
+      date: m.date||'',
+      league: m.league||'',
+      for_xg: isHome? (m.home_xg??null): (m.away_xg??null),
+      ag_xg:  isHome? (m.away_xg??null): (m.home_xg??null),
+      for_soT:isHome? (m.home_shotsOT??null): (m.away_shotsOT??null),
+      ag_soT: isHome? (m.away_shotsOT??null): (m.home_shotsOT??null),
+      ppda:   isHome? (m.home_ppda??null): (m.away_ppda??null),
+      rest:   isHome? (m.home_rest??null): (m.away_rest??null),
+      goals_for: isHome? (m.home_goals??null): (m.away_goals??null),
+      goals_ag:  isHome? (m.away_goals??null): (m.home_goals??null),
+    }
+    hist.get(key).push(entry)
+  }
+  for(const m of rows){ pushTeam(m.home,true,m); pushTeam(m.away,false,m) }
+
+  function rollingStats(team, date){
+    const h = (hist.get(team||'__NA__')||[]).filter(x=> (x.date||'') < (date||''))
+    const take = (arr,n)=> arr.slice(-n)
+    const s5 = take(h,rS), sL = take(h,rL)
+    const avg=(arr,key)=>{ if(arr.length===0) return null; let s=0,c=0; for(const x of arr){ if(x[key]!=null){ s+=x[key]; c++ } } return c? s/c : null }
+    return {
+      s_for_xg: avg(s5,'for_xg'), s_ag_xg: avg(s5,'ag_xg'),
+      l_for_xg: avg(sL,'for_xg'), l_ag_xg: avg(sL,'ag_xg'),
+      s_for_soT: avg(s5,'for_soT'), s_ag_soT: avg(s5,'ag_soT'),
+      s_ppda: avg(s5,'ppda'), l_ppda: avg(sL,'ppda'),
+      s_rest: avg(s5,'rest'), l_rest: avg(sL,'rest'),
+      s_goal_diff: (avg(s5,'goals_for')??0) - (avg(s5,'goals_ag')??0),
+      l_goal_diff: (avg(sL,'goals_for')??0) - (avg(sL,'goals_ag')??0),
+    }
+  }
+
+  for(const m of rows){
+    const fH = rollingStats(m.home, m.date)
+    const fA = rollingStats(m.away, m.date)
+    m.f_for_xg = (fH.s_for_xg??0) - (fA.s_for_xg??0)
+    m.f_ag_xg  = (fH.s_ag_xg??0)  - (fA.s_ag_xg??0)
+    m.f_soT    = (fH.s_for_soT??0) - (fA.s_for_soT??0)
+    m.f_ppda   = (fA.s_ppda??0) - (fH.s_ppda??0)
+    m.f_rest   = (fH.s_rest??0) - (fA.s_rest??0)
+    m.f_goalD  = (fH.s_goal_diff??0) - (fA.s_goal_diff??0)
+
+    m.p_imp_over = implied(m.odds_over25)
+    m.p_imp_btts = implied(m.odds_btts)
+    m.clima_hum = m.humidity ?? 50
+    m.clima_temp = m.temp ?? 18
+    m.ref_fouls = m.referee_fouls_pg ?? 22
+
+    if(m.home_goals!=null && m.away_goals!=null){
+      const tot = m.home_goals + m.away_goals
+      m.y_over25 = (tot>2)?1:0
+      m.y_btts = (m.home_goals>0 && m.away_goals>0)?1:0
+    } else {
+      m.y_over25 = null; m.y_btts = null
+    }
+  }
+  return rows
+}
+
+// =================== LOGÍSTICA (SGD) + ISOTÓNICA ===================
+function makeDesign(rows, target){
+  const X=[], y=[]
+  const cols = ['f_for_xg','f_ag_xg','f_soT','f_ppda','f_rest','f_goalD','p_imp_'+(target==='over'?'over':'btts'),'clima_hum','clima_temp','ref_fouls']
+  for(const r of rows){
+    const lbl = (target==='over')? r.y_over25 : r.y_btts
+    if(lbl==null) continue
+    const row = cols.map(c=> (r[c]==null? 0 : Number(r[c])))
+    X.push(row); y.push(lbl)
+  }
+  const mu = Array(X[0]?.length||0).fill(0), sd = Array(X[0]?.length||0).fill(0)
+  if(X.length){
+    for(let j=0;j<mu.length;j++){
+      let s=0; for(let i=0;i<X.length;i++) s+=X[i][j]; mu[j]=s/X.length
+      let v=0; for(let i=0;i<X.length;i++){ const d=X[i][j]-mu[j]; v+=d*d } sd[j]=Math.sqrt(v/Math.max(1,X.length-1))||1
+      for(let i=0;i<X.length;i++) X[i][j]=(X[i][j]-mu[j])/sd[j]
+    }
+  }
+  return {X,y,cols,mu,sd}
+}
+function trainLogReg(design, epochs=400, lr=0.05, l2=0.001){
+  const {X,y} = design
+  const d = X[0]?.length||0
+  let w = Array(d).fill(0), b=0
+  for(let ep=0; ep<epochs; ep++){
+    for(let i=0;i<X.length;i++){
+      const xi = X[i], yi=y[i]
+      let z=b; for(let j=0;j<d;j++) z+= w[j]*xi[j]
+      const p = 1/(1+Math.exp(-z))
+      const err = p-yi
+      for(let j=0;j<d;j++){
+        w[j] -= lr*(err*xi[j] + l2*w[j])
+      }
+      b -= lr*err
+    }
+  }
+  return {w,b}
+}
+function predictLogReg(design, model, rowObj){
+  const x = design.cols.map(c=> rowObj[c]==null?0:Number(rowObj[c]))
+  for(let j=0;j<x.length;j++) x[j]=(x[j]-design.mu[j])/design.sd[j]
+  let z=model.b; for(let j=0;j<x.length;j++) z+= model.w[j]*x[j]
+  return 1/(1+Math.exp(-z))
+}
+function isotonicFit(probs, labels){
+  const n = probs.length
+  let xy = []
+  for(let i=0;i<n;i++) xy.push({x:probs[i], n:1, y:labels[i]})
+  xy.sort((a,b)=> a.x-b.x)
+  for(let i=0;i<xy.length;){
+    let j=i
+    while(j<xy.length-1 && xy[j].y/xy[j].n > xy[j+1].y/xy[j+1].n){
+      xy[j+1] = {x: xy[j].x+xy[j+1].x, n: xy[j].n+xy[j+1].n, y: xy[j].y+xy[j+1].y}
+      xy.splice(j,1)
+      j=Math.max(0,j-1)
+      if(j===0) break
+    }
+    i++
+  }
+  let out=[]
+  let accx=0, accn=0, accy=0
+  for(const b of xy){ accx+=b.x; accn+=b.n; accy+=b.y; out.push({x:accx/accn, y:accy/accn}) }
+  out = out.map(p=> ({x:clamp(p.x,0,1), y:clamp(p.y,0,1)}))
+  return out
+}
+function isotonicPredict(fit, p){
+  if(!fit || fit.length===0) return p
+  for(let i=0;i<fit.length-1;i++){
+    if(p>=fit[i].x && p<=fit[i+1].x){
+      const t=(p-fit[i].x)/(fit[i+1].x-fit[i].x+1e-9)
+      return fit[i].y + t*(fit[i+1].y - fit[i].y)
+    }
+  }
+  if(p<fit[0].x) return fit[0].y
+  return fit[fit.length-1].y
+}
+
+// =================== MÉTRICAS ===================
+const brier = (p,y)=> { let s=0; for(let i=0;i<p.length;i++){ const d=(p[i]-y[i]); s+=d*d } return s/p.length }
+const logloss = (p,y)=>{ let s=0; for(let i=0;i<p.length;i++){ const pi=clamp(p[i],1e-7,1-1e-7); s += -(y[i]*Math.log(pi)+(1-y[i])*Math.log(1-pi)) } return s/p.length }
+
+// =================== ENTRENAMIENTO / INFERENCIA ===================
+let RAW=[], FEAT=[]
+let designO, modelO, isoO
+let designB, modelB, isoB
+let PICKS=[]
+
+function trainAll(){
+  if(!FEAT.length){ alert('Primero carga datos.'); return }
+  const minDate = document.getElementById('minDate').value || null
+  let train = FEAT.filter(r=> r.y_over25!=null && r.y_btts!=null)
+  if(minDate){ train = train.filter(r=> r.date <= minDate) }
+  const cut = Math.floor(train.length*0.8)
+  const trainSet = train.slice(0,cut)
+  const validSet = train.slice(cut)
+
+  designO = makeDesign(trainSet, 'over'); modelO = trainLogReg(designO)
+  designB = makeDesign(trainSet, 'btts'); modelB = trainLogReg(designB)
+
+  const pO=[], yO=[], pB=[], yB=[]
+  for(const r of validSet){
+    const p1 = predictLogReg(designO, modelO, r)
+    const p2 = predictLogReg(designB, modelB, r)
+    pO.push(p1); yO.push(r.y_over25)
+    pB.push(p2); yB.push(r.y_btts)
+  }
+  isoO = isotonicFit(pO,yO); isoB = isotonicFit(pB,yB)
+
+  const pOc = pO.map(p=> isotonicPredict(isoO,p))
+  const pBc = pB.map(p=> isotonicPredict(isoB,p))
+  document.getElementById('brierO').textContent = brier(pOc,yO).toFixed(4)
+  document.getElementById('loglossO').textContent = logloss(pOc,yO).toFixed(4)
+  document.getElementById('brierB').textContent = brier(pBc,yB).toFixed(4)
+  document.getElementById('loglossB').textContent = logloss(pBc,yB).toFixed(4)
+  setBadge('calibO', calibScore(pOc,yO))
+  setBadge('calibB', calibScore(pBc,yB))
+
+  renderReliability('chartReliabO', pOc, yO)
+  renderReliability('chartReliabB', pBc, yB)
+
+  document.getElementById('btnPicks').disabled = false
+}
+
+function setBadge(id, score){
+  const el = document.getElementById(id)
+  el.textContent = score.txt
+  el.className = 'badge ' + score.cls
+}
+function calibScore(p,y){
+  const bins = binReliability(p,y)
+  let s=0; for(const b of bins){ s += Math.abs(b.acc - b.conf) }
+  const d = s/bins.length
+  if(d<0.02) return {txt:'Excelente', cls:'good'}
+  if(d<0.05) return {txt:'Buena', cls:'mid'}
+  return {txt:'Mejorable', cls:'bad'}
+}
+
+function generatePicks(){
+  const thr = Number(document.getElementById('edgeThr').value||0.03)
+  const kf = Number(document.getElementById('kellyFrac').value||0.25)
+  const league = document.getElementById('fLeague').value
+
+  const future = FEAT.filter(r=> r.y_over25==null && r.y_btts==null)
+                      .filter(r=> !league || r.league===league)
+
+  const outO=[], outB=[]
+  for(const r of future){
+    const p1 = isotonicPredict(isoO, predictLogReg(designO, modelO, r))
+    const p2 = isotonicPredict(isoB, predictLogReg(designB, modelB, r))
+    const imp1 = r.p_imp_over, imp2 = r.p_imp_btts
+    if(imp1){
+      const edge = p1 - imp1
+      if(edge>thr){ outO.push(makePickRow(r,p1,imp1,r.odds_over25,kf)) }
+    }
+    if(imp2){
+      const edge = p2 - imp2
+      if(edge>thr){ outB.push(makePickRow(r,p2,imp2,r.odds_btts,kf)) }
+    }
+  }
+  outO.sort((a,b)=> b.edge-a.edge)
+  outB.sort((a,b)=> b.edge-a.edge)
+  fillTable('tblOver', outO)
+  fillTable('tblBTTS', outB)
+  PICKS = outO.concat(outB)
+  document.getElementById('btnExport').disabled = PICKS.length===0
+}
+
+function makePickRow(r, pModel, pImp, odds, kf){
+  const b = (odds||0)-1
+  const stakeKelly = (odds && b>0) ? Math.max(0, ((b*pModel - (1-pModel))/b)) * kf : 0
+  return { date:r.date, league:r.league, match:`${r.home} vs ${r.away}`, p_model: pModel, p_imp:pImp, edge: pModel-pImp, odds: odds||null, kelly: stakeKelly }
+}
+
+function fillTable(id, rows){
+  const tb = document.querySelector(`#${id} tbody`)
+  tb.innerHTML = rows.map(r=> `<tr>
+    <td>${r.date||''}</td>
+    <td>${r.league||''}</td>
+    <td>${r.match||''}</td>
+    <td class="knum">${(r.p_model??0).toFixed(3)}</td>
+    <td class="knum">${(r.p_imp??0).toFixed(3)}</td>
+    <td class="knum">${(r.edge??0).toFixed(3)}</td>
+    <td class="knum">${r.odds? r.odds.toFixed(2): '—'}</td>
+    <td><span class="badge ${r.kelly>0? 'good':'bad'}">${(r.kelly*100).toFixed(1)}%</span></td>
+  </tr>`).join('')
+}
+
+function exportCSV(){
+  const head=['date','league','match','p_model','p_imp','edge','odds','kelly']
+  const rows = PICKS.map(r=> head.map(k=> r[k]))
+  let csv = head.join(',')+'\n'
+  for(const r of rows){ csv += r.join(',')+'\n' }
+  const blob = new Blob([csv], {type:'text/csv'})
+  const a = document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='picks.csv'; a.click()
+}
+
+// =================== RELIABILITY PLOTS ===================
+function binReliability(p,y, nb=10){
+  const idx = p.map((v,i)=>[v,i]).sort((a,b)=> a[0]-b[0]).map(x=>x[1])
+  const n = p.length, size = Math.max(1, Math.floor(n/nb))
+  const out=[]
+  for(let b=0;b<nb;b++){
+    const start = b*size, end = (b===nb-1? n: (b+1)*size)
+    if(start>=n) break
+    let sP=0,sY=0,c=0
+    for(let i=start;i<end;i++){ const k=idx[i]; sP+=p[k]; sY+=y[k]; c++ }
+    if(c>0) out.push({conf:sP/c, acc:sY/c, n:c})
+  }
+  return out
+}
+function renderReliability(canvasId, p, y){
+  const bins = binReliability(p,y)
+  const ctx = document.getElementById(canvasId).getContext('2d')
+  if(ctx._chart){ ctx._chart.destroy() }
+  const labels = bins.map((_,i)=> `${(i/bins.length*100).toFixed(0)}–${((i+1)/bins.length*100).toFixed(0)}%`)
+  const data1 = bins.map(b=> b.acc)
+  const data2 = bins.map(b=> b.conf)
+  ctx._chart = new Chart(ctx, { type:'line', data:{ labels, datasets:[ {label:'Exactitud', data:data1}, {label:'Confianza', data:data2} ]}, options:{ responsive:true, interaction:{mode:'index',intersect:false}, scales:{ y:{min:0,max:1} } } })
+}
+
+// =================== CARGA: CSV o JSON ===================
+function refreshLeagueFilter(data){
+  const sel = document.getElementById('fLeague')
+  const leagues = Array.from(new Set(data.map(r=> r.league))).filter(Boolean).sort()
+  sel.innerHTML = '<option value="">(Todas)</option>' + leagues.map(l=> `<option>${l}</option>`).join('')
+}
+
+function handleCSV(text){
+  const {columns, data} = parseCSV(text)
+  let norm = normalizeObjects(data)
+  norm = adaptFromCustomSchema(norm)
+  RAW = norm
+  FEAT = engineerFeatures(RAW, {rollShort:document.getElementById('rollShort').value, rollLong:document.getElementById('rollLong').value})
+  refreshLeagueFilter(FEAT)
+  alert('Datos CSV cargados: '+FEAT.length+' filas.')
+}
+
+function handleJSON(text){
+  let obj
+  try{ obj = JSON.parse(text) }catch(e){ alert('JSON inválido.'); return }
+  let arr = Array.isArray(obj)? obj : (obj && Array.isArray(obj.data)? obj.data : null)
+  if(!arr){ alert('El JSON debe ser un array de partidos o {data:[...]}.'); return }
+  let norm = normalizeObjects(arr)
+  norm = adaptFromCustomSchema(norm)
+  RAW = norm
+  FEAT = engineerFeatures(RAW, {rollShort:document.getElementById('rollShort').value, rollLong:document.getElementById('rollLong').value})
+  refreshLeagueFilter(FEAT)
+  alert('Datos JSON cargados: '+FEAT.length+' filas.')
+}
+
+function loadAuto(text, name){
+  const lower = (name||'').toLowerCase()
+  if(lower.endsWith('.json')){ handleJSON(text); return }
+  try{ const p=JSON.parse(text); if(Array.isArray(p) || (p && typeof p==='object')){ handleJSON(text); return } }catch(e){}
+  handleCSV(text)
+}
+
+// ======= DEMOS (puedes borrar) =======
+const DEMO_CSV = `Name,Desired Outcome,Odd,Date,League,Match,Home OnGoal Shots at FT,Away OnGoal Shots at FT,Result FT
+Argentina Liga Profesional,1,1.53,vie., 28 jul. 2023 18:30,Argentina Liga Profesional de Fútbol,River Plate - Racing Club,6,4,2-1
+`
+const DEMO_JSON = [
+  {"Name":"Argentina Liga Profesional","Desired Outcome":"1","Odd":"1.53","Date":"vie., 28 jul. 2023 18:30","League":"Argentina Liga Profesional de Fútbol","Match":"River Plate - Racing Club","Home OnGoal Shots at FT":"6","Away OnGoal Shots at FT":"4","Result FT":"2-1"}
+]
+
+// =================== EVENTOS UI ===================
+const fileInput = document.getElementById('file')
+fileInput.addEventListener('change', (e)=>{
+  const f=e.target.files[0]; if(!f) return
+  const fr = new FileReader(); fr.onload = ()=> loadAuto(fr.result, f.name); fr.readAsText(f)
+})
+document.getElementById('btnDemoCSV').addEventListener('click', ()=> handleCSV(DEMO_CSV))
+document.getElementById('btnDemoJSON').addEventListener('click', ()=> handleJSON(JSON.stringify(DEMO_JSON)))
+document.getElementById('btnEntrenar').addEventListener('click', trainAll)
+document.getElementById('btnPicks').addEventListener('click', generatePicks)
+document.getElementById('btnExport').addEventListener('click', exportCSV)
 </script>
 </body>
 </html>
