@@ -48,12 +48,13 @@
   .pill{background:#121a2a;border:1px solid var(--border);color:#9aa3b2;padding:6px 10px;border-radius:999px;font-size:12px}
   .split{display:flex;gap:16px;flex-wrap:wrap}
   canvas{max-height:280px}
+  .tbl-small td{font-size:12px}
 </style>
 </head>
 <body>
 <main>
   <h1>Predicción de Fútbol — Logística + Calibración + Edge (sin Poisson/Monte Carlo)</h1>
-  <div class="sub">Carga <b>CSV o JSON</b>, entreno Over 2.5 y BTTS, calibro, comparo contra cuotas y calculo stakes Kelly.</div>
+  <div class="sub">Carga <b>CSV o JSON</b> con histórico para entrenar. Luego <b>agrega manualmente</b> los partidos (Local vs Visitante + cuotas) y genera picks.</div>
 
   <!-- CONTROLES PRINCIPALES -->
   <section class="grid g-3" style="margin-top:16px">
@@ -116,6 +117,51 @@
       </div>
       <p class="sub">Split temporal: 80% train / 20% valid.</p>
     </div>
+  </section>
+
+  <!-- NUEVO: PARTIDOS MANUALES -->
+  <section class="card" style="margin-top:8px">
+    <h2>4) Partidos a analizar (manual)</h2>
+    <div class="grid g-3">
+      <div>
+        <label>Fecha (YYYY-MM-DD)</label>
+        <input id="fiDate" type="date" />
+      </div>
+      <div>
+        <label>Liga</label>
+        <input id="fiLeague" type="text" placeholder="Ej: Argentina Liga Profesional"/>
+      </div>
+      <div class="grid g-2" style="gap:8px">
+        <div>
+          <label>Local</label>
+          <input id="fiHome" type="text" placeholder="Ej: River Plate"/>
+        </div>
+        <div>
+          <label>Visitante</label>
+          <input id="fiAway" type="text" placeholder="Ej: Racing Club"/>
+        </div>
+      </div>
+      <div>
+        <label>Cuota Over 2.5</label>
+        <input id="fiOver" type="number" step="0.01" placeholder="Ej: 1.95"/>
+      </div>
+      <div>
+        <label>Cuota BTTS (Yes)</label>
+        <input id="fiBTTS" type="number" step="0.01" placeholder="Ej: 1.85"/>
+      </div>
+      <div style="display:flex;align-items:flex-end">
+        <button id="btnAddFixture" class="btn">Agregar partido</button>
+      </div>
+    </div>
+
+    <div class="sub" style="margin-top:8px">Los partidos agregados aquí se consideran “futuros” (sin resultado). Se usarán al pulsar <b>Generar picks</b>.</div>
+
+    <table id="tblFixtures" class="tbl-small" style="margin-top:10px">
+      <thead><tr>
+        <th>Fecha</th><th>Liga</th><th>Partido</th><th>Odd Over</th><th>Odd BTTS</th><th></th>
+      </tr></thead>
+      <tbody></tbody>
+    </table>
   </section>
 
   <!-- MÉTRICAS Y GRÁFICOS -->
@@ -221,12 +267,11 @@ function numSafe(v){ const n=Number(String(v).replace(/[^0-9\.-]/g,'')); return 
 function adaptFromCustomSchema(arr){
   const oddAs = (document.getElementById('oddAs')?.value)||'over';
   return arr.map(r=>{
-    // Si ya viene normalizado (date/home/away), se respeta
-    if(r.date && r.home && r.away) return r;
+    if(r.date && r.home && r.away) return r; // ya normalizado
 
     const out = {};
     // Fecha y liga
-    out.date = r.date || parseSpanishDate(r.date) || parseSpanishDate(r._date) || parseSpanishDate(r.league) || parseSpanishDate(r.name) || null;
+    out.date = parseSpanishDate(r.date) || parseSpanishDate(r._date) || parseSpanishDate(r.league) || parseSpanishDate(r.name) || r.date || null;
     out.league = r.league || r.name || r.argentina_liga_profesional_de_futbol || r.argentina_liga_profesional || '';
 
     // Match -> home/away
@@ -264,7 +309,7 @@ function adaptFromCustomSchema(arr){
     out.odd_x_prematch = numSafe(r.odd_x_prematch);
     out.odd_2_prematch = numSafe(r.odd_2_prematch);
 
-    // Campos opcionales que el motor entiende (se dejan nulos si no están)
+    // Campos opcionales
     out.home_xg = numSafe(out.home_xg);
     out.away_xg = numSafe(out.away_xg);
     out.home_ppda = numSafe(out.home_ppda);
@@ -437,12 +482,20 @@ let RAW=[], FEAT=[]
 let designO, modelO, isoO
 let designB, modelB, isoB
 let PICKS=[]
+let MANUAL_FIXTURES=[] // ← nuevos partidos agregados a mano
 
 function trainAll(){
-  if(!FEAT.length){ alert('Primero carga datos.'); return }
+  if(!FEAT.length){ alert('Primero carga datos históricos.'); return }
   const minDate = document.getElementById('minDate').value || null
+
+  // Solo histórico para entrenar (filas con resultado)
   let train = FEAT.filter(r=> r.y_over25!=null && r.y_btts!=null)
   if(minDate){ train = train.filter(r=> r.date <= minDate) }
+
+  if(train.length < 30){
+    alert('Pocas filas con resultado para entrenar (min. recomendado: 30). Carga más histórico.');
+  }
+
   const cut = Math.floor(train.length*0.8)
   const trainSet = train.slice(0,cut)
   const validSet = train.slice(cut)
@@ -461,10 +514,10 @@ function trainAll(){
 
   const pOc = pO.map(p=> isotonicPredict(isoO,p))
   const pBc = pB.map(p=> isotonicPredict(isoB,p))
-  document.getElementById('brierO').textContent = brier(pOc,yO).toFixed(4)
-  document.getElementById('loglossO').textContent = logloss(pOc,yO).toFixed(4)
-  document.getElementById('brierB').textContent = brier(pBc,yB).toFixed(4)
-  document.getElementById('loglossB').textContent = logloss(pBc,yB).toFixed(4)
+  document.getElementById('brierO').textContent = (pOc.length? brier(pOc,yO).toFixed(4): '—')
+  document.getElementById('loglossO').textContent = (pOc.length? logloss(pOc,yO).toFixed(4): '—')
+  document.getElementById('brierB').textContent = (pBc.length? brier(pBc,yB).toFixed(4): '—')
+  document.getElementById('loglossB').textContent = (pBc.length? logloss(pBc,yB).toFixed(4): '—')
   setBadge('calibO', calibScore(pOc,yO))
   setBadge('calibB', calibScore(pBc,yB))
 
@@ -480,6 +533,7 @@ function setBadge(id, score){
   el.className = 'badge ' + score.cls
 }
 function calibScore(p,y){
+  if(!p.length) return {txt:'—', cls:'mid'}
   const bins = binReliability(p,y)
   let s=0; for(const b of bins){ s += Math.abs(b.acc - b.conf) }
   const d = s/bins.length
@@ -489,12 +543,19 @@ function calibScore(p,y){
 }
 
 function generatePicks(){
+  if(!designO || !designB){ alert('Primero entrena los modelos.'); return }
   const thr = Number(document.getElementById('edgeThr').value||0.03)
   const kf = Number(document.getElementById('kellyFrac').value||0.25)
   const league = document.getElementById('fLeague').value
 
-  const future = FEAT.filter(r=> r.y_over25==null && r.y_btts==null)
-                      .filter(r=> !league || r.league===league)
+  // Solo los manuales (o cualquiera sin resultado) — pero priorizamos los manuales
+  const future = FEAT
+    .filter(r=> r.__manualFixture === true) // ← marca añadida al agregar
+    .filter(r=> !league || r.league===league)
+
+  if(future.length===0){
+    alert('No hay partidos manuales agregados. Usa la sección 4) para añadir Local vs Visitante con cuotas.');
+  }
 
   const outO=[], outB=[]
   for(const r of future){
@@ -516,6 +577,10 @@ function generatePicks(){
   fillTable('tblBTTS', outB)
   PICKS = outO.concat(outB)
   document.getElementById('btnExport').disabled = PICKS.length===0
+
+  if(outO.length===0 && outB.length===0){
+    alert('No se generaron picks con el umbral actual. Prueba ajustar el Edge o revisa cuotas.');
+  }
 }
 
 function makePickRow(r, pModel, pImp, odds, kf){
@@ -549,6 +614,7 @@ function exportCSV(){
 
 // =================== RELIABILITY PLOTS ===================
 function binReliability(p,y, nb=10){
+  if(!p.length) return []
   const idx = p.map((v,i)=>[v,i]).sort((a,b)=> a[0]-b[0]).map(x=>x[1])
   const n = p.length, size = Math.max(1, Math.floor(n/nb))
   const out=[]
@@ -565,6 +631,7 @@ function renderReliability(canvasId, p, y){
   const bins = binReliability(p,y)
   const ctx = document.getElementById(canvasId).getContext('2d')
   if(ctx._chart){ ctx._chart.destroy() }
+  if(!bins.length){ ctx.canvas.replaceWith(ctx.canvas.cloneNode(true)); return }
   const labels = bins.map((_,i)=> `${(i/bins.length*100).toFixed(0)}–${((i+1)/bins.length*100).toFixed(0)}%`)
   const data1 = bins.map(b=> b.acc)
   const data2 = bins.map(b=> b.conf)
@@ -608,13 +675,68 @@ function loadAuto(text, name){
   handleCSV(text)
 }
 
-// ======= DEMOS (puedes borrar) =======
+// ======= DEMOS =======
 const DEMO_CSV = `Name,Desired Outcome,Odd,Date,League,Match,Home OnGoal Shots at FT,Away OnGoal Shots at FT,Result FT
 Argentina Liga Profesional,1,1.53,vie., 28 jul. 2023 18:30,Argentina Liga Profesional de Fútbol,River Plate - Racing Club,6,4,2-1
 `
 const DEMO_JSON = [
   {"Name":"Argentina Liga Profesional","Desired Outcome":"1","Odd":"1.53","Date":"vie., 28 jul. 2023 18:30","League":"Argentina Liga Profesional de Fútbol","Match":"River Plate - Racing Club","Home OnGoal Shots at FT":"6","Away OnGoal Shots at FT":"4","Result FT":"2-1"}
 ]
+
+// =================== PARTIDOS MANUALES (nuevo) ===================
+function renderFixtures(){
+  const tb = document.querySelector('#tblFixtures tbody')
+  tb.innerHTML = MANUAL_FIXTURES.map((r,idx)=> `<tr>
+    <td>${r.date||''}</td>
+    <td>${r.league||''}</td>
+    <td>${r.home||''} vs ${r.away||''}</td>
+    <td class="knum">${r.odds_over25? Number(r.odds_over25).toFixed(2): '—'}</td>
+    <td class="knum">${r.odds_btts? Number(r.odds_btts).toFixed(2): '—'}</td>
+    <td><button class="btn warn" onclick="removeFixture(${idx})">Quitar</button></td>
+  </tr>`).join('')
+}
+
+function removeFixture(idx){
+  MANUAL_FIXTURES.splice(idx,1)
+  // reconstruimos FEAT: histórico + manuales
+  RAW = RAW.filter(r=> !r.__manualFixture).concat(MANUAL_FIXTURES)
+  FEAT = engineerFeatures(RAW, {rollShort:document.getElementById('rollShort').value, rollLong:document.getElementById('rollLong').value})
+  refreshLeagueFilter(FEAT)
+  renderFixtures()
+}
+
+function addFixture(){
+  const d = (document.getElementById('fiDate').value||'').trim()
+  const l = (document.getElementById('fiLeague').value||'').trim()
+  const h = (document.getElementById('fiHome').value||'').trim()
+  const a = (document.getElementById('fiAway').value||'').trim()
+  const oOver = document.getElementById('fiOver').value
+  const oBTTS = document.getElementById('fiBTTS').value
+
+  if(!d || !h || !a){ alert('Fecha, Local y Visitante son obligatorios.'); return }
+  const row = {
+    date: d, league: l, home: h, away: a,
+    odds_over25: (oOver? Number(oOver): null),
+    odds_btts: (oBTTS? Number(oBTTS): null),
+    // sin resultado → futuros
+    y_over25: null, y_btts: null,
+    __manualFixture: true
+  }
+  MANUAL_FIXTURES.push(row)
+
+  // FEAT = histórico + manuales (recalcular para construir features de forma)
+  RAW = RAW.filter(r=> !r.__manualFixture).concat(MANUAL_FIXTURES)
+  FEAT = engineerFeatures(RAW, {rollShort:document.getElementById('rollShort').value, rollLong:document.getElementById('rollLong').value})
+  refreshLeagueFilter(FEAT)
+  renderFixtures()
+
+  // limpiar inputs mínimos
+  // (conservamos liga por comodidad)
+  document.getElementById('fiHome').value=''
+  document.getElementById('fiAway').value=''
+  document.getElementById('fiOver').value=''
+  document.getElementById('fiBTTS').value=''
+}
 
 // =================== EVENTOS UI ===================
 const fileInput = document.getElementById('file')
@@ -627,6 +749,7 @@ document.getElementById('btnDemoJSON').addEventListener('click', ()=> handleJSON
 document.getElementById('btnEntrenar').addEventListener('click', trainAll)
 document.getElementById('btnPicks').addEventListener('click', generatePicks)
 document.getElementById('btnExport').addEventListener('click', exportCSV)
+document.getElementById('btnAddFixture').addEventListener('click', addFixture)
 </script>
 </body>
 </html>
