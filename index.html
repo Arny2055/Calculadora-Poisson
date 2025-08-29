@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Predicción Fútbol — Probabilidades (Over, BTTS, 1X2) + Historial por Equipo</title>
+<title>Predicción Fútbol — Probabilidades (Over, BTTS, 1X2) + Elo + Priors</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
@@ -23,17 +23,17 @@
   .grid{display:grid;gap:16px}
   .g-3{grid-template-columns:repeat(3,minmax(0,1fr))}
   .g-2{grid-template-columns:repeat(2,minmax(0,1fr))}
-  .card{background:linear-gradient(180deg,var(--panel),var(--panel2));border:1px solid var(--border);border-radius:16px;padding:16px;box-shadow:0 4px 16px #0005;overflow:hidden}
+  .card{background:linear-gradient(180deg,var(--panel),var(--panel2));border:1px solid var(--border);border-radius:16px;padding:16px;box-shadow:0 4px 16px #0005}
   .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
   .btn{background:var(--accent);border:none;color:#0b1020;font-weight:700;padding:10px 14px;border-radius:12px;cursor:pointer}
   .btn.alt{background:var(--accent2)}
-  .btn.ghost{background:transparent;border:1px solid var(--border);color:var(--text)}
+  .btn.ghost{background:transparent;border:1px solid var(--border);color:#var(--text)}
   .btn.warn{background:var(--warn);color:#000}
   .btn:disabled{opacity:.55;cursor:not-allowed}
   label{display:block;font-size:12px;color:var(--muted);margin-bottom:6px}
   input,select{width:100%;padding:10px 12px;border-radius:10px;border:1px solid var(--border);background:#111521;color:#fff}
-  table{width:100%;border-collapse:collapse;table-layout:auto}
-  th,td{padding:10px;border-bottom:1px solid var(--border);text-align:left;vertical-align:middle}
+  table{width:100%;border-collapse:collapse}
+  th,td{padding:10px;border-bottom:1px solid var(--border);text-align:left}
   th{font-size:12px;color:var(--muted);font-weight:600}
   tr:hover td{background:#0f1422}
   .badge{display:inline-block;padding:3px 8px;border-radius:999px;font-size:11px;font-weight:700}
@@ -46,26 +46,24 @@
   .split{display:flex;gap:16px;flex-wrap:wrap}
   .nowrap{white-space:nowrap}
 
-  /* ---- CANVAS: evitar desbordes ---- */
-  canvas{display:block;width:100% !important;max-width:100%;height:260px !important}
+  /* Gráficas: no desbordar */
+  .charts{display:grid;gap:12px}
+  .charts.g-3{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .charts.g-2{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .chart-wrap{position:relative;width:100%;max-width:100%}
+  canvas{display:block;width:100% !important;height:auto !important;max-height:260px}
 
-  /* Contenedor de muchas gráficas en 1x2: permitir wrap y evitar overflow */
-  .charts-1x2{display:grid;gap:12px;grid-template-columns:repeat(3,minmax(0,1fr))}
-  @media (max-width:1100px){
-    .g-3{grid-template-columns:repeat(2,minmax(0,1fr))}
-    .charts-1x2{grid-template-columns:repeat(2,minmax(0,1fr))}
-  }
-  @media (max-width:720px){
-    .g-3,.g-2{grid-template-columns:1fr}
-    .charts-1x2{grid-template-columns:1fr}
-    table{display:block;overflow-x:auto}
+  @media (max-width: 900px){
+    .g-3{grid-template-columns:1fr}
+    .g-2{grid-template-columns:1fr}
+    .charts.g-3,.charts.g-2{grid-template-columns:1fr}
   }
 </style>
 </head>
 <body>
 <main>
-  <h1>Predicción de Fútbol — Probabilidades (Over 2.5 / BTTS / 1X2)</h1>
-  <div class="sub">Carga <b>CSV o JSON</b> con histórico para entrenar. Luego <b>elige liga y equipos</b> (de tu histórico) y calcula probabilidades calibradas para <b>Over 2.5</b>, <b>BTTS</b> y <b>1X2</b> para partidos manuales. <b>No se usan cuotas del mercado</b>; se muestra porcentaje y <b>cuota justa</b> (1/p).</div>
+  <h1>Predicción de Fútbol — Probabilidades (Over 2.5 / BTTS / 1X2) + Elo + Priors</h1>
+  <div class="sub">Carga <b>CSV o JSON</b> con histórico, entrena (80%/20% temporal), agrega partidos manuales y obtén <b>probabilidades calibradas</b> y <b>cuotas justas</b> (1/p). Sin cuotas de mercado.</div>
 
   <!-- CONTROLES PRINCIPALES -->
   <section class="grid g-3" style="margin-top:16px">
@@ -96,7 +94,7 @@
         <button id="btnPicks" class="btn alt" disabled>Calcular probabilidades</button>
         <button id="btnExport" class="btn ghost" disabled>Exportar predicciones (CSV)</button>
       </div>
-      <p class="sub">Split temporal: 80% train / 20% valid.</p>
+      <p class="sub">Usamos: Elo con decaimiento, pesos por recencia y clase, priors por liga y calibración isotónica por liga.</p>
     </div>
 
     <div class="card">
@@ -154,7 +152,7 @@
           <div class="sub">Calibración: <span id="calibO" class="badge mid">—</span></div>
         </div>
       </div>
-      <canvas id="chartReliabO"></canvas>
+      <div class="chart-wrap"><canvas id="chartReliabO"></canvas></div>
     </div>
     <div class="card">
       <h2>Métricas — BTTS</h2>
@@ -164,24 +162,21 @@
           <div class="sub">Calibración: <span id="calibB" class="badge mid">—</span></div>
         </div>
       </div>
-      <canvas id="chartReliabB"></canvas>
+      <div class="chart-wrap"><canvas id="chartReliabB"></canvas></div>
     </div>
   </section>
 
   <!-- MÉTRICAS Y GRÁFICOS (1X2) -->
   <section class="card" style="margin-top:16px">
     <h2>Métricas — 1X2</h2>
-    <div class="sub">Se muestra la calibración promedio por clase (Home, Draw, Away) en validación temporal.</div>
-    <div class="grid g-2">
-      <div>
-        <div class="sub">Brier (prom): <b id="brier1x2" class="knum">—</b> · LogLoss (prom): <b id="logloss1x2" class="knum">—</b></div>
-        <div class="sub">Calibración: <span id="calib1x2" class="badge mid">—</span></div>
-      </div>
+    <div class="sub">Calibración por clase (Home, Draw, Away) en validación temporal con isotónica por liga.</div>
+    <div class="split">
+      <div class="sub">Brier (prom): <b id="brier1x2" class="knum">—</b> · LogLoss (prom): <b id="logloss1x2" class="knum">—</b> · Calibración: <span id="calib1x2" class="badge mid">—</span></div>
     </div>
-    <div class="charts-1x2" style="margin-top:10px">
-      <canvas id="chartReliabH"></canvas>
-      <canvas id="chartReliabD"></canvas>
-      <canvas id="chartReliabA"></canvas>
+    <div class="charts g-3" style="margin-top:10px">
+      <div class="chart-wrap"><canvas id="chartReliabH"></canvas></div>
+      <div class="chart-wrap"><canvas id="chartReliabD"></canvas></div>
+      <div class="chart-wrap"><canvas id="chartReliabA"></canvas></div>
     </div>
   </section>
 
@@ -249,7 +244,7 @@
     </table>
   </section>
 
-  <div class="footer">Notas: logística binaria (Over, BTTS) + logística multinomial (1X2) entrenadas con SGD y regularización L2. Calibración isotónica por clase usando validación temporal. Se muestran <b>probabilidades calibradas</b> en porcentaje y su <b>cuota justa</b> (1/p). Esta app no usa cuotas de mercado.</div>
+  <div class="footer">Modelado: logística binaria (Over, BTTS) + softmax (1X2) con SGD, L2, pesos por recencia y clase; features de forma (rolling), Elo con decaimiento, priors por liga; calibración isotónica <b>por liga</b> con respaldo global. Probabilidades calibradas en porcentaje y cuotas justas.</div>
 </main>
 
 <script>
@@ -277,6 +272,8 @@ const parseCSV = (text) => {
 }
 const toNum = (v)=> v===''||v==null? null : Number(v)
 const clamp=(x,a,b)=> Math.max(a, Math.min(b, x))
+const safeDate = (s)=>{ const d=new Date(s); return isNaN(d)? null : d }
+const daysBetween = (a,b)=> Math.max(0, Math.round((b-a)/86400000))
 
 // Normaliza keys: snake_case
 function normalizeObjects(arr){
@@ -299,28 +296,24 @@ function parseSpanishDate(s){
 function splitMatch(s){ if(!s) return {home:null,away:null}; const p=String(s).split('-'); return {home:(p[0]||'').trim(), away:(p[1]||'').trim()} }
 function numSafe(v){ const n=Number(String(v).replace(/[^0-9\.-]/g,'')); return isNaN(n)? null : n }
 
-// =================== ADAPTADOR DE TU ESQUEMA (sin cuotas) ===================
+// =================== ADAPTADOR ESQUEMA (sin cuotas) ===================
 function adaptFromCustomSchema(arr){
   return arr.map(r=>{
-    if(r.date && r.home && r.away) return r; // ya normalizado
+    if(r.date && r.home && r.away) return r;
 
     const out = {};
-    // Fecha y liga
     out.date = parseSpanishDate(r.date) || parseSpanishDate(r._date) || parseSpanishDate(r.league) || parseSpanishDate(r.name) || r.date || null;
     out.league = r.league || r.name || r.argentina_liga_profesional_de_futbol || r.argentina_liga_profesional || '';
 
-    // Match -> home/away
     const m = splitMatch(r.match);
     out.home = m.home || r.home;
     out.away = m.away || r.away;
 
-    // Resultado FT "2-1"
     if(r.result_ft){
       const mm = String(r.result_ft).match(/(\d+)\s*-\s*(\d+)/);
       if(mm){ out.home_goals=numSafe(mm[1]); out.away_goals=numSafe(mm[2]); }
     }
 
-    // Stats básicas
     out.home_shotsOT = numSafe(r.home_ongoal_shots_at_ft);
     out.away_shotsOT = numSafe(r.away_ongoal_shots_at_ft);
     out.home_total_shots = numSafe(r.home_total_shots_at_ft);
@@ -334,7 +327,6 @@ function adaptFromCustomSchema(arr){
     out.home_redcards_at_ft = numSafe(r.home_redcards_at_ft);
     out.away_redcards_at_ft = numSafe(r.away_redcards_at_ft);
 
-    // Variables opcionales
     out.home_xg = numSafe(out.home_xg);
     out.away_xg = numSafe(out.away_xg);
     out.home_ppda = numSafe(out.home_ppda);
@@ -349,7 +341,43 @@ function adaptFromCustomSchema(arr){
   });
 }
 
-// =================== FEATURE ENGINEERING ===================
+// =================== FEATURE ENGINEERING + ELO ===================
+let TEAM_ELO = new Map(); // team -> rating
+
+function getElo(team){ return TEAM_ELO.get(team) ?? 1500 }
+function setElo(team, val){ TEAM_ELO.set(team, val) }
+function expectedFromElo(eA, eB, hAdv=60){
+  const qa = Math.pow(10, (eA + hAdv - eB)/400)
+  const qb = 1
+  const pHome = qa/(qa+qb)
+  return [pHome, 1-pHome]
+}
+function updateEloRow(row, K=16, hAdv=60){
+  if(row.home_goals==null || row.away_goals==null) return
+  const h = row.home, a = row.away
+  const Eh = getElo(h), Ea = getElo(a)
+  const [pH] = expectedFromElo(Eh, Ea, hAdv)
+  const y = (row.home_goals>row.away_goals)?1 : (row.home_goals===row.away_goals?0.5:0)
+  const halfLife = 240
+  const ageDays = row._ageDays ?? 0
+  const decay = Math.pow(0.5, ageDays/halfLife)
+  const Kd = K*decay
+  const newH = Eh + Kd * (y - pH)
+  const newA = Ea + Kd * ((1-y) - (1-pH))
+  setElo(h, newH); setElo(a, newA)
+}
+function addEloFeature(rows){
+  if(!rows.length) return
+  const lastDate = safeDate(rows[rows.length-1].date) || new Date()
+  for(const r of rows){ const d = safeDate(r.date)||lastDate; r._ageDays = daysBetween(d, lastDate) }
+  TEAM_ELO = new Map()
+  for(const r of rows){
+    const Eh = getElo(r.home), Ea = getElo(r.away)
+    r.f_eloDiff = (Eh - Ea)
+    updateEloRow(r)
+  }
+}
+
 function engineerFeatures(rows, opts){
   const rS = Number(opts.rollShort||5), rL = Number(opts.rollLong||10)
   rows.sort((a,b)=> (a.date||'').localeCompare(b.date||''))
@@ -418,19 +446,72 @@ function engineerFeatures(rows, opts){
       m.y_over25 = null; m.y_btts = null; m.y_wdl = null
     }
   }
+
+  // Elo (añade f_eloDiff)
+  addEloFeature(rows)
+
   return rows
 }
 
-// =================== LOGÍSTICA BINARIA + MULTINOMIAL ===================
-function makeDesignBinary(rows, target){
-  const X=[], y=[]
-  const cols = ['f_for_xg','f_ag_xg','f_soT','f_ppda','f_rest','f_goalD','clima_hum','clima_temp','ref_fouls']
+// =================== PRIORS POR LIGA ===================
+let PRIORS = null
+function computeLeaguePriors(rows){
+  const byL = new Map()
   for(const r of rows){
-    const lbl = (target==='over')? r.y_over25 : r.y_btts
-    if(lbl==null) continue
-    const row = cols.map(c=> (r[c]==null? 0 : Number(r[c])))
-    X.push(row); y.push(lbl)
+    if(r.y_over25==null || r.y_btts==null || r.y_wdl==null) continue
+    const L = r.league||'__'
+    if(!byL.has(L)) byL.set(L,{o:0,b:0,d:0,n:0})
+    const s = byL.get(L)
+    s.o += r.y_over25; s.b += r.y_btts; s.d += (r.y_wdl===1?1:0); s.n += 1
   }
+  const pri = new Map()
+  byL.forEach((v,k)=> pri.set(k,{
+    pOver: v.n? v.o/v.n : 0.55,
+    pBTTS: v.n? v.b/v.n : 0.52,
+    pDraw: v.n? v.d/v.n : 0.26
+  }))
+  return pri
+}
+function addPriorsToRows(rows, priMap){
+  for(const r of rows){
+    const p = priMap?.get(r.league) || {pOver:0.55,pBTTS:0.52,pDraw:0.26}
+    r.f_priorOver = p.pOver
+    r.f_priorBTTS = p.pBTTS
+    r.f_priorDraw = p.pDraw
+  }
+}
+
+// =================== DISEÑOS + PESOS ===================
+function makeDesignBinary(rows, target){
+  // columnas comunes + prior específico y Elo
+  const colsBase = ['f_for_xg','f_ag_xg','f_soT','f_ppda','f_rest','f_goalD','clima_hum','clima_temp','ref_fouls','f_eloDiff']
+  const priorCol = (target==='over'?'f_priorOver':'f_priorBTTS')
+  const cols = colsBase.concat([priorCol])
+
+  // frecuencias para balanceo
+  const freq = new Map()
+  rows.forEach(r=>{
+    const y = (target==='over'? r.y_over25 : r.y_btts)
+    if(y!=null) freq.set(y,(freq.get(y)||0)+1)
+  })
+  const total = Array.from(freq.values()).reduce((a,b)=>a+b,0) || 1
+  const invFreq = new Map(); freq.forEach((c,k)=> invFreq.set(k, total/(c||1)))
+
+  // recencia
+  const lastDate = safeDate(rows[rows.length-1]?.date)||new Date()
+
+  const X=[], y=[], w=[], leagues=[]
+  for(const r of rows){
+    const yi = (target==='over'? r.y_over25 : r.y_btts)
+    if(yi==null) continue
+    const row = cols.map(c=> (r[c]==null? 0 : Number(r[c])))
+    X.push(row); y.push(yi); leagues.push(r.league||'__')
+    const ageDays = daysBetween(safeDate(r.date)||lastDate, lastDate)
+    const wRec = Math.pow(0.5, ageDays/240)
+    const wCls = invFreq.get(yi)||1
+    w.push(wRec * wCls)
+  }
+
   const mu = Array(X[0]?.length||0).fill(0), sd = Array(X[0]?.length||0).fill(0)
   if(X.length){
     for(let j=0;j<mu.length;j++){
@@ -439,17 +520,34 @@ function makeDesignBinary(rows, target){
       for(let i=0;i<X.length;i++) X[i][j]=(X[i][j]-mu[j])/sd[j]
     }
   }
-  return {X,y,cols,mu,sd}
+  return {X,y,w,cols,mu,sd, leagues}
 }
 
 function makeDesignMulticlass(rows){
-  const X=[], y=[]
-  const cols = ['f_for_xg','f_ag_xg','f_soT','f_ppda','f_rest','f_goalD','clima_hum','clima_temp','ref_fouls']
+  const cols = ['f_for_xg','f_ag_xg','f_soT','f_ppda','f_rest','f_goalD','clima_hum','clima_temp','ref_fouls','f_eloDiff','f_priorDraw']
+
+  // frecuencias por clase
+  const freq = new Map()
+  rows.forEach(r=>{
+    const y=r.y_wdl
+    if(y!=null) freq.set(y,(freq.get(y)||0)+1)
+  })
+  const total = Array.from(freq.values()).reduce((a,b)=>a+b,0) || 1
+  const invFreq = new Map(); [0,1,2].forEach(k=> invFreq.set(k, total/((freq.get(k)||1))))
+
+  const lastDate = safeDate(rows[rows.length-1]?.date)||new Date()
+
+  const X=[], y=[], w=[], leagues=[]
   for(const r of rows){
     if(r.y_wdl==null) continue
     const row = cols.map(c=> (r[c]==null? 0 : Number(r[c])))
-    X.push(row); y.push(r.y_wdl) // 0,1,2
+    X.push(row); y.push(r.y_wdl); leagues.push(r.league||'__')
+    const ageDays = daysBetween(safeDate(r.date)||lastDate, lastDate)
+    const wRec = Math.pow(0.5, ageDays/240)
+    const wCls = invFreq.get(r.y_wdl)||1
+    w.push(wRec * wCls)
   }
+
   const mu = Array(X[0]?.length||0).fill(0), sd = Array(X[0]?.length||0).fill(0)
   if(X.length){
     for(let j=0;j<mu.length;j++){
@@ -458,26 +556,25 @@ function makeDesignMulticlass(rows){
       for(let i=0;i<X.length;i++) X[i][j]=(X[i][j]-mu[j])/sd[j]
     }
   }
-  return {X,y,cols,mu,sd,K:3}
+  return {X,y,w,cols,mu,sd,K:3, leagues}
 }
 
+// =================== MODELOS (SGD ponderado) ===================
 function trainLogReg(design, epochs=400, lr=0.05, l2=0.001){
-  const {X,y} = design
+  const {X,y,w} = design
   const d = X[0]?.length||0
-  let w = Array(d).fill(0), b=0
+  let W = Array(d).fill(0), b=0
   for(let ep=0; ep<epochs; ep++){
     for(let i=0;i<X.length;i++){
-      const xi = X[i], yi=y[i]
-      let z=b; for(let j=0;j<d;j++) z+= w[j]*xi[j]
+      const xi = X[i], yi=y[i], wi=w[i]||1
+      let z=b; for(let j=0;j<d;j++) z+= W[j]*xi[j]
       const p = 1/(1+Math.exp(-z))
-      const err = p-yi
-      for(let j=0;j<d;j++){
-        w[j] -= lr*(err*xi[j] + l2*w[j])
-      }
+      const err = (p-yi)*wi
+      for(let j=0;j<d;j++){ W[j] -= lr*(err*xi[j] + l2*W[j]) }
       b -= lr*err
     }
   }
-  return {w,b}
+  return {w:W,b}
 }
 function predictLogReg(design, model, rowObj){
   const x = design.cols.map(c=> rowObj[c]==null?0:Number(rowObj[c]))
@@ -485,7 +582,6 @@ function predictLogReg(design, model, rowObj){
   let z=model.b; for(let j=0;j<x.length;j++) z+= model.w[j]*x[j]
   return 1/(1+Math.exp(-z))
 }
-
 function softmax(arr){
   const m = Math.max(...arr)
   const exps = arr.map(v=> Math.exp(v-m))
@@ -493,21 +589,20 @@ function softmax(arr){
   return exps.map(v=> v/s)
 }
 function trainSoftmax(design, epochs=400, lr=0.05, l2=0.001){
-  const {X,y,K} = design
+  const {X,y,w,K} = design
   const d = X[0]?.length||0
   let W = Array.from({length:K}, ()=> Array(d).fill(0))
   let b = Array(K).fill(0)
   for(let ep=0; ep<epochs; ep++){
     for(let i=0;i<X.length;i++){
-      const xi = X[i], yi = y[i]
+      const xi = X[i], yi = y[i], wi = w[i]||1
       const z = b.map((bk,k)=> bk + W[k].reduce((s,wj,j)=> s + wj*xi[j], 0))
-      const p = softmax(z)
+      const m = Math.max(...z); const exps = z.map(v=> Math.exp(v-m))
+      const s = exps.reduce((a,b)=>a+b,0); const p = exps.map(v=> v/s)
       for(let k=0;k<K;k++){
         const yk = (yi===k)?1:0
-        const err = p[k]-yk
-        for(let j=0;j<d;j++){
-          W[k][j] -= lr*(err*xi[j] + l2*W[k][j])
-        }
+        const err = (p[k]-yk)*wi
+        for(let j=0;j<d;j++){ W[k][j] -= lr*(err*xi[j] + l2*W[k][j]) }
         b[k] -= lr*err
       }
     }
@@ -521,9 +616,10 @@ function predictSoftmax(design, model, rowObj){
   return softmax(z) // [pH,pD,pA]
 }
 
-// =================== ISOTÓNICA ===================
+// =================== ISOTÓNICA (global + por liga) ===================
 function isotonicFit(probs, labels){
   const n = probs.length
+  if(!n) return []
   let xy = []
   for(let i=0;i<n;i++) xy.push({x:probs[i], n:1, y:labels[i]})
   xy.sort((a,b)=> a.x-b.x)
@@ -531,9 +627,7 @@ function isotonicFit(probs, labels){
     let j=i
     while(j<xy.length-1 && xy[j].y/xy[j].n > xy[j+1].y/xy[j+1].n){
       xy[j+1] = {x: xy[j].x+xy[j+1].x, n: xy[j].n+xy[j+1].n, y: xy[j].y+xy[j+1].y}
-      xy.splice(j,1)
-      j=Math.max(0,j-1)
-      if(j===0) break
+      xy.splice(j,1); j=Math.max(0,j-1); if(j===0) break
     }
     i++
   }
@@ -553,11 +647,32 @@ function isotonicPredict(fit, p){
   if(p<fit[0].x) return fit[0].y
   return fit[fit.length-1].y
 }
+function fitIsoByLeague(preds, labels, leagues){
+  // preds, labels, leagues: arrays alineados (validación)
+  const byL = new Map()
+  for(let i=0;i<preds.length;i++){
+    const L = leagues[i]||'__'
+    if(!byL.has(L)) byL.set(L, {p:[],y:[]})
+    byL.get(L).p.push(preds[i]); byL.get(L).y.push(labels[i])
+  }
+  const out = new Map()
+  byL.forEach((v,k)=>{
+    const fit = v.p.length>=20 ? isotonicFit(v.p, v.y) : [] // mínimo para estabilidad
+    out.set(k, fit)
+  })
+  const globalFit = isotonicFit(preds, labels)
+  return {byLeague: out, globalFit}
+}
+function isoPredictByLeague(isoObj, league, p){
+  const fitL = isoObj.byLeague.get(league||'__')
+  const fit = (fitL && fitL.length)? fitL : isoObj.globalFit
+  return isotonicPredict(fit, p)
+}
 
 // =================== MÉTRICAS ===================
 const brier = (p,y)=> { if(!p.length) return NaN; let s=0; for(let i=0;i<p.length;i++){ const d=(p[i]-y[i]); s+=d*d } return s/p.length }
 const logloss = (p,y)=>{ if(!p.length) return NaN; let s=0; for(let i=0;i<p.length;i++){ const pi=clamp(p[i],1e-7,1-1e-7); s += -(y[i]*Math.log(pi)+(1-y[i])*Math.log(1-pi)) } return s/p.length }
-function brierMulti(P, Y){ // P: [[pH,pD,pA]], Y: [0/1/2]
+function brierMulti(P, Y){
   if(!P.length) return NaN
   let s=0
   for(let i=0;i<P.length;i++){
@@ -579,14 +694,14 @@ function loglossMulti(P,Y){
 
 // =================== ENTRENAMIENTO / INFERENCIA ===================
 let RAW=[], FEAT=[]
-let designO, modelO, isoO
-let designB, modelB, isoB
-let designWDL, modelWDL, isoH, isoD, isoA
-let PREDS=[] // filas exportables
+let designO, modelO, isoO // bin Over
+let designB, modelB, isoB // bin BTTS
+let designWDL, modelWDL, isoH, isoD, isoA // 1x2
+let PREDS=[] // export
 let MANUAL_FIXTURES=[]
 let LEAGUE_TEAMS = new Map()
 
-// ----- Mapa Liga -> Set(Equipos) (solo histórico)
+// ----- Liga -> Set(Equipos)
 function buildLeagueTeamsMap(data){
   LEAGUE_TEAMS = new Map()
   for(const r of data){
@@ -644,70 +759,75 @@ function maybeToggleAddButton(){
 // ----- Entrenar y métricas
 function trainAll(){
   if(!FEAT.length){ alert('Primero carga datos históricos.'); return }
-  let train = FEAT.filter(r=> r.y_over25!=null && r.y_btts!=null && r.y_wdl!=null)
-
-  if(train.length < 60){
+  let pool = FEAT.filter(r=> r.y_over25!=null && r.y_btts!=null && r.y_wdl!=null)
+  if(pool.length < 60){
     alert('Pocas filas con resultado para entrenar (min. recomendado: 60). Carga más histórico.');
   }
 
-  const cut = Math.floor(train.length*0.8)
-  const trainSet = train.slice(0,cut)
-  const validSet = train.slice(cut)
+  // Split 80/20 temporal
+  const cut = Math.floor(pool.length*0.8)
+  const trainSet = pool.slice(0,cut)
+  const validSet = pool.slice(cut)
 
-  // Binarios
+  // Priors por liga a todo el dataset (para que estén en train/valid y futuros)
+  PRIORS = computeLeaguePriors(trainSet)
+  addPriorsToRows(FEAT, PRIORS)
+
+  // Diseños + entrenamiento ponderado
   designO = makeDesignBinary(trainSet, 'over'); modelO = trainLogReg(designO)
   designB = makeDesignBinary(trainSet, 'btts'); modelB = trainLogReg(designB)
-
-  // Multiclase 1X2
   designWDL = makeDesignMulticlass(trainSet); modelWDL = trainSoftmax(designWDL)
 
-  // Calibración: obtener predicciones en validación
-  const pO=[], yO=[], pB=[], yB=[]
-  const pH=[], yH=[], pD=[], yD=[], pA=[], yA=[]
-  const P1x2=[], Y1x2=[]
+  // Validación para calibrar (por liga y global)
+  const pO=[], yO=[], lO=[]
+  const pB=[], yB=[], lB=[]
+  const P1x2=[], Y1x2=[], L1x2=[]
   for(const r of validSet){
     const p1 = predictLogReg(designO, modelO, r)
     const p2 = predictLogReg(designB, modelB, r)
-    pO.push(p1); yO.push(r.y_over25)
-    pB.push(p2); yB.push(r.y_btts)
+    pO.push(p1); yO.push(r.y_over25); lO.push(r.league||'__')
+    pB.push(p2); yB.push(r.y_btts);   lB.push(r.league||'__')
 
     const q = predictSoftmax(designWDL, modelWDL, r) // [H,D,A]
-    P1x2.push(q); Y1x2.push(r.y_wdl)
-    pH.push(q[0]); yH.push(r.y_wdl===0?1:0)
-    pD.push(q[1]); yD.push(r.y_wdl===1?1:0)
-    pA.push(q[2]); yA.push(r.y_wdl===2?1:0)
+    P1x2.push(q); Y1x2.push(r.y_wdl); L1x2.push(r.league||'__')
   }
-  // Ajustes isotónicos
-  isoO = isotonicFit(pO,yO); isoB = isotonicFit(pB,yB)
-  isoH = isotonicFit(pH,yH); isoD = isotonicFit(pD,yD); isoA = isotonicFit(pA,yA)
+
+  // Calibración por liga
+  const fitO = fitIsoByLeague(pO,yO,lO)
+  const fitB = fitIsoByLeague(pB,yB,lB)
+  // Para multiclase calibramos cada clase por separado
+  const pH = P1x2.map(q=>q[0]), yH = Y1x2.map(v=> v===0?1:0)
+  const pD = P1x2.map(q=>q[1]), yD = Y1x2.map(v=> v===1?1:0)
+  const pA = P1x2.map(q=>q[2]), yA = Y1x2.map(v=> v===2?1:0)
+  const fitH = fitIsoByLeague(pH,yH,L1x2)
+  const fitD = fitIsoByLeague(pD,yD,L1x2)
+  const fitA = fitIsoByLeague(pA,yA,L1x2)
+  isoO = fitO; isoB = fitB; isoH = fitH; isoD = fitD; isoA = fitA
 
   // Métricas post-calibración
-  const pOc = pO.map(p=> isotonicPredict(isoO,p))
-  const pBc = pB.map(p=> isotonicPredict(isoB,p))
+  const pOc = pO.map((p,i)=> isoPredictByLeague(isoO, lO[i], p))
+  const pBc = pB.map((p,i)=> isoPredictByLeague(isoB, lB[i], p))
   document.getElementById('brierO').textContent = (pOc.length? brier(pOc,yO).toFixed(4): '—')
   document.getElementById('loglossO').textContent = (pOc.length? logloss(pOc,yO).toFixed(4): '—')
   document.getElementById('brierB').textContent = (pBc.length? brier(pBc,yB).toFixed(4): '—')
   document.getElementById('loglossB').textContent = (pBc.length? logloss(pBc,yB).toFixed(4): '—')
   setBadge('calibO', calibScore(pOc,yO))
   setBadge('calibB', calibScore(pBc,yB))
-
   renderReliability('chartReliabO', pOc, yO)
   renderReliability('chartReliabB', pBc, yB)
 
-  // Métricas 1x2 calibradas
-  const Pc = P1x2.map((q)=>[
-    isotonicPredict(isoH,q[0]),
-    isotonicPredict(isoD,q[1]),
-    isotonicPredict(isoA,q[2])
+  // Métricas 1x2 calibradas por liga
+  const Pc = P1x2.map((q,i)=>[
+    isoPredictByLeague(isoH, L1x2[i], q[0]),
+    isoPredictByLeague(isoD, L1x2[i], q[1]),
+    isoPredictByLeague(isoA, L1x2[i], q[2]),
   ])
-  for(const q of Pc){
-    const s=q[0]+q[1]+q[2]; if(s>0){ q[0]/=s; q[1]/=s; q[2]/=s }
-  }
+  for(const q of Pc){ const s=q[0]+q[1]+q[2]; if(s>0){ q[0]/=s; q[1]/=s; q[2]/=s } }
   const b1 = brierMulti(Pc,Y1x2)
   const l1 = loglossMulti(Pc,Y1x2)
   document.getElementById('brier1x2').textContent = isFinite(b1)? b1.toFixed(4) : '—'
   document.getElementById('logloss1x2').textContent = isFinite(l1)? l1.toFixed(4) : '—'
-  setBadge('calib1x2', calibScoreMulti([Pc.map(q=>q[0]),Y1x2.map(v=> v===0?1:0)],[Pc.map(q=>q[1]),Y1x2.map(v=> v===1?1:0)],[Pc.map(q=>q[2]),Y1x2.map(v=> v===2?1:0)]))
+  setBadge('calib1x2', calibScoreMulti(Pc,Y1x2))
 
   renderReliability('chartReliabH', Pc.map(q=>q[0]), Y1x2.map(v=> v===0?1:0))
   renderReliability('chartReliabD', Pc.map(q=>q[1]), Y1x2.map(v=> v===1?1:0))
@@ -731,24 +851,23 @@ function calibScore(p,y){
   if(d<0.05) return {txt:'Buena', cls:'mid'}
   return {txt:'Mejorable', cls:'bad'}
 }
-function calibScoreMulti([pH,yH],[pD,yD],[pA,yA]){
-  const dH = avgAbsBinDiff(pH,yH), dD = avgAbsBinDiff(pD,yD), dA = avgAbsBinDiff(pA,yA)
-  const d = (dH+dD+dA)/3
+function calibScoreMulti(Pc, Y){
+  const pH = Pc.map(q=>q[0]), yH = Y.map(v=> v===0?1:0)
+  const pD = Pc.map(q=>q[1]), yD = Y.map(v=> v===1?1:0)
+  const pA = Pc.map(q=>q[2]), yA = Y.map(v=> v===2?1:0)
+  const d = (avgAbsBinDiff(pH,yH)+avgAbsBinDiff(pD,yD)+avgAbsBinDiff(pA,yA))/3
   if(d<0.02) return {txt:'Excelente', cls:'good'}
   if(d<0.05) return {txt:'Buena', cls:'mid'}
   return {txt:'Mejorable', cls:'bad'}
-}
-function avgAbsBinDiff(p,y){
-  const bins = binReliability(p,y)
-  if(!bins.length) return 1
-  let s=0; for(const b of bins){ s += Math.abs(b.acc - b.conf) }
-  return s/bins.length
 }
 
 // ===== CALCULAR PROBABILIDADES =====
 function generateProbabilities(){
   if(!designO || !designB || !designWDL){ alert('Primero entrena los modelos.'); return }
   const league = document.getElementById('fLeague').value
+
+  // Asegurar que priors estén en fixtures agregados tras el entrenamiento
+  addPriorsToRows(FEAT, PRIORS||new Map())
 
   const future = FEAT
     .filter(r=> r.__manualFixture === true)
@@ -763,25 +882,25 @@ function generateProbabilities(){
   PREDS = []
 
   for(const r of future){
-    // Over / BTTS calibrados
-    const pOver = isotonicPredict(isoO, predictLogReg(designO, modelO, r))
-    const pBTTS = isotonicPredict(isoB, predictLogReg(designB, modelB, r))
+    // Over / BTTS calibrados por liga
+    const pOver = isoPredictByLeague(isoO, r.league, predictLogReg(designO, modelO, r))
+    const pBTTS = isoPredictByLeague(isoB, r.league, predictLogReg(designB, modelB, r))
 
     const fairOver = pOver>0 ? (1/pOver) : null
     const fairBTTS = pBTTS>0 ? (1/pBTTS) : null
 
     outO.push({date:r.date, league:r.league, match:`${r.home} vs ${r.away}`, p_model:pOver, fair:fairOver})
-    PREDS.push({date:r.date, league:r.league, match:`${r.home} vs ${r.away}`, market:'Over 2.5', p_model:pOver, p_model_percent:pOver*100, fair_odds:fairOver})
+    PREDS.push({date:r.date, league:r.league, match:`${r.home} vs ${r.away}`, market:'Over 2.5', p_model:pOver, p_model_percent:(pOver*100).toFixed(1), fair_odds: fairOver? fairOver.toFixed(2):''})
 
     outB.push({date:r.date, league:r.league, match:`${r.home} vs ${r.away}`, p_model:pBTTS, fair:fairBTTS})
-    PREDS.push({date:r.date, league:r.league, match:`${r.home} vs ${r.away}`, market:'BTTS Yes', p_model:pBTTS, p_model_percent:pBTTS*100, fair_odds:fairBTTS})
+    PREDS.push({date:r.date, league:r.league, match:`${r.home} vs ${r.away}`, market:'BTTS Yes', p_model:pBTTS, p_model_percent:(pBTTS*100).toFixed(1), fair_odds: fairBTTS? fairBTTS.toFixed(2):''})
 
-    // 1X2
+    // 1X2 calibrado por liga (cada clase), re-normalizado
     let q = predictSoftmax(designWDL, modelWDL, r) // [H,D,A]
     q = [
-      isotonicPredict(isoH,q[0]),
-      isotonicPredict(isoD,q[1]),
-      isotonicPredict(isoA,q[2])
+      isoPredictByLeague(isoH, r.league, q[0]),
+      isoPredictByLeague(isoD, r.league, q[1]),
+      isoPredictByLeague(isoA, r.league, q[2]),
     ]
     const s=q[0]+q[1]+q[2]; if(s>0){ q[0]/=s; q[1]/=s; q[2]/=s }
 
@@ -794,9 +913,9 @@ function generateProbabilities(){
       pH:q[0], pD:q[1], pA:q[2], fH:fairH, fD:fairD, fA:fairA
     })
 
-    PREDS.push({date:r.date, league:r.league, match:`${r.home} vs ${r.away}`, market:'1 (Home)', p_model:q[0], p_model_percent:q[0]*100, fair_odds:fairH})
-    PREDS.push({date:r.date, league:r.league, match:`${r.home} vs ${r.away}`, market:'X (Draw)', p_model:q[1], p_model_percent:q[1]*100, fair_odds:fairD})
-    PREDS.push({date:r.date, league:r.league, match:`${r.home} vs ${r.away}`, market:'2 (Away)', p_model:q[2], p_model_percent:q[2]*100, fair_odds:fairA})
+    PREDS.push({date:r.date, league:r.league, match:`${r.home} vs ${r.away}`, market:'1 (Home)', p_model:q[0], p_model_percent:(q[0]*100).toFixed(1), fair_odds: fairH? fairH.toFixed(2):''})
+    PREDS.push({date:r.date, league:r.league, match:`${r.home} vs ${r.away}`, market:'X (Draw)', p_model:q[1], p_model_percent:(q[1]*100).toFixed(1), fair_odds: fairD? fairD.toFixed(2):''})
+    PREDS.push({date:r.date, league:r.league, match:`${r.home} vs ${r.away}`, market:'2 (Away)', p_model:q[2], p_model_percent:(q[2]*100).toFixed(1), fair_odds: fairA? fairA.toFixed(2):''})
   }
 
   outO.sort((a,b)=> b.p_model-a.p_model)
@@ -840,7 +959,7 @@ function fill1x2Table(id, rows){
 
 function exportCSV(){
   const head=['date','league','match','market','p_model','p_model_percent','fair_odds']
-  const rows = PREDS.map(r=> head.map(k=> r[k]))
+  const rows = PREDS.map(r=> head.map(k=> r[k]??''))
   let csv = head.join(',')+'\n'
   for(const r of rows){ csv += r.join(',')+'\n' }
   const blob = new Blob([csv], {type:'text/csv'})
@@ -864,28 +983,19 @@ function binReliability(p,y, nb=10){
 }
 function renderReliability(canvasId, p, y){
   const bins = binReliability(p,y)
-  const canvas = document.getElementById(canvasId)
-  const ctx = canvas.getContext('2d')
-  if(ctx._chart){ ctx._chart.destroy(); ctx._chart = null }
-  if(!bins.length){
-    const clone = canvas.cloneNode(true)
-    canvas.parentNode.replaceChild(clone, canvas)
-    return
-  }
+  const ctx = document.getElementById(canvasId).getContext('2d')
+  if(ctx._chart){ ctx._chart.destroy() }
+  if(!bins.length){ ctx.canvas.replaceWith(ctx.canvas.cloneNode(true)); return }
   const labels = bins.map((_,i)=> `${(i/bins.length*100).toFixed(0)}–${((i+1)/bins.length*100).toFixed(0)}%`)
   const data1 = bins.map(b=> b.acc)
   const data2 = bins.map(b=> b.conf)
-  ctx._chart = new Chart(ctx, {
-    type:'line',
-    data:{ labels, datasets:[ {label:'Exactitud', data:data1}, {label:'Confianza', data:data2} ]},
-    options:{
-      responsive:true,
-      maintainAspectRatio:false,
-      interaction:{mode:'index',intersect:false},
-      scales:{ y:{min:0,max:1} },
-      plugins:{ legend:{display:true} }
-    }
-  })
+  ctx._chart = new Chart(ctx, { type:'line', data:{ labels, datasets:[ {label:'Exactitud', data:data1}, {label:'Confianza', data:data2} ]}, options:{ responsive:true, interaction:{mode:'index',intersect:false}, maintainAspectRatio:true, scales:{ y:{min:0,max:1} } } })
+}
+function avgAbsBinDiff(p,y){
+  const bins = binReliability(p,y)
+  if(!bins.length) return 1
+  let s=0; for(const b of bins){ s += Math.abs(b.acc - b.conf) }
+  return s/bins.length
 }
 
 // =================== HISTORIAL POR EQUIPO ===================
@@ -959,7 +1069,7 @@ function afterDataLoaded(){
   rebuildTeamHistory()
 }
 function handleCSV(text){
-  const {columns, data} = parseCSV(text)
+  const {data} = parseCSV(text)
   let norm = normalizeObjects(data)
   norm = adaptFromCustomSchema(norm)
   RAW = norm
