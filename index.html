@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Predicción Fútbol — Probabilidades (Over & BTTS, sin cuotas)</title>
+<title>Predicción Fútbol — Probabilidades (Over & BTTS, sin cuotas) + Historial por Equipo</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
@@ -42,7 +42,6 @@
   .mid{background:#2c2a11;color:#ffe9a1;border:1px solid #685c1c}
   .knum{font-variant-numeric:tabular-nums}
   .footer{color:var(--muted);font-size:12px;margin:24px 0 16px}
-  .code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;background:#0c1020;border:1px dashed var(--border);border-radius:10px;padding:8px}
   .pill{background:#121a2a;border:1px solid var(--border);color:#9aa3b2;padding:6px 10px;border-radius:999px;font-size:12px}
   .split{display:flex;gap:16px;flex-wrap:wrap}
   canvas{max-height:280px}
@@ -95,7 +94,7 @@
     </div>
   </section>
 
-  <!-- 4) PARTIDOS MANUALES con SELECTS dependientes -->
+  <!-- 4) PARTIDOS MANUALES -->
   <section class="card" style="margin-top:8px">
     <h2>4) Partidos a analizar (manual)</h2>
     <div class="grid g-3">
@@ -121,8 +120,7 @@
         <button id="btnAddFixture" class="btn" disabled>Agregar partido</button>
       </div>
     </div>
-
-    <div class="sub" style="margin-top:8px">Solo podrás elegir equipos que aparecieron en tu histórico para esa liga.</div>
+    <div class="sub" style="margin-top:8px">Solo equipos que existan en tu histórico para esa liga.</div>
 
     <table id="tblFixtures" class="tbl-small" style="margin-top:10px">
       <thead><tr>
@@ -156,6 +154,33 @@
     </div>
   </section>
 
+  <!-- HISTORIAL POR EQUIPO -->
+  <section class="card" style="margin-top:16px">
+    <h2>5) Historial por equipo</h2>
+    <div class="row">
+      <div style="min-width:220px">
+        <label>Liga</label>
+        <select id="histLeague"><option value="">(Todas)</option></select>
+      </div>
+      <div>
+        <label>Ventana (N partidos recientes)</label>
+        <input id="histN" type="number" value="5" min="3" max="30" />
+      </div>
+      <button class="btn" id="btnRebuildHist">Recalcular</button>
+    </div>
+    <table id="tblTeams" class="tbl-small" style="margin-top:10px">
+      <thead>
+        <tr>
+          <th>Equipo</th><th>Liga</th><th>PJ</th>
+          <th>GFØ(N)</th><th>GCØ(N)</th>
+          <th>SoT ForØ(N)</th><th>SoT AgØ(N)</th>
+          <th>DifØ(N)</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </section>
+
   <!-- TABLAS DE PREDICCIONES -->
   <section class="grid g-2" style="margin-top:16px">
     <div class="card">
@@ -180,7 +205,7 @@
     </div>
   </section>
 
-  <div class="footer">Notas: logística L2 + isotónica. Features: forma rolling (xG, tiros a puerta), PPDA, descanso, clima, árbitro, localía y señales básicas de juego. Apuesta si quieres, pero aquí solo mostramos <b>probabilidades calibradas</b>.</div>
+  <div class="footer">Notas: logística L2 + isotónica. Features: forma rolling (xG, tiros a puerta), PPDA, descanso, clima, árbitro, localía y señales básicas de juego. Se muestran <b>probabilidades calibradas</b>; sin ROI ni cuotas.</div>
 </main>
 
 <script>
@@ -304,6 +329,7 @@ function engineerFeatures(rows, opts){
       rest:   isHome? (m.home_rest??null): (m.away_rest??null),
       goals_for: isHome? (m.home_goals??null): (m.away_goals??null),
       goals_ag:  isHome? (m.away_goals??null): (m.home_goals??null),
+      team: team
     }
     hist.get(key).push(entry)
   }
@@ -438,9 +464,8 @@ let designB, modelB, isoB
 let PREDS=[] // filas exportables
 let MANUAL_FIXTURES=[]
 let LEAGUE_TEAMS = new Map()
-let _BT_CHART=null // (no usado, solo para evitar errores si se reutiliza código)
 
-// Mapa Liga -> Set(Equipos) basado solo en histórico cargado (no incluye manuales)
+// ----- Mapa Liga -> Set(Equipos) (solo histórico)
 function buildLeagueTeamsMap(data){
   LEAGUE_TEAMS = new Map()
   for(const r of data){
@@ -495,6 +520,7 @@ function maybeToggleAddButton(){
   btn.disabled = !(d && league && h && a && h!==a)
 }
 
+// ----- Entrenar y métricas
 function trainAll(){
   if(!FEAT.length){ alert('Primero carga datos históricos.'); return }
   let train = FEAT.filter(r=> r.y_over25!=null && r.y_btts!=null)
@@ -532,6 +558,9 @@ function trainAll(){
   renderReliability('chartReliabB', pBc, yB)
 
   document.getElementById('btnPicks').disabled = false
+  // Actualiza historial por equipo ante nuevo dataset procesado
+  populateHistLeagueOptions()
+  rebuildTeamHistory()
 }
 function setBadge(id, score){
   const el = document.getElementById(id)
@@ -569,20 +598,13 @@ function generateProbabilities(){
     const pOver = isotonicPredict(isoO, predictLogReg(designO, modelO, r))
     const pBTTS = isotonicPredict(isoB, predictLogReg(designB, modelB, r))
 
-    outO.push({
-      date:r.date, league:r.league, match:`${r.home} vs ${r.away}`,
-      p_model:pOver
-    })
+    outO.push({date:r.date, league:r.league, match:`${r.home} vs ${r.away}`, p_model:pOver})
     PREDS.push({date:r.date, league:r.league, match:`${r.home} vs ${r.away}`, market:'Over 2.5', p_model:pOver})
 
-    outB.push({
-      date:r.date, league:r.league, match:`${r.home} vs ${r.away}`,
-      p_model:pBTTS
-    })
+    outB.push({date:r.date, league:r.league, match:`${r.home} vs ${r.away}`, p_model:pBTTS})
     PREDS.push({date:r.date, league:r.league, match:`${r.home} vs ${r.away}`, market:'BTTS Yes', p_model:pBTTS})
   }
 
-  // Ordena por prob. descendente
   outO.sort((a,b)=> b.p_model-a.p_model)
   outB.sort((a,b)=> b.p_model-a.p_model)
 
@@ -600,7 +622,6 @@ function fillPredTable(id, rows){
     <td class="knum">${(r.p_model??0).toFixed(3)}</td>
   </tr>`).join('')
 }
-
 function exportCSV(){
   const head=['date','league','match','market','p_model']
   const rows = PREDS.map(r=> head.map(k=> r[k]))
@@ -636,19 +657,84 @@ function renderReliability(canvasId, p, y){
   ctx._chart = new Chart(ctx, { type:'line', data:{ labels, datasets:[ {label:'Exactitud', data:data1}, {label:'Confianza', data:data2} ]}, options:{ responsive:true, interaction:{mode:'index',intersect:false}, scales:{ y:{min:0,max:1} } } })
 }
 
+// =================== HISTORIAL POR EQUIPO ===================
+function populateHistLeagueOptions(){
+  const sel = document.getElementById('histLeague')
+  const leagues = Array.from(LEAGUE_TEAMS.keys()).sort()
+  sel.innerHTML = '<option value="">(Todas)</option>' + leagues.map(l=> `<option>${l}</option>`).join('')
+}
+function rebuildTeamHistory(){
+  const N = Math.max(3, Math.min(30, Number(document.getElementById('histN').value||5)))
+  const leagueFilter = document.getElementById('histLeague').value || null
+
+  // Construir lista de apariciones por equipo (solo histórico, no manuales)
+  const rows = RAW.filter(r=> !r.__manualFixture && r.date && r.home && r.away).slice()
+  rows.sort((a,b)=> (a.date||'').localeCompare(b.date||''))
+
+  // Expandir cada partido a dos filas (perspectiva local/visitante)
+  const perTeam = new Map()
+  function push(team, league, date, gf, ga, sotf, sota){
+    const key = `${league}|||${team}`
+    if(!perTeam.has(key)) perTeam.set(key, [])
+    perTeam.get(key).push({date, league, team, gf, ga, sotf, sota})
+  }
+  for(const m of rows){
+    const gfH = toNum(m.home_goals), gaH = toNum(m.away_goals)
+    const gfA = toNum(m.away_goals), gaA = toNum(m.home_goals)
+    const soth = toNum(m.home_shotsOT), sota = toNum(m.away_shotsOT)
+    const sotah = toNum(m.away_shotsOT), sotaa = toNum(m.home_shotsOT)
+    push(m.home, m.league, m.date, gfH, gaH, soth, sota)
+    push(m.away, m.league, m.date, gfA, gaA, sotah, sotaa)
+  }
+
+  // Calcular agregados
+  const out=[]
+  perTeam.forEach((arr, key)=>{
+    if(!arr.length) return
+    // Filtro por liga si aplica
+    const lg = arr[0].league
+    if(leagueFilter && lg!==leagueFilter) return
+    // PJ total
+    const pj = arr.length
+    // Tomar últimos N
+    const last = arr.slice(-N)
+    const avg = (list, k)=> list.length? (list.reduce((s,x)=> s + (toNum(x[k])||0), 0) / list.length) : 0
+    const gf = avg(last,'gf'), gc = avg(last,'ga')
+    const sotf = avg(last,'sotf'), sota = avg(last,'sota')
+    const dif = gf - gc
+    out.push({ team:arr[0].team, league:lg, pj, gf, gc, sotf, sota, dif })
+  })
+
+  // Ordenar por DifØ(N) desc
+  out.sort((a,b)=> b.dif - a.dif)
+
+  // Render
+  const tb = document.querySelector('#tblTeams tbody')
+  tb.innerHTML = out.map(r=> `<tr>
+    <td>${r.team}</td>
+    <td>${r.league}</td>
+    <td class="knum">${r.pj}</td>
+    <td class="knum">${r.gf.toFixed(2)}</td>
+    <td class="knum">${r.gc.toFixed(2)}</td>
+    <td class="knum">${r.sotf.toFixed(2)}</td>
+    <td class="knum">${r.sota.toFixed(2)}</td>
+    <td class="knum">${r.dif.toFixed(2)}</td>
+  </tr>`).join('')
+}
+
 // =================== CARGA: CSV o JSON ===================
 function refreshLeagueFilter(data){
   const sel = document.getElementById('fLeague')
   const leagues = Array.from(new Set(data.map(r=> r.league))).filter(Boolean).sort()
   sel.innerHTML = '<option value="">(Todas)</option>' + leagues.map(l=> `<option>${l}</option>`).join('')
 }
-
 function afterDataLoaded(){
   buildLeagueTeamsMap(RAW)
   setFiLeagueOptions()
   refreshLeagueFilter(FEAT)
+  populateHistLeagueOptions()
+  rebuildTeamHistory()
 }
-
 function handleCSV(text){
   const {columns, data} = parseCSV(text)
   let norm = normalizeObjects(data)
@@ -670,7 +756,6 @@ function handleJSON(text){
   afterDataLoaded()
   alert('Datos JSON cargados: '+FEAT.length+' filas.')
 }
-
 function loadAuto(text, name){
   const lower = (name||'').toLowerCase()
   if(lower.endsWith('.json')){ handleJSON(text); return }
@@ -740,11 +825,15 @@ document.getElementById('btnPicks').addEventListener('click', generateProbabilit
 document.getElementById('btnExport').addEventListener('click', exportCSV)
 document.getElementById('btnAddFixture').addEventListener('click', addFixture)
 
-// dependencias de selects
 document.getElementById('fiLeague').addEventListener('change', onLeagueChange)
 document.getElementById('fiDate').addEventListener('input', maybeToggleAddButton)
 document.getElementById('fiHome').addEventListener('change', maybeToggleAddButton)
 document.getElementById('fiAway').addEventListener('change', maybeToggleAddButton)
+
+// Historial por equipo
+document.getElementById('btnRebuildHist').addEventListener('click', rebuildTeamHistory)
+document.getElementById('histLeague').addEventListener('change', rebuildTeamHistory)
+document.getElementById('histN').addEventListener('input', rebuildTeamHistory)
 </script>
 </body>
 </html>
