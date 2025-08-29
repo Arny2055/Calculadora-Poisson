@@ -54,7 +54,7 @@
 <body>
 <main>
   <h1>Predicción de Fútbol — Logística + Calibración + Edge (sin Poisson/Monte Carlo)</h1>
-  <div class="sub">Carga <b>CSV o JSON</b> con histórico para entrenar. Luego <b>agrega manualmente</b> los partidos (Local vs Visitante + cuotas) y genera picks.</div>
+  <div class="sub">Carga <b>CSV o JSON</b> con histórico para entrenar. Luego <b>elige liga y equipos</b> (de tu histórico) y genera picks.</div>
 
   <!-- CONTROLES PRINCIPALES -->
   <section class="grid g-3" style="margin-top:16px">
@@ -107,7 +107,7 @@
       <h2>3) Filtros</h2>
       <div class="grid g-2">
         <div>
-          <label>Liga</label>
+          <label>Liga (para ver picks)</label>
           <select id="fLeague"><option value="">(Todas)</option></select>
         </div>
         <div>
@@ -119,7 +119,7 @@
     </div>
   </section>
 
-  <!-- 4) PARTIDOS MANUALES -->
+  <!-- 4) PARTIDOS MANUALES con SELECTS dependientes -->
   <section class="card" style="margin-top:8px">
     <h2>4) Partidos a analizar (manual)</h2>
     <div class="grid g-3">
@@ -129,16 +129,16 @@
       </div>
       <div>
         <label>Liga</label>
-        <input id="fiLeague" type="text" placeholder="Ej: Argentina Liga Profesional"/>
+        <select id="fiLeague"><option value="">(elige una liga)</option></select>
       </div>
       <div class="grid g-2" style="gap:8px">
         <div>
           <label>Local</label>
-          <input id="fiHome" type="text" placeholder="Ej: River Plate"/>
+          <select id="fiHome" disabled><option value="">—</option></select>
         </div>
         <div>
           <label>Visitante</label>
-          <input id="fiAway" type="text" placeholder="Ej: Racing Club"/>
+          <select id="fiAway" disabled><option value="">—</option></select>
         </div>
       </div>
       <div>
@@ -150,11 +150,11 @@
         <input id="fiBTTS" type="number" step="0.01" placeholder="Ej: 1.85"/>
       </div>
       <div style="display:flex;align-items:flex-end">
-        <button id="btnAddFixture" class="btn">Agregar partido</button>
+        <button id="btnAddFixture" class="btn" disabled>Agregar partido</button>
       </div>
     </div>
 
-    <div class="sub" style="margin-top:8px">Los partidos agregados aquí se consideran “futuros” (sin resultado). Se usarán al pulsar <b>Generar picks</b>.</div>
+    <div class="sub" style="margin-top:8px">Solo podrás elegir equipos que aparecieron en tu histórico para esa liga.</div>
 
     <table id="tblFixtures" class="tbl-small" style="margin-top:10px">
       <thead><tr>
@@ -183,7 +183,7 @@
       <button id="btnBacktest" class="btn ghost">Probar umbrales</button>
     </div>
 
-    <div class="sub">Usa el 20% más reciente (validación). ROI calculado con Kelly×fracción sobre cuotas disponibles en histórico.</div>
+    <div class="sub">Usa el 20% más reciente (validación). ROI con Kelly×fracción sobre cuotas disponibles en histórico.</div>
 
     <table id="tblBT" class="tbl-small" style="margin-top:10px">
       <thead><tr>
@@ -246,7 +246,7 @@
     </div>
   </section>
 
-  <div class="footer">Notas: logística L2 + isotónica. Features: forma rolling (xG, tiros a puerta), PPDA (si lo tienes), descanso, clima, árbitro, localía y señales de mercado. Apuesta si <span class="code">p_model − p_implícita &gt; umbral</span>; stake = Kelly×fracción.</div>
+  <div class="footer">Notas: logística L2 + isotónica. Features: forma rolling (xG, tiros a puerta), PPDA, descanso, clima, árbitro, localía y señales de mercado. Apuesta si <span class="code">p_model − p_implícita &gt; umbral</span>; stake = Kelly×fracción.</div>
 </main>
 
 <script>
@@ -319,7 +319,7 @@ function adaptFromCustomSchema(arr){
       if(mm){ out.home_goals=numSafe(mm[1]); out.away_goals=numSafe(mm[2]); }
     }
 
-    // Stats fáciles
+    // Stats básicas
     out.home_shotsOT = numSafe(r.home_ongoal_shots_at_ft);
     out.away_shotsOT = numSafe(r.away_ongoal_shots_at_ft);
     out.home_total_shots = numSafe(r.home_total_shots_at_ft);
@@ -516,8 +516,72 @@ let RAW=[], FEAT=[]
 let designO, modelO, isoO
 let designB, modelB, isoB
 let PICKS=[]
-let MANUAL_FIXTURES=[] // partidos agregados a mano
+let MANUAL_FIXTURES=[]
 let _BT_CHART=null
+
+// NUEVO: mapa Liga -> Set(Equipos) basado solo en histórico cargado (no incluye manuales)
+let LEAGUE_TEAMS = new Map()
+
+function buildLeagueTeamsMap(data){
+  LEAGUE_TEAMS = new Map()
+  for(const r of data){
+    if(r.__manualFixture) continue // solo histórico
+    const league = r.league||''
+    const home = r.home||''
+    const away = r.away||''
+    if(!league || !(home||away)) continue
+    if(!LEAGUE_TEAMS.has(league)) LEAGUE_TEAMS.set(league, new Set())
+    const s = LEAGUE_TEAMS.get(league)
+    if(home) s.add(home)
+    if(away) s.add(away)
+  }
+}
+
+function setFiLeagueOptions(){
+  const sel = document.getElementById('fiLeague')
+  const leagues = Array.from(LEAGUE_TEAMS.keys()).sort()
+  sel.innerHTML = '<option value="">(elige una liga)</option>' + leagues.map(l=> `<option>${l}</option>`).join('')
+  sel.disabled = leagues.length===0
+  // Reset equipos
+  setTeamOptions([], 'fiHome'); setTeamOptions([], 'fiAway')
+  document.getElementById('fiHome').disabled = true
+  document.getElementById('fiAway').disabled = true
+  maybeToggleAddButton()
+}
+
+function setTeamOptions(teams, idSel){
+  const sel = document.getElementById(idSel)
+  const opts = teams.map(t=> `<option>${t}</option>`).join('')
+  sel.innerHTML = '<option value="">(elige)</option>' + opts
+}
+
+function onLeagueChange(){
+  const league = document.getElementById('fiLeague').value
+  const homeSel = document.getElementById('fiHome')
+  const awaySel = document.getElementById('fiAway')
+  if(!league){
+    setTeamOptions([], 'fiHome'); setTeamOptions([], 'fiAway')
+    homeSel.disabled = true; awaySel.disabled = true
+    maybeToggleAddButton()
+    return
+  }
+  const teams = Array.from(LEAGUE_TEAMS.get(league)||[]).sort()
+  setTeamOptions(teams, 'fiHome'); setTeamOptions(teams, 'fiAway')
+  homeSel.disabled = false; awaySel.disabled = false
+  // limpiar selecciones previas
+  homeSel.value=''; awaySel.value=''
+  maybeToggleAddButton()
+}
+
+function maybeToggleAddButton(){
+  const d = (document.getElementById('fiDate').value||'').trim()
+  const league = document.getElementById('fiLeague').value
+  const h = document.getElementById('fiHome').value
+  const a = document.getElementById('fiAway').value
+  const btn = document.getElementById('btnAddFixture')
+  // Habilitar solo si todo está listo y equipos distintos
+  btn.disabled = !(d && league && h && a && h!==a)
+}
 
 function trainAll(){
   if(!FEAT.length){ alert('Primero carga datos históricos.'); return }
@@ -678,13 +742,12 @@ function frange(a,b,step){
   for(let i=0;i<n;i++){ const v = +(a + i*step).toFixed(6); if(v<=b+1e-9) arr.push(v) }
   return arr
 }
-function kellyStake(p, odds){ // fracción de bankroll (Kelly puro)
+function kellyStake(p, odds){
   const b = (odds||0)-1
   if(!odds || b<=0) return 0
   const f = (b*p - (1-p))/b
   return Math.max(0, f)
 }
-
 function backtestThresholds(){
   if(!designO || !designB){ alert('Primero entrena los modelos.'); return }
   const from = Number(document.getElementById('thrFrom').value||0.02)
@@ -692,22 +755,15 @@ function backtestThresholds(){
   const step = Number(document.getElementById('thrStep').value||0.01)
   const kf   = Number(document.getElementById('kellyFrac').value||0.25)
 
-  // Conjunto de validación (20% más reciente con resultado)
   let hist = FEAT.filter(r=> r.y_over25!=null && r.y_btts!=null)
   const cut = Math.floor(hist.length*0.8)
   const valid = hist.slice(cut)
-
   if(valid.length===0){ alert('No hay validación. Carga más histórico.'); return }
 
-  // Predecimos una sola vez para speed
   const rows = valid.map(r=>{
     const pO = isotonicPredict(isoO, predictLogReg(designO, modelO, r))
     const pB = isotonicPredict(isoB, predictLogReg(designB, modelB, r))
-    return {
-      ...r,
-      pO,pB,
-      impO:r.p_imp_over, impB:r.p_imp_btts
-    }
+    return { ...r, pO,pB, impO:r.p_imp_over, impB:r.p_imp_btts }
   })
 
   const thrs = frange(from,to,step)
@@ -718,7 +774,6 @@ function backtestThresholds(){
     let stakeB=0, profB=0, nB=0
 
     for(const r of rows){
-      // Over
       if(r.impO!=null && r.odds_over25){
         const edgeO = r.pO - r.impO
         if(edgeO > thr){
@@ -732,7 +787,6 @@ function backtestThresholds(){
           }
         }
       }
-      // BTTS
       if(r.impB!=null && r.odds_btts){
         const edgeB = r.pB - r.impB
         if(edgeB > thr){
@@ -757,7 +811,6 @@ function backtestThresholds(){
   renderBTTable(results)
   renderBTChart(results)
 }
-
 function renderBTTable(rows){
   const tb = document.querySelector('#tblBT tbody')
   tb.innerHTML = rows.map(r=> `<tr>
@@ -770,7 +823,6 @@ function renderBTTable(rows){
     <td class="knum">${r.nB}</td>
   </tr>`).join('')
 }
-
 function renderBTChart(rows){
   const ctx = document.getElementById('chartBT').getContext('2d')
   if(_BT_CHART){ _BT_CHART.destroy() }
@@ -790,16 +842,23 @@ function refreshLeagueFilter(data){
   sel.innerHTML = '<option value="">(Todas)</option>' + leagues.map(l=> `<option>${l}</option>`).join('')
 }
 
+function afterDataLoaded(){
+  // mapa liga->equipos (solo histórico), selects de 4)
+  buildLeagueTeamsMap(RAW)
+  setFiLeagueOptions()
+  // filtro de liga para picks
+  refreshLeagueFilter(FEAT)
+}
+
 function handleCSV(text){
   const {columns, data} = parseCSV(text)
   let norm = normalizeObjects(data)
   norm = adaptFromCustomSchema(norm)
   RAW = norm
   FEAT = engineerFeatures(RAW, {rollShort:document.getElementById('rollShort').value, rollLong:document.getElementById('rollLong').value})
-  refreshLeagueFilter(FEAT)
+  afterDataLoaded()
   alert('Datos CSV cargados: '+FEAT.length+' filas.')
 }
-
 function handleJSON(text){
   let obj
   try{ obj = JSON.parse(text) }catch(e){ alert('JSON inválido.'); return }
@@ -809,7 +868,7 @@ function handleJSON(text){
   norm = adaptFromCustomSchema(norm)
   RAW = norm
   FEAT = engineerFeatures(RAW, {rollShort:document.getElementById('rollShort').value, rollLong:document.getElementById('rollLong').value})
-  refreshLeagueFilter(FEAT)
+  afterDataLoaded()
   alert('Datos JSON cargados: '+FEAT.length+' filas.')
 }
 
@@ -840,24 +899,24 @@ function renderFixtures(){
     <td><button class="btn warn" onclick="removeFixture(${idx})">Quitar</button></td>
   </tr>`).join('')
 }
-
 function removeFixture(idx){
   MANUAL_FIXTURES.splice(idx,1)
   RAW = RAW.filter(r=> !r.__manualFixture).concat(MANUAL_FIXTURES)
   FEAT = engineerFeatures(RAW, {rollShort:document.getElementById('rollShort').value, rollLong:document.getElementById('rollLong').value})
-  refreshLeagueFilter(FEAT)
+  // No actualizamos LEAGUE_TEAMS desde manuales; se mantiene histórico
   renderFixtures()
 }
-
 function addFixture(){
   const d = (document.getElementById('fiDate').value||'').trim()
-  const l = (document.getElementById('fiLeague').value||'').trim()
-  const h = (document.getElementById('fiHome').value||'').trim()
-  const a = (document.getElementById('fiAway').value||'').trim()
+  const l = document.getElementById('fiLeague').value
+  const h = document.getElementById('fiHome').value
+  const a = document.getElementById('fiAway').value
   const oOver = document.getElementById('fiOver').value
   const oBTTS = document.getElementById('fiBTTS').value
 
-  if(!d || !h || !a){ alert('Fecha, Local y Visitante son obligatorios.'); return }
+  if(!d || !l || !h || !a){ alert('Fecha, Liga, Local y Visitante son obligatorios.'); return }
+  if(h===a){ alert('Local y Visitante deben ser distintos.'); return }
+
   const row = {
     date: d, league: l, home: h, away: a,
     odds_over25: (oOver? Number(oOver): null),
@@ -869,11 +928,10 @@ function addFixture(){
 
   RAW = RAW.filter(r=> !r.__manualFixture).concat(MANUAL_FIXTURES)
   FEAT = engineerFeatures(RAW, {rollShort:document.getElementById('rollShort').value, rollLong:document.getElementById('rollLong').value})
-  refreshLeagueFilter(FEAT)
-  renderFixtures()
 
-  document.getElementById('fiHome').value=''
-  document.getElementById('fiAway').value=''
+  renderFixtures()
+  maybeToggleAddButton()
+  // limpiar cuotas
   document.getElementById('fiOver').value=''
   document.getElementById('fiBTTS').value=''
 }
@@ -892,6 +950,12 @@ document.getElementById('btnEntrenar').addEventListener('click', trainAll)
 document.getElementById('btnPicks').addEventListener('click', generatePicks)
 document.getElementById('btnExport').addEventListener('click', exportCSV)
 document.getElementById('btnAddFixture').addEventListener('click', addFixture)
+
+// dependencias de selects
+document.getElementById('fiLeague').addEventListener('change', onLeagueChange)
+document.getElementById('fiDate').addEventListener('input', maybeToggleAddButton)
+document.getElementById('fiHome').addEventListener('change', maybeToggleAddButton)
+document.getElementById('fiAway').addEventListener('change', maybeToggleAddButton)
 </script>
 </body>
 </html>
