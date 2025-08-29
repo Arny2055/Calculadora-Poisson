@@ -119,7 +119,7 @@
     </div>
   </section>
 
-  <!-- NUEVO: PARTIDOS MANUALES -->
+  <!-- 4) PARTIDOS MANUALES -->
   <section class="card" style="margin-top:8px">
     <h2>4) Partidos a analizar (manual)</h2>
     <div class="grid g-3">
@@ -162,6 +162,40 @@
       </tr></thead>
       <tbody></tbody>
     </table>
+  </section>
+
+  <!-- 5) BACKTEST DE UMBRALES -->
+  <section class="card" style="margin-top:8px">
+    <h2>5) Backtest de umbrales (validación)</h2>
+    <div class="row">
+      <div>
+        <label>Desde</label>
+        <input id="thrFrom" type="number" step="0.005" value="0.02"/>
+      </div>
+      <div>
+        <label>Hasta</label>
+        <input id="thrTo" type="number" step="0.005" value="0.10"/>
+      </div>
+      <div>
+        <label>Paso</label>
+        <input id="thrStep" type="number" step="0.005" value="0.01"/>
+      </div>
+      <button id="btnBacktest" class="btn ghost">Probar umbrales</button>
+    </div>
+
+    <div class="sub">Usa el 20% más reciente (validación). ROI calculado con Kelly×fracción sobre cuotas disponibles en histórico.</div>
+
+    <table id="tblBT" class="tbl-small" style="margin-top:10px">
+      <thead><tr>
+        <th>Umbral</th>
+        <th>ROI Total</th><th>#Picks</th>
+        <th>ROI Over</th><th>#Over</th>
+        <th>ROI BTTS</th><th>#BTTS</th>
+      </tr></thead>
+      <tbody></tbody>
+    </table>
+
+    <canvas id="chartBT" style="margin-top:12px;"></canvas>
   </section>
 
   <!-- MÉTRICAS Y GRÁFICOS -->
@@ -304,7 +338,7 @@ function adaptFromCustomSchema(arr){
     if(oddAs==='over') out.odds_over25 = odd;
     else if(oddAs==='btts') out.odds_btts = odd;
 
-    // 1X2 (por si quieres ampliar features de mercado)
+    // 1X2 (opcional)
     out.odd_1_prematch = numSafe(r.odd_1_prematch);
     out.odd_x_prematch = numSafe(r.odd_x_prematch);
     out.odd_2_prematch = numSafe(r.odd_2_prematch);
@@ -474,15 +508,16 @@ function isotonicPredict(fit, p){
 }
 
 // =================== MÉTRICAS ===================
-const brier = (p,y)=> { let s=0; for(let i=0;i<p.length;i++){ const d=(p[i]-y[i]); s+=d*d } return s/p.length }
-const logloss = (p,y)=>{ let s=0; for(let i=0;i<p.length;i++){ const pi=clamp(p[i],1e-7,1-1e-7); s += -(y[i]*Math.log(pi)+(1-y[i])*Math.log(1-pi)) } return s/p.length }
+const brier = (p,y)=> { if(!p.length) return NaN; let s=0; for(let i=0;i<p.length;i++){ const d=(p[i]-y[i]); s+=d*d } return s/p.length }
+const logloss = (p,y)=>{ if(!p.length) return NaN; let s=0; for(let i=0;i<p.length;i++){ const pi=clamp(p[i],1e-7,1-1e-7); s += -(y[i]*Math.log(pi)+(1-y[i])*Math.log(1-pi)) } return s/p.length }
 
 // =================== ENTRENAMIENTO / INFERENCIA ===================
 let RAW=[], FEAT=[]
 let designO, modelO, isoO
 let designB, modelB, isoB
 let PICKS=[]
-let MANUAL_FIXTURES=[] // ← nuevos partidos agregados a mano
+let MANUAL_FIXTURES=[] // partidos agregados a mano
+let _BT_CHART=null
 
 function trainAll(){
   if(!FEAT.length){ alert('Primero carga datos históricos.'); return }
@@ -548,9 +583,8 @@ function generatePicks(){
   const kf = Number(document.getElementById('kellyFrac').value||0.25)
   const league = document.getElementById('fLeague').value
 
-  // Solo los manuales (o cualquiera sin resultado) — pero priorizamos los manuales
   const future = FEAT
-    .filter(r=> r.__manualFixture === true) // ← marca añadida al agregar
+    .filter(r=> r.__manualFixture === true)
     .filter(r=> !league || r.league===league)
 
   if(future.length===0){
@@ -638,6 +672,117 @@ function renderReliability(canvasId, p, y){
   ctx._chart = new Chart(ctx, { type:'line', data:{ labels, datasets:[ {label:'Exactitud', data:data1}, {label:'Confianza', data:data2} ]}, options:{ responsive:true, interaction:{mode:'index',intersect:false}, scales:{ y:{min:0,max:1} } } })
 }
 
+// =================== BACKTEST DE UMBRALES ===================
+function frange(a,b,step){
+  const arr=[], n=Math.max(1, Math.floor((b-a)/step)+1)
+  for(let i=0;i<n;i++){ const v = +(a + i*step).toFixed(6); if(v<=b+1e-9) arr.push(v) }
+  return arr
+}
+function kellyStake(p, odds){ // fracción de bankroll (Kelly puro)
+  const b = (odds||0)-1
+  if(!odds || b<=0) return 0
+  const f = (b*p - (1-p))/b
+  return Math.max(0, f)
+}
+
+function backtestThresholds(){
+  if(!designO || !designB){ alert('Primero entrena los modelos.'); return }
+  const from = Number(document.getElementById('thrFrom').value||0.02)
+  const to   = Number(document.getElementById('thrTo').value||0.10)
+  const step = Number(document.getElementById('thrStep').value||0.01)
+  const kf   = Number(document.getElementById('kellyFrac').value||0.25)
+
+  // Conjunto de validación (20% más reciente con resultado)
+  let hist = FEAT.filter(r=> r.y_over25!=null && r.y_btts!=null)
+  const cut = Math.floor(hist.length*0.8)
+  const valid = hist.slice(cut)
+
+  if(valid.length===0){ alert('No hay validación. Carga más histórico.'); return }
+
+  // Predecimos una sola vez para speed
+  const rows = valid.map(r=>{
+    const pO = isotonicPredict(isoO, predictLogReg(designO, modelO, r))
+    const pB = isotonicPredict(isoB, predictLogReg(designB, modelB, r))
+    return {
+      ...r,
+      pO,pB,
+      impO:r.p_imp_over, impB:r.p_imp_btts
+    }
+  })
+
+  const thrs = frange(from,to,step)
+  const results=[]
+  for(const thr of thrs){
+    let stakeTot=0, profitTot=0, nTot=0
+    let stakeO=0, profO=0, nO=0
+    let stakeB=0, profB=0, nB=0
+
+    for(const r of rows){
+      // Over
+      if(r.impO!=null && r.odds_over25){
+        const edgeO = r.pO - r.impO
+        if(edgeO > thr){
+          const f = kellyStake(r.pO, r.odds_over25) * kf
+          if(f>0){
+            const b = r.odds_over25-1
+            const win = (r.y_over25===1)
+            const profit = win ? f*b : -f
+            stakeTot+=f; profitTot+=profit; nTot++
+            stakeO+=f; profO+=profit; nO++
+          }
+        }
+      }
+      // BTTS
+      if(r.impB!=null && r.odds_btts){
+        const edgeB = r.pB - r.impB
+        if(edgeB > thr){
+          const f = kellyStake(r.pB, r.odds_btts) * kf
+          if(f>0){
+            const b = r.odds_btts-1
+            const win = (r.y_btts===1)
+            const profit = win ? f*b : -f
+            stakeTot+=f; profitTot+=profit; nTot++
+            stakeB+=f; profB+=profit; nB++
+          }
+        }
+      }
+    }
+
+    const ROI = stakeTot>0? (profitTot/stakeTot) : 0
+    const ROI_O = stakeO>0? (profO/stakeO) : 0
+    const ROI_B = stakeB>0? (profB/stakeB) : 0
+    results.push({thr, ROI, picks:nTot, ROI_O, nO, ROI_B, nB})
+  }
+
+  renderBTTable(results)
+  renderBTChart(results)
+}
+
+function renderBTTable(rows){
+  const tb = document.querySelector('#tblBT tbody')
+  tb.innerHTML = rows.map(r=> `<tr>
+    <td class="knum">${r.thr.toFixed(3)}</td>
+    <td class="knum">${(r.ROI*100).toFixed(1)}%</td>
+    <td class="knum">${r.picks}</td>
+    <td class="knum">${(r.ROI_O*100).toFixed(1)}%</td>
+    <td class="knum">${r.nO}</td>
+    <td class="knum">${(r.ROI_B*100).toFixed(1)}%</td>
+    <td class="knum">${r.nB}</td>
+  </tr>`).join('')
+}
+
+function renderBTChart(rows){
+  const ctx = document.getElementById('chartBT').getContext('2d')
+  if(_BT_CHART){ _BT_CHART.destroy() }
+  const labels = rows.map(r=> r.thr.toFixed(3))
+  const dataROI = rows.map(r=> +(r.ROI*100).toFixed(2))
+  _BT_CHART = new Chart(ctx, {
+    type:'line',
+    data:{ labels, datasets:[ {label:'ROI % (Total)', data:dataROI} ]},
+    options:{ responsive:true, scales:{ y:{ ticks:{ callback:(v)=> v+'%' } } } }
+  })
+}
+
 // =================== CARGA: CSV o JSON ===================
 function refreshLeagueFilter(data){
   const sel = document.getElementById('fLeague')
@@ -683,7 +828,7 @@ const DEMO_JSON = [
   {"Name":"Argentina Liga Profesional","Desired Outcome":"1","Odd":"1.53","Date":"vie., 28 jul. 2023 18:30","League":"Argentina Liga Profesional de Fútbol","Match":"River Plate - Racing Club","Home OnGoal Shots at FT":"6","Away OnGoal Shots at FT":"4","Result FT":"2-1"}
 ]
 
-// =================== PARTIDOS MANUALES (nuevo) ===================
+// =================== PARTIDOS MANUALES ===================
 function renderFixtures(){
   const tb = document.querySelector('#tblFixtures tbody')
   tb.innerHTML = MANUAL_FIXTURES.map((r,idx)=> `<tr>
@@ -698,7 +843,6 @@ function renderFixtures(){
 
 function removeFixture(idx){
   MANUAL_FIXTURES.splice(idx,1)
-  // reconstruimos FEAT: histórico + manuales
   RAW = RAW.filter(r=> !r.__manualFixture).concat(MANUAL_FIXTURES)
   FEAT = engineerFeatures(RAW, {rollShort:document.getElementById('rollShort').value, rollLong:document.getElementById('rollLong').value})
   refreshLeagueFilter(FEAT)
@@ -718,20 +862,16 @@ function addFixture(){
     date: d, league: l, home: h, away: a,
     odds_over25: (oOver? Number(oOver): null),
     odds_btts: (oBTTS? Number(oBTTS): null),
-    // sin resultado → futuros
     y_over25: null, y_btts: null,
     __manualFixture: true
   }
   MANUAL_FIXTURES.push(row)
 
-  // FEAT = histórico + manuales (recalcular para construir features de forma)
   RAW = RAW.filter(r=> !r.__manualFixture).concat(MANUAL_FIXTURES)
   FEAT = engineerFeatures(RAW, {rollShort:document.getElementById('rollShort').value, rollLong:document.getElementById('rollLong').value})
   refreshLeagueFilter(FEAT)
   renderFixtures()
 
-  // limpiar inputs mínimos
-  // (conservamos liga por comodidad)
   document.getElementById('fiHome').value=''
   document.getElementById('fiAway').value=''
   document.getElementById('fiOver').value=''
@@ -739,6 +879,8 @@ function addFixture(){
 }
 
 // =================== EVENTOS UI ===================
+document.getElementById('btnBacktest').addEventListener('click', backtestThresholds)
+
 const fileInput = document.getElementById('file')
 fileInput.addEventListener('change', (e)=>{
   const f=e.target.files[0]; if(!f) return
