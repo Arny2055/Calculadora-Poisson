@@ -23,17 +23,17 @@
   .grid{display:grid;gap:16px}
   .g-3{grid-template-columns:repeat(3,minmax(0,1fr))}
   .g-2{grid-template-columns:repeat(2,minmax(0,1fr))}
-  .card{background:linear-gradient(180deg,var(--panel),var(--panel2));border:1px solid var(--border);border-radius:16px;padding:16px;box-shadow:0 4px 16px #0005}
+  .card{background:linear-gradient(180deg,var(--panel),var(--panel2));border:1px solid var(--border);border-radius:16px;padding:16px;box-shadow:0 4px 16px #0005;overflow:hidden}
   .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
   .btn{background:var(--accent);border:none;color:#0b1020;font-weight:700;padding:10px 14px;border-radius:12px;cursor:pointer}
   .btn.alt{background:var(--accent2)}
-  .btn.ghost{background:transparent;border:1px solid var(--border);color:#var(--text)}
+  .btn.ghost{background:transparent;border:1px solid var(--border);color:var(--text)}
   .btn.warn{background:var(--warn);color:#000}
   .btn:disabled{opacity:.55;cursor:not-allowed}
   label{display:block;font-size:12px;color:var(--muted);margin-bottom:6px}
   input,select{width:100%;padding:10px 12px;border-radius:10px;border:1px solid var(--border);background:#111521;color:#fff}
-  table{width:100%;border-collapse:collapse}
-  th,td{padding:10px;border-bottom:1px solid var(--border);text-align:left}
+  table{width:100%;border-collapse:collapse;table-layout:auto}
+  th,td{padding:10px;border-bottom:1px solid var(--border);text-align:left;vertical-align:middle}
   th{font-size:12px;color:var(--muted);font-weight:600}
   tr:hover td{background:#0f1422}
   .badge{display:inline-block;padding:3px 8px;border-radius:999px;font-size:11px;font-weight:700}
@@ -44,9 +44,22 @@
   .footer{color:var(--muted);font-size:12px;margin:24px 0 16px}
   .pill{background:#121a2a;border:1px solid var(--border);color:#9aa3b2;padding:6px 10px;border-radius:999px;font-size:12px}
   .split{display:flex;gap:16px;flex-wrap:wrap}
-  canvas{max-height:280px}
-  .tbl-small td{font-size:12px}
   .nowrap{white-space:nowrap}
+
+  /* ---- CANVAS: evitar desbordes ---- */
+  canvas{display:block;width:100% !important;max-width:100%;height:260px !important}
+
+  /* Contenedor de muchas gráficas en 1x2: permitir wrap y evitar overflow */
+  .charts-1x2{display:grid;gap:12px;grid-template-columns:repeat(3,minmax(0,1fr))}
+  @media (max-width:1100px){
+    .g-3{grid-template-columns:repeat(2,minmax(0,1fr))}
+    .charts-1x2{grid-template-columns:repeat(2,minmax(0,1fr))}
+  }
+  @media (max-width:720px){
+    .g-3,.g-2{grid-template-columns:1fr}
+    .charts-1x2{grid-template-columns:1fr}
+    table{display:block;overflow-x:auto}
+  }
 </style>
 </head>
 <body>
@@ -165,7 +178,7 @@
         <div class="sub">Calibración: <span id="calib1x2" class="badge mid">—</span></div>
       </div>
     </div>
-    <div class="grid g-3" style="margin-top:10px">
+    <div class="charts-1x2" style="margin-top:10px">
       <canvas id="chartReliabH"></canvas>
       <canvas id="chartReliabD"></canvas>
       <canvas id="chartReliabA"></canvas>
@@ -486,8 +499,7 @@ function trainSoftmax(design, epochs=400, lr=0.05, l2=0.001){
   let b = Array(K).fill(0)
   for(let ep=0; ep<epochs; ep++){
     for(let i=0;i<X.length;i++){
-      const xi = X[i], yi = y[i] // class index 0..K-1
-      // logits
+      const xi = X[i], yi = y[i]
       const z = b.map((bk,k)=> bk + W[k].reduce((s,wj,j)=> s + wj*xi[j], 0))
       const p = softmax(z)
       for(let k=0;k<K;k++){
@@ -683,12 +695,11 @@ function trainAll(){
   renderReliability('chartReliabB', pBc, yB)
 
   // Métricas 1x2 calibradas
-  const Pc = P1x2.map((q,i)=>[
+  const Pc = P1x2.map((q)=>[
     isotonicPredict(isoH,q[0]),
     isotonicPredict(isoD,q[1]),
     isotonicPredict(isoA,q[2])
   ])
-  // Re-normalizar suavemente por si hay ligeras desviaciones numéricas
   for(const q of Pc){
     const s=q[0]+q[1]+q[2]; if(s>0){ q[0]/=s; q[1]/=s; q[2]/=s }
   }
@@ -696,7 +707,7 @@ function trainAll(){
   const l1 = loglossMulti(Pc,Y1x2)
   document.getElementById('brier1x2').textContent = isFinite(b1)? b1.toFixed(4) : '—'
   document.getElementById('logloss1x2').textContent = isFinite(l1)? l1.toFixed(4) : '—'
-  setBadge('calib1x2', calibScoreMulti([pH,yH],[pD,yD],[pA,yA]))
+  setBadge('calib1x2', calibScoreMulti([Pc.map(q=>q[0]),Y1x2.map(v=> v===0?1:0)],[Pc.map(q=>q[1]),Y1x2.map(v=> v===1?1:0)],[Pc.map(q=>q[2]),Y1x2.map(v=> v===2?1:0)]))
 
   renderReliability('chartReliabH', Pc.map(q=>q[0]), Y1x2.map(v=> v===0?1:0))
   renderReliability('chartReliabD', Pc.map(q=>q[1]), Y1x2.map(v=> v===1?1:0))
@@ -790,7 +801,7 @@ function generateProbabilities(){
 
   outO.sort((a,b)=> b.p_model-a.p_model)
   outB.sort((a,b)=> b.p_model-a.p_model)
-  out1x2.sort((a,b)=> (b.pH - a.pH)) // orden por Home como referencia
+  out1x2.sort((a,b)=> (b.pH - a.pH))
 
   fillPredTable('tblOver', outO)
   fillPredTable('tblBTTS', outB)
@@ -853,13 +864,28 @@ function binReliability(p,y, nb=10){
 }
 function renderReliability(canvasId, p, y){
   const bins = binReliability(p,y)
-  const ctx = document.getElementById(canvasId).getContext('2d')
-  if(ctx._chart){ ctx._chart.destroy() }
-  if(!bins.length){ ctx.canvas.replaceWith(ctx.canvas.cloneNode(true)); return }
+  const canvas = document.getElementById(canvasId)
+  const ctx = canvas.getContext('2d')
+  if(ctx._chart){ ctx._chart.destroy(); ctx._chart = null }
+  if(!bins.length){
+    const clone = canvas.cloneNode(true)
+    canvas.parentNode.replaceChild(clone, canvas)
+    return
+  }
   const labels = bins.map((_,i)=> `${(i/bins.length*100).toFixed(0)}–${((i+1)/bins.length*100).toFixed(0)}%`)
   const data1 = bins.map(b=> b.acc)
   const data2 = bins.map(b=> b.conf)
-  ctx._chart = new Chart(ctx, { type:'line', data:{ labels, datasets:[ {label:'Exactitud', data:data1}, {label:'Confianza', data:data2} ]}, options:{ responsive:true, interaction:{mode:'index',intersect:false}, scales:{ y:{min:0,max:1} } } })
+  ctx._chart = new Chart(ctx, {
+    type:'line',
+    data:{ labels, datasets:[ {label:'Exactitud', data:data1}, {label:'Confianza', data:data2} ]},
+    options:{
+      responsive:true,
+      maintainAspectRatio:false,
+      interaction:{mode:'index',intersect:false},
+      scales:{ y:{min:0,max:1} },
+      plugins:{ legend:{display:true} }
+    }
+  })
 }
 
 // =================== HISTORIAL POR EQUIPO ===================
