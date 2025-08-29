@@ -188,7 +188,7 @@
       <table id="tblOver">
         <thead><tr>
           <th>Fecha</th><th>Liga</th><th>Partido</th>
-          <th>p_model</th>
+          <th>p_model (%)</th><th>Cuota justa</th>
         </tr></thead>
         <tbody></tbody>
       </table>
@@ -198,14 +198,14 @@
       <table id="tblBTTS">
         <thead><tr>
           <th>Fecha</th><th>Liga</th><th>Partido</th>
-          <th>p_model</th>
+          <th>p_model (%)</th><th>Cuota justa</th>
         </tr></thead>
         <tbody></tbody>
       </table>
     </div>
   </section>
 
-  <div class="footer">Notas: logística L2 + isotónica. Features: forma rolling (xG, tiros a puerta), PPDA, descanso, clima, árbitro, localía y señales básicas de juego. Se muestran <b>probabilidades calibradas</b>; sin ROI ni cuotas.</div>
+  <div class="footer">Notas: logística L2 + isotónica. Features: forma rolling (xG, tiros a puerta), PPDA, descanso, clima, árbitro, localía y señales básicas de juego. Se muestran <b>probabilidades calibradas</b> en porcentaje y su <b>cuota justa</b> (1/p); sin ROI ni cuotas del mercado.</div>
 </main>
 
 <script>
@@ -558,7 +558,6 @@ function trainAll(){
   renderReliability('chartReliabB', pBc, yB)
 
   document.getElementById('btnPicks').disabled = false
-  // Actualiza historial por equipo ante nuevo dataset procesado
   populateHistLeagueOptions()
   rebuildTeamHistory()
 }
@@ -598,11 +597,26 @@ function generateProbabilities(){
     const pOver = isotonicPredict(isoO, predictLogReg(designO, modelO, r))
     const pBTTS = isotonicPredict(isoB, predictLogReg(designB, modelB, r))
 
-    outO.push({date:r.date, league:r.league, match:`${r.home} vs ${r.away}`, p_model:pOver})
-    PREDS.push({date:r.date, league:r.league, match:`${r.home} vs ${r.away}`, market:'Over 2.5', p_model:pOver})
+    const fairOver = pOver>0 ? (1/pOver) : null
+    const fairBTTS = pBTTS>0 ? (1/pBTTS) : null
 
-    outB.push({date:r.date, league:r.league, match:`${r.home} vs ${r.away}`, p_model:pBTTS})
-    PREDS.push({date:r.date, league:r.league, match:`${r.home} vs ${r.away}`, market:'BTTS Yes', p_model:pBTTS})
+    outO.push({
+      date:r.date, league:r.league, match:`${r.home} vs ${r.away}`,
+      p_model:pOver, fair:fairOver
+    })
+    PREDS.push({
+      date:r.date, league:r.league, match:`${r.home} vs ${r.away}`,
+      market:'Over 2.5', p_model:pOver, p_model_percent:pOver*100, fair_odds:fairOver
+    })
+
+    outB.push({
+      date:r.date, league:r.league, match:`${r.home} vs ${r.away}`,
+      p_model:pBTTS, fair:fairBTTS
+    })
+    PREDS.push({
+      date:r.date, league:r.league, match:`${r.home} vs ${r.away}`,
+      market:'BTTS Yes', p_model:pBTTS, p_model_percent:pBTTS*100, fair_odds:fairBTTS
+    })
   }
 
   outO.sort((a,b)=> b.p_model-a.p_model)
@@ -613,17 +627,22 @@ function generateProbabilities(){
 
   document.getElementById('btnExport').disabled = PREDS.length===0
 }
+function fmtPercent(x){ return (x*100).toFixed(1) + '%' }
+function fmtFair(x){ return x? x.toFixed(2) : '—' }
+
 function fillPredTable(id, rows){
   const tb = document.querySelector(`#${id} tbody`)
   tb.innerHTML = rows.map(r=> `<tr>
     <td>${r.date||''}</td>
     <td>${r.league||''}</td>
     <td>${r.match||''}</td>
-    <td class="knum">${(r.p_model??0).toFixed(3)}</td>
+    <td class="knum">${fmtPercent(r.p_model??0)}</td>
+    <td class="knum">${fmtFair(r.fair)}</td>
   </tr>`).join('')
 }
+
 function exportCSV(){
-  const head=['date','league','match','market','p_model']
+  const head=['date','league','match','market','p_model','p_model_percent','fair_odds']
   const rows = PREDS.map(r=> head.map(k=> r[k]))
   let csv = head.join(',')+'\n'
   for(const r of rows){ csv += r.join(',')+'\n' }
@@ -691,12 +710,9 @@ function rebuildTeamHistory(){
   const out=[]
   perTeam.forEach((arr, key)=>{
     if(!arr.length) return
-    // Filtro por liga si aplica
     const lg = arr[0].league
     if(leagueFilter && lg!==leagueFilter) return
-    // PJ total
     const pj = arr.length
-    // Tomar últimos N
     const last = arr.slice(-N)
     const avg = (list, k)=> list.length? (list.reduce((s,x)=> s + (toNum(x[k])||0), 0) / list.length) : 0
     const gf = avg(last,'gf'), gc = avg(last,'ga')
@@ -705,10 +721,8 @@ function rebuildTeamHistory(){
     out.push({ team:arr[0].team, league:lg, pj, gf, gc, sotf, sota, dif })
   })
 
-  // Ordenar por DifØ(N) desc
   out.sort((a,b)=> b.dif - a.dif)
 
-  // Render
   const tb = document.querySelector('#tblTeams tbody')
   tb.innerHTML = out.map(r=> `<tr>
     <td>${r.team}</td>
