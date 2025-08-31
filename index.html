@@ -42,22 +42,25 @@
   .mid{background:#2c2a11;color:#ffe9a1;border:1px solid #685c1c}
   .knum{font-variant-numeric:tabular-nums}
   .footer{color:var(--muted);font-size:12px;margin:24px 0 16px}
-  .pill{background:#121a2a;border:1px solid #var(--border);color:#9aa3b2;padding:6px 10px;border-radius:999px;font-size:12px}
+  .pill{background:#121a2a;border:1px solid var(--border);color:#9aa3b2;padding:6px 10px;border-radius:999px;font-size:12px}
   .split{display:flex;gap:16px;flex-wrap:wrap}
   .nowrap{white-space:nowrap}
 
+  /* Gráficas: no desbordar */
   .charts{display:grid;gap:12px}
   .charts.g-3{grid-template-columns:repeat(3,minmax(0,1fr))}
   .charts.g-2{grid-template-columns:repeat(2,minmax(0,1fr))}
   .chart-wrap{position:relative;width:100%;max-width:100%}
   canvas{display:block;width:100% !important;height:auto !important;max-height:260px}
 
+  /* Tablas de calibración */
   .calib{margin-top:10px}
   .calib table{font-size:12px}
   .calib td.knum,.calib th.knum{font-variant-numeric:tabular-nums}
   .delta-pos{color:#79e2a6}
   .delta-neg{color:#ff6b6b}
 
+  /* Resaltado 1X2 */
   .best{background:#0a3823;color:#94f3c1;border:1px solid #1a7b50;border-radius:8px;padding:2px 6px}
 
   @media (max-width: 900px){
@@ -70,21 +73,18 @@
 <body>
 <main>
   <h1>BET MEXICO 🇲🇽</h1>
-  <div class="sub">Carga <b>CSV o JSON</b> (puedes seleccionar <b>2 JSON</b> a la vez), entrena (80%/20% temporal), agrega partidos manuales y obtén <b>probabilidades calibradas</b> y <b>cuotas justas</b> (1/p). Sin cuotas de mercado.</div>
+  <div class="sub">Carga <b>CSV o JSON</b> con histórico, entrena (80%/20% temporal), agrega partidos manuales y obtén <b>probabilidades calibradas</b> y <b>cuotas justas</b> (1/p). Sin cuotas de mercado.</div>
 
   <!-- CONTROLES PRINCIPALES -->
   <section class="grid g-3" style="margin-top:16px">
     <div class="card">
       <h2>1) Datos</h2>
       <div class="row">
-        <input id="files" type="file" multiple accept=".csv,.txt,.json,application/json" />
+        <input id="file" type="file" accept=".csv,.txt,.json,application/json" />
         <button class="btn ghost" id="btnDemoCSV">Demo CSV</button>
         <button class="btn ghost" id="btnDemoJSON">Demo JSON</button>
       </div>
-      <p class="sub" style="margin-top:8px">
-        Puedes seleccionar <b>uno o varios</b> archivos. Los unimos y <b>deduplicamos</b> por (fecha, liga, local, visitante).
-        <br><span id="loadInfo" class="pill" style="display:inline-block;margin-top:6px">Sin datos cargados</span>
-      </p>
+      <p class="sub" style="margin-top:8px">Formato flexible con columnas tipo <span class="pill">Match</span>, <span class="pill">Date</span>, <span class="pill">Home OnGoal Shots at FT</span>… Se adapta automáticamente.</p>
     </div>
 
     <div class="card">
@@ -630,7 +630,7 @@ function predictSoftmax(design, model, rowObj){
   const x = design.cols.map(c=> rowObj[c]==null?0:Number(rowObj[c]))
   for(let j=0;j<x.length;j++) x[j]=(x[j]-design.mu[j])/design.sd[j]
   const z = model.b.map((bk,k)=> bk + model.W[k].reduce((s,wj,j)=> s + wj*x[j], 0))
-  return softmax(z)
+  return softmax(z) // [pH,pD,pA]
 }
 
 // =================== ISOTÓNICA (global + por liga) ===================
@@ -762,24 +762,12 @@ function renderCalibrationTable(targetId, p, y){
 
 // =================== ENTRENAMIENTO / INFERENCIA ===================
 let RAW=[], FEAT=[]
-let designO, modelO, isoO
-let designB, modelB, isoB
-let designWDL, modelWDL, isoH, isoD, isoA
-let PREDS=[]
+let designO, modelO, isoO // bin Over
+let designB, modelB, isoB // bin BTTS
+let designWDL, modelWDL, isoH, isoD, isoA // 1x2
+let PREDS=[] // export
 let MANUAL_FIXTURES=[]
 let LEAGUE_TEAMS = new Map()
-
-// ======= DEDUP =======
-function dedupRows(rows){
-  const seen = new Set()
-  const out=[]
-  for(const r of rows){
-    const key = `${r.date||''}|||${(r.league||'').toLowerCase()}|||${(r.home||'').toLowerCase()}|||${(r.away||'').toLowerCase()}`
-    if(seen.has(key)) continue
-    seen.add(key); out.push(r)
-  }
-  return out
-}
 
 // ----- Liga -> Set(Equipos)
 function buildLeagueTeamsMap(data){
@@ -891,6 +879,7 @@ function trainAll(){
   setBadge('calibB', calibScore(pBc,yB))
   renderReliability('chartReliabO', pOc, yO)
   renderReliability('chartReliabB', pBc, yB)
+  // Tablas de calibración Over/BTTS
   renderCalibrationTable('calibTableO', pOc, yO)
   renderCalibrationTable('calibTableB', pBc, yB)
 
@@ -910,6 +899,7 @@ function trainAll(){
   renderReliability('chartReliabH', Pc.map(q=>q[0]), Y1x2.map(v=> v===0?1:0))
   renderReliability('chartReliabD', Pc.map(q=>q[1]), Y1x2.map(v=> v===1?1:0))
   renderReliability('chartReliabA', Pc.map(q=>q[2]), Y1x2.map(v=> v===2?1:0))
+  // Tablas de calibración 1X2 por clase
   renderCalibrationTable('calibTableH', Pc.map(q=>q[0]), Y1x2.map(v=> v===0?1:0))
   renderCalibrationTable('calibTableD', Pc.map(q=>q[1]), Y1x2.map(v=> v===1?1:0))
   renderCalibrationTable('calibTableA', Pc.map(q=>q[2]), Y1x2.map(v=> v===2?1:0))
@@ -1107,7 +1097,7 @@ function rebuildTeamHistory(){
   </tr>`).join('')
 }
 
-// =================== CARGA MULTIARCHIVO ===================
+// =================== CARGA: CSV o JSON ===================
 function refreshLeagueFilter(data){
   const sel = document.getElementById('fLeague')
   const leagues = Array.from(new Set(data.map(r=> r.league))).filter(Boolean).sort()
@@ -1119,62 +1109,34 @@ function afterDataLoaded(){
   refreshLeagueFilter(FEAT)
   populateHistLeagueOptions()
   rebuildTeamHistory()
-  const inf = document.getElementById('loadInfo')
-  inf.textContent = `Cargados ${FEAT.length} partidos (${RAW.length} crudos, tras merge & dedupe)`
 }
-
-// Parsers reutilizables
-function parseCSVToRows(text){
+function handleCSV(text){
   const {data} = parseCSV(text)
   let norm = normalizeObjects(data)
   norm = adaptFromCustomSchema(norm)
-  return norm
-}
-function parseJSONToRows(text){
-  let obj
-  try{ obj = JSON.parse(text) }catch(e){ throw new Error('JSON inválido') }
-  let arr = Array.isArray(obj)? obj : (obj && Array.isArray(obj.data)? obj.data : null)
-  if(!arr) throw new Error('El JSON debe ser un array de partidos o {data:[...]}.')
-  let norm = normalizeObjects(arr)
-  norm = adaptFromCustomSchema(norm)
-  return norm
-}
-
-// Lector multiarchivo (2 JSON o mezcla)
-async function loadMultiFiles(fileList){
-  if(!fileList || !fileList.length) return
-  const files = Array.from(fileList)
-  let allRows = []
-  for(const f of files){
-    const text = await f.text()
-    const name = (f.name||'').toLowerCase()
-    try{
-      if(name.endsWith('.json')){
-        allRows = allRows.concat(parseJSONToRows(text))
-      } else {
-        // CSV / TXT desconocido => intentamos JSON y si falla, CSV
-        try{ allRows = allRows.concat(parseJSONToRows(text)) }
-        catch{ allRows = allRows.concat(parseCSVToRows(text)) }
-      }
-    }catch(err){
-      alert(`Error en ${f.name}: ${err.message||err}`)
-    }
-  }
-  if(allRows.length===0){
-    alert('No se pudieron extraer partidos de los archivos seleccionados.')
-    return
-  }
-  // Merge + dedupe
-  allRows = dedupRows(allRows)
-  RAW = allRows
+  RAW = norm
   FEAT = engineerFeatures(RAW, {rollShort:document.getElementById('rollShort').value, rollLong:document.getElementById('rollLong').value})
   afterDataLoaded()
-  alert(`Archivos leídos: ${files.length}\nPartidos importados (únicos): ${FEAT.length}`)
+  alert('Datos CSV cargados: '+FEAT.length+' filas.')
 }
-
-// Compatibilidad con botones demo y carga simple (usando pipeline multi)
-function handleCSV(text){ const rows = parseCSVToRows(text); RAW = dedupRows(rows); FEAT = engineerFeatures(RAW, {rollShort:document.getElementById('rollShort').value, rollLong:document.getElementById('rollLong').value}); afterDataLoaded(); alert('Datos CSV cargados: '+FEAT.length+' filas.') }
-function handleJSON(text){ const rows = parseJSONToRows(text); RAW = dedupRows(rows); FEAT = engineerFeatures(RAW, {rollShort:document.getElementById('rollShort').value, rollLong:document.getElementById('rollLong').value}); afterDataLoaded(); alert('Datos JSON cargados: '+FEAT.length+' filas.') }
+function handleJSON(text){
+  let obj
+  try{ obj = JSON.parse(text) }catch(e){ alert('JSON inválido.'); return }
+  let arr = Array.isArray(obj)? obj : (obj && Array.isArray(obj.data)? obj.data : null)
+  if(!arr){ alert('El JSON debe ser un array de partidos o {data:[...]}.'); return }
+  let norm = normalizeObjects(arr)
+  norm = adaptFromCustomSchema(norm)
+  RAW = norm
+  FEAT = engineerFeatures(RAW, {rollShort:document.getElementById('rollShort').value, rollLong:document.getElementById('rollLong').value})
+  afterDataLoaded()
+  alert('Datos JSON cargados: '+FEAT.length+' filas.')
+}
+function loadAuto(text, name){
+  const lower = (name||'').toLowerCase()
+  if(lower.endsWith('.json')){ handleJSON(text); return }
+  try{ const p=JSON.parse(text); if(Array.isArray(p) || (p && typeof p==='object')){ handleJSON(text); return } }catch(e){}
+  handleCSV(text)
+}
 
 // ======= DEMOS =======
 const DEMO_CSV = `Name,Date,League,Match,Home OnGoal Shots at FT,Away OnGoal Shots at FT,Result FT
@@ -1233,8 +1195,11 @@ function addFixture(){
 document.getElementById('btnDemoCSV').addEventListener('click', ()=> handleCSV(DEMO_CSV))
 document.getElementById('btnDemoJSON').addEventListener('click', ()=> handleJSON(JSON.stringify(DEMO_JSON)))
 
-const filesInput = document.getElementById('files')
-filesInput.addEventListener('change', (e)=>{ loadMultiFiles(e.target.files) })
+const fileInput = document.getElementById('file')
+fileInput.addEventListener('change', (e)=>{
+  const f=e.target.files[0]; if(!f) return
+  const fr = new FileReader(); fr.onload = ()=> loadAuto(fr.result, f.name); fr.readAsText(f)
+})
 
 document.getElementById('btnEntrenar').addEventListener('click', trainAll)
 document.getElementById('btnPicks').addEventListener('click', generateProbabilities)
@@ -1246,6 +1211,7 @@ document.getElementById('fiDate').addEventListener('input', maybeToggleAddButton
 document.getElementById('fiHome').addEventListener('change', maybeToggleAddButton)
 document.getElementById('fiAway').addEventListener('change', maybeToggleAddButton)
 
+// Historial por equipo
 document.getElementById('btnRebuildHist').addEventListener('click', rebuildTeamHistory)
 document.getElementById('histLeague').addEventListener('change', rebuildTeamHistory)
 document.getElementById('histN').addEventListener('input', rebuildTeamHistory)
