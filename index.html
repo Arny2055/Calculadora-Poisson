@@ -85,14 +85,10 @@
 
     <div class="card">
       <h2>2) Entrenamiento</h2>
-      <div class="grid g-3">
+      <div class="grid g-2">
         <div>
           <label>Rolling ventana corta</label>
           <input id="rollShort" type="number" value="6" min="3" max="12"/>
-        </div>
-        <div>
-          <label>Rolling ventana mediana</label>
-          <input id="rollMed" type="number" value="10" min="4" max="20"/>
         </div>
         <div>
           <label>Rolling ventana larga</label>
@@ -104,7 +100,7 @@
         <button id="btnPicks" class="btn alt" disabled>Calcular probabilidades</button>
         <button id="btnExport" class="btn ghost" disabled>Exportar predicciones (CSV)</button>
       </div>
-      <p class="sub">Usamos: Elo con decaimiento, pesos por recencia y clase, priors por liga y calibración isotónica por liga. Ahora con <b>tres ventanas</b> (corta/mediana/larga) para forma.</p>
+      <p class="sub">Usamos: Elo con decaimiento, pesos por recencia y clase, priors por liga y calibración isotónica por liga.</p>
     </div>
 
     <div class="card">
@@ -140,20 +136,11 @@
       </div>
       <div style="display:flex;align-items:flex-end;gap:8px;flex-wrap:wrap">
         <button id="btnAddFixture" class="btn" disabled>Agregar partido</button>
-        <!-- FEEDS DE HOY -->
+        <!-- NUEVO: botón para traer partidos de hoy desde ESPN -->
         <button id="btnFetchToday" class="btn ghost">Partidos de hoy (ESPN)</button>
-        <button id="btnFetchFD" class="btn ghost">Partidos de hoy (FD.org)</button>
       </div>
     </div>
-    <div class="sub" style="margin-top:8px">
-      Solo equipos que existan en tu histórico para esa liga.
-      <br>Para <b>football-data.org</b> ingresa tu <span class="pill">X-Auth-Token</span> (se guarda localmente):
-    </div>
-    <div class="row" style="margin-top:6px">
-      <input id="fdToken" type="password" placeholder="Pegue aquí su X-Auth-Token de football-data.org" style="min-width:320px" />
-      <button id="btnSaveFDToken" class="btn ghost">Guardar token</button>
-      <button id="btnClearFDToken" class="btn warn">Borrar token</button>
-    </div>
+    <div class="sub" style="margin-top:8px">Solo equipos que existan en tu histórico para esa liga.</div>
 
     <table id="tblFixtures" class="tbl-small" style="margin-top:10px">
       <thead><tr>
@@ -276,7 +263,7 @@
     </table>
   </section>
 
-  <div class="footer">Modelado: logística binaria (Over, BTTS) + softmax (1X2) con SGD, L2, pesos por recencia y clase; features de forma (rolling corta/mediana/larga), Elo con decaimiento, priors por liga; calibración isotónica <b>por liga</b> con respaldo global. Probabilidades calibradas en porcentaje y cuotas justas.</div>
+  <div class="footer">Modelado: logística binaria (Over, BTTS) + softmax (1X2) con SGD, L2, pesos por recencia y clase; features de forma (rolling), Elo con decaimiento, priors por liga; calibración isotónica <b>por liga</b> con respaldo global. Probabilidades calibradas en porcentaje y cuotas justas.</div>
 </main>
 
 <script>
@@ -307,29 +294,244 @@ const clamp=(x,a,b)=> Math.max(a, Math.min(b, x))
 const safeDate = (s)=>{ const d=new Date(s); return isNaN(d)? null : d }
 const daysBetween = (a,b)=> Math.max(0, Math.round((b-a)/86400000))
 
+// Normaliza keys: snake_case
+function normalizeKey(k){ return String(k).toLowerCase().trim().replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,'') }
 function normalizeObjects(arr){
-  const normKey = (k)=> k.toLowerCase().trim().replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,'')
-  return arr.map(r=>{ const o={}; for(const k of Object.keys(r)){ o[normKey(k)] = (''+r[k]).trim() } return o })
+  return arr.map(r=>{
+    const o={}; for(const k of Object.keys(r)){ o[normalizeKey(k)] = (''+r[k]).trim?.() ?? r[k] }
+    return o
+  })
 }
 
+// Fecha “vie., 28 jul. 2023 18:30” -> YYYY-MM-DD
 function parseSpanishDate(s){
-  if(!s) return null;
+  if(s==null) return null;
+  if(typeof s==='number'){ // timestamp (seg/milis)
+    const n = (s>1e12? s : (s*1000))
+    const d = new Date(n); return isNaN(d)? null : d.toISOString().slice(0,10)
+  }
+  const str = String(s).trim()
+  // ISO directo
+  const tryISO = new Date(str)
+  if(!isNaN(tryISO)) return tryISO.toISOString().slice(0,10)
+  // Español "vie., 28 jul. 2023 18:30"
   const months={ene:1,feb:2,mar:3,abr:4,may:5,jun:6,jul:7,ago:8,sep:9,oct:10,nov:11,dic:12};
-  const m = String(s).toLowerCase().match(/(\d{1,2})\s+([a-záéíóú\.]{3,})\.?\s+(\d{4})/i);
-  if(!m){ const d=new Date(s); return isNaN(d)? null : d.toISOString().slice(0,10) }
-  const day = String(m[1]).padStart(2,'0');
-  const monKey = m[2].slice(0,3).normalize('NFD').replace(/[\u0300-\u036f\.]/g,'');
-  const mon = months[monKey]; const year=m[3];
-  if(!mon) return null;
-  return `${year}-${String(mon).padStart(2,'0')}-${day}`;
+  const m = str.toLowerCase().match(/(\d{1,2})\s+([a-záéíóú\.]{3,})\.?\s+(\d{4})/)
+  if(!m) return null
+  const day = String(m[1]).padStart(2,'0')
+  const monKey = m[2].slice(0,3).normalize('NFD').replace(/[\u0300-\u036f\.]/g,'')
+  const mon = months[monKey]; const year=m[3]; if(!mon) return null
+  return `${year}-${String(mon).padStart(2,'0')}-${day}`
 }
 function splitMatch(s){ if(!s) return {home:null,away:null}; const p=String(s).split('-'); return {home:(p[0]||'').trim(), away:(p[1]||'').trim()} }
-function numSafe(v){ const n=Number(String(v).replace(/[^0-9\.-]/g,'')); return isNaN(n)? null : n }
+function numSafe(v){ if(v==null) return null; const n=Number(String(v).replace(/[^0-9\.-]/g,'')); return isNaN(n)? null : n }
 
-/* =================== ADAPTADOR ESQUEMA (sin cuotas) =================== */
+/* =================== ADAPTADOR ESQUEMA (universal JSON) =================== */
+/** Recorrido profundo: extrae TODOS los objetos y arrays anidados */
+function deepCollect(value, out){
+  if(value==null) return
+  if(Array.isArray(value)){ for(const v of value) deepCollect(v,out); return }
+  if(typeof value==='object'){
+    out.push(value)
+    for(const k of Object.keys(value)) deepCollect(value[k], out)
+  }
+}
+
+/** Aplana un objeto (clave compuesta a snake_case) */
+function flatten(obj, prefix='', res={}){
+  for(const k of Object.keys(obj)){
+    const v = obj[k]
+    const nk = prefix? `${prefix}_${normalizeKey(k)}` : normalizeKey(k)
+    if(v && typeof v==='object' && !Array.isArray(v)){
+      flatten(v, nk, res)
+    } else {
+      res[nk] = v
+    }
+  }
+  return res
+}
+
+/** Intenta extraer home/away/league/date/score desde un objeto "candidato" */
+function extractMatchFromFlat(o){
+  const pick = (keys)=> {
+    for(const kk of keys){
+      if(o[kk]!=null && String(o[kk]).trim()!=='') return o[kk]
+    }
+    return null
+  }
+
+  const homeKeys = [
+    'home','home_team','home_name','home_team_name','local','localteam_name','equipo_local',
+    'team_home','home_side','home_team_short','ht','homeclub','homeclub_name',
+    'fixture_home','teams_home_name','participants_home_name'
+  ]
+  const awayKeys = [
+    'away','away_team','away_name','away_team_name','visitante','visitanteteam_name','equipo_visitante',
+    'team_away','away_side','away_team_short','at','awayclub','awayclub_name',
+    'fixture_away','teams_away_name','participants_away_name'
+  ]
+  const matchKeys = ['match','game','card','fixture_card','nombre_partido','partido','teams_card']
+  const leagueKeys = [
+    'league','league_name','competition','competition_name','tournament','tournament_name','division','comp',
+    'league_display_name','championship','season_name','liga'
+  ]
+  const dateKeys = [
+    'date','utcdate','fixture_date','start_time','kickoff','event_date','game_date','match_date',
+    'datetime','commence_time','timestamp','ts','created_at','updated_at','starttimestamp'
+  ]
+  const ftKeys = ['result_ft','final_score','full_time','ft','score_fulltime','score_ft','ft_score','resultado_final']
+
+  // 1) Home/Away por claves directas:
+  let home = pick(homeKeys), away = pick(awayKeys)
+
+  // 2) Si viene en un "match" string tipo "A - B"
+  if((!home || !away) && o['match']){
+    const m = splitMatch(o['match']); home = home || m.home; away = away || m.away
+  }
+  if((!home || !away)){
+    // Variantes "teams": ["A","B"] o objects
+    if(Array.isArray(o['teams'])){
+      const t = o['teams']
+      if(t.length>=2){
+        const n1 = t[0]?.name || t[0]?.display_name || t[0]?.team || t[0]
+        const n2 = t[1]?.name || t[1]?.display_name || t[1]?.team || t[1]
+        if(!home) home = typeof n1==='string'? n1 : null
+        if(!away) away = typeof n2==='string'? n2 : null
+      }
+    }
+    // "competitors" / "participants" (ESPN, The Odds API)
+    const sideArr = o['competitors'] || o['participants'] || o['sides'] || null
+    if(Array.isArray(sideArr)){
+      const H = sideArr.find(x=> String(x?.homeAway||x?.location||x?.side||'').toLowerCase().includes('home'))
+      const A = sideArr.find(x=> String(x?.homeAway||x?.location||x?.side||'').toLowerCase().includes('away'))
+      const nameKey = (x)=> x?.team?.displayName || x?.team?.name || x?.name || x?.title || x?.team_name
+      if(H && !home) home = nameKey(H)
+      if(A && !away) away = nameKey(A)
+      // Si no hay etiquetas home/away: toma los 2 primeros
+      if((!home || !away) && sideArr.length>=2){
+        const n1 = nameKey(sideArr[0]); const n2 = nameKey(sideArr[1])
+        if(!home) home = n1; if(!away) away = n2
+      }
+    }
+    // Alternativa: keys "home_team_name"/"away_team_name" ya cubiertas arriba
+  }
+
+  // 3) Fecha
+  let dateRaw = pick(dateKeys)
+  // Toma también "fixture_date" anidado ya aplanado
+  // Si hay timestamp string numérico
+  if(dateRaw!=null && typeof dateRaw==='string' && /^\d{9,13}$/.test(dateRaw)) dateRaw = Number(dateRaw)
+  const date = parseSpanishDate(dateRaw) || null
+
+  // 4) Liga
+  let league = pick(leagueKeys)
+  // Algunas APIs ponen competition_name en "competition_name_name"
+  if(!league && o['competition_name_name']) league = o['competition_name_name']
+
+  // 5) Resultado / goles
+  let home_goals = null, away_goals = null
+
+  const homeGKeys = ['home_goals','home_score','goals_home','home_ft','home_final','score_home','home_result','home_full_time']
+  const awayGKeys = ['away_goals','away_score','goals_away','away_ft','away_final','score_away','away_result','away_full_time']
+  if(o['score'] && typeof o['score']==='string' && /(\d+)\s*-\s*(\d+)/.test(o['score'])){
+    const mm = o['score'].match(/(\d+)\s*-\s*(\d+)/); home_goals = numSafe(mm[1]); away_goals = numSafe(mm[2])
+  }
+  if(o['scores'] && typeof o['scores']==='string' && /(\d+)\s*-\s*(\d+)/.test(o['scores'])){
+    const mm = o['scores'].match(/(\d+)\s*-\s*(\d+)/); home_goals = numSafe(mm[1]); away_goals = numSafe(mm[2])
+  }
+  // parse result_ft / ft_score "2-1"
+  const ft = pick(ftKeys)
+  if(ft && /(\d+)\s*-\s*(\d+)/.test(String(ft))){
+    const mm = String(ft).match(/(\d+)\s*-\s*(\d+)/); home_goals = numSafe(mm[1]); away_goals = numSafe(mm[2])
+  }
+  if(home_goals==null) home_goals = numSafe(pick(homeGKeys))
+  if(away_goals==null) away_goals = numSafe(pick(awayGKeys))
+
+  // Intento desde objetos típicos: fixture_fulltime_home/away, score_full_time_home/away
+  const hgObj = numSafe(o['full_time_home'] ?? o['score_full_time_home'] ?? o['ft_home'] ?? o['scorehome'])
+  const agObj = numSafe(o['full_time_away'] ?? o['score_full_time_away'] ?? o['ft_away'] ?? o['scoreaway'])
+  if(home_goals==null && hgObj!=null) home_goals = hgObj
+  if(away_goals==null && agObj!=null) away_goals = agObj
+
+  // Shots on target si existieran (no son obligatorios)
+  const home_shotsOT = numSafe(o['home_shots_on_target'] ?? o['home_ongoal_shots_at_ft'] ?? o['shots_on_target_home'] ?? o['home_sot'])
+  const away_shotsOT = numSafe(o['away_shots_on_target'] ?? o['away_ongoal_shots_at_ft'] ?? o['shots_on_target_away'] ?? o['away_sot'])
+
+  // Validación mínima: necesitamos home/away (y ojalá fecha)
+  if(!home || !away) return null
+
+  return {
+    date, league: (league||'').toString(),
+    home: home?.toString?.() ?? home,
+    away: away?.toString?.() ?? away,
+    home_goals, away_goals,
+    home_shotsOT, away_shotsOT
+  }
+}
+
+/** Dado un JSON arbitrario, rescata una lista de filas normalizadas */
+function universalJSONToRows(obj){
+  // Soporta {data:[...]}, {response:[...]}, array directo, etc.
+  const rootArr = []
+  if(Array.isArray(obj)) rootArr.push(...obj)
+  else if(obj && typeof obj==='object'){
+    if(Array.isArray(obj.data)) rootArr.push(...obj.data)
+    if(Array.isArray(obj.response)) rootArr.push(...obj.response)
+    // A veces viene { events:[...] } o { fixtures:[...] } etc.
+    for(const k of ['events','fixtures','matches','games','results']){
+      if(Array.isArray(obj[k])) rootArr.push(...obj[k])
+    }
+  }
+
+  const pool = []
+  // Incluye la raíz y todo lo profundo
+  deepCollect(obj, pool)
+  // Para cada objeto, intenta aplanar y extraer
+  const out = []
+  for(const cand of pool){
+    if(!cand || typeof cand!=='object' || Array.isArray(cand)) continue
+    const flat = flatten(cand)
+    const row = extractMatchFromFlat(flat)
+    if(row) out.push(row)
+  }
+
+  // Si rootArr trae elementos del mismo nivel que ya son partidos
+  for(const item of rootArr){
+    if(item && typeof item==='object'){
+      const flat = flatten(item)
+      const row = extractMatchFromFlat(flat)
+      if(row) out.push(row)
+    }
+  }
+
+  // Si aún no hay filas y el JSON es un array de strings/pares, intenta "Match" + "score"
+  if(out.length===0 && Array.isArray(obj)){
+    for(const it of obj){
+      if(typeof it==='string' && it.includes('-')){
+        const m = splitMatch(it)
+        if(m.home && m.away){
+          out.push({date:null, league:'', home:m.home, away:m.away, home_goals:null, away_goals:null})
+        }
+      }
+    }
+  }
+
+  // Limpieza básica
+  const cleaned = out
+    .filter(r=> r && r.home && r.away)
+    .map(r=>{
+      // Fecha: si no hubo, intenta desde cadenas típicas internas
+      const dd = r.date || parseSpanishDate(r.utcDate) || null
+      return {...r, date: dd}
+    })
+
+  return cleaned
+}
+
+/** Adaptador legacy (por si el usuario sube el CSV/JSON del ejemplo anterior) */
 function adaptFromCustomSchema(arr){
   return arr.map(r=>{
-    if(r.date && r.home && r.away) return r;
+    if(r.date && r.home && r.away) return r
 
     const out = {};
     out.date = parseSpanishDate(r.date) || parseSpanishDate(r._date) || parseSpanishDate(r.league) || parseSpanishDate(r.name) || r.date || null;
@@ -357,22 +559,12 @@ function adaptFromCustomSchema(arr){
     out.home_redcards_at_ft = numSafe(r.home_redcards_at_ft);
     out.away_redcards_at_ft = numSafe(r.away_redcards_at_ft);
 
-    out.home_xg = numSafe(out.home_xg);
-    out.away_xg = numSafe(out.away_xg);
-    out.home_ppda = numSafe(out.home_ppda);
-    out.away_ppda = numSafe(out.away_ppda);
-    out.home_rest = numSafe(out.home_rest);
-    out.away_rest = numSafe(out.away_rest);
-    out.referee_fouls_pg = numSafe(out.referee_fouls_pg);
-    out.humidity = numSafe(out.humidity);
-    out.temp = numSafe(out.temp);
-
     return out;
   });
 }
 
 /* =================== FEATURE ENGINEERING + ELO =================== */
-let TEAM_ELO = new Map();
+let TEAM_ELO = new Map(); // team -> rating
 function getElo(team){ return TEAM_ELO.get(team) ?? 1500 }
 function setElo(team, val){ TEAM_ELO.set(team, val) }
 function expectedFromElo(eA, eB, hAdv=60){
@@ -407,12 +599,8 @@ function addEloFeature(rows){
   }
 }
 
-/* ---- NUEVO: tres ventanas (corta/mediana/larga) ---- */
 function engineerFeatures(rows, opts){
-  const rS = Number(opts.rollShort||5),
-        rM = Number(opts.rollMed||10),
-        rL = Number(opts.rollLong||18)
-
+  const rS = Number(opts.rollShort||5), rL = Number(opts.rollLong||10)
   rows.sort((a,b)=> (a.date||'').localeCompare(b.date||''))
   for(const r of rows){
     r.home_goals = toNum(r.home_goals); r.away_goals = toNum(r.away_goals)
@@ -423,7 +611,7 @@ function engineerFeatures(rows, opts){
   function pushTeam(team, isHome, m){
     const key = team||'__NA__'
     if(!hist.has(key)) hist.set(key, [])
-    hist.get(key).push({
+    const entry = {
       date: m.date||'',
       league: m.league||'',
       for_xg: isHome? (m.home_xg??null): (m.away_xg??null),
@@ -435,61 +623,37 @@ function engineerFeatures(rows, opts){
       goals_for: isHome? (m.home_goals??null): (m.away_goals??null),
       goals_ag:  isHome? (m.away_goals??null): (m.home_goals??null),
       team: team
-    })
+    }
+    hist.get(key).push(entry)
   }
   for(const m of rows){ pushTeam(m.home,true,m); pushTeam(m.away,false,m) }
 
-  function takeLastBefore(team, date, n){
-    const h = (hist.get(team||'__NA__')||[]).filter(x=> (x.date||'') < (date||''))
-    return h.slice(-n)
-  }
-  const avg=(arr,key)=>{ if(arr.length===0) return null; let s=0,c=0; for(const x of arr){ if(x[key]!=null){ s+=x[key]; c++ } } return c? s/c : null }
-
   function rollingStats(team, date){
-    const s = takeLastBefore(team,date,rS)
-    const m = takeLastBefore(team,date,rM)
-    const l = takeLastBefore(team,date,rL)
-    const pack = (arr)=>({
-      for_xg: avg(arr,'for_xg'), ag_xg: avg(arr,'ag_xg'),
-      for_soT: avg(arr,'for_soT'), ag_soT: avg(arr,'ag_soT'),
-      ppda: avg(arr,'ppda'), rest: avg(arr,'rest'),
-      goal_diff: (avg(arr,'goals_for')??0) - (avg(arr,'goals_ag')??0),
-    })
-    return {s:pack(s), m:pack(m), l:pack(l)}
+    const h = (hist.get(team||'__NA__')||[]).filter(x=> (x.date||'') < (date||''))
+    const take = (arr,n)=> arr.slice(-n)
+    const s5 = take(h,rS), sL = take(h,rL)
+    const avg=(arr,key)=>{ if(arr.length===0) return null; let s=0,c=0; for(const x of arr){ if(x[key]!=null){ s+=x[key]; c++ } } return c? s/c : null }
+    return {
+      s_for_xg: avg(s5,'for_xg'), s_ag_xg: avg(s5,'ag_xg'),
+      l_for_xg: avg(sL,'for_xg'), l_ag_xg: avg(sL,'ag_xg'),
+      s_for_soT: avg(s5,'for_soT'), s_ag_soT: avg(s5,'ag_soT'),
+      s_ppda: avg(s5,'ppda'), l_ppda: avg(sL,'ppda'),
+      s_rest: avg(s5,'rest'), l_rest: avg(sL,'rest'),
+      s_goal_diff: (avg(s5,'goals_for')??0) - (avg(s5,'goals_ag')??0),
+      l_goal_diff: (avg(sL,'goals_for')??0) - (avg(sL,'goals_ag')??0),
+    }
   }
 
   for(const m of rows){
     const fH = rollingStats(m.home, m.date)
     const fA = rollingStats(m.away, m.date)
+    m.f_for_xg = (fH.s_for_xg??0) - (fA.s_for_xg??0)
+    m.f_ag_xg  = (fH.s_ag_xg??0)  - (fA.s_ag_xg??0)
+    m.f_soT    = (fH.s_for_soT??0) - (fA.s_for_soT??0)
+    m.f_ppda   = (fA.s_ppda??0) - (fH.s_ppda??0)
+    m.f_rest   = (fH.s_rest??0) - (fA.s_rest??0)
+    m.f_goalD  = (fH.s_goal_diff??0) - (fA.s_goal_diff??0)
 
-    // Diferencias por ventana
-    const diff = (a,b,k)=> ((a?.[k]??0) - (b?.[k]??0))
-
-    // SHORT
-    m.f_for_xg_s = diff(fH.s, fA.s, 'for_xg')
-    m.f_ag_xg_s  = diff(fH.s, fA.s, 'ag_xg')
-    m.f_soT_s    = diff(fH.s, fA.s, 'for_soT')
-    m.f_ppda_s   = diff(fH.s, fA.s, 'ppda')
-    m.f_rest_s   = diff(fH.s, fA.s, 'rest')
-    m.f_goalD_s  = diff(fH.s, fA.s, 'goal_diff')
-
-    // MED
-    m.f_for_xg_m = diff(fH.m, fA.m, 'for_xg')
-    m.f_ag_xg_m  = diff(fH.m, fA.m, 'ag_xg')
-    m.f_soT_m    = diff(fH.m, fA.m, 'for_soT')
-    m.f_ppda_m   = diff(fH.m, fA.m, 'ppda')
-    m.f_rest_m   = diff(fH.m, fA.m, 'rest')
-    m.f_goalD_m  = diff(fH.m, fA.m, 'goal_diff')
-
-    // LONG
-    m.f_for_xg_l = diff(fH.l, fA.l, 'for_xg')
-    m.f_ag_xg_l  = diff(fH.l, fA.l, 'ag_xg')
-    m.f_soT_l    = diff(fH.l, fA.l, 'for_soT')
-    m.f_ppda_l   = diff(fH.l, fA.l, 'ppda')
-    m.f_rest_l   = diff(fH.l, fA.l, 'rest')
-    m.f_goalD_l  = diff(fH.l, fA.l, 'goal_diff')
-
-    // Clima / árbitro (fallbacks)
     m.clima_hum = m.humidity ?? 50
     m.clima_temp = m.temp ?? 18
     m.ref_fouls = m.referee_fouls_pg ?? 22
@@ -509,6 +673,7 @@ function engineerFeatures(rows, opts){
 
   return rows
 }
+
 /* =================== PRIORS POR LIGA =================== */
 let PRIORS = null
 function computeLeaguePriors(rows){
@@ -538,18 +703,8 @@ function addPriorsToRows(rows, priMap){
 }
 
 /* =================== DISEÑOS + PESOS =================== */
-/* Incluye features de forma para S/M/L */
 function makeDesignBinary(rows, target){
-  const colsBase = [
-    // SHORT
-    'f_for_xg_s','f_ag_xg_s','f_soT_s','f_ppda_s','f_rest_s','f_goalD_s',
-    // MED
-    'f_for_xg_m','f_ag_xg_m','f_soT_m','f_ppda_m','f_rest_m','f_goalD_m',
-    // LONG
-    'f_for_xg_l','f_ag_xg_l','f_soT_l','f_ppda_l','f_rest_l','f_goalD_l',
-    // Otros
-    'clima_hum','clima_temp','ref_fouls','f_eloDiff'
-  ]
+  const colsBase = ['f_for_xg','f_ag_xg','f_soT','f_ppda','f_rest','f_goalD','clima_hum','clima_temp','ref_fouls','f_eloDiff']
   const priorCol = (target==='over'?'f_priorOver':'f_priorBTTS')
   const cols = colsBase.concat([priorCol])
 
@@ -587,16 +742,7 @@ function makeDesignBinary(rows, target){
 }
 
 function makeDesignMulticlass(rows){
-  const cols = [
-    // SHORT
-    'f_for_xg_s','f_ag_xg_s','f_soT_s','f_ppda_s','f_rest_s','f_goalD_s',
-    // MED
-    'f_for_xg_m','f_ag_xg_m','f_soT_m','f_ppda_m','f_rest_m','f_goalD_m',
-    // LONG
-    'f_for_xg_l','f_ag_xg_l','f_soT_l','f_ppda_l','f_rest_l','f_goalD_l',
-    // Otros
-    'clima_hum','clima_temp','ref_fouls','f_eloDiff','f_priorDraw'
-  ]
+  const cols = ['f_for_xg','f_ag_xg','f_soT','f_ppda','f_rest','f_goalD','clima_hum','clima_temp','ref_fouls','f_eloDiff','f_priorDraw']
 
   const freq = new Map()
   rows.forEach(r=>{
@@ -1174,22 +1320,32 @@ function afterDataLoaded(){
   inf.textContent = `Cargados ${FEAT.length} partidos (${RAW.length} crudos, tras merge & dedupe)`
 }
 
+// Parsers reutilizables
 function parseCSVToRows(text){
   const {data} = parseCSV(text)
   let norm = normalizeObjects(data)
-  norm = adaptFromCustomSchema(norm)
-  return norm
+  // Intenta legacy:
+  let rows = adaptFromCustomSchema(norm)
+  // Si pareciera vacío, intenta universal a partir del CSV convertido a objetos
+  if(!rows.length) rows = universalJSONToRows(norm)
+  return rows
 }
 function parseJSONToRows(text){
   let obj
   try{ obj = JSON.parse(text) }catch(e){ throw new Error('JSON inválido') }
-  let arr = Array.isArray(obj)? obj : (obj && Array.isArray(obj.data)? obj.data : null)
-  if(!arr) throw new Error('El JSON debe ser un array de partidos o {data:[...]}.')
-  let norm = normalizeObjects(arr)
-  norm = adaptFromCustomSchema(norm)
-  return norm
+  // Intento universal primero:
+  let rows = universalJSONToRows(obj)
+  // Si no obtuvo nada, intenta legacy + normalización plana
+  if(rows.length===0){
+    let arr = Array.isArray(obj)? obj : (obj && Array.isArray(obj.data)? obj.data : (obj && Array.isArray(obj.response)? obj.response : null))
+    if(!arr) throw new Error('No se hallaron partidos en el JSON. Prueba con otro archivo o estructura.')
+    let norm = normalizeObjects(arr)
+    rows = adaptFromCustomSchema(norm)
+  }
+  return rows
 }
 
+// Lector multiarchivo (2 JSON o mezcla)
 async function loadMultiFiles(fileList){
   if(!fileList || !fileList.length) return
   const files = Array.from(fileList)
@@ -1201,6 +1357,7 @@ async function loadMultiFiles(fileList){
       if(name.endsWith('.json')){
         allRows = allRows.concat(parseJSONToRows(text))
       } else {
+        // CSV / TXT desconocido => intentamos JSON y si falla, CSV
         try{ allRows = allRows.concat(parseJSONToRows(text)) }
         catch{ allRows = allRows.concat(parseCSVToRows(text)) }
       }
@@ -1212,40 +1369,17 @@ async function loadMultiFiles(fileList){
     alert('No se pudieron extraer partidos de los archivos seleccionados.')
     return
   }
+  // Merge + dedupe
   allRows = dedupRows(allRows)
   RAW = allRows
-  FEAT = engineerFeatures(RAW, {
-    rollShort:document.getElementById('rollShort').value,
-    rollMed:document.getElementById('rollMed').value,
-    rollLong:document.getElementById('rollLong').value
-  })
+  FEAT = engineerFeatures(RAW, {rollShort:document.getElementById('rollShort').value, rollLong:document.getElementById('rollLong').value})
   afterDataLoaded()
   alert(`Archivos leídos: ${files.length}\nPartidos importados (únicos): ${FEAT.length}`)
 }
 
-/* Compatibilidad con botones demo y carga simple */
-function handleCSV(text){
-  const rows = parseCSVToRows(text)
-  RAW = dedupRows(rows)
-  FEAT = engineerFeatures(RAW, {
-    rollShort:document.getElementById('rollShort').value,
-    rollMed:document.getElementById('rollMed').value,
-    rollLong:document.getElementById('rollLong').value
-  })
-  afterDataLoaded()
-  alert('Datos CSV cargados: '+FEAT.length+' filas.')
-}
-function handleJSON(text){
-  const rows = parseJSONToRows(text)
-  RAW = dedupRows(rows)
-  FEAT = engineerFeatures(RAW, {
-    rollShort:document.getElementById('rollShort').value,
-    rollMed:document.getElementById('rollMed').value,
-    rollLong:document.getElementById('rollLong').value
-  })
-  afterDataLoaded()
-  alert('Datos JSON cargados: '+FEAT.length+' filas.')
-}
+// Compatibilidad con botones demo y carga simple (usando pipeline multi)
+function handleCSV(text){ const rows = parseCSVToRows(text); RAW = dedupRows(rows); FEAT = engineerFeatures(RAW, {rollShort:document.getElementById('rollShort').value, rollLong:document.getElementById('rollLong').value}); afterDataLoaded(); alert('Datos CSV cargados: '+FEAT.length+' filas.') }
+function handleJSON(text){ const rows = parseJSONToRows(text); RAW = dedupRows(rows); FEAT = engineerFeatures(RAW, {rollShort:document.getElementById('rollShort').value, rollLong:document.getElementById('rollLong').value}); afterDataLoaded(); alert('Datos JSON cargados: '+FEAT.length+' filas.') }
 
 /* ======= DEMOS ======= */
 const DEMO_CSV = `Name,Date,League,Match,Home OnGoal Shots at FT,Away OnGoal Shots at FT,Result FT
@@ -1274,11 +1408,7 @@ function renderFixtures(){
 function removeFixture(idx){
   MANUAL_FIXTURES.splice(idx,1)
   RAW = RAW.filter(r=> !r.__manualFixture).concat(MANUAL_FIXTURES)
-  FEAT = engineerFeatures(RAW, {
-    rollShort:document.getElementById('rollShort').value,
-    rollMed:document.getElementById('rollMed').value,
-    rollLong:document.getElementById('rollLong').value
-  })
+  FEAT = engineerFeatures(RAW, {rollShort:document.getElementById('rollShort').value, rollLong:document.getElementById('rollLong').value})
   renderFixtures()
 }
 function addFixture(){
@@ -1298,29 +1428,29 @@ function addFixture(){
   MANUAL_FIXTURES.push(row)
 
   RAW = RAW.filter(r=> !r.__manualFixture).concat(MANUAL_FIXTURES)
-  FEAT = engineerFeatures(RAW, {
-    rollShort:document.getElementById('rollShort').value,
-    rollMed:document.getElementById('rollMed').value,
-    rollLong:document.getElementById('rollLong').value
-  })
+  FEAT = engineerFeatures(RAW, {rollShort:document.getElementById('rollShort').value, rollLong:document.getElementById('rollLong').value})
 
   renderFixtures()
   maybeToggleAddButton()
 }
 
-/* ============ HOY ESPN (endpoint público no oficial) ============ */
+/* ============ NUEVO: traer partidos de HOY desde ESPN (no oficial) ============ */
+/* Documentación comunitaria del endpoint y parámetro ?dates=YYYYMMDD: ver fuentes citadas. */
 async function fetchTodayFixturesESPN(){
+  // Asegúrate de haber cargado tu histórico primero (para que existan ligas/equipos)
   if(RAW.length===0){
     alert('Primero carga tu histórico (CSV/JSON). Luego vuelve a intentar "Partidos de hoy (ESPN)".')
     return
   }
+
+  // YYYYMMDD en tu zona local
   const now = new Date()
   const y = now.getFullYear()
   const m = String(now.getMonth()+1).padStart(2,'0')
   const d = String(now.getDate()).padStart(2,'0')
   const yyyymmdd = `${y}${m}${d}`
-  const url = `https://site.api.espn.com/apis/site/v2/sports/soccer/all/scoreboard?dates=${yyyymmdd}`
 
+  const url = `https://site.api.espn.com/apis/site/v2/sports/soccer/all/scoreboard?dates=${yyyymmdd}`
   let data
   try{
     const res = await fetch(url, {credentials:'omit', mode:'cors'})
@@ -1344,9 +1474,11 @@ async function fetchTodayFixturesESPN(){
     const away = competitors.find(c=> c.homeAway==='away')?.team?.displayName || null
     if(!home || !away){ skipped++; continue }
 
+    // Fecha local YYYY-MM-DD
     const dUTC = ev?.date ? new Date(ev.date) : now
     const localISO = new Date(dUTC.getTime() - dUTC.getTimezoneOffset()*60000).toISOString().slice(0,10)
 
+    // Encontrar la liga de tu dataset donde estén ambos equipos
     let leagueKey = null
     for(const [L,set] of LEAGUE_TEAMS.entries()){
       const lowerSet = new Set(Array.from(set).map(x=> x.toLowerCase()))
@@ -1356,6 +1488,7 @@ async function fetchTodayFixturesESPN(){
     }
     if(!leagueKey){ skipped++; continue }
 
+    // Evitar duplicados
     const dup = MANUAL_FIXTURES.some(r=> r.date===localISO && r.league===leagueKey &&
       r.home.toLowerCase()===home.toLowerCase() && r.away.toLowerCase()===away.toLowerCase())
     if(dup){ continue }
@@ -1367,12 +1500,9 @@ async function fetchTodayFixturesESPN(){
     added++
   }
 
+  // Reinyectar fixtures y recomputar features
   RAW = RAW.filter(r=> !r.__manualFixture).concat(MANUAL_FIXTURES)
-  FEAT = engineerFeatures(RAW, {
-    rollShort:document.getElementById('rollShort').value,
-    rollMed:document.getElementById('rollMed').value,
-    rollLong:document.getElementById('rollLong').value
-  })
+  FEAT = engineerFeatures(RAW, {rollShort:document.getElementById('rollShort').value, rollLong:document.getElementById('rollLong').value})
   renderFixtures()
 
   alert(`Partidos de hoy — agregados: ${added}, omitidos: ${skipped} (equipos no presentes en tu histórico o ligas no mapeadas).`)
@@ -1399,6 +1529,7 @@ document.getElementById('btnRebuildHist').addEventListener('click', rebuildTeamH
 document.getElementById('histLeague').addEventListener('change', rebuildTeamHistory)
 document.getElementById('histN').addEventListener('input', rebuildTeamHistory)
 
+/* NUEVO: botón “Partidos de hoy (ESPN)” */
 document.getElementById('btnFetchToday').addEventListener('click', fetchTodayFixturesESPN)
 </script>
 </body>
