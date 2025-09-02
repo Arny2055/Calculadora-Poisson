@@ -295,243 +295,30 @@ const safeDate = (s)=>{ const d=new Date(s); return isNaN(d)? null : d }
 const daysBetween = (a,b)=> Math.max(0, Math.round((b-a)/86400000))
 
 // Normaliza keys: snake_case
-function normalizeKey(k){ return String(k).toLowerCase().trim().replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,'') }
 function normalizeObjects(arr){
-  return arr.map(r=>{
-    const o={}; for(const k of Object.keys(r)){ o[normalizeKey(k)] = (''+r[k]).trim?.() ?? r[k] }
-    return o
-  })
+  const normKey = (k)=> k.toLowerCase().trim().replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,'')
+  return arr.map(r=>{ const o={}; for(const k of Object.keys(r)){ o[normKey(k)] = (''+r[k]).trim() } return o })
 }
 
 // Fecha “vie., 28 jul. 2023 18:30” -> YYYY-MM-DD
 function parseSpanishDate(s){
-  if(s==null) return null;
-  if(typeof s==='number'){ // timestamp (seg/milis)
-    const n = (s>1e12? s : (s*1000))
-    const d = new Date(n); return isNaN(d)? null : d.toISOString().slice(0,10)
-  }
-  const str = String(s).trim()
-  // ISO directo
-  const tryISO = new Date(str)
-  if(!isNaN(tryISO)) return tryISO.toISOString().slice(0,10)
-  // Español "vie., 28 jul. 2023 18:30"
+  if(!s) return null;
   const months={ene:1,feb:2,mar:3,abr:4,may:5,jun:6,jul:7,ago:8,sep:9,oct:10,nov:11,dic:12};
-  const m = str.toLowerCase().match(/(\d{1,2})\s+([a-záéíóú\.]{3,})\.?\s+(\d{4})/)
-  if(!m) return null
-  const day = String(m[1]).padStart(2,'0')
-  const monKey = m[2].slice(0,3).normalize('NFD').replace(/[\u0300-\u036f\.]/g,'')
-  const mon = months[monKey]; const year=m[3]; if(!mon) return null
-  return `${year}-${String(mon).padStart(2,'0')}-${day}`
+  const m = String(s).toLowerCase().match(/(\d{1,2})\s+([a-záéíóú\.]{3,})\.?\s+(\d{4})/i);
+  if(!m){ const d=new Date(s); return isNaN(d)? null : d.toISOString().slice(0,10) }
+  const day = String(m[1]).padStart(2,'0');
+  const monKey = m[2].slice(0,3).normalize('NFD').replace(/[\u0300-\u036f\.]/g,'');
+  const mon = months[monKey]; const year=m[3];
+  if(!mon) return null;
+  return `${year}-${String(mon).padStart(2,'0')}-${day}`;
 }
 function splitMatch(s){ if(!s) return {home:null,away:null}; const p=String(s).split('-'); return {home:(p[0]||'').trim(), away:(p[1]||'').trim()} }
-function numSafe(v){ if(v==null) return null; const n=Number(String(v).replace(/[^0-9\.-]/g,'')); return isNaN(n)? null : n }
+function numSafe(v){ const n=Number(String(v).replace(/[^0-9\.-]/g,'')); return isNaN(n)? null : n }
 
-/* =================== ADAPTADOR ESQUEMA (universal JSON) =================== */
-/** Recorrido profundo: extrae TODOS los objetos y arrays anidados */
-function deepCollect(value, out){
-  if(value==null) return
-  if(Array.isArray(value)){ for(const v of value) deepCollect(v,out); return }
-  if(typeof value==='object'){
-    out.push(value)
-    for(const k of Object.keys(value)) deepCollect(value[k], out)
-  }
-}
-
-/** Aplana un objeto (clave compuesta a snake_case) */
-function flatten(obj, prefix='', res={}){
-  for(const k of Object.keys(obj)){
-    const v = obj[k]
-    const nk = prefix? `${prefix}_${normalizeKey(k)}` : normalizeKey(k)
-    if(v && typeof v==='object' && !Array.isArray(v)){
-      flatten(v, nk, res)
-    } else {
-      res[nk] = v
-    }
-  }
-  return res
-}
-
-/** Intenta extraer home/away/league/date/score desde un objeto "candidato" */
-function extractMatchFromFlat(o){
-  const pick = (keys)=> {
-    for(const kk of keys){
-      if(o[kk]!=null && String(o[kk]).trim()!=='') return o[kk]
-    }
-    return null
-  }
-
-  const homeKeys = [
-    'home','home_team','home_name','home_team_name','local','localteam_name','equipo_local',
-    'team_home','home_side','home_team_short','ht','homeclub','homeclub_name',
-    'fixture_home','teams_home_name','participants_home_name'
-  ]
-  const awayKeys = [
-    'away','away_team','away_name','away_team_name','visitante','visitanteteam_name','equipo_visitante',
-    'team_away','away_side','away_team_short','at','awayclub','awayclub_name',
-    'fixture_away','teams_away_name','participants_away_name'
-  ]
-  const matchKeys = ['match','game','card','fixture_card','nombre_partido','partido','teams_card']
-  const leagueKeys = [
-    'league','league_name','competition','competition_name','tournament','tournament_name','division','comp',
-    'league_display_name','championship','season_name','liga'
-  ]
-  const dateKeys = [
-    'date','utcdate','fixture_date','start_time','kickoff','event_date','game_date','match_date',
-    'datetime','commence_time','timestamp','ts','created_at','updated_at','starttimestamp'
-  ]
-  const ftKeys = ['result_ft','final_score','full_time','ft','score_fulltime','score_ft','ft_score','resultado_final']
-
-  // 1) Home/Away por claves directas:
-  let home = pick(homeKeys), away = pick(awayKeys)
-
-  // 2) Si viene en un "match" string tipo "A - B"
-  if((!home || !away) && o['match']){
-    const m = splitMatch(o['match']); home = home || m.home; away = away || m.away
-  }
-  if((!home || !away)){
-    // Variantes "teams": ["A","B"] o objects
-    if(Array.isArray(o['teams'])){
-      const t = o['teams']
-      if(t.length>=2){
-        const n1 = t[0]?.name || t[0]?.display_name || t[0]?.team || t[0]
-        const n2 = t[1]?.name || t[1]?.display_name || t[1]?.team || t[1]
-        if(!home) home = typeof n1==='string'? n1 : null
-        if(!away) away = typeof n2==='string'? n2 : null
-      }
-    }
-    // "competitors" / "participants" (ESPN, The Odds API)
-    const sideArr = o['competitors'] || o['participants'] || o['sides'] || null
-    if(Array.isArray(sideArr)){
-      const H = sideArr.find(x=> String(x?.homeAway||x?.location||x?.side||'').toLowerCase().includes('home'))
-      const A = sideArr.find(x=> String(x?.homeAway||x?.location||x?.side||'').toLowerCase().includes('away'))
-      const nameKey = (x)=> x?.team?.displayName || x?.team?.name || x?.name || x?.title || x?.team_name
-      if(H && !home) home = nameKey(H)
-      if(A && !away) away = nameKey(A)
-      // Si no hay etiquetas home/away: toma los 2 primeros
-      if((!home || !away) && sideArr.length>=2){
-        const n1 = nameKey(sideArr[0]); const n2 = nameKey(sideArr[1])
-        if(!home) home = n1; if(!away) away = n2
-      }
-    }
-    // Alternativa: keys "home_team_name"/"away_team_name" ya cubiertas arriba
-  }
-
-  // 3) Fecha
-  let dateRaw = pick(dateKeys)
-  // Toma también "fixture_date" anidado ya aplanado
-  // Si hay timestamp string numérico
-  if(dateRaw!=null && typeof dateRaw==='string' && /^\d{9,13}$/.test(dateRaw)) dateRaw = Number(dateRaw)
-  const date = parseSpanishDate(dateRaw) || null
-
-  // 4) Liga
-  let league = pick(leagueKeys)
-  // Algunas APIs ponen competition_name en "competition_name_name"
-  if(!league && o['competition_name_name']) league = o['competition_name_name']
-
-  // 5) Resultado / goles
-  let home_goals = null, away_goals = null
-
-  const homeGKeys = ['home_goals','home_score','goals_home','home_ft','home_final','score_home','home_result','home_full_time']
-  const awayGKeys = ['away_goals','away_score','goals_away','away_ft','away_final','score_away','away_result','away_full_time']
-  if(o['score'] && typeof o['score']==='string' && /(\d+)\s*-\s*(\d+)/.test(o['score'])){
-    const mm = o['score'].match(/(\d+)\s*-\s*(\d+)/); home_goals = numSafe(mm[1]); away_goals = numSafe(mm[2])
-  }
-  if(o['scores'] && typeof o['scores']==='string' && /(\d+)\s*-\s*(\d+)/.test(o['scores'])){
-    const mm = o['scores'].match(/(\d+)\s*-\s*(\d+)/); home_goals = numSafe(mm[1]); away_goals = numSafe(mm[2])
-  }
-  // parse result_ft / ft_score "2-1"
-  const ft = pick(ftKeys)
-  if(ft && /(\d+)\s*-\s*(\d+)/.test(String(ft))){
-    const mm = String(ft).match(/(\d+)\s*-\s*(\d+)/); home_goals = numSafe(mm[1]); away_goals = numSafe(mm[2])
-  }
-  if(home_goals==null) home_goals = numSafe(pick(homeGKeys))
-  if(away_goals==null) away_goals = numSafe(pick(awayGKeys))
-
-  // Intento desde objetos típicos: fixture_fulltime_home/away, score_full_time_home/away
-  const hgObj = numSafe(o['full_time_home'] ?? o['score_full_time_home'] ?? o['ft_home'] ?? o['scorehome'])
-  const agObj = numSafe(o['full_time_away'] ?? o['score_full_time_away'] ?? o['ft_away'] ?? o['scoreaway'])
-  if(home_goals==null && hgObj!=null) home_goals = hgObj
-  if(away_goals==null && agObj!=null) away_goals = agObj
-
-  // Shots on target si existieran (no son obligatorios)
-  const home_shotsOT = numSafe(o['home_shots_on_target'] ?? o['home_ongoal_shots_at_ft'] ?? o['shots_on_target_home'] ?? o['home_sot'])
-  const away_shotsOT = numSafe(o['away_shots_on_target'] ?? o['away_ongoal_shots_at_ft'] ?? o['shots_on_target_away'] ?? o['away_sot'])
-
-  // Validación mínima: necesitamos home/away (y ojalá fecha)
-  if(!home || !away) return null
-
-  return {
-    date, league: (league||'').toString(),
-    home: home?.toString?.() ?? home,
-    away: away?.toString?.() ?? away,
-    home_goals, away_goals,
-    home_shotsOT, away_shotsOT
-  }
-}
-
-/** Dado un JSON arbitrario, rescata una lista de filas normalizadas */
-function universalJSONToRows(obj){
-  // Soporta {data:[...]}, {response:[...]}, array directo, etc.
-  const rootArr = []
-  if(Array.isArray(obj)) rootArr.push(...obj)
-  else if(obj && typeof obj==='object'){
-    if(Array.isArray(obj.data)) rootArr.push(...obj.data)
-    if(Array.isArray(obj.response)) rootArr.push(...obj.response)
-    // A veces viene { events:[...] } o { fixtures:[...] } etc.
-    for(const k of ['events','fixtures','matches','games','results']){
-      if(Array.isArray(obj[k])) rootArr.push(...obj[k])
-    }
-  }
-
-  const pool = []
-  // Incluye la raíz y todo lo profundo
-  deepCollect(obj, pool)
-  // Para cada objeto, intenta aplanar y extraer
-  const out = []
-  for(const cand of pool){
-    if(!cand || typeof cand!=='object' || Array.isArray(cand)) continue
-    const flat = flatten(cand)
-    const row = extractMatchFromFlat(flat)
-    if(row) out.push(row)
-  }
-
-  // Si rootArr trae elementos del mismo nivel que ya son partidos
-  for(const item of rootArr){
-    if(item && typeof item==='object'){
-      const flat = flatten(item)
-      const row = extractMatchFromFlat(flat)
-      if(row) out.push(row)
-    }
-  }
-
-  // Si aún no hay filas y el JSON es un array de strings/pares, intenta "Match" + "score"
-  if(out.length===0 && Array.isArray(obj)){
-    for(const it of obj){
-      if(typeof it==='string' && it.includes('-')){
-        const m = splitMatch(it)
-        if(m.home && m.away){
-          out.push({date:null, league:'', home:m.home, away:m.away, home_goals:null, away_goals:null})
-        }
-      }
-    }
-  }
-
-  // Limpieza básica
-  const cleaned = out
-    .filter(r=> r && r.home && r.away)
-    .map(r=>{
-      // Fecha: si no hubo, intenta desde cadenas típicas internas
-      const dd = r.date || parseSpanishDate(r.utcDate) || null
-      return {...r, date: dd}
-    })
-
-  return cleaned
-}
-
-/** Adaptador legacy (por si el usuario sube el CSV/JSON del ejemplo anterior) */
+/* =================== ADAPTADOR ESQUEMA (sin cuotas) =================== */
 function adaptFromCustomSchema(arr){
   return arr.map(r=>{
-    if(r.date && r.home && r.away) return r
+    if(r.date && r.home && r.away) return r;
 
     const out = {};
     out.date = parseSpanishDate(r.date) || parseSpanishDate(r._date) || parseSpanishDate(r.league) || parseSpanishDate(r.name) || r.date || null;
@@ -558,6 +345,16 @@ function adaptFromCustomSchema(arr){
     out.away_yellowcards_at_ft = numSafe(r.away_yellowcards_at_ft);
     out.home_redcards_at_ft = numSafe(r.home_redcards_at_ft);
     out.away_redcards_at_ft = numSafe(r.away_redcards_at_ft);
+
+    out.home_xg = numSafe(out.home_xg);
+    out.away_xg = numSafe(out.away_xg);
+    out.home_ppda = numSafe(out.home_ppda);
+    out.away_ppda = numSafe(out.away_ppda);
+    out.home_rest = numSafe(out.home_rest);
+    out.away_rest = numSafe(out.away_rest);
+    out.referee_fouls_pg = numSafe(out.referee_fouls_pg);
+    out.humidity = numSafe(out.humidity);
+    out.temp = numSafe(out.temp);
 
     return out;
   });
@@ -1324,25 +1121,17 @@ function afterDataLoaded(){
 function parseCSVToRows(text){
   const {data} = parseCSV(text)
   let norm = normalizeObjects(data)
-  // Intenta legacy:
-  let rows = adaptFromCustomSchema(norm)
-  // Si pareciera vacío, intenta universal a partir del CSV convertido a objetos
-  if(!rows.length) rows = universalJSONToRows(norm)
-  return rows
+  norm = adaptFromCustomSchema(norm)
+  return norm
 }
 function parseJSONToRows(text){
   let obj
   try{ obj = JSON.parse(text) }catch(e){ throw new Error('JSON inválido') }
-  // Intento universal primero:
-  let rows = universalJSONToRows(obj)
-  // Si no obtuvo nada, intenta legacy + normalización plana
-  if(rows.length===0){
-    let arr = Array.isArray(obj)? obj : (obj && Array.isArray(obj.data)? obj.data : (obj && Array.isArray(obj.response)? obj.response : null))
-    if(!arr) throw new Error('No se hallaron partidos en el JSON. Prueba con otro archivo o estructura.')
-    let norm = normalizeObjects(arr)
-    rows = adaptFromCustomSchema(norm)
-  }
-  return rows
+  let arr = Array.isArray(obj)? obj : (obj && Array.isArray(obj.data)? obj.data : null)
+  if(!arr) throw new Error('El JSON debe ser un array de partidos o {data:[...]}.')
+  let norm = normalizeObjects(arr)
+  norm = adaptFromCustomSchema(norm)
+  return norm
 }
 
 // Lector multiarchivo (2 JSON o mezcla)
@@ -1534,3 +1323,4 @@ document.getElementById('btnFetchToday').addEventListener('click', fetchTodayFix
 </script>
 </body>
 </html>
+Quiero que pueda leer cualquier json que cargue, se puede? si es asi crea el codigo y entregamelo completo listo para copiar y pegar
