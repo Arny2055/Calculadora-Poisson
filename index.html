@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Normal Bivariada — Importar JSON por Liga/Partido</title>
+<title>Normal Bivariada — Liga/Partido con Local y Visitante</title>
 <style>
   body{margin:0;background:#0f1115;color:#e6eaf2;font:14px/1.4 system-ui,Inter,Segoe UI,Roboto,Arial}
   header{padding:14px 16px;border-bottom:1px solid #2a3140}
@@ -12,7 +12,7 @@
   .card{background:#171a21;border:1px solid #2a3140;border-radius:10px;padding:14px}
   h1{font-size:18px;margin:0 0 4px} h2{font-size:15px;margin:0 0 10px}
   input,select,button{width:100%;background:#1f2430;color:#e6eaf2;border:1px solid #2a3140;border-radius:8px;padding:8px}
-  .row{display:grid;grid-template-columns:1fr 130px;gap:8px;align-items:center;margin:8px 0}
+  .row{display:grid;grid-template-columns:1fr 160px;gap:8px;align-items:center;margin:8px 0}
   .pill{display:inline-block;border:1px solid #2a3140;background:#1f2430;border-radius:999px;padding:4px 8px;margin-right:6px}
   .kpis{display:grid;gap:8px;grid-template-columns:repeat(3,1fr)}
   .kpi{background:#1f2430;border:1px solid #2a3140;border-radius:10px;padding:10px;text-align:center}
@@ -25,8 +25,8 @@
 </style>
 </head>
 <body>
-<header class="wrap"><h1>Calculadora — Normal Bivariada (auto desde JSON)</h1>
-<div class="muted">Importa tu JSON → elige liga y partido → μ, σ, ρ → pronósticos.</div></header>
+<header class="wrap"><h1>Calculadora — Normal Bivariada (JSON + Liga/Partido)</h1>
+<div class="muted">Importa JSON → elige liga → partido → define local/visitante → pronósticos.</div></header>
 
 <div class="wrap grid">
   <!-- Entrada -->
@@ -36,6 +36,8 @@
     <div class="row"><label>o Pegar JSON</label><button id="parseBtn" class="btn">Cargar desde portapapeles</button></div>
     <div class="row"><label>Liga</label><select id="league"><option value="">—</option></select></div>
     <div class="row"><label>Partido</label><select id="match"><option value="">—</option></select></div>
+    <div class="row"><label>Equipo Local</label><select id="home"><option value="">—</option></select></div>
+    <div class="row"><label>Equipo Visitante</label><select id="away"><option value="">—</option></select></div>
     <div class="row"><label>α EWMA (0=uniforme)</label><input id="alpha" type="number" step="0.01" min="0" max="0.99" value="0"></div>
     <div class="row"><label>Línea O/U</label><input id="ou" type="number" step="0.5" value="2.5"></div>
     <div class="row"><label>Simulaciones</label><input id="ns" type="number" step="1000" min="5000" value="50000"></div>
@@ -93,173 +95,95 @@ let DATA=[], byLeague=new Map();
 function safeParseJson(text){
   let t=text.trim();
   if(!t) throw 'JSON vacío';
-  if(!t.startsWith('[')){ // permitir objetos separados por comas
-    t = '[' + t.replace(/,\s*$/, '') + ']';
-  }
+  if(!t.startsWith('[')){ t = '[' + t.replace(/,\s*$/, '') + ']'; }
   return JSON.parse(t);
 }
-
 function normalizeRecord(r){
-  const league = String(r.League||'').trim();
-  const match  = String(r.Match||'').trim();
-  const ft = String(r["Result FT"]||r.Result||'').trim(); // "2-2"
-  const m = ft.match(/(-?\d+)\s*[-:]\s*(-?\d+)/);
-  const h = m ? +m[1] : null, a = m ? +m[2] : null;
-  return (league && match && Number.isFinite(h) && Number.isFinite(a)) ? {league,match,h,a} : null;
+  const league=String(r.League||'').trim(), match=String(r.Match||'').trim();
+  const ft=String(r["Result FT"]||r.Result||'').trim(); const m=ft.match(/(\d+)[-:](\d+)/);
+  const h=m?+m[1]:null,a=m?+m[2]:null;
+  return (league&&match&&Number.isFinite(h)&&Number.isFinite(a))?{league,match,h,a}:null;
 }
-
 function ingest(arr){
-  DATA = [];
-  byLeague.clear();
-  for(const r of arr){
-    const x = normalizeRecord(r);
-    if(!x) continue;
-    DATA.push(x);
-    if(!byLeague.has(x.league)) byLeague.set(x.league, []);
-    byLeague.get(x.league).push(x);
-  }
-  // poblar ligas
-  const lg = el('league'); lg.innerHTML = '<option value="">—</option>' +
-    Array.from(byLeague.keys()).sort().map(l=>`<option>${l}</option>`).join('');
-  el('match').innerHTML = '<option value="">—</option>';
-  el('info').textContent = `Cargados ${DATA.length} partidos válidos en ${byLeague.size} ligas.`;
+  DATA=[];byLeague.clear();
+  for(const r of arr){const x=normalizeRecord(r);if(!x)continue;
+    if(!byLeague.has(x.league))byLeague.set(x.league,[]);
+    byLeague.get(x.league).push(x);}
+  el('league').innerHTML='<option value="">—</option>'+Array.from(byLeague.keys()).map(l=>`<option>${l}</option>`).join('');
+  el('match').innerHTML='<option value="">—</option>';
+  el('home').innerHTML='<option value="">—</option>'; el('away').innerHTML='<option value="">—</option>';
+  el('info').textContent=`Cargados ${arr.length} registros válidos en ${byLeague.size} ligas.`;
 }
-
 function onLeagueChange(){
-  const L = el('league').value;
-  const mm = el('match');
-  mm.innerHTML = '<option value="">—</option>';
-  if(!L) return;
-  const matches = Array.from(new Set(byLeague.get(L).map(d=>d.match))).sort();
-  mm.innerHTML += matches.map(m=>`<option>${m}</option>`).join('');
+  const L=el('league').value; const mm=el('match');
+  mm.innerHTML='<option value="">—</option>';
+  if(!L)return;
+  const matches=Array.from(new Set(byLeague.get(L).map(d=>d.match))).sort();
+  mm.innerHTML+=matches.map(m=>`<option>${m}</option>`).join('');
 }
-
-function mean(a,w=null){
-  if(!a.length) return 0;
-  if(!w) return a.reduce((s,x)=>s+x,0)/a.length;
-  const sw=w.reduce((s,x)=>s+x,0); let n=0; for(let i=0;i<a.length;i++) n+=a[i]*w[i];
-  return n/(sw||1);
+function onMatchChange(){
+  const L=el('league').value,M=el('match').value; if(!L||!M)return;
+  const rows=byLeague.get(L).filter(r=>r.match===M);
+  if(rows.length===0)return;
+  // dividir nombres del campo "Match"
+  const parts=M.split(/[-–]/).map(s=>s.trim());
+  const opts=parts.length===2?parts:rows.map(r=>r.match);
+  const hSel=el('home'), aSel=el('away');
+  hSel.innerHTML='<option value="">—</option>'+opts.map(o=>`<option>${o}</option>`).join('');
+  aSel.innerHTML='<option value="">—</option>'+opts.map(o=>`<option>${o}</option>`).join('');
 }
-function variance(a,mu,w=null){
-  if(!a.length) return 0;
-  if(!w){ let s=0; for(const x of a) s+=(x-mu)*(x-mu); return s/Math.max(1,a.length-1); }
-  const sw=w.reduce((s,x)=>s+x,0), sw2=w.reduce((s,x)=>s+x*x,0);
-  let s=0; for(let i=0;i<a.length;i++) s+=w[i]*(a[i]-mu)*(a[i]-mu);
-  const c = sw - (sw2/sw); return s/Math.max(1e-9,c);
-}
-function covariance(X,Y,mx,my,w=null){
-  const n=X.length; if(!n) return 0;
-  if(!w){ let s=0; for(let i=0;i<n;i++) s+=(X[i]-mx)*(Y[i]-my); return s/Math.max(1,n-1); }
-  const sw=w.reduce((s,a)=>s+a,0), sw2=w.reduce((s,a)=>s+a*a,0);
-  let s=0; for(let i=0;i<n;i++) s+=w[i]*(X[i]-mx)*(Y[i]-my);
-  const c = sw - (sw2/sw); return s/Math.max(1e-9,c);
-}
-function ewmaWeights(n,alpha){
-  if(alpha<=0) return null;
-  const w=[]; for(let i=0;i<n;i++) w.push(Math.pow(1-alpha,i)); w.reverse(); return w;
-}
-
-// Monte Carlo y analítico
+function mean(a){return a.reduce((s,x)=>s+x,0)/a.length;}
+function variance(a,mu){let s=0;for(const x of a)s+=(x-mu)*(x-mu);return s/Math.max(1,a.length-1);}
+function covariance(X,Y,mx,my){let s=0;for(let i=0;i<X.length;i++)s+=(X[i]-mx)*(Y[i]-my);return s/Math.max(1,X.length-1);}
 function randn(){let u=0,v=0;while(u===0)u=Math.random();while(v===0)v=Math.random();
-  return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v);}
+return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v);}
 function simulate(muH,muA,sdH,sdA,rho,n,disc,line){
   const s=Math.sqrt(1-Math.min(0.999,Math.max(-0.999,rho))**2);
-  let wH=0,d=0,wA=0,over=0,btts=0,SH=0,SA=0,ST=0;
-  const map=new Map();
-  for(let i=0;i<n;i++){
-    const z1=randn(), z2=randn();
-    const x=muH+sdH*z1, y=muA+sdA*(rho*z1+s*z2);
-    let H=Math.max(0, disc==='round'?Math.round(x):Math.floor(x));
-    let A=Math.max(0, disc==='round'?Math.round(y):Math.floor(y));
-    if(H>A) wH++; else if(H===A) d++; else wA++;
-    if(H+A>line) over++;
-    if(H>0&&A>0) btts++;
-    SH+=H; SA+=A; ST+=H+A;
-    const k=H+':'+A; map.set(k,(map.get(k)||0)+1);
-  }
-  return {pH:wH/n,pD:d/n,pA:wA/n,pOverMC:over/n,pUnderMC:1-over/n,pBTTS:btts/n,eH:SH/n,eA:SA/n,eT:ST/n,scores:map};
-}
+  let wH=0,d=0,wA=0,over=0,btts=0,SH=0,SA=0,ST=0;const map=new Map();
+  for(let i=0;i<n;i++){const z1=randn(),z2=randn();const x=muH+sdH*z1,y=muA+sdA*(rho*z1+s*z2);
+    let H=Math.max(0,disc==='round'?Math.round(x):Math.floor(x));
+    let A=Math.max(0,disc==='round'?Math.round(y):Math.floor(y));
+    if(H>A)wH++;else if(H===A)d++;else wA++;
+    if(H+A>line)over++;if(H>0&&A>0)btts++;
+    SH+=H;SA+=A;ST+=H+A;const k=H+':'+A;map.set(k,(map.get(k)||0)+1);}
+  return {pH:wH/n,pD:d/n,pA:wA/n,pOverMC:over/n,pUnderMC:1-over/n,pBTTS:btts/n,eH:SH/n,eA:SA/n,eT:ST/n,scores:map};}
 function overAnalytic(muH,muA,sdH,sdA,rho,line){
-  const muT=muH+muA, varT=sdH*sdH+sdA*sdA+2*rho*sdH*sdA, sdT=Math.sqrt(Math.max(varT,1e-12));
-  const z=(line-muT)/sdT; const Phi=0.5*(1+erf(z/Math.SQRT2));
-  return {pUnder:Phi,pOver:1-Phi,sdT};
-}
+  const muT=muH+muA,varT=sdH*sdH+sdA*sdA+2*rho*sdH*sdA,sdT=Math.sqrt(Math.max(varT,1e-12));
+  const z=(line-muT)/sdT;const Phi=0.5*(1+erf(z/Math.SQRT2));return{pUnder:Phi,pOver:1-Phi,sdT};}
 function erf(x){const s=Math.sign(x);x=Math.abs(x);
   const a1=0.254829592,a2=-0.284496736,a3=1.421413741,a4=-1.453152027,a5=1.061405429,p=0.3275911;
-  const t=1/(1+p*x); const y=1-((((((a5*t+a4)*t)+a3)*t+a2)*t+a1)*t)*Math.exp(-x*x); return s*y;}
-function renderScores(map,n,tb){
-  const arr=[]; map.forEach((c,k)=>arr.push({k,p:c/n})); arr.sort((a,b)=>b.p-a.p);
-  tb.innerHTML = (arr.slice(0,8).map(r=>`<tr><td>${r.k}</td><td>${pct(r.p)}</td><td>${odds(r.p)}</td></tr>`).join('')) || `<tr><td colspan="3" class="muted">—</td></tr>`;
-}
+  const t=1/(1+p*x);const y=1-((((((a5*t+a4)*t)+a3)*t+a2)*t+a1)*t)*Math.exp(-x*x);return s*y;}
+function renderScores(map,n,tb){const arr=[];map.forEach((c,k)=>arr.push({k,p:c/n}));arr.sort((a,b)=>b.p-a.p);
+tb.innerHTML=(arr.slice(0,8).map(r=>`<tr><td>${r.k}</td><td>${pct(r.p)}</td><td>${odds(r.p)}</td></tr>`).join(''))||`<tr><td colspan="3" class="muted">—</td></tr>`;}
 
-function estimateParamsForLeague(L, alpha){
-  const rows = (byLeague.get(L)||[]).slice(); // ya vienen en el orden que tu dataset tenga
-  // Si tu JSON está cronológico (viejo→reciente) mejor; si no, no pasa nada.
-  const H = rows.map(r=>r.h), A = rows.map(r=>r.a);
-  const w = alpha>0 ? ewmaWeights(rows.length,alpha) : null;
-  const muH = mean(H,w), muA = mean(A,w);
-  const sdH = Math.sqrt(variance(H,muH,w)), sdA = Math.sqrt(variance(A,muA,w));
-  const cov = covariance(H,A,muH,muA,w);
-  const rho = (sdH>0 && sdA>0) ? Math.max(-0.999, Math.min(0.999, cov/(sdH*sdA))) : 0;
-  return {muH,muA,sdH,sdA,rho};
-}
+function estimateParamsForLeague(L){
+  const rows=byLeague.get(L)||[],H=rows.map(r=>r.h),A=rows.map(r=>r.a);
+  const muH=mean(H),muA=mean(A),sdH=Math.sqrt(variance(H,muH)),sdA=Math.sqrt(variance(A,muA));
+  const cov=covariance(H,A,muH,muA);const rho=(sdH>0&&sdA>0)?Math.max(-0.999,Math.min(0.999,cov/(sdH*sdA))):0;
+  return{muH,muA,sdH,sdA,rho};}
 
-// Eventos UI
-el('league').addEventListener('change', onLeagueChange);
-el('file').addEventListener('change', async (e)=>{
-  const f=e.target.files[0]; if(!f) return;
-  const text = await f.text();
-  try{ ingest(safeParseJson(text)); }catch(err){ alert('Error JSON: '+err); }
-});
-el('parseBtn').addEventListener('click', async ()=>{
-  try{
-    const text = await navigator.clipboard.readText();
-    ingest(safeParseJson(text));
-  }catch(err){ alert('No pude leer/parsear el portapapeles: '+err); }
-});
+// UI events
+el('league').addEventListener('change',onLeagueChange);
+el('match').addEventListener('change',onMatchChange);
+el('file').addEventListener('change',async e=>{const f=e.target.files[0];if(!f)return;const text=await f.text();ingest(safeParseJson(text));});
+el('parseBtn').addEventListener('click',async()=>{try{const text=await navigator.clipboard.readText();ingest(safeParseJson(text));}catch(e){alert('Error portapapeles: '+e);}});
 
 el('run').onclick=()=>{
-  const L = el('league').value;
-  const M = el('match').value; // informativo (no filtra parámetros)
-  if(!L){ alert('Elige una liga.'); return; }
-  if(!byLeague.has(L) || byLeague.get(L).length<3){ alert('Esa liga tiene <3 partidos válidos.'); return; }
-
-  const alpha = parseFloat(el('alpha').value)||0;
-  const {muH,muA,sdH,sdA,rho} = estimateParamsForLeague(L, alpha);
-
-  const line = parseFloat(el('ou').value);
-  const ns = Math.max(5000, Math.floor(+el('ns').value));
-  const disc = el('disc').value;
-
-  const ana = overAnalytic(muH,muA,sdH,sdA,rho,line);
-  const mc  = simulate(muH,muA,sdH,sdA,rho,ns,disc,line);
-
-  // parámetros
-  el('muH').textContent=muH.toFixed(3);
-  el('muA').textContent=muA.toFixed(3);
-  el('sdH').textContent=sdH.toFixed(3);
-  el('sdA').textContent=sdA.toFixed(3);
-  el('rho').textContent=rho.toFixed(3);
-  el('sdT').textContent=ana.sdT.toFixed(3);
-
-  // resultados
-  el('pH').textContent=pct(mc.pH);
-  el('pD').textContent=pct(mc.pD);
-  el('pA').textContent=pct(mc.pA);
-  el('pOver').textContent=pct(mc.pOverMC);
-  el('pUnder').textContent=pct(mc.pUnderMC);
+  const L=el('league').value,Hsel=el('home').value,Asel=el('away').value;
+  if(!L||!Hsel||!Asel){alert('Selecciona liga, partido, local y visitante.');return;}
+  const {muH,muA,sdH,sdA,rho}=estimateParamsForLeague(L);
+  const line=+el('ou').value,ns=Math.max(5000,Math.floor(+el('ns').value)),disc=el('disc').value;
+  const ana=overAnalytic(muH,muA,sdH,sdA,rho,line);const mc=simulate(muH,muA,sdH,sdA,rho,ns,disc,line);
+  el('muH').textContent=muH.toFixed(3);el('muA').textContent=muA.toFixed(3);
+  el('sdH').textContent=sdH.toFixed(3);el('sdA').textContent=sdA.toFixed(3);
+  el('rho').textContent=rho.toFixed(3);el('sdT').textContent=ana.sdT.toFixed(3);
+  el('pH').textContent=pct(mc.pH);el('pD').textContent=pct(mc.pD);el('pA').textContent=pct(mc.pA);
+  el('pOver').textContent=pct(mc.pOverMC);el('pUnder').textContent=pct(mc.pUnderMC);
   el('pBTTS').textContent=pct(mc.pBTTS);
-  el('eH').textContent=mc.eH.toFixed(3);
-  el('eA').textContent=mc.eA.toFixed(3);
-  el('eT').textContent=mc.eT.toFixed(3);
+  el('eH').textContent=mc.eH.toFixed(3);el('eA').textContent=mc.eA.toFixed(3);el('eT').textContent=mc.eT.toFixed(3);
   el('pOUmix').textContent=`${pct(mc.pOverMC)} / ${pct(ana.pOver)}`;
-
-  // tabla
-  renderScores(mc.scores, ns, document.getElementById('scores'));
-
-  // info
-  const cnt = byLeague.get(L).length;
-  el('info').textContent = `Liga: ${L} — partidos cargados: ${cnt}` + (M?` — partido seleccionado: ${M}`:'');
+  renderScores(mc.scores,ns,document.getElementById('scores'));
+  el('info').textContent=`Liga: ${L} — Local: ${Hsel} vs Visitante: ${Asel}`;
 };
 </script>
 </body>
