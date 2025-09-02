@@ -85,10 +85,14 @@
 
     <div class="card">
       <h2>2) Entrenamiento</h2>
-      <div class="grid g-2">
+      <div class="grid g-3">
         <div>
           <label>Rolling ventana corta</label>
           <input id="rollShort" type="number" value="6" min="3" max="12"/>
+        </div>
+        <div>
+          <label>Rolling ventana mediana</label>
+          <input id="rollMed" type="number" value="10" min="4" max="20"/>
         </div>
         <div>
           <label>Rolling ventana larga</label>
@@ -100,7 +104,7 @@
         <button id="btnPicks" class="btn alt" disabled>Calcular probabilidades</button>
         <button id="btnExport" class="btn ghost" disabled>Exportar predicciones (CSV)</button>
       </div>
-      <p class="sub">Usamos: Elo con decaimiento, pesos por recencia y clase, priors por liga y calibración isotónica por liga.</p>
+      <p class="sub">Usamos: Elo con decaimiento, pesos por recencia y clase, priors por liga y calibración isotónica por liga. Ahora con <b>tres ventanas</b> (corta/mediana/larga) para forma.</p>
     </div>
 
     <div class="card">
@@ -272,7 +276,7 @@
     </table>
   </section>
 
-  <div class="footer">Modelado: logística binaria (Over, BTTS) + softmax (1X2) con SGD, L2, pesos por recencia y clase; features de forma (rolling), Elo con decaimiento, priors por liga; calibración isotónica <b>por liga</b> con respaldo global. Probabilidades calibradas en porcentaje y cuotas justas.</div>
+  <div class="footer">Modelado: logística binaria (Over, BTTS) + softmax (1X2) con SGD, L2, pesos por recencia y clase; features de forma (rolling corta/mediana/larga), Elo con decaimiento, priors por liga; calibración isotónica <b>por liga</b> con respaldo global. Probabilidades calibradas en porcentaje y cuotas justas.</div>
 </main>
 
 <script>
@@ -303,13 +307,11 @@ const clamp=(x,a,b)=> Math.max(a, Math.min(b, x))
 const safeDate = (s)=>{ const d=new Date(s); return isNaN(d)? null : d }
 const daysBetween = (a,b)=> Math.max(0, Math.round((b-a)/86400000))
 
-// Normaliza keys: snake_case
 function normalizeObjects(arr){
   const normKey = (k)=> k.toLowerCase().trim().replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,'')
   return arr.map(r=>{ const o={}; for(const k of Object.keys(r)){ o[normKey(k)] = (''+r[k]).trim() } return o })
 }
 
-// Fecha “vie., 28 jul. 2023 18:30” -> YYYY-MM-DD
 function parseSpanishDate(s){
   if(!s) return null;
   const months={ene:1,feb:2,mar:3,abr:4,may:5,jun:6,jul:7,ago:8,sep:9,oct:10,nov:11,dic:12};
@@ -370,7 +372,7 @@ function adaptFromCustomSchema(arr){
 }
 
 /* =================== FEATURE ENGINEERING + ELO =================== */
-let TEAM_ELO = new Map(); // team -> rating
+let TEAM_ELO = new Map();
 function getElo(team){ return TEAM_ELO.get(team) ?? 1500 }
 function setElo(team, val){ TEAM_ELO.set(team, val) }
 function expectedFromElo(eA, eB, hAdv=60){
@@ -405,8 +407,12 @@ function addEloFeature(rows){
   }
 }
 
+/* ---- NUEVO: tres ventanas (corta/mediana/larga) ---- */
 function engineerFeatures(rows, opts){
-  const rS = Number(opts.rollShort||5), rL = Number(opts.rollLong||10)
+  const rS = Number(opts.rollShort||5),
+        rM = Number(opts.rollMed||10),
+        rL = Number(opts.rollLong||18)
+
   rows.sort((a,b)=> (a.date||'').localeCompare(b.date||''))
   for(const r of rows){
     r.home_goals = toNum(r.home_goals); r.away_goals = toNum(r.away_goals)
@@ -417,7 +423,7 @@ function engineerFeatures(rows, opts){
   function pushTeam(team, isHome, m){
     const key = team||'__NA__'
     if(!hist.has(key)) hist.set(key, [])
-    const entry = {
+    hist.get(key).push({
       date: m.date||'',
       league: m.league||'',
       for_xg: isHome? (m.home_xg??null): (m.away_xg??null),
@@ -429,37 +435,61 @@ function engineerFeatures(rows, opts){
       goals_for: isHome? (m.home_goals??null): (m.away_goals??null),
       goals_ag:  isHome? (m.away_goals??null): (m.home_goals??null),
       team: team
-    }
-    hist.get(key).push(entry)
+    })
   }
   for(const m of rows){ pushTeam(m.home,true,m); pushTeam(m.away,false,m) }
 
-  function rollingStats(team, date){
+  function takeLastBefore(team, date, n){
     const h = (hist.get(team||'__NA__')||[]).filter(x=> (x.date||'') < (date||''))
-    const take = (arr,n)=> arr.slice(-n)
-    const s5 = take(h,rS), sL = take(h,rL)
-    const avg=(arr,key)=>{ if(arr.length===0) return null; let s=0,c=0; for(const x of arr){ if(x[key]!=null){ s+=x[key]; c++ } } return c? s/c : null }
-    return {
-      s_for_xg: avg(s5,'for_xg'), s_ag_xg: avg(s5,'ag_xg'),
-      l_for_xg: avg(sL,'for_xg'), l_ag_xg: avg(sL,'ag_xg'),
-      s_for_soT: avg(s5,'for_soT'), s_ag_soT: avg(s5,'ag_soT'),
-      s_ppda: avg(s5,'ppda'), l_ppda: avg(sL,'ppda'),
-      s_rest: avg(s5,'rest'), l_rest: avg(sL,'rest'),
-      s_goal_diff: (avg(s5,'goals_for')??0) - (avg(s5,'goals_ag')??0),
-      l_goal_diff: (avg(sL,'goals_for')??0) - (avg(sL,'goals_ag')??0),
-    }
+    return h.slice(-n)
+  }
+  const avg=(arr,key)=>{ if(arr.length===0) return null; let s=0,c=0; for(const x of arr){ if(x[key]!=null){ s+=x[key]; c++ } } return c? s/c : null }
+
+  function rollingStats(team, date){
+    const s = takeLastBefore(team,date,rS)
+    const m = takeLastBefore(team,date,rM)
+    const l = takeLastBefore(team,date,rL)
+    const pack = (arr)=>({
+      for_xg: avg(arr,'for_xg'), ag_xg: avg(arr,'ag_xg'),
+      for_soT: avg(arr,'for_soT'), ag_soT: avg(arr,'ag_soT'),
+      ppda: avg(arr,'ppda'), rest: avg(arr,'rest'),
+      goal_diff: (avg(arr,'goals_for')??0) - (avg(arr,'goals_ag')??0),
+    })
+    return {s:pack(s), m:pack(m), l:pack(l)}
   }
 
   for(const m of rows){
     const fH = rollingStats(m.home, m.date)
     const fA = rollingStats(m.away, m.date)
-    m.f_for_xg = (fH.s_for_xg??0) - (fA.s_for_xg??0)
-    m.f_ag_xg  = (fH.s_ag_xg??0)  - (fA.s_ag_xg??0)
-    m.f_soT    = (fH.s_for_soT??0) - (fA.s_for_soT??0)
-    m.f_ppda   = (fA.s_ppda??0) - (fH.s_ppda??0)
-    m.f_rest   = (fH.s_rest??0) - (fA.s_rest??0)
-    m.f_goalD  = (fH.s_goal_diff??0) - (fA.s_goal_diff??0)
 
+    // Diferencias por ventana
+    const diff = (a,b,k)=> ((a?.[k]??0) - (b?.[k]??0))
+
+    // SHORT
+    m.f_for_xg_s = diff(fH.s, fA.s, 'for_xg')
+    m.f_ag_xg_s  = diff(fH.s, fA.s, 'ag_xg')
+    m.f_soT_s    = diff(fH.s, fA.s, 'for_soT')
+    m.f_ppda_s   = diff(fH.s, fA.s, 'ppda')
+    m.f_rest_s   = diff(fH.s, fA.s, 'rest')
+    m.f_goalD_s  = diff(fH.s, fA.s, 'goal_diff')
+
+    // MED
+    m.f_for_xg_m = diff(fH.m, fA.m, 'for_xg')
+    m.f_ag_xg_m  = diff(fH.m, fA.m, 'ag_xg')
+    m.f_soT_m    = diff(fH.m, fA.m, 'for_soT')
+    m.f_ppda_m   = diff(fH.m, fA.m, 'ppda')
+    m.f_rest_m   = diff(fH.m, fA.m, 'rest')
+    m.f_goalD_m  = diff(fH.m, fA.m, 'goal_diff')
+
+    // LONG
+    m.f_for_xg_l = diff(fH.l, fA.l, 'for_xg')
+    m.f_ag_xg_l  = diff(fH.l, fA.l, 'ag_xg')
+    m.f_soT_l    = diff(fH.l, fA.l, 'for_soT')
+    m.f_ppda_l   = diff(fH.l, fA.l, 'ppda')
+    m.f_rest_l   = diff(fH.l, fA.l, 'rest')
+    m.f_goalD_l  = diff(fH.l, fA.l, 'goal_diff')
+
+    // Clima / árbitro (fallbacks)
     m.clima_hum = m.humidity ?? 50
     m.clima_temp = m.temp ?? 18
     m.ref_fouls = m.referee_fouls_pg ?? 22
@@ -479,7 +509,6 @@ function engineerFeatures(rows, opts){
 
   return rows
 }
-
 /* =================== PRIORS POR LIGA =================== */
 let PRIORS = null
 function computeLeaguePriors(rows){
@@ -509,8 +538,18 @@ function addPriorsToRows(rows, priMap){
 }
 
 /* =================== DISEÑOS + PESOS =================== */
+/* Incluye features de forma para S/M/L */
 function makeDesignBinary(rows, target){
-  const colsBase = ['f_for_xg','f_ag_xg','f_soT','f_ppda','f_rest','f_goalD','clima_hum','clima_temp','ref_fouls','f_eloDiff']
+  const colsBase = [
+    // SHORT
+    'f_for_xg_s','f_ag_xg_s','f_soT_s','f_ppda_s','f_rest_s','f_goalD_s',
+    // MED
+    'f_for_xg_m','f_ag_xg_m','f_soT_m','f_ppda_m','f_rest_m','f_goalD_m',
+    // LONG
+    'f_for_xg_l','f_ag_xg_l','f_soT_l','f_ppda_l','f_rest_l','f_goalD_l',
+    // Otros
+    'clima_hum','clima_temp','ref_fouls','f_eloDiff'
+  ]
   const priorCol = (target==='over'?'f_priorOver':'f_priorBTTS')
   const cols = colsBase.concat([priorCol])
 
@@ -548,7 +587,16 @@ function makeDesignBinary(rows, target){
 }
 
 function makeDesignMulticlass(rows){
-  const cols = ['f_for_xg','f_ag_xg','f_soT','f_ppda','f_rest','f_goalD','clima_hum','clima_temp','ref_fouls','f_eloDiff','f_priorDraw']
+  const cols = [
+    // SHORT
+    'f_for_xg_s','f_ag_xg_s','f_soT_s','f_ppda_s','f_rest_s','f_goalD_s',
+    // MED
+    'f_for_xg_m','f_ag_xg_m','f_soT_m','f_ppda_m','f_rest_m','f_goalD_m',
+    // LONG
+    'f_for_xg_l','f_ag_xg_l','f_soT_l','f_ppda_l','f_rest_l','f_goalD_l',
+    // Otros
+    'clima_hum','clima_temp','ref_fouls','f_eloDiff','f_priorDraw'
+  ]
 
   const freq = new Map()
   rows.forEach(r=>{
@@ -1126,7 +1174,6 @@ function afterDataLoaded(){
   inf.textContent = `Cargados ${FEAT.length} partidos (${RAW.length} crudos, tras merge & dedupe)`
 }
 
-// Parsers reutilizables
 function parseCSVToRows(text){
   const {data} = parseCSV(text)
   let norm = normalizeObjects(data)
@@ -1143,7 +1190,6 @@ function parseJSONToRows(text){
   return norm
 }
 
-// Lector multiarchivo (2 JSON o mezcla)
 async function loadMultiFiles(fileList){
   if(!fileList || !fileList.length) return
   const files = Array.from(fileList)
@@ -1155,7 +1201,6 @@ async function loadMultiFiles(fileList){
       if(name.endsWith('.json')){
         allRows = allRows.concat(parseJSONToRows(text))
       } else {
-        // CSV / TXT desconocido => intentamos JSON y si falla, CSV
         try{ allRows = allRows.concat(parseJSONToRows(text)) }
         catch{ allRows = allRows.concat(parseCSVToRows(text)) }
       }
@@ -1167,17 +1212,40 @@ async function loadMultiFiles(fileList){
     alert('No se pudieron extraer partidos de los archivos seleccionados.')
     return
   }
-  // Merge + dedupe
   allRows = dedupRows(allRows)
   RAW = allRows
-  FEAT = engineerFeatures(RAW, {rollShort:document.getElementById('rollShort').value, rollLong:document.getElementById('rollLong').value})
+  FEAT = engineerFeatures(RAW, {
+    rollShort:document.getElementById('rollShort').value,
+    rollMed:document.getElementById('rollMed').value,
+    rollLong:document.getElementById('rollLong').value
+  })
   afterDataLoaded()
   alert(`Archivos leídos: ${files.length}\nPartidos importados (únicos): ${FEAT.length}`)
 }
 
-// Compatibilidad con botones demo y carga simple (usando pipeline multi)
-function handleCSV(text){ const rows = parseCSVToRows(text); RAW = dedupRows(rows); FEAT = engineerFeatures(RAW, {rollShort:document.getElementById('rollShort').value, rollLong:document.getElementById('rollLong').value}); afterDataLoaded(); alert('Datos CSV cargados: '+FEAT.length+' filas.') }
-function handleJSON(text){ const rows = parseJSONToRows(text); RAW = dedupRows(rows); FEAT = engineerFeatures(RAW, {rollShort:document.getElementById('rollShort').value, rollLong:document.getElementById('rollLong').value}); afterDataLoaded(); alert('Datos JSON cargados: '+FEAT.length+' filas.') }
+/* Compatibilidad con botones demo y carga simple */
+function handleCSV(text){
+  const rows = parseCSVToRows(text)
+  RAW = dedupRows(rows)
+  FEAT = engineerFeatures(RAW, {
+    rollShort:document.getElementById('rollShort').value,
+    rollMed:document.getElementById('rollMed').value,
+    rollLong:document.getElementById('rollLong').value
+  })
+  afterDataLoaded()
+  alert('Datos CSV cargados: '+FEAT.length+' filas.')
+}
+function handleJSON(text){
+  const rows = parseJSONToRows(text)
+  RAW = dedupRows(rows)
+  FEAT = engineerFeatures(RAW, {
+    rollShort:document.getElementById('rollShort').value,
+    rollMed:document.getElementById('rollMed').value,
+    rollLong:document.getElementById('rollLong').value
+  })
+  afterDataLoaded()
+  alert('Datos JSON cargados: '+FEAT.length+' filas.')
+}
 
 /* ======= DEMOS ======= */
 const DEMO_CSV = `Name,Date,League,Match,Home OnGoal Shots at FT,Away OnGoal Shots at FT,Result FT
@@ -1206,7 +1274,11 @@ function renderFixtures(){
 function removeFixture(idx){
   MANUAL_FIXTURES.splice(idx,1)
   RAW = RAW.filter(r=> !r.__manualFixture).concat(MANUAL_FIXTURES)
-  FEAT = engineerFeatures(RAW, {rollShort:document.getElementById('rollShort').value, rollLong:document.getElementById('rollLong').value})
+  FEAT = engineerFeatures(RAW, {
+    rollShort:document.getElementById('rollShort').value,
+    rollMed:document.getElementById('rollMed').value,
+    rollLong:document.getElementById('rollLong').value
+  })
   renderFixtures()
 }
 function addFixture(){
@@ -1226,29 +1298,29 @@ function addFixture(){
   MANUAL_FIXTURES.push(row)
 
   RAW = RAW.filter(r=> !r.__manualFixture).concat(MANUAL_FIXTURES)
-  FEAT = engineerFeatures(RAW, {rollShort:document.getElementById('rollShort').value, rollLong:document.getElementById('rollLong').value})
+  FEAT = engineerFeatures(RAW, {
+    rollShort:document.getElementById('rollShort').value,
+    rollMed:document.getElementById('rollMed').value,
+    rollLong:document.getElementById('rollLong').value
+  })
 
   renderFixtures()
   maybeToggleAddButton()
 }
 
-/* ============ NUEVO: traer partidos de HOY desde ESPN (no oficial) ============ */
-/* Documentación comunitaria del endpoint y parámetro ?dates=YYYYMMDD: ver fuentes citadas. */
+/* ============ HOY ESPN (endpoint público no oficial) ============ */
 async function fetchTodayFixturesESPN(){
-  // Asegúrate de haber cargado tu histórico primero (para que existan ligas/equipos)
   if(RAW.length===0){
     alert('Primero carga tu histórico (CSV/JSON). Luego vuelve a intentar "Partidos de hoy (ESPN)".')
     return
   }
-
-  // YYYYMMDD en tu zona local
   const now = new Date()
   const y = now.getFullYear()
   const m = String(now.getMonth()+1).padStart(2,'0')
   const d = String(now.getDate()).padStart(2,'0')
   const yyyymmdd = `${y}${m}${d}`
-
   const url = `https://site.api.espn.com/apis/site/v2/sports/soccer/all/scoreboard?dates=${yyyymmdd}`
+
   let data
   try{
     const res = await fetch(url, {credentials:'omit', mode:'cors'})
@@ -1272,11 +1344,9 @@ async function fetchTodayFixturesESPN(){
     const away = competitors.find(c=> c.homeAway==='away')?.team?.displayName || null
     if(!home || !away){ skipped++; continue }
 
-    // Fecha local YYYY-MM-DD
     const dUTC = ev?.date ? new Date(ev.date) : now
     const localISO = new Date(dUTC.getTime() - dUTC.getTimezoneOffset()*60000).toISOString().slice(0,10)
 
-    // Encontrar la liga de tu dataset donde estén ambos equipos
     let leagueKey = null
     for(const [L,set] of LEAGUE_TEAMS.entries()){
       const lowerSet = new Set(Array.from(set).map(x=> x.toLowerCase()))
@@ -1286,7 +1356,6 @@ async function fetchTodayFixturesESPN(){
     }
     if(!leagueKey){ skipped++; continue }
 
-    // Evitar duplicados
     const dup = MANUAL_FIXTURES.some(r=> r.date===localISO && r.league===leagueKey &&
       r.home.toLowerCase()===home.toLowerCase() && r.away.toLowerCase()===away.toLowerCase())
     if(dup){ continue }
@@ -1298,9 +1367,12 @@ async function fetchTodayFixturesESPN(){
     added++
   }
 
-  // Reinyectar fixtures y recomputar features
   RAW = RAW.filter(r=> !r.__manualFixture).concat(MANUAL_FIXTURES)
-  FEAT = engineerFeatures(RAW, {rollShort:document.getElementById('rollShort').value, rollLong:document.getElementById('rollLong').value})
+  FEAT = engineerFeatures(RAW, {
+    rollShort:document.getElementById('rollShort').value,
+    rollMed:document.getElementById('rollMed').value,
+    rollLong:document.getElementById('rollLong').value
+  })
   renderFixtures()
 
   alert(`Partidos de hoy — agregados: ${added}, omitidos: ${skipped} (equipos no presentes en tu histórico o ligas no mapeadas).`)
@@ -1327,7 +1399,6 @@ document.getElementById('btnRebuildHist').addEventListener('click', rebuildTeamH
 document.getElementById('histLeague').addEventListener('change', rebuildTeamHistory)
 document.getElementById('histN').addEventListener('input', rebuildTeamHistory)
 
-/* NUEVO: botón “Partidos de hoy (ESPN)” */
 document.getElementById('btnFetchToday').addEventListener('click', fetchTodayFixturesESPN)
 </script>
 </body>
