@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Poisson Jerárquico + Forma — Backtest y Próximos</title>
+<title>Bivariante Poisson + Dixon–Coles — Backtest y Próximos</title>
 <style>
   :root{--bg:#0f1115;--card:#171a21;--bd:#2a3140;--fg:#e6eaf2;--mut:#9aa3b2;--btn:#7aa2ff}
   *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.45 system-ui,Inter,Segoe UI,Roboto,Arial}
@@ -17,12 +17,13 @@
   .pill{display:inline-block;background:#1f2430;border:1px solid var(--bd);border-radius:999px;padding:4px 8px;margin:4px 6px 0 0}
   table{width:100%;border-collapse:collapse;margin-top:10px} th,td{border-bottom:1px solid var(--bd);padding:6px;text-align:right}
   th:first-child,td:first-child{text-align:left} .muted{color:var(--mut);font-size:12px} .small{font-size:12px}
+  .switch{display:flex;align-items:center;gap:8px}
 </style>
 </head>
 <body>
 <header class="wrap">
-  <h1>Poisson Jerárquico + Forma — Backtest y Próximos</h1>
-  <div class="muted">Importa histórico → elige liga → Entrenar → Backtest → Próximos (equipos por liga, EV).</div>
+  <h1>Bivariante Poisson + Dixon–Coles — Backtest y Próximos</h1>
+  <div class="muted">Importa histórico → liga → Entrenar → Backtest → Próximos (equipos por liga, EV).</div>
 </header>
 
 <div class="wrap grid">
@@ -35,7 +36,7 @@
 
     <h2>Parámetros del modelo</h2>
     <div class="row"><label>Línea O/U</label><input id="ou" type="number" step="0.5" value="2.5"></div>
-    <div class="row"><label>EV mínimo</label><input id="evThr" type="number" step="0.01" value="0.02"></div>
+    <div class="row"><label>EV mínimo</label><input id="evThr" type="number" step="0.01" value="0.03"></div>
     <div class="row"><label>maxGoals (convolución)</label><input id="maxGoals" type="number" min="8" max="14" step="1" value="10"></div>
     <div class="row"><label>β (impacto forma)</label><input id="beta" type="number" step="0.05" value="0.30"></div>
     <div class="row"><label>τ (shrinkage)</label><input id="tau" type="number" step="1" value="8"></div>
@@ -43,8 +44,12 @@
     <div class="row"><label>α forma (EWMA)</label><input id="alphaForm" type="number" step="0.01" value="0.25"></div>
     <div class="row"><label>k forma (últimos k)</label><input id="kForm" type="number" step="1" value="6"></div>
 
+    <h2>Correcciones</h2>
+    <div class="row switch"><label>Usar Dixon–Coles</label><input id="useDC" type="checkbox" checked></div>
+    <div class="row"><label>ρ (Dixon–Coles)</label><input id="rho" type="number" step="0.01" value="0.05"></div>
+
     <div class="row2" style="margin-top:6px">
-      <button id="train" class="btn">Entrenar (Poisson)</button>
+      <button id="train" class="btn">Entrenar (Bivariante)</button>
       <button id="run" class="btn">Correr Backtest</button>
     </div>
 
@@ -107,7 +112,7 @@
     </table>
 
     <div class="row2" style="margin-top:10px">
-      <button id="predict" class="btn">Predecir Próximos (Poisson)</button>
+      <button id="predict" class="btn">Predecir Próximos (Bivariante)</button>
       <div></div>
     </div>
 
@@ -127,10 +132,12 @@ const num=v=>{const t=String(v??'').trim().replace(',','.'); const x=parseFloat(
 function parseFT(s){const m=String(s||'').match(/(-?\d+)\s*[-:]\s*(-?\d+)/);return m?[+m[1],+m[2]]:[null,null];}
 function parseDateAny(s){const d=new Date(s); if(!isNaN(d)) return d; return new Date(NaN);}
 function splitTeams(match){ if(!match) return ['','']; const parts=String(match).split(/[-–]/); return [(parts[0]||'').trim(),(parts[1]||'').trim()];}
+function mean(a){return a.reduce((s,x)=>s+x,0)/Math.max(1,a.length);}
+function sampleCov(X,Y){const n=Math.min(X.length,Y.length); if(n<2) return 0; const mx=mean(X.slice(0,n)), my=mean(Y.slice(0,n)); let s=0; for(let i=0;i<n;i++) s+=(X[i]-mx)*(Y[i]-my); return s/Math.max(1,n-1);}
 
 /* ===== Estado ===== */
 let RAW=[], BY_LEAGUE=new Map(), TEAMS_BY_LEAGUE=new Map();
-let MODEL=null; // modelo entrenado de la liga seleccionada
+let MODEL=null; // modelo entrenado por liga (almacena lambdas base + cov)
 
 /* ===== Carga histórico ===== */
 el('file').addEventListener('change', async e=>{
@@ -175,24 +182,15 @@ function getOdds_1X2(r,f1,fX,f2){const o=r.raw;
   return {o1:o1>1.01?o1:null, ox:ox>1.01?ox:null, o2:o2>1.01?o2:null};
 }
 
-/* ===== Poisson jerárquico + forma ===== */
-function poisPMF(k, lam){
-  if(lam<=0) return k===0?1:0;
-  let term=Math.exp(-lam), p=(k===0)?term:0;
-  for(let i=1;i<=k;i++){ term*=lam/i; if(i===k) p=term; }
-  return p;
-}
-function ewma(arr, alpha){ if(!arr.length) return 0; let m=arr[0]; for(let i=1;i<arr.length;i++) m=alpha*arr[i]+(1-alpha)*m; return m; }
-
-function trainPoissonLeague(rows, {tau=8,n_cap=20,alphaForm=0.25,kForm=6}={}){
+/* ===== Ratings por equipo (shrinkage + forma) ===== */
+function ewma(arr, a){ if(!arr.length) return 0; let m=arr[0]; for(let i=1;i<arr.length;i++) m=a*arr[i]+(1-a)*m; return m; }
+function trainTeams(rows,{tau=8,n_cap=20,alphaForm=0.25,kForm=6}={}){
   const league={gh:0,ga:0,n:0}; for(const r of rows){ league.gh+=r.h; league.ga+=r.a; league.n++; }
   league.gh/=Math.max(1,league.n); league.ga/=Math.max(1,league.n);
   const HFA=Math.log(Math.max(1e-6,league.gh)) - Math.log(Math.max(1e-6,league.ga));
-
   const perTeam=new Map(), push=(t,gf,ga,d)=>{ if(!perTeam.has(t)) perTeam.set(t,{gf:[],ga:[],d:[]}); const o=perTeam.get(t); o.gf.push(gf); o.ga.push(ga); o.d.push(d); };
   for(const r of rows){ push(r.homeName,r.h,r.a,r.date); push(r.awayName,r.a,r.h,r.date); }
   for(const o of perTeam.values()){ const idx=[...o.gf.keys()].sort((i,j)=>o.d[i]-o.d[j]); o.gf=idx.map(i=>o.gf[i]); o.ga=idx.map(i=>o.ga[i]); o.d=idx.map(i=>o.d[i]); }
-
   const teams={};
   for(const [name,o] of perTeam){
     const n=o.gf.length, nEff=Math.min(n_cap,n);
@@ -208,21 +206,39 @@ function trainPoissonLeague(rows, {tau=8,n_cap=20,alphaForm=0.25,kForm=6}={}){
   }
   return {league,HFA,teams};
 }
-function expectedLambdas(model, home, away, {beta=0.3}={}){
-  const {league,HFA,teams}=model; const h=teams[home], a=teams[away]; if(!h||!a) return {lamH:NaN,lamA:NaN};
-  const atkH=Math.log(Math.max(1e-6,h.rfor)) - Math.log(Math.max(1e-6,league.gh));
-  const defA=Math.log(Math.max(1e-6,a.rcon)) - Math.log(Math.max(1e-6,league.ga));
-  const atkA=Math.log(Math.max(1e-6,a.rfor)) - Math.log(Math.max(1e-6,league.ga));
-  const defH=Math.log(Math.max(1e-6,h.rcon)) - Math.log(Math.max(1e-6,league.gh));
-  const logLamH=Math.log(Math.max(1e-6,league.gh)) + HFA + atkH - defA + beta*(h.ffor - a.fcon);
-  const logLamA=Math.log(Math.max(1e-6,league.ga))        + atkA - defH + beta*(a.ffor - h.fcon);
-  return {lamH:Math.max(1e-6,Math.exp(logLamH)), lamA:Math.max(1e-6,Math.exp(logLamA))};
-}
-function probsFromLambdas(lamH, lamA, {lineOU=2.5,maxGoals=10}={}){
-  const pH=[],pA=[]; for(let k=0;k<=maxGoals;k++){ pH[k]=poisPMF(k,lamH); pA[k]=poisPMF(k,lamA); }
+
+/* ===== Probabilidades: Poisson bivariante + DC opcional ===== */
+function probsBivariate(lamH, lamA, cov, {lineOU=2.5, maxGoals=10, useDC=false, rho=0.05}={}){
+  const lamc=Math.max(0,cov||0);
+  const lam1=Math.max(1e-6,lamH-lamc), lam2=Math.max(1e-6,lamA-lamc);
+  const e=Math.exp(-(lam1+lam2+lamc));
+  const fact=[1]; for(let i=1;i<=maxGoals;i++) fact[i]=fact[i-1]*i;
+  const pIJ=(i,j)=>{
+    const m=Math.min(i,j); let s=0;
+    for(let k=0;k<=m;k++){
+      s += Math.pow(lam1,i-k)/fact[i-k] * Math.pow(lam2,j-k)/fact[j-k] * Math.pow(lamc,k)/fact[k];
+    }
+    return e*s;
+  };
+  // matriz base
+  const M=Array.from({length:maxGoals+1},()=>Array(maxGoals+1).fill(0));
+  for(let i=0;i<=maxGoals;i++)for(let j=0;j<=maxGoals;j++) M[i][j]=pIJ(i,j);
+
+  if(useDC){ // tweak 0-0,1-0,0-1,1-1 + renormaliza
+    const tweak=(i,j)=>{
+      if(i===0&&j===0) return 1 - rho;
+      if(i===0&&j===1) return 1 + rho;
+      if(i===1&&j===0) return 1 + rho;
+      if(i===1&&j===1) return 1 - rho;
+      return 1;
+    };
+    let S=0; for(let i=0;i<=maxGoals;i++)for(let j=0;j<=maxGoals;j++){ M[i][j]*=tweak(i,j); S+=M[i][j]; }
+    for(let i=0;i<=maxGoals;i++)for(let j=0;j<=maxGoals;j++) M[i][j]/=S;
+  }
+
   let p1=0,pX=0,p2=0,pOver=0,pUnder=0,pBTTS=0;
   for(let i=0;i<=maxGoals;i++)for(let j=0;j<=maxGoals;j++){
-    const p=pH[i]*pA[j];
+    const p=M[i][j];
     if(i>j)p1+=p; else if(i===j)pX+=p; else p2+=p;
     if(i+j>lineOU)pOver+=p; else pUnder+=p;
     if(i>0&&j>0)pBTTS+=p;
@@ -234,15 +250,19 @@ const ev=(p,odd)=> p*(odd-1)-(1-p);
 /* ===== Entrenar (botón) ===== */
 el('train').addEventListener('click', ()=>{
   const L=el('league').value; if(!L){alert('Elige una liga.');return;}
-  const rows=(BY_LEAGUE.get(L)||[]).slice();
-  if(rows.length<10){alert('Muy poco histórico.');return;}
-  MODEL=trainPoissonLeague(rows,{
+  const rows=(BY_LEAGUE.get(L)||[]).slice(); if(rows.length<10){alert('Muy poco histórico.');return;}
+  // ratings equipos
+  const teamsModel = trainTeams(rows,{
     tau:+el('tau').value||8, n_cap:+el('ncap').value||20, alphaForm:+el('alphaForm').value||0.25, kForm:+el('kForm').value||6
   });
-  el('info').textContent=`Modelo entrenado: gh=${MODEL.league.gh.toFixed(2)}, ga=${MODEL.league.ga.toFixed(2)} | equipos=${Object.keys(MODEL.teams).length}`;
+  // covarianza liga (para componente compartido)
+  const H=rows.map(r=>r.h), A=rows.map(r=>r.a);
+  const covHA = Math.max(0, sampleCov(H,A));
+  MODEL={...teamsModel, covHA};
+  el('info').textContent=`Entrenado: gh=${MODEL.league.gh.toFixed(2)}, ga=${MODEL.league.ga.toFixed(2)}, cov=${MODEL.covHA.toFixed(3)} | equipos=${Object.keys(MODEL.teams).length}`;
 });
 
-/* ===== Backtest walk-forward ===== */
+/* ===== Backtest walk-forward (bivariante + DC opcional) ===== */
 el('run').addEventListener('click', ()=>{
   const L=el('league').value; if(!L){alert('Elige una liga.');return;}
   const rows=(BY_LEAGUE.get(L)||[]).slice(); if(rows.length<12){alert('Muy poco histórico.');return;}
@@ -250,44 +270,46 @@ el('run').addEventListener('click', ()=>{
   const fOver=el('fOddOver').value.trim(), fUnder=el('fOddUnder').value.trim(), fBTTS=el('fOddBTTS').value.trim();
   const f1=el('fOdd1').value.trim(), fX=el('fOddX').value.trim(), f2=el('fOdd2').value.trim();
 
-  const ouLine=+el('ou').value||2.5, evMin=+el('evThr').value||0, maxGoals=Math.max(8,Math.min(14, +el('maxGoals').value||10));
+  const ouLine=+el('ou').value||2.5, evMin=+el('evThr').value||0.03, maxGoals=Math.max(8,Math.min(14, +el('maxGoals').value||10));
   const beta=+el('beta').value||0.3, tau=+el('tau').value||8, n_cap=+el('ncap').value||20, alphaForm=+el('alphaForm').value||0.25, kForm=+el('kForm').value||6;
+  const useDC=el('useDC').checked, rho=+el('rho').value||0.05;
 
-  // acumuladores liga y equipos para entrenamiento incremental
-  let ghSum=0, gaSum=0, n=0;
+  // acumuladores liga y equipos incrementales
+  const H=[], A[];
   const T=new Map(); // team -> {gf:[],ga:[]}
-  function mkTeam(t){ if(!T.has(t)) T.set(t,{gf:[],ga:[]}); return T.get(t); }
+  const mkTeam=t=>{ if(!T.has(t)) T.set(t,{gf:[],ga:[]}); return T.get(t); };
 
   let bets=0,hits=0,units=0; const outRows=[];
   for(const r of rows){
-    if(n<8){ // arranque: juntar algo de liga antes de decidir
-      ghSum+=r.h; gaSum+=r.a; n++;
+    if(H.length<8){ // “warm-up” de liga
+      H.push(r.h); A.push(r.a);
       mkTeam(r.homeName).gf.push(r.h); mkTeam(r.homeName).ga.push(r.a);
       mkTeam(r.awayName).gf.push(r.a); mkTeam(r.awayName).ga.push(r.h);
       continue;
     }
-    // entrenar modelo con info hasta el partido actual
-    const league={gh:ghSum/Math.max(1,n), ga:gaSum/Math.max(1,n)};
+    const league={gh:mean(H), ga:mean(A)};
     const HFA=Math.log(Math.max(1e-6,league.gh)) - Math.log(Math.max(1e-6,league.ga));
+    const covHA=Math.max(0, sampleCov(H,A));
+
     function teamParams(name){
       const o=T.get(name)||{gf:[],ga:[]}, nT=o.gf.length, nEff=Math.min(n_cap,nT);
       const r_for=o.gf.slice(-nEff).reduce((s,x)=>s+x,0)/Math.max(1,nEff);
       const r_con=o.ga.slice(-nEff).reduce((s,x)=>s+x,0)/Math.max(1,nEff);
       const w=nT/(nT+tau);
-      const rfor=w*r_for+(1-w)*league.gh;
-      const rcon=w*r_con+(1-w)*league.ga;
+      const rfor=w*r_for+(1-w)*league.gh, rcon=w*r_con+(1-w)*league.ga;
       const k=Math.min(kForm,nT);
       const f_for=(k>0?ewma(o.gf.slice(-k),alphaForm):rfor)-rfor;
       const f_con=(k>0?ewma(o.ga.slice(-k),alphaForm):rcon)-rcon;
       return {rfor,rcon,ffor:f_for,fcon:f_con,nT};
     }
     const h=teamParams(r.homeName), a=teamParams(r.awayName);
-    if(h.nT<2||a.nT<2){ // poca historia
-      ghSum+=r.h; gaSum+=r.a; n++;
+    if(h.nT<2||a.nT<2){ // poca historia por equipo
+      H.push(r.h); A.push(r.a);
       mkTeam(r.homeName).gf.push(r.h); mkTeam(r.homeName).ga.push(r.a);
       mkTeam(r.awayName).gf.push(r.a); mkTeam(r.awayName).ga.push(r.h);
       continue;
     }
+
     const atkH=Math.log(Math.max(1e-6,h.rfor))-Math.log(Math.max(1e-6,league.gh));
     const defA=Math.log(Math.max(1e-6,a.rcon))-Math.log(Math.max(1e-6,league.ga));
     const atkA=Math.log(Math.max(1e-6,a.rfor))-Math.log(Math.max(1e-6,league.ga));
@@ -295,20 +317,21 @@ el('run').addEventListener('click', ()=>{
     const logLamH=Math.log(Math.max(1e-6,league.gh))+HFA+atkH-defA+beta*(h.ffor-a.fcon);
     const logLamA=Math.log(Math.max(1e-6,league.ga))     +atkA-defH+beta*(a.ffor-h.fcon);
     const lamH=Math.max(1e-6,Math.exp(logLamH)), lamA=Math.max(1e-6,Math.exp(logLamA));
-    const P=probsFromLambdas(lamH,lamA,{lineOU:ouLine,maxGoals});
 
-    // construir candidatos por mercado a partir de cuotas disponibles
+    const P=probsBivariate(lamH,lamA,covHA,{lineOU:ouLine,maxGoals,useDC,rho});
+
+    // candidatos por mercado (si hay cuotas)
     const {over,under}=getOdds_OU(r,fOver,fUnder);
     const {yes}=getOdds_BTTS(r,fBTTS);
     const {o1,ox,o2}=getOdds_1X2(r,f1,fX,f2);
     const cand=[];
-    if(over) cand.push({lab:'Over '+ouLine, p:P.pOver, odd:over, win:(r.h+r.a>ouLine)?1:0});
+    if(over) cand.push({lab:'Over '+ouLine,p:P.pOver,odd:over,win:(r.h+r.a>ouLine)?1:0});
     if(under) cand.push({lab:'Under '+ouLine,p:P.pUnder,odd:under,win:(r.h+r.a<=ouLine)?1:0});
-    if(yes) cand.push({lab:'BTTS Sí',p:P.pBTTS,odd:yes,win:(r.h>0&&r.a>0)?1:0});
-    if(o1) cand.push({lab:'1',p:P.p1,odd:o1,win:(r.h>r.a)?1:0});
-    if(ox) cand.push({lab:'X',p:P.pX,odd:ox,win:(r.h===r.a)?1:0});
-    if(o2) cand.push({lab:'2',p:P.p2,odd:o2,win:(r.h<r.a)?1:0});
-    cand.forEach(c=>c.EV=ev(c.p,c.odd));
+    if(yes)   cand.push({lab:'BTTS Sí',    p:P.pBTTS,odd:yes, win:(r.h>0&&r.a>0)?1:0});
+    if(o1)    cand.push({lab:'1',          p:P.p1,   odd:o1,  win:(r.h>r.a)?1:0});
+    if(ox)    cand.push({lab:'X',          p:P.pX,   odd:ox,  win:(r.h===r.a)?1:0});
+    if(o2)    cand.push({lab:'2',          p:P.p2,   odd:o2,  win:(r.h<r.a)?1:0});
+    cand.forEach(c=>c.EV= c.p*(c.odd-1)-(1-c.p));
     cand.sort((a,b)=>b.EV-a.EV);
     const pick=cand[0];
     if(pick && pick.EV>=evMin){
@@ -316,8 +339,8 @@ el('run').addEventListener('click', ()=>{
       outRows.push({date:r.date.toISOString().slice(0,10),match:r.match,market:pick.lab,odd:pick.odd.toFixed(2),p_hat:pick.p.toFixed(3),EV:pick.EV.toFixed(3),result:`${r.h}-${r.a}`,win:pick.win?'✔':'✖'});
     }
 
-    // actualizar acumuladores
-    ghSum+=r.h; gaSum+=r.a; n++;
+    // actualizar
+    H.push(r.h); A.push(r.a);
     mkTeam(r.homeName).gf.push(r.h); mkTeam(r.homeName).ga.push(r.a);
     mkTeam(r.awayName).gf.push(r.a); mkTeam(r.awayName).ga.push(r.h);
   }
@@ -325,7 +348,7 @@ el('run').addEventListener('click', ()=>{
   const roi=bets?units/bets:0;
   el('bets').textContent=bets; el('hits').textContent=hits; el('hr').textContent=bets?pct(hits/bets):'—';
   el('units').textContent=fmt(units); el('roi').textContent=bets?pct(roi):'—';
-  el('badges').innerHTML=`<span class="pill">Liga: <b>${L}</b></span><span class="pill">Modelo: Poisson jerárquico</span><span class="pill">β ${(+el('beta').value||0.3)}</span><span class="pill">τ ${(+el('tau').value||8)}</span>`;
+  el('badges').innerHTML=`<span class="pill">Liga: <b>${L}</b></span><span class="pill">Modelo: Bivariante</span><span class="pill">DC: ${useDC?'on':'off'} (ρ=${rho})</span>`;
 
   const tb=document.querySelector('#tbl tbody');
   tb.innerHTML = outRows.slice(0,300).map(r=>`<tr><td>${r.date}</td><td>${r.match}</td><td>${r.market}</td><td>${r.odd}</td><td>${r.p_hat}</td><td>${r.EV}</td><td>${r.result}</td><td>${r.win}</td></tr>`).join('')
@@ -335,7 +358,7 @@ el('run').addEventListener('click', ()=>{
       .concat(outRows.map(r=>[r.date,r.match,r.market,r.odd,r.p_hat,r.EV,r.result,r.win]));
     const csv=rowsCsv.map(r=>r.join(',')).join('\n');
     const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'}); const url=URL.createObjectURL(blob);
-    const a=document.createElement('a'); a.href=url; a.download=`backtest_poisson_${L}.csv`; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+    const a=document.createElement('a'); a.href=url; a.download=`backtest_bivar_${L}.csv`; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
   };
 });
 
@@ -397,37 +420,52 @@ function loadNextFromJson(arr){
   }
 }
 
-/* ===== Predecir Próximos con Poisson ===== */
+/* ===== Predecir Próximos (bivariante + DC opcional) ===== */
 el('predict').addEventListener('click', ()=>{
   const L=el('league').value; if(!L){alert('Elige una liga.');return;}
   const hist=(BY_LEAGUE.get(L)||[]).slice(); if(hist.length<10){alert('Poco histórico.');return;}
-  // Entrena si no hay modelo vigente
   if(!MODEL){
-    MODEL=trainPoissonLeague(hist,{tau:+el('tau').value||8,n_cap:+el('ncap').value||20,alphaForm:+el('alphaForm').value||0.25,kForm:+el('kForm').value||6});
+    const tm=trainTeams(hist,{tau:+el('tau').value||8,n_cap:+el('ncap').value||20,alphaForm:+el('alphaForm').value||0.25,kForm:+el('kForm').value||6});
+    const covHA=Math.max(0, sampleCov(hist.map(r=>r.h), hist.map(r=>r.a)));
+    MODEL={...tm,covHA};
   }
-  const beta=+el('beta').value||0.3, evMin=+el('evThr').value||0;
+  const beta=+el('beta').value||0.3, evMin=+el('evThr').value||0.03;
   const maxGoals=Math.max(8,Math.min(14, +el('maxGoals').value||10));
+  const useDC=el('useDC').checked, rho=+el('rho').value||0.05;
+
   const out=[], rows=[...tbNext.querySelectorAll('tr')];
   for(const tr of rows){
     const tds=tr.querySelectorAll('td'); if(!tds.length) continue;
     const date=(tds[0].querySelector('input')?.value)||'';
     const home=(tds[1].querySelector('select')?.value)||''; const away=(tds[2].querySelector('select')?.value)||'';
     if(!home||!away){ out.push({date,match:`${home||'?'} vs ${away||'?'}`,market:'-',odd:'-',p:'-',EV:'-',decision:'—'}); continue; }
+
+    // lambdas esperadas (ratings + forma)
+    const h=MODEL.teams[home], a=MODEL.teams[away], Lg=MODEL.league;
+    if(!h||!a){ out.push({date,match:`${home} vs ${away}`,market:'-',odd:'-',p:'-',EV:'-',decision:'—'}); continue; }
+    const atkH=Math.log(Math.max(1e-6,h.rfor))-Math.log(Math.max(1e-6,Lg.gh));
+    const defA=Math.log(Math.max(1e-6,a.rcon))-Math.log(Math.max(1e-6,Lg.ga));
+    const atkA=Math.log(Math.max(1e-6,a.rfor))-Math.log(Math.max(1e-6,Lg.ga));
+    const defH=Math.log(Math.max(1e-6,h.rcon))-Math.log(Math.max(1e-6,Lg.gh));
+    const HFA=Math.log(Math.max(1e-6,Lg.gh)) - Math.log(Math.max(1e-6,Lg.ga));
+    const logLamH=Math.log(Math.max(1e-6,Lg.gh))+HFA+atkH-defA+beta*(h.ffor-a.fcon);
+    const logLamA=Math.log(Math.max(1e-6,Lg.ga))     +atkA-defH+beta*(a.ffor-h.fcon);
+    const lamH=Math.max(1e-6,Math.exp(logLamH)), lamA=Math.max(1e-6,Math.exp(logLamA));
+
     const ouLine=num(tr.querySelector('[data-field="line"]')?.value) || (+el('ou').value||2.5);
     const over=num(tr.querySelector('[data-field="over"]')?.value), under=num(tr.querySelector('[data-field="under"]')?.value);
     const btts=num(tr.querySelector('[data-field="btts"]')?.value);
     const o1=num(tr.querySelector('[data-field="o1"]')?.value), ox=num(tr.querySelector('[data-field="ox"]')?.value), o2=num(tr.querySelector('[data-field="o2"]')?.value);
 
-    const {lamH,lamA}=expectedLambdas(MODEL,home,away,{beta});
-    const P=probsFromLambdas(lamH,lamA,{lineOU:ouLine,maxGoals});
+    const P=probsBivariate(lamH,lamA,MODEL.covHA,{lineOU:ouLine,maxGoals,useDC,rho});
     const cand=[];
-    if(over>1.01)  cand.push({lab:'Over '+ouLine, p:P.pOver, odd:over});
-    if(under>1.01) cand.push({lab:'Under '+ouLine, p:P.pUnder, odd:under});
+    if(over>1.01)  cand.push({lab:'Over '+ouLine, p:P.pOver,  odd:over});
+    if(under>1.01) cand.push({lab:'Under '+ouLine,p:P.pUnder, odd:under});
     if(btts>1.01)  cand.push({lab:'BTTS Sí',     p:P.pBTTS, odd:btts});
     if(o1>1.01)    cand.push({lab:'1',           p:P.p1,    odd:o1});
     if(ox>1.01)    cand.push({lab:'X',           p:P.pX,    odd:ox});
     if(o2>1.01)    cand.push({lab:'2',           p:P.p2,    odd:o2});
-    cand.forEach(c=>c.EV=ev(c.p,c.odd));
+    cand.forEach(c=>c.EV= c.p*(c.odd-1)-(1-c.p));
     cand.sort((a,b)=>b.EV-a.EV);
     const pick=cand[0];
     const decision=(pick && pick.EV>=evMin)?'APOSTAR':'NO APOSTAR';
@@ -438,8 +476,18 @@ el('predict').addEventListener('click', ()=>{
     || `<tr><td colspan="7" class="muted">Agrega o importa próximos partidos.</td></tr>`;
 });
 
-/* ===== Eventos auxiliares ===== */
-function refreshNextTeamSelects(){ /* ya definida arriba */ }
+/* ===== Próximos: helpers UI ===== */
+const tbNext=document.querySelector('#tblNext tbody');
+function refreshNextTeamSelects(){
+  const L=el('league').value, teams=getLeagueTeams(L);
+  [...tbNext.querySelectorAll('tr')].forEach(tr=>{
+    const tds=tr.querySelectorAll('td'); if(tds.length<3) return;
+    const h=tds[1].querySelector('select'), a=tds[2].querySelector('select');
+    const ch=h?.value||'', ca=a?.value||'';
+    if(h) h.outerHTML=teamSelectHTML(teams,ch);
+    if(a) a.outerHTML=teamSelectHTML(teams,ca);
+  });
+}
 </script>
 </body>
 </html>
