@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Backtesting + Entrenar + Próximos (con equipos por liga)</title>
+<title>Backtesting + Entrenar + Próximos (equipos por liga, fix línea/odd)</title>
 <style>
   body{margin:0;background:#0f1115;color:#e6eaf2;font:14px/1.45 system-ui,Inter,Segoe UI,Roboto,Arial}
   header{padding:14px 16px;border-bottom:1px solid #2a3140}
@@ -27,7 +27,7 @@
 <body>
 <header class="wrap">
   <h1>Backtesting + Auto-Entrenamiento + Próximos — Equipos por liga</h1>
-  <div class="muted">Importa histórico → entrena → backtest → elige próximos con <b>equipos de esa liga</b> y decide con la política.</div>
+  <div class="muted">Importa histórico → entrena → backtest → elige próximos con equipos de esa liga y decide con la política.</div>
 </header>
 
 <div class="wrap grid">
@@ -97,7 +97,7 @@
   <section class="card">
     <h2>Próximos partidos (elige equipos de la liga)</h2>
     <div class="small muted" style="margin-bottom:6px">
-      Importa JSON (array) con <code>Date</code>, <code>Match</code> (“Local - Visitante”) y cuotas. Se intentará pre-seleccionar los equipos si existen en el catálogo de la liga.
+      Importa JSON (array) con <code>Date</code>, <code>Match</code> (“Local - Visitante”) y cuotas. Se pre-seleccionan equipos si existen en el catálogo de la liga.
     </div>
     <div class="row"><label>Archivo JSON próximos</label><input id="fileNext" type="file" accept=".json"></div>
     <div class="row"><label>o Pegar JSON</label><button id="btnPasteNext" class="btn">Cargar próximos</button></div>
@@ -134,13 +134,12 @@
 const el=id=>document.getElementById(id);
 const pct=x=>(x*100).toFixed(2)+'%';
 const fmt=x=>(isFinite(x)?x.toFixed(3):'—');
+function num(v){ const t=String(v??'').trim().replace(',','.'); const x=parseFloat(t); return Number.isFinite(x)?x:NaN; }
+
 function parseFT(s){const m=String(s||'').match(/(-?\d+)\s*[-:]\s*(-?\d+)/);return m?[+m[1],+m[2]]:[null,null];}
 function parseDateAny(s){const d=new Date(s); if(!isNaN(d)) return d; return new Date(NaN);}
-function splitTeams(match){
-  if(!match) return ['',''];
-  const parts = String(match).split(/[-–]/);
-  return [ (parts[0]||'').trim(), (parts[1]||'').trim() ];
-}
+function splitTeams(match){ if(!match) return ['','']; const parts=String(match).split(/[-–]/); return [(parts[0]||'').trim(), (parts[1]||'').trim()]; }
+
 function mean(a){return a.reduce((s,x)=>s+x,0)/a.length;}
 function variance(a,mu){let s=0;for(const x of a)s+=(x-mu)*(x-mu);return s/Math.max(1,a.length-1);}
 function covariance(X,Y,mx,my){let s=0;for(let i=0;i<X.length;i++)s+=(X[i]-mx)*(Y[i]-my);return s/Math.max(1,X.length-1);}
@@ -186,7 +185,6 @@ el('market').addEventListener('change', ()=>{
   document.getElementById('col1X2').style.display  = (m==='1X2')?'':'none';
 });
 el('league').addEventListener('change', ()=>{
-  // Cuando cambie la liga, refrescamos selects de próximos
   refreshNextTeamSelects();
 });
 
@@ -369,7 +367,6 @@ function getLeagueTeams(league){
   if(!set) return [];
   return Array.from(set).sort((a,b)=>a.localeCompare(b,'es',{sensitivity:'base'}));
 }
-
 function teamSelectHTML(options, selected=''){
   const opts = ['<option value="">—</option>'].concat(options.map(t=>{
     const sel = (t===selected)?' selected':'';
@@ -379,28 +376,25 @@ function teamSelectHTML(options, selected=''){
 }
 
 function renderRow(next={date:'',home:'',away:'',over:'',under:'',line:'2.5',btts:'',o1:'',ox:'',o2:''}){
-  const m=el('market').value;
-  const L=el('league').value;
-  const teams=getLeagueTeams(L);
+  const m=el('market').value, L=el('league').value, teams=getLeagueTeams(L);
   const tr=document.createElement('tr');
   tr.innerHTML = `
     <td><input type="date" value="${next.date||''}"></td>
     <td>${teamSelectHTML(teams, next.home)}</td>
     <td>${teamSelectHTML(teams, next.away)}</td>
     <td ${m==='OU'?'':'style="display:none"'}><div class="row2" style="grid-template-columns:80px 1fr 1fr">
-      <input placeholder="Línea" value="${next.line||'2.5'}">
-      <input placeholder="Over"  value="${next.over||''}">
-      <input placeholder="Under" value="${next.under||''}">
+      <input data-field="line"  placeholder="Línea" value="${next.line||'2.5'}">
+      <input data-field="over"  placeholder="Over"  value="${next.over||''}">
+      <input data-field="under" placeholder="Under" value="${next.under||''}">
     </div></td>
-    <td ${m==='BTTS'?'':'style="display:none"'}><input placeholder="Odd BTTS Sí" value="${next.btts||''}"></td>
+    <td ${m==='BTTS'?'':'style="display:none"'}><input data-field="btts" placeholder="Odd BTTS Sí" value="${next.btts||''}"></td>
     <td ${m==='1X2'?'':'style="display:none"'}><div class="row2">
-      <input placeholder="Odd 1" value="${next.o1||''}">
-      <input placeholder="Odd X" value="${next.ox||''}">
-      <input placeholder="Odd 2" value="${next.o2||''}">
+      <input data-field="o1" placeholder="Odd 1" value="${next.o1||''}">
+      <input data-field="ox" placeholder="Odd X" value="${next.ox||''}">
+      <input data-field="o2" placeholder="Odd 2" value="${next.o2||''}">
     </div></td>`;
   tbNext.appendChild(tr);
 }
-
 function refreshNextTeamSelects(){
   const L=el('league').value, teams=getLeagueTeams(L);
   [...tbNext.querySelectorAll('tr')].forEach(tr=>{
@@ -419,7 +413,7 @@ el('addRow').addEventListener('click', ()=>{
 });
 el('clearRows').addEventListener('click', ()=>{tbNext.innerHTML='';});
 
-// Importar JSON de próximos (intenta mapear equipos al catálogo)
+// Importar JSON de próximos (mapea equipos al catálogo)
 el('fileNext').addEventListener('change', async e=>{
   const f=e.target.files[0]; if(!f)return;
   try{ const arr=JSON.parse(await f.text()); loadNextFromJson(arr); }catch(err){alert('Error JSON próximos: '+err);}
@@ -428,11 +422,9 @@ el('btnPasteNext').addEventListener('click', async ()=>{
   try{ const arr=JSON.parse(await navigator.clipboard.readText()); loadNextFromJson(arr); }catch(err){alert('Portapapeles próximos: '+err);}
 });
 function nearestTeamName(name, teams){
-  // emparejamiento simple por igualdad flexible
   const n=String(name||'').trim().toLowerCase();
   const found = teams.find(t=>t.toLowerCase()===n);
   if(found) return found;
-  // contiene palabras clave
   const hit = teams.find(t=> n && (t.toLowerCase().includes(n) || n.includes(t.toLowerCase())) );
   return hit || '';
 }
@@ -456,7 +448,7 @@ function loadNextFromJson(arr){
   }
 }
 
-// ===== Próximos: calcular y decidir =====
+// ===== Próximos: calcular y decidir (fix lectura línea/odds) =====
 el('predict').addEventListener('click', ()=>{
   const L=el('league').value; if(!L){alert('Elige una liga para usar su histórico.');return;}
   const hist=(BY_LEAGUE.get(L)||[]).slice(); if(hist.length< +el('minHist').value){alert('Poco histórico para calibrar.');return;}
@@ -465,40 +457,53 @@ el('predict').addEventListener('click', ()=>{
   const market=el('market').value; const evMin=+el('evThr').value||0;
   const ouDefault = +el('ou').value||2.5;
 
-  // parámetros de liga usando TODO el histórico (EWMA si aplica)
+  // parámetros globales de la liga
   const H=hist.map(r=>r.h), A=hist.map(r=>r.a);
-  let muH,muA,sdH,sdA,cov,rho;
-  if(alpha>0){const w=ewmaWeights(H.length,alpha); muH=meanW(H,w); muA=meanW(A,w);
+  let muH,muA,sdH,sdA,rho;
+  if(alpha>0){
+    const w=ewmaWeights(H.length,alpha);
+    muH=meanW(H,w); muA=meanW(A,w);
     const vH=varW(H,muH,w), vA=varW(A,muA,w), c=covW(H,A,muH,muA,w);
-    sdH=Math.sqrt(Math.max(1e-9,vH)); sdA=Math.sqrt(Math.max(1e-9,vA)); rho=Math.max(-0.999,Math.min(0.999,c/(sdH*sdA)));
-  }else{ muH=mean(H); muA=mean(A);
-    sdH=Math.sqrt(Math.max(1e-9,variance(H,muH))); sdA=Math.sqrt(Math.max(1e-9,variance(A,muA)));
-    const c=covariance(H,A,muH,muA); rho=Math.max(-0.999,Math.min(0.999,c/(sdH*sdA)));
+    sdH=Math.sqrt(Math.max(1e-9,vH)); sdA=Math.sqrt(Math.max(1e-9,vA));
+    rho=Math.max(-0.999,Math.min(0.999,c/(sdH*sdA)));
+  }else{
+    muH=mean(H); muA=mean(A);
+    sdH=Math.sqrt(Math.max(1e-9,variance(H,muH)));
+    sdA=Math.sqrt(Math.max(1e-9,variance(A,muA)));
+    const c=covariance(H,A,muH,muA);
+    rho=Math.max(-0.999,Math.min(0.999,c/(sdH*sdA)));
   }
 
   const out=[]; const rows=[...tbNext.querySelectorAll('tr')];
   for(const tr of rows){
     const tds=tr.querySelectorAll('td'); if(!tds.length) continue;
-    const date=tds[0].querySelector('input').value||'';
-    const home=tds[1].querySelector('select').value||''; const away=tds[2].querySelector('select').value||'';
+    const date=(tds[0].querySelector('input')?.value)||'';
+    const home=(tds[1].querySelector('select')?.value)||''; const away=(tds[2].querySelector('select')?.value)||'';
     let bet=null, odd=null, p=null, ev=null, desc=`${home} vs ${away}`;
-    const ouLine = (market==='OU') ? +(tds[3].querySelectorAll('input')[0].value||ouDefault) : ouDefault;
+
+    // OU: leer por data-field
+    let ouLine = ouDefault;
+    if(market==='OU'){
+      const lineEl = tr.querySelector('[data-field="line"]');
+      if(lineEl) ouLine = num(lineEl.value) || ouDefault;
+    }
     const sim=simulateQuick(muH,muA,sdH,sdA,rho,ns,disc, ouLine);
 
     if(market==='OU'){
-      const over = +tds[3].querySelectorAll('input')[1].value||NaN;
-      const under= +tds[3].querySelectorAll('input')[2].value||NaN;
+      const over = num(tr.querySelector('[data-field="over"]')?.value);
+      const under= num(tr.querySelector('[data-field="under"]')?.value);
       const cand=[];
       if(over>1.01)  cand.push({lab:'Over '+ouLine,  p:sim.pOver,  odd:over});
       if(under>1.01) cand.push({lab:'Under '+ouLine, p:sim.pUnder, odd:under});
       cand.forEach(c=>c.ev=c.p*(c.odd-1)-(1-c.p)); cand.sort((a,b)=>b.ev-a.ev);
       const pick=cand[0]; if(pick){bet=pick.lab; p=pick.p; odd=pick.odd; ev=pick.ev;}
     }else if(market==='BTTS'){
-      const btts = +tds[3].querySelector('input').value||NaN;
+      const btts = num(tr.querySelector('[data-field="btts"]')?.value);
       if(btts>1.01){ bet='BTTS Sí'; p=sim.pBTTS; odd=btts; ev=p*(odd-1)-(1-p); }
     }else{
-      const ins=tds[3].querySelectorAll('input');
-      const o1=+ins[0].value||NaN, ox=+ins[1].value||NaN, o2=+ins[2].value||NaN;
+      const o1=num(tr.querySelector('[data-field="o1"]')?.value);
+      const ox=num(tr.querySelector('[data-field="ox"]')?.value);
+      const o2=num(tr.querySelector('[data-field="o2"]')?.value);
       const cand=[]; if(o1>1.01)cand.push({lab:'1',p:sim.p1,odd:o1}); if(ox>1.01)cand.push({lab:'X',p:sim.pX,odd:ox}); if(o2>1.01)cand.push({lab:'2',p:sim.p2,odd:o2});
       cand.forEach(c=>c.ev=c.p*(c.odd-1)-(1-c.p)); cand.sort((a,b)=>b.ev-a.ev);
       const pick=cand[0]; if(pick){bet=pick.lab; p=pick.p; odd=pick.odd; ev=pick.ev;}
