@@ -2,355 +2,323 @@
 <html lang="es">
 <head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Normal Bivariada — Auto (α y mezcla) por liga</title>
+<title>Backtesting — Normal Bivariada (Round vs Floor)</title>
 <style>
   body{margin:0;background:#0f1115;color:#e6eaf2;font:14px/1.45 system-ui,Inter,Segoe UI,Roboto,Arial}
   header{padding:14px 16px;border-bottom:1px solid #2a3140}
-  .wrap{max-width:1024px;margin:0 auto;padding:16px}
+  .wrap{max-width:1080px;margin:0 auto;padding:16px}
   .grid{display:grid;gap:16px}
-  @media(min-width:900px){.grid{grid-template-columns:380px 1fr}}
-  .card{background:#171a21;border:1px solid #2a3140;border-radius:10px;padding:14px}
-  h1{font-size:18px;margin:0 0 4px} h2{font-size:15px;margin:0 0 10px}
-  input,select,button{width:100%;background:#1f2430;color:#e6eaf2;border:1px solid #2a3140;border-radius:8px;padding:8px}
+  @media(min-width:980px){.grid{grid-template-columns:380px 1fr}}
+  .card{background:#171a21;border:1px solid #2a3140;border-radius:12px;padding:14px}
+  h1{font-size:18px;margin:0 0 6px} h2{font-size:15px;margin:0 0 10px}
+  input,select,button,textarea{width:100%;background:#1f2430;color:#e6eaf2;border:1px solid #2a3140;border-radius:8px;padding:8px}
   .row{display:grid;grid-template-columns:1fr 180px;gap:8px;align-items:center;margin:8px 0}
+  .btn{background:#7aa2ff;color:#0a1020;font-weight:700;cursor:pointer}
   .pill{display:inline-block;border:1px solid #2a3140;background:#1f2430;border-radius:999px;padding:4px 8px;margin:4px 6px 0 0}
-  .kpis{display:grid;gap:8px;grid-template-columns:repeat(3,1fr)}
-  .kpi{background:#1f2430;border:1px solid #2a3140;border-radius:10px;padding:10px;text-align:center}
-  .kpi b{font-size:17px}
-  table{width:100%;border-collapse:collapse;margin-top:8px}
+  table{width:100%;border-collapse:collapse;margin-top:10px}
   th,td{border-bottom:1px solid #2a3140;padding:6px;text-align:right}
   th:first-child,td:first-child{text-align:left}
-  .btn{background:#7aa2ff;color:#0c1020;font-weight:700;cursor:pointer}
   .muted{color:#9aa3b2;font-size:12px}
-  .flex{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 </style>
 </head>
 <body>
 <header class="wrap">
-  <h1>Calculadora — Normal Bivariada (Auto α + mezcla por liga)</h1>
-  <div class="muted">Importa JSON → elige liga → equipos → auto-detección de α y w según progreso de temporada.</div>
+  <h1>Backtesting — Normal Bivariada (EWMA, Round/Floor)</h1>
+  <div class="muted">Importa JSON → elige liga y mercado → corre walk-forward con α, EV y #sims configurables.</div>
 </header>
 
 <div class="wrap grid">
-  <!-- Panel de control -->
+  <!-- Panel izquierdo -->
   <section class="card">
     <h2>Datos & Configuración</h2>
     <div class="row"><label>Archivo JSON</label><input id="file" type="file" accept=".json"></div>
-    <div class="row"><label>o Portapapeles</label><button id="btnPaste" class="btn">Cargar</button></div>
+    <div class="row"><label>o Pegar JSON</label><button id="btnPaste" class="btn">Cargar portapapeles</button></div>
     <div class="row"><label>Liga</label><select id="league"><option value="">—</option></select></div>
-    <div class="row"><label>Equipo Local</label><select id="home"><option value="">—</option></select></div>
-    <div class="row"><label>Equipo Visitante</label><select id="away"><option value="">—</option></select></div>
 
-    <h2>Temporada & Auto-parámetros</h2>
+    <h2>Mercado</h2>
     <div class="row">
-      <label>Esquema de temporada</label>
-      <select id="seasonMode">
-        <option value="CAL">Calendario (ene–dic)</option>
-        <option value="JUL">Jul–Jun (Europa)</option>
+      <label>Tipo</label>
+      <select id="market">
+        <option value="OU">Over/Under</option>
+        <option value="BTTS">BTTS (GG)</option>
+        <option value="1X2">1X2 (mejor EV)</option>
       </select>
     </div>
-    <div class="row"><label>Largo temporada (partidos)</label><input id="seasonLen" type="number" min="10" value="36"></div>
-    <div class="row"><label>Jornadas para w=1</label><input id="nfull" type="number" min="3" value="12"></div>
-    <div class="row"><label>Auto por liga</label>
-      <select id="auto">
-        <option value="on">ON (detectar α y w)</option>
-        <option value="off">OFF (manual)</option>
-      </select>
-    </div>
-    <div class="row"><label>α (manual si OFF)</label><input id="alpha" type="number" min="0" max="0.99" step="0.01" value="0.15" disabled></div>
-    <div class="row"><label>w mezcla (manual si OFF)</label><input id="w" type="number" min="0" max="1" step="0.01" value="1" disabled></div>
+    <div class="row" id="ouLineRow"><label>Línea O/U</label><input id="ouLine" type="number" step="0.5" value="2.5"></div>
 
-    <h2>Simulación</h2>
-    <div class="row"><label>Línea O/U</label><input id="ou" type="number" step="0.5" value="2.5"></div>
-    <div class="row"><label>Simulaciones</label><input id="ns" type="number" min="5000" step="1000" value="50000"></div>
+    <h2>Modelo</h2>
+    <div class="row"><label>α EWMA (0=uniforme)</label><input id="alpha" type="number" min="0" max="0.99" step="0.01" value="0.15"></div>
     <div class="row"><label>Discretización</label>
-      <select id="disc"><option value="round">Redondear</option><option value="floor">Floor</option></select>
+      <select id="disc"><option value="round">Round</option><option value="floor">Floor</option></select>
     </div>
-    <button id="run" class="btn">Calcular</button>
+    <div class="row"><label>Simulaciones</label><input id="nsims" type="number" min="2000" step="1000" value="10000"></div>
+    <div class="row"><label>Mín. historial (partidos previos)</label><input id="minHist" type="number" min="3" value="8"></div>
 
+    <h2>Ejecución</h2>
+    <div class="row"><label>Umbral EV para apostar</label><input id="evThr" type="number" step="0.01" value="0.00"></div>
+    <div class="row"><label>Stake por apuesta</label><input id="stake" type="number" step="0.1" value="1"></div>
+    <button id="run" class="btn">Correr Backtest</button>
     <p class="muted" id="info">—</p>
-    <div class="flex" id="badges"></div>
 
-    <h2>Parámetros finales</h2>
-    <div>
-      <span class="pill">μ<sub>H</sub>: <b id="muH">—</b></span>
-      <span class="pill">μ<sub>A</sub>: <b id="muA">—</b></span>
-      <span class="pill">σ<sub>H</sub>: <b id="sdH">—</b></span>
-      <span class="pill">σ<sub>A</sub>: <b id="sdA">—</b></span>
-      <span class="pill">ρ: <b id="rho">—</b></span>
-      <span class="pill">σ<sub>T</sub> (anal.): <b id="sdT">—</b></span>
-    </div>
+    <h2>Mapeo de odds (opcional)</h2>
+    <div class="muted">Si tus campos de cuotas tienen nombres diferentes, especifícalos aquí.</div>
+    <div class="row"><label>Odd Over 2.5</label><input id="fOddOver" placeholder="Odd Over25 / OddOver25"></div>
+    <div class="row"><label>Odd Under 2.5</label><input id="fOddUnder" placeholder="Odd Under25 / OddUnder25"></div>
+    <div class="row"><label>Odd BTTS (Sí/GG)</label><input id="fOddBTTS" placeholder="Odd BTTS / Odd GG / Odd"></div>
+    <div class="row"><label>Odd 1</label><input id="fOdd1" placeholder="Odd 1 PreMatch"></div>
+    <div class="row"><label>Odd X</label><input id="fOddX" placeholder="Odd X PreMatch"></div>
+    <div class="row"><label>Odd 2</label><input id="fOdd2" placeholder="Odd 2 PreMatch"></div>
   </section>
 
-  <!-- Resultados -->
+  <!-- Panel derecho -->
   <section class="card">
     <h2>Resultados</h2>
-    <div class="muted" id="fixture">—</div>
-    <div class="kpis" style="margin-top:8px">
-      <div class="kpi">1 (Local)<br><b id="pH">—</b></div>
-      <div class="kpi">X (Empate)<br><b id="pD">—</b></div>
-      <div class="kpi">2 (Visitante)<br><b id="pA">—</b></div>
-    </div>
-    <div class="kpis" style="margin-top:8px">
-      <div class="kpi">Over<br><b id="pOver">—</b></div>
-      <div class="kpi">Under<br><b id="pUnder">—</b></div>
-      <div class="kpi">BTTS<br><b id="pBTTS">—</b></div>
-    </div>
+    <div id="badges" class="muted">—</div>
     <div style="margin-top:8px">
-      <span class="pill">E[goles H] MC: <b id="eH">—</b></span>
-      <span class="pill">E[goles A] MC: <b id="eA">—</b></span>
-      <span class="pill">E[total] MC: <b id="eT">—</b></span>
-      <span class="pill">O/U (MC / anal.): <b id="pOUmix">—</b></span>
+      <span class="pill">Bets: <b id="bets">—</b></span>
+      <span class="pill">Aciertos: <b id="hits">—</b></span>
+      <span class="pill">Hit Rate: <b id="hitRate">—</b></span>
+      <span class="pill">Unidades: <b id="units">—</b></span>
+      <span class="pill">ROI: <b id="roi">—</b></span>
     </div>
-    <h3 style="margin-top:12px;font-size:14px">Top 8 marcadores (MC)</h3>
-    <table><thead><tr><th>Marcador</th><th>Prob.</th><th>Cuota</th></tr></thead>
-      <tbody id="scores"><tr><td colspan="3" class="muted">—</td></tr></tbody></table>
+    <h3 style="margin-top:12px;font-size:14px">Detalle (top 20 por EV)</h3>
+    <table id="tbl"><thead><tr>
+      <th>Fecha</th><th>Partido</th><th>Mercado</th><th>Odd</th><th>p̂</th><th>EV</th><th>Res</th><th>Win</th>
+    </tr></thead><tbody></tbody></table>
+    <div style="margin-top:10px"><button id="btnCsv" class="btn">Descargar CSV</button></div>
   </section>
 </div>
 
 <script>
-// ==== Utilidades UI ====
+// ===== Utilidades =====
 const el = id => document.getElementById(id);
-const pct = p => (p*100).toFixed(2)+'%';
-const odds = p => p>0 ? (1/p).toFixed(2) : '—';
+const pct = x => (x*100).toFixed(2)+'%';
+const fmt = x => (isFinite(x)? x.toFixed(3) : '—');
 
-// ==== Parseo de JSON y fechas (ES + ISO) ====
-let leagues = new Map(); // league -> {rows:[{date,home,away,h,a}], teams:Set}
-const MONTHS_ES = {ene:1,feb:2,mar:3,abr:4,may:5,jun:6,jul:7,ago:8,sept:9,sep:9,oct:10,nov:11,dic:12};
-function parseDateES(s){
-  const d1 = new Date(s);
-  if(!isNaN(d1)) return d1;
-  const m = String(s).toLowerCase().replace(/[,\.]/g,'').match(/(\d{1,2})\s+([a-zñ]+)\s+(\d{4})(?:\s+(\d{1,2}):(\d{2}))?/i);
-  if(m){
-    const dd=+m[1], mon=m[2].slice(0,4), yyyy=+m[3], hh=+(m[4]||0), mm=+(m[5]||0);
-    const MM = MONTHS_ES[mon] || MONTHS_ES[m[2].slice(0,5)] || MONTHS_ES[m[2].slice(0,3)] || 1;
-    return new Date(yyyy, MM-1, dd, hh, mm);
-  }
+function parseFT(s){
+  const m=String(s||'').match(/(-?\d+)\s*[-:]\s*(-?\d+)/);
+  return m? [parseInt(m[1]), parseInt(m[2])] : [null,null];
+}
+function parseDateAny(s){
+  const d = new Date(s); if(!isNaN(d)) return d;
+  const m = String(s).toLowerCase().replace(/[,\.]/g,'').match(/(\d{1,2})\s+([a-zñ]+)\s+(\d{4})/);
+  const M = {ene:1,feb:2,mar:3,abr:4,may:5,jun:6,jul:7,ago:8,sept:9,sep:9,oct:10,nov:11,dic:12};
+  if(m){ const dd=+m[1], mm=M[m[2].slice(0,4)]||1, yy=+m[3]; return new Date(yy,mm-1,dd); }
   return new Date(NaN);
 }
-function safeParseJson(text){
-  let t=text.trim(); if(!t) throw 'JSON vacío';
-  if(!t.startsWith('[')) t='['+t.replace(/,\s*$/,'')+']';
-  return JSON.parse(t);
-}
-function parseRow(r){
-  const league = String(r.League||'').trim();
-  const match  = String(r.Match||'').trim();
-  const date   = parseDateES(r.Date||r.fecha||r.date||'');
-  const ft     = String(r["Result FT"]||r.Result||'').trim();
-  const mft    = ft.match(/(-?\d+)\s*[-:]\s*(-?\d+)/);
-  const h = mft?+mft[1]:null, a = mft?+mft[2]:null;
-  const parts = match.split(/[-–]/).map(s=>s.trim());
-  const home = parts[0]||'', away = parts[1]||'';
-  if(!league || !Number.isFinite(h) || !Number.isFinite(a) || isNaN(date)) return null;
-  return {league, date, home, away, h, a};
-}
-function ingest(arr){
-  leagues.clear();
-  let ok=0;
-  for(const r of arr){
-    const x=parseRow(r); if(!x) continue; ok++;
-    if(!leagues.has(x.league)) leagues.set(x.league,{rows:[], teams:new Set()});
-    const L=leagues.get(x.league);
-    L.rows.push(x); if(x.home) L.teams.add(x.home); if(x.away) L.teams.add(x.away);
-  }
-  // ordenar por fecha
-  for(const L of leagues.values()) L.rows.sort((a,b)=>a.date-b.date);
-  // poblar ligas
-  el('league').innerHTML = '<option value="">—</option>' + Array.from(leagues.keys()).sort().map(l=>`<option>${l}</option>`).join('');
-  el('home').innerHTML = '<option value="">—</option>'; el('away').innerHTML = '<option value="">—</option>';
-  el('info').textContent = `Cargados ${ok} partidos válidos en ${leagues.size} ligas.`;
-  el('badges').innerHTML = '';
-}
-
-// ==== Temporadas: CAL (ene–dic) o JUL–JUN ====
-function seasonId(d, mode){
-  const y=d.getFullYear(), m=d.getMonth()+1;
-  if(mode==='JUL'){ const start = (m>=7)? y : (y-1); return `${start}/${start+1}`; }
-  return String(y);
-}
-function splitBySeason(rows, mode){
-  const by = new Map();
-  for(const r of rows){
-    const id = seasonId(r.date, mode);
-    if(!by.has(id)) by.set(id, []);
-    by.get(id).push(r);
-  }
-  return by;
-}
-
-// ==== Estadística básica (con EWMA opcional) ====
+function mean(a){ return a.reduce((s,x)=>s+x,0)/a.length; }
+function variance(a,mu){ let s=0; for(const x of a) s+=(x-mu)*(x-mu); return s/Math.max(1,a.length-1); }
+function covariance(X,Y,mx,my){ let s=0; for(let i=0;i<X.length;i++) s+=(X[i]-mx)*(Y[i]-my); return s/Math.max(1,X.length-1); }
 function ewmaWeights(n,a){ if(a<=0) return null; const w=[]; for(let i=0;i<n;i++) w.push(Math.pow(1-a,i)); w.reverse(); return w; }
-function mean(a,w=null){ if(!a.length) return 0; if(!w) return a.reduce((s,x)=>s+x,0)/a.length;
-  const sw=w.reduce((s,x)=>s+x,0); let t=0; for(let i=0;i<a.length;i++) t+=a[i]*w[i]; return t/(sw||1); }
-function variance(a,mu,w=null){
-  if(!a.length) return 0;
-  if(!w){ let s=0; for(const x of a) s+=(x-mu)*(x-mu); return s/Math.max(1,a.length-1); }
-  const sw=w.reduce((s,x)=>s+x,0), sw2=w.reduce((s,x)=>s+x*x,0);
-  let s=0; for(let i=0;i<a.length;i++) s+=w[i]*(a[i]-mu)*(a[i]-mu);
-  const c=sw-(sw2/sw); return s/Math.max(1e-9,c);
-}
-function covariance(X,Y,mx,my,w=null){
-  const n=X.length; if(!n) return 0;
-  if(!w){ let s=0; for(let i=0;i<n;i++) s+=(X[i]-mx)*(Y[i]-my); return s/Math.max(1,n-1); }
-  const sw=w.reduce((s,a)=>s+a,0), sw2=w.reduce((s,a)=>s+a*a,0);
-  let s=0; for(let i=0;i<n;i++) s+=w[i]*(X[i]-mx)*(Y[i]-my);
-  const c=sw-(sw2/sw); return s/Math.max(1e-9,c);
-}
-function seasonStats(rows, alpha=0){
-  const H=rows.map(r=>r.h), A=rows.map(r=>r.a);
-  const w = alpha>0 ? ewmaWeights(rows.length,alpha) : null;
-  const muH=mean(H,w), muA=mean(A,w);
-  const vH=variance(H,muH,w), vA=variance(A,muA,w);
-  const cov=covariance(H,A,muH,muA,w);
-  return {muH,muA,vH,vA,cov,n:rows.length};
-}
-function blendStats(cur, prv, w){
-  const muH = w*cur.muH + (1-w)*prv.muH;
-  const muA = w*cur.muA + (1-w)*prv.muA;
-  const vH  = w*(cur.vH + (cur.muH - muH)**2) + (1-w)*(prv.vH + (prv.muH - muH)**2);
-  const vA  = w*(cur.vA + (cur.muA - muA)**2) + (1-w)*(prv.vA + (prv.muA - muA)**2);
-  const cov = w*(cur.cov + (cur.muH - muH)*(cur.muA - muA))
-            + (1-w)*(prv.cov + (prv.muH - muH)*(prv.muA - muA));
-  const sdH=Math.sqrt(Math.max(vH,1e-12)), sdA=Math.sqrt(Math.max(vA,1e-12));
-  let rho=cov/(sdH*sdA); rho=Math.max(-0.999, Math.min(0.999, rho));
-  return {muH,muA,sdH,sdA,rho};
-}
+function meanW(a,w){ const sw=w.reduce((s,x)=>s+x,0); let t=0; for(let i=0;i<a.length;i++) t+=a[i]*w[i]; return t/(sw||1); }
+function varW(a,mu,w){ const sw=w.reduce((s,x)=>s+x,0), sw2=w.reduce((s,x)=>s+x*x,0); let s=0; for(let i=0;i<a.length;i++) s+=w[i]*(a[i]-mu)*(a[i]-mu); const c=sw-(sw2/sw); return s/Math.max(1e-9,c); }
+function covW(X,Y,mx,my,w){ const sw=w.reduce((s,a)=>s+a,0), sw2=w.reduce((s,a)=>s+a*a,0); let s=0; for(let i=0;i<X.length;i++) s+=w[i]*(X[i]-mx)*(Y[i]-my); const c=sw-(sw2/sw); return s/Math.max(1e-9,c); }
 
-// ==== Heurísticas AUTO (α y w) por liga ====
-function autoAlpha(n){ // por tramos (ajusta si quieres)
-  if(n<=6)  return 0.05;
-  if(n<=12) return 0.10;
-  if(n<=24) return 0.15;
-  return 0.20;
-}
-function autoWeight(nCur, nFull){ return Math.max(0, Math.min(1, nCur/Math.max(1,nFull))); }
-
-// ==== Monte Carlo & analítico ====
-function randn(){let u=0,v=0;while(u===0)u=Math.random();while(v===0)v=Math.random();
-  return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v);}
-function simulate(muH,muA,sdH,sdA,rho,n,disc,line){
+function randn(){let u=0,v=0;while(u===0)u=Math.random();while(v===0)v=Math.random();return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v);}
+function simulate(muH,muA,sdH,sdA,rho,n,disc,ouLine){
   const s=Math.sqrt(1-Math.min(0.999,Math.max(-0.999,rho))**2);
-  let wH=0,d=0,wA=0,over=0,btts=0,SH=0,SA=0,ST=0; const map=new Map();
+  let over=0,btts=0,wH=0,d=0,wA=0;
   for(let i=0;i<n;i++){
     const z1=randn(), z2=randn();
-    const x=muH + sdH*z1, y=muA + sdA*(rho*z1+s*z2);
-    let H=Math.max(0, disc==='round'?Math.round(x):Math.floor(x));
-    let A=Math.max(0, disc==='round'?Math.round(y):Math.floor(y));
-    if(H>A)wH++; else if(H===A)d++; else wA++;
-    if(H+A>line)over++; if(H>0&&A>0)btts++;
-    SH+=H; SA+=A; ST+=H+A; const k=H+':'+A; map.set(k,(map.get(k)||0)+1);
+    const x=muH+sdH*z1, y=muA+sdA*(rho*z1+s*z2);
+    let H=Math.max(0,disc==='round'?Math.round(x):Math.floor(x));
+    let A=Math.max(0,disc==='round'?Math.round(y):Math.floor(y));
+    if(H+A>ouLine) over++;
+    if(H>0&&A>0) btts++;
+    if(H>A) wH++; else if(H===A) d++; else wA++;
   }
-  return {pH:wH/n,pD:d/n,pA:wA/n,pOverMC:over/n,pUnderMC:1-over/n,pBTTS:btts/n,eH:SH/n,eA:SA/n,eT:ST/n,scores:map};
+  return { pOver:over/n, pUnder:1-over/n, pBTTS:btts/n, p1:wH/n, pX:d/n, p2:wA/n };
 }
-function overAnalytic(muH,muA,sdH,sdA,rho,line){
-  const muT=muH+muA, varT=sdH*sdH+sdA*sdA+2*rho*sdH*sdA, sdT=Math.sqrt(Math.max(varT,1e-12));
-  const z=(line-muT)/sdT; const Phi=0.5*(1+erf(z/Math.SQRT2));
-  return {pUnder:Phi,pOver:1-Phi,sdT};
-}
-function erf(x){const s=Math.sign(x);x=Math.abs(x);
-  const a1=0.254829592,a2=-0.284496736,a3=1.421413741,a4=-1.453152027,a5=1.061405429,p=0.3275911;
-  const t=1/(1+p*x); const y=1-((((((a5*t+a4)*t)+a3)*t+a2)*t+a1)*t)*Math.exp(-x*x); return s*y;}
 
-// ==== UI ====
+// ===== Estado =====
+let RAW=[], BY_LEAGUE=new Map();
+
+function ingest(arr){
+  RAW = [];
+  BY_LEAGUE.clear();
+  for(const r of arr){
+    const league = String(r.League||'').trim(); if(!league) continue;
+    const [h,a] = parseFT(r["Result FT"] || r.Result);
+    const date  = parseDateAny(r.Date || r.fecha || r.date || '');
+    const match = String(r.Match||'').trim();
+    if(!Number.isFinite(h)||!Number.isFinite(a)||isNaN(date)) continue;
+    const row = {league,date,match,h,a,raw:r};
+    RAW.push(row);
+    if(!BY_LEAGUE.has(league)) BY_LEAGUE.set(league, []);
+    BY_LEAGUE.get(league).push(row);
+  }
+  for(const arr of BY_LEAGUE.values()) arr.sort((a,b)=>a.date-b.date);
+  el('league').innerHTML = '<option value="">—</option>' + Array.from(BY_LEAGUE.keys()).sort().map(l=>`<option>${l}</option>`).join('');
+  el('info').textContent = `Cargados ${RAW.length} partidos en ${BY_LEAGUE.size} ligas.`;
+}
+
 el('file').addEventListener('change', async e=>{
   const f=e.target.files[0]; if(!f) return;
-  try{ ingest(safeParseJson(await f.text())); }catch(err){ alert('Error JSON: '+err); }
+  try{ ingest(JSON.parse(await f.text())); }catch(err){ alert('Error JSON: '+err); }
 });
 el('btnPaste').addEventListener('click', async ()=>{
-  try{ ingest(safeParseJson(await navigator.clipboard.readText())); }catch(err){ alert('Portapapeles: '+err); }
+  try{ ingest(JSON.parse(await navigator.clipboard.readText())); }catch(err){ alert('No pude leer/parsear el portapapeles: '+err); }
 });
-el('league').addEventListener('change', ()=>{
-  const L = el('league').value; if(!L){ el('home').innerHTML='<option>—</option>'; el('away').innerHTML='<option>—</option>'; return; }
-  const teams = Array.from(leagues.get(L).teams||[]).sort();
-  const opts = '<option value="">—</option>'+teams.map(t=>`<option>${t}</option>`).join('');
-  el('home').innerHTML = opts; el('away').innerHTML = opts;
-  el('fixture').textContent = '—'; el('badges').innerHTML='';
+el('market').addEventListener('change', ()=>{
+  el('ouLineRow').style.display = (el('market').value==='OU') ? '' : 'none';
 });
-el('auto').addEventListener('change', ()=>{
-  const on = el('auto').value==='on';
-  el('alpha').disabled = on; el('w').disabled = on;
-});
+el('ouLineRow').style.display = '';
 
+// ===== Obtener odds del registro =====
+function getOdds_OU(r, fOver, fUnder, line){
+  const obj = r.raw;
+  const candidatesOver = [fOver, 'Odd Over25','OddOver25','Over25','Over 2.5','OddOver2_5','OddOver2.5'].filter(Boolean);
+  const candidatesUnder= [fUnder,'Odd Under25','OddUnder25','Under25','Under 2.5','OddUnder2_5','OddUnder2.5'].filter(Boolean);
+  const over = candidatesOver.map(k=>+obj[k]).find(x=>x>1.01) || null;
+  const under= candidatesUnder.map(k=>+obj[k]).find(x=>x>1.01) || null;
+  return {over, under, line};
+}
+function getOdds_BTTS(r, fBTTS){
+  const obj = r.raw;
+  const candidates = [fBTTS,'Odd BTTS','OddBTTS','Odd GG','OddGG','Odd'].filter(Boolean);
+  const o = candidates.map(k=>+obj[k]).find(x=>x>1.01) || null;
+  return {yes:o};
+}
+function getOdds_1X2(r, f1,fX,f2){
+  const obj = r.raw;
+  const o1 = +obj[f1] || +obj['Odd 1 PreMatch'] || +obj['Odd1Prematch'] || null;
+  const ox = +obj[fX] || +obj['Odd X PreMatch'] || +obj['OddXPrematch'] || null;
+  const o2 = +obj[f2] || +obj['Odd 2 PreMatch'] || +obj['Odd2Prematch'] || null;
+  return {o1:o1>1.01?o1:null, ox:ox>1.01?ox:null, o2:o2>1.01?o2:null};
+}
+
+// ===== Backtest =====
 el('run').addEventListener('click', ()=>{
-  const L = el('league').value, Hname=el('home').value, Aname=el('away').value;
-  if(!L||!Hname||!Aname||Hname===Aname){ alert('Elige liga y equipos (local ≠ visitante).'); return; }
+  const L = el('league').value;
+  if(!L){ alert('Elige una liga.'); return; }
+  const rows = (BY_LEAGUE.get(L)||[]).slice();
+  if(rows.length< +el('minHist').value + 1){ alert('Muy pocos partidos para backtest en esta liga.'); return; }
 
-  const mode = el('seasonMode').value;
-  const seasonLen = Math.max(10, Math.floor(+el('seasonLen').value||36));
-  const nFull = Math.max(3, Math.floor(+el('nfull').value||12));
-  const line = +el('ou').value;
-  const ns = Math.max(5000, Math.floor(+el('ns').value||50000));
+  const alpha = Math.max(0, Math.min(0.99, +el('alpha').value||0));
   const disc = el('disc').value;
+  const ns   = Math.max(2000, Math.floor(+el('nsims').value||10000));
+  const minHist = Math.max(3, Math.floor(+el('minHist').value||8));
+  const evThr = +el('evThr').value||0;
+  const stake = +el('stake').value||1;
+  const market = el('market').value;
+  const ouLine = +el('ouLine').value||2.5;
 
-  const Ldata = leagues.get(L).rows;
-  const byS = splitBySeason(Ldata, mode);
-  // tempor. actual = última por orden alfabético (por formato id)
-  const ids = Array.from(byS.keys()).sort();
-  const curId = ids[ids.length-1];
-  const prvId = ids[ids.length-2]; // puede ser undefined
-  const curRows = byS.get(curId)||[];
-  const prvRows = prvId ? byS.get(prvId) : [];
+  // campos de odds
+  const fOver = el('fOddOver').value.trim();
+  const fUnder= el('fOddUnder').value.trim();
+  const fBTTS = el('fOddBTTS').value.trim();
+  const f1=el('fOdd1').value.trim(), fX=el('fOddX').value.trim(), f2=el('fOdd2').value.trim();
 
-  let alpha, w;
-  if(el('auto').value==='on'){
-    const nCur = curRows.length;
-    alpha = autoAlpha(nCur);
-    w = prvRows.length ? autoWeight(nCur, nFull) : 1;
-    el('alpha').value = alpha.toFixed(2);
-    el('w').value = w.toFixed(2);
+  let bets=0, hits=0, units=0;
+  const rowsOut=[];
 
-    // badges informativos
-    const b = [];
-    b.push(`<span class="pill">Temporada actual: <b>${curId}</b> (${nCur} pj)</span>`);
-    if(prvRows.length) b.push(`<span class="pill">Temporada pasada: <b>${prvId}</b> (${prvRows.length} pj)</span>`);
-    b.push(`<span class="pill">Auto α: <b>${alpha.toFixed(2)}</b></span>`);
-    b.push(`<span class="pill">Auto w: <b>${w.toFixed(2)}</b> (w=1 desde ${nFull} pj)</span>`);
-    el('badges').innerHTML = b.join('');
-  }else{
-    alpha = Math.max(0, Math.min(0.99, +el('alpha').value||0.15));
-    w = Math.max(0, Math.min(1, +el('w').value||1));
-    el('badges').innerHTML = '';
+  // walk-forward
+  for(let i=0;i<rows.length;i++){
+    const r = rows[i];
+    const hist = rows.slice(0,i);              // solo pasado
+    if(hist.length < minHist) continue;
+
+    // Datos de liga (histórico) para parámetros
+    const H = hist.map(x=>x.h), A = hist.map(x=>x.a);
+    let muH,muA,sdH,sdA,cov,rho;
+    const w = alpha>0 ? ewmaWeights(hist.length, alpha) : null;
+    if(w){
+      muH = meanW(H,w); muA = meanW(A,w);
+      sdH = Math.sqrt(varW(H,muH,w)); sdA = Math.sqrt(varW(A,muA,w));
+      cov =  covW(H,A,muH,muA,w);
+    }else{
+      muH = mean(H); muA = mean(A);
+      sdH = Math.sqrt(variance(H,muH)); sdA = Math.sqrt(variance(A,muA));
+      cov = covariance(H,A,muH,muA);
+    }
+    sdH = Math.max(sdH,1e-6); sdA=Math.max(sdA,1e-6);
+    rho = Math.max(-0.999, Math.min(0.999, cov/(sdH*sdA)));
+
+    // Simulación
+    const sim = simulate(muH,muA,sdH,sdA,rho,ns,disc,ouLine);
+
+    // Odds del registro
+    let bet=null, odd=null, p=null, res=null, win=0;
+
+    if(market==='OU'){
+      const {over,under} = getOdds_OU(r,fOver,fUnder,ouLine);
+      const cand = [];
+      if(over)  cand.push({label:'Over '+ouLine, p:sim.pOver, odd:over, win: (r.h+r.a>ouLine)?1:0});
+      if(under) cand.push({label:'Under '+ouLine,p:sim.pUnder,odd:under,win: (r.h+r.a<=ouLine)?1:0});
+      cand.forEach(c=> c.ev = c.p*(c.odd-1) - (1-c.p));
+      const pick = cand.sort((a,b)=>b.ev-a.ev)[0];
+      if(pick && pick.ev>=evThr){ bet=pick.label; p=pick.p; odd=pick.odd; win=pick.win; }
+      res = (r.h+r.a)+'g';
+    }else if(market==='BTTS'){
+      const {yes} = getOdds_BTTS(r,fBTTS);
+      if(yes){
+        const pBTTS = sim.pBTTS, ev = pBTTS*(yes-1)-(1-pBTTS);
+        if(ev>=evThr){ bet='BTTS Sí'; p=pBTTS; odd=yes; win=(r.h>0&&r.a>0)?1:0; }
+      }
+      res = r.h+'-'+r.a;
+    }else if(market==='1X2'){
+      const {o1,ox,o2} = getOdds_1X2(r,f1,fX,f2);
+      const cand=[];
+      if(o1) cand.push({label:'1', p:sim.p1, odd:o1, win:(r.h>r.a)?1:0});
+      if(ox) cand.push({label:'X', p:sim.pX, odd:ox, win:(r.h===r.a)?1:0});
+      if(o2) cand.push({label:'2', p:sim.p2, odd:o2, win:(r.h<r.a)?1:0});
+      cand.forEach(c=> c.ev = c.p*(c.odd-1) - (1-c.p));
+      const pick = cand.sort((a,b)=>b.ev-a.ev)[0];
+      if(pick && pick.ev>=evThr){ bet=pick.label; p=pick.p; odd=pick.odd; win=pick.win; }
+      res = r.h+'-'+r.a;
+    }
+
+    if(bet){
+      bets += 1;
+      hits += win;
+      const pnl = win ? stake*(odd-1) : -stake;
+      units += pnl;
+      rowsOut.push({
+        date: r.date.toISOString().slice(0,10),
+        match: r.match,
+        market: bet,
+        odd: odd?.toFixed(2),
+        p_hat: p?.toFixed(3),
+        EV: (p*(odd-1)-(1-p)).toFixed(3),
+        result: res,
+        win: win? '✔' : '✖'
+      });
+    }
   }
 
-  // estadísticas por temporada
-  const cur = seasonStats(curRows, alpha);         // α sobre temporada actual
-  const prv = seasonStats(prvRows, 0);             // pasada sin EWMA (puedes cambiar)
-  const pars = prvRows.length ? blendStats(cur, prv, w) : { // mezcla si hay pasada
-    muH:cur.muH, muA:cur.muA,
-    sdH:Math.sqrt(cur.vH||1e-12), sdA:Math.sqrt(cur.vA||1e-12),
-    rho:(cur.vH&&cur.vA)? Math.max(-0.999, Math.min(0.999, (cur.cov/Math.sqrt(cur.vH*cur.vA)))):0
+  const roi = bets>0 ? (units/(bets*stake)) : 0;
+  el('bets').textContent = bets;
+  el('hits').textContent = hits;
+  el('hitRate').textContent = bets? pct(hits/bets) : '—';
+  el('units').textContent = fmt(units);
+  el('roi').textContent = bets? pct(roi) : '—';
+  el('badges').innerHTML = `<span class="pill">Liga: <b>${L}</b></span>
+    <span class="pill">Mercado: <b>${el('market').value}</b></span>
+    <span class="pill">α: <b>${alpha}</b></span>
+    <span class="pill">Disc: <b>${disc}</b></span>
+    <span class="pill">#Sims: <b>${ns}</b></span>
+    <span class="pill">MinHist: <b>${minHist}</b></span>
+    <span class="pill">EV≥ <b>${evThr}</b></span>`;
+
+  // tabla
+  const tb = document.querySelector('#tbl tbody');
+  tb.innerHTML = rowsOut.slice(0,200).map(r=>`<tr>
+    <td>${r.date}</td><td>${r.match}</td><td>${r.market}</td>
+    <td>${r.odd}</td><td>${r.p_hat}</td><td>${r.EV}</td><td>${r.result}</td><td>${r.win}</td>
+  </tr>`).join('') || `<tr><td colspan="8" class="muted">No hubo apuestas con EV ≥ umbral.</td></tr>`;
+
+  // CSV
+  el('btnCsv').onclick = ()=>{
+    const rowsCsv = [['date','match','market','odd','p_hat','EV','result','win']].concat(
+      rowsOut.map(r=>[r.date,r.match,r.market,r.odd,r.p_hat,r.EV,r.result,r.win])
+    );
+    const csv = rowsCsv.map(r=>r.join(',')).join('\n');
+    const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href=url; a.download=`backtest_${L}_${el('market').value}.csv`;
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
   };
-
-  // simulación
-  const ana = overAnalytic(pars.muH,pars.muA,pars.sdH,pars.sdA,pars.rho,line);
-  const mc  = simulate    (pars.muH,pars.muA,pars.sdH,pars.sdA,pars.rho,ns,disc,line);
-
-  // pintar
-  el('fixture').textContent = `${Hname} vs ${Aname} — Liga: ${L} — Temporada: ${curId}${prvRows.length?` (+ mezcla ${prvId})`:''}`;
-  el('muH').textContent = pars.muH.toFixed(3);
-  el('muA').textContent = pars.muA.toFixed(3);
-  el('sdH').textContent = pars.sdH.toFixed(3);
-  el('sdA').textContent = pars.sdA.toFixed(3);
-  el('rho').textContent = pars.rho.toFixed(3);
-  el('sdT').textContent = ana.sdT.toFixed(3);
-
-  el('pH').textContent = pct(mc.pH);
-  el('pD').textContent = pct(mc.pD);
-  el('pA').textContent = pct(mc.pA);
-  el('pOver').textContent = pct(mc.pOverMC);
-  el('pUnder').textContent = pct(mc.pUnderMC);
-  el('pBTTS').textContent = pct(mc.pBTTS);
-  el('eH').textContent = mc.eH.toFixed(3);
-  el('eA').textContent = mc.eA.toFixed(3);
-  el('eT').textContent = mc.eT.toFixed(3);
-  el('pOUmix').textContent = `${pct(mc.pOverMC)} / ${pct(ana.pOver)}`;
-
-  const arr=[]; mc.scores.forEach((c,k)=>arr.push({k,p:c/ns}));
-  arr.sort((a,b)=>b.p-a.p);
-  document.getElementById('scores').innerHTML =
-    (arr.slice(0,8).map(r=>`<tr><td>${r.k}</td><td>${pct(r.p)}</td><td>${odds(r.p)}</td></tr>`).join(''))
-    || `<tr><td colspan="3" class="muted">—</td></tr>`;
 });
 </script>
 </body>
