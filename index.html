@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Bivariante Poisson + Dixon–Coles — Backtest y Próximos</title>
+<title>Bivariante Poisson + Dixon–Coles — Backtest, Próximos y ROI por mercado</title>
 <style>
   :root{--bg:#0f1115;--card:#171a21;--bd:#2a3140;--fg:#e6eaf2;--mut:#9aa3b2;--btn:#7aa2ff}
   *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.45 system-ui,Inter,Segoe UI,Roboto,Arial}
@@ -22,8 +22,8 @@
 </head>
 <body>
 <header class="wrap">
-  <h1>Bivariante Poisson + Dixon–Coles — Backtest y Próximos</h1>
-  <div class="muted">Importa histórico → liga → Entrenar → Backtest → Próximos (equipos por liga, EV).</div>
+  <h1>Bivariante Poisson + Dixon–Coles — Backtest, Próximos y ROI por mercado</h1>
+  <div class="muted">Importa histórico → elige liga → Entrenar → Backtest → Próximos (equipos por liga, EV).</div>
 </header>
 
 <div class="wrap grid">
@@ -76,10 +76,22 @@
       <span class="pill">Unidades: <b id="units">—</b></span>
       <span class="pill">ROI: <b id="roi">—</b></span>
     </div>
-    <table id="tbl"><thead><tr>
+
+    <h3 style="margin-top:10px;font-size:14px">ROI por mercado (solo picks tomados)</h3>
+    <table id="tblByMkt">
+      <thead>
+        <tr>
+          <th>Mercado</th><th>Bets</th><th>Hit%</th><th>Unidades</th><th>ROI</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+
+    <table id="tbl" style="margin-top:12px"><thead><tr>
       <th>Fecha</th><th>Partido</th><th>Mercado</th><th>Odd</th><th>p̂</th><th>EV</th><th>Res</th><th>Win</th>
     </tr></thead><tbody></tbody></table>
-    <div style="margin-top:10px"><button id="btnCsv" class="btn">Descargar CSV</button></div>
+
+    <div style="margin-top:10px"><button id="btnCsv" class="btn">Descargar CSV (picks)</button></div>
   </section>
 </div>
 
@@ -282,8 +294,8 @@ function probsBivariate(lamH, lamA, cov, {lineOU=2.5, maxGoals=10, useDC=false, 
   }
   return {p1,pX,p2,pOver,pUnder,pBTTS};
 }
-const ev=(p,odd)=> p*(c_odd(odd)-1)-(1-p);
 const c_odd=o=> (Number.isFinite(+o)?+o:NaN);
+const ev=(p,odd)=> p*(c_odd(odd)-1)-(1-p);
 
 /* ===== Entrenar (botón) ===== */
 el('train').addEventListener('click', ()=>{
@@ -310,10 +322,20 @@ el('run').addEventListener('click', ()=>{
   const useDC=el('useDC').checked, rho=+el('rho').value||0.05;
 
   // Acumuladores incrementales de liga y equipos
-  let H=[], A=[];                     // ✅ corregido
+  let H=[], A=[];
   const T=new Map(); const mkTeam=t=>{ if(!T.has(t)) T.set(t,{gf:[],ga:[]}); return T.get(t); };
 
   let bets=0,hits=0,units=0; const outRows=[];
+  // 👉 nuevo: acumuladores por mercado
+  const byMkt = {
+    ['Over '+ouLine]: {bets:0,hits:0,units:0},
+    ['Under '+ouLine]:{bets:0,hits:0,units:0},
+    ['BTTS Sí']:{bets:0,hits:0,units:0},
+    ['1']:{bets:0,hits:0,units:0},
+    ['X']:{bets:0,hits:0,units:0},
+    ['2']:{bets:0,hits:0,units:0}
+  };
+
   for(const r of rows){
     if(H.length<8){ // warm-up
       H.push(r.h); A.push(r.a);
@@ -367,9 +389,29 @@ el('run').addEventListener('click', ()=>{
     cand.forEach(c=>c.EV= ev(c.p,c.odd));
     cand.sort((a,b)=>b.EV-a.EV);
     const pick=cand[0];
+
     if(pick && pick.EV>=evMin){
+      // global
       bets++; hits+=pick.win; units += pick.win ? (pick.odd-1) : -1;
-      outRows.push({date:r.date.toISOString().slice(0,10),match:r.match,market:pick.lab,odd:pick.odd.toFixed(2),p_hat:pick.p.toFixed(3),EV:pick.EV.toFixed(3),result:`${r.h}-${r.a}`,win:pick.win?'✔':'✖'});
+      // por mercado
+      if(byMkt[pick.lab]){
+        byMkt[pick.lab].bets += 1;
+        byMkt[pick.lab].hits += pick.win ? 1 : 0;
+        byMkt[pick.lab].units += pick.win ? (pick.odd-1) : -1;
+      } else {
+        // si la línea cambia (ej. 3.0) crea la clave dinámica
+        if(!byMkt[pick.lab]) byMkt[pick.lab] = {bets:0,hits:0,units:0};
+        byMkt[pick.lab].bets += 1;
+        byMkt[pick.lab].hits += pick.win ? 1 : 0;
+        byMkt[pick.lab].units += pick.win ? (pick.odd-1) : -1;
+      }
+
+      outRows.push({
+        date:r.date.toISOString().slice(0,10),
+        match:r.match,market:pinkey(pick.lab,ouLine),odd:pick.odd.toFixed(2),
+        p_hat:pick.p.toFixed(3),EV:pick.EV.toFixed(3),
+        result:`${r.h}-${r.a}`,win:pick.win?'✔':'✖'
+      });
     }
 
     H.push(r.h); A.push(r.a);
@@ -382,9 +424,12 @@ el('run').addEventListener('click', ()=>{
   el('units').textContent=fmt(units); el('roi').textContent=bets?pct(roi):'—';
   el('badges').innerHTML=`<span class="pill">Liga: <b>${L}</b></span><span class="pill">Modelo: Bivariante</span><span class="pill">DC: ${useDC?'on':'off'} (ρ=${rho})</span>`;
 
+  // Render picks
   const tb=document.querySelector('#tbl tbody');
-  tb.innerHTML = outRows.slice(0,300).map(r=>`<tr><td>${r.date}</td><td>${r.match}</td><td>${r.market}</td><td>${r.odd}</td><td>${r.p_hat}</td><td>${r.EV}</td><td>${r.result}</td><td>${r.win}</td></tr>`).join('')
+  tb.innerHTML = outRows.slice(0,400).map(r=>`<tr><td>${r.date}</td><td>${r.match}</td><td>${r.market}</td><td>${r.odd}</td><td>${r.p_hat}</td><td>${r.EV}</td><td>${r.result}</td><td>${r.win}</td></tr>`).join('')
     || `<tr><td colspan="8" class="muted">No hubo apuestas con EV ≥ umbral.</td></tr>`;
+
+  // CSV
   el('btnCsv').onclick=()=>{
     const rowsCsv=[['date','match','market','odd','p_hat','EV','result','win']]
       .concat(outRows.map(r=>[r.date,r.match,r.market,r.odd,r.p_hat,r.EV,r.result,r.win]));
@@ -392,10 +437,44 @@ el('run').addEventListener('click', ()=>{
     const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'}); const url=URL.createObjectURL(blob);
     const a=document.createElement('a'); a.href=url; a.download=`backtest_bivar_${L}.csv`; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
   };
+
+  // ROI por mercado
+  renderByMarket(byMkt);
 });
 
+// normaliza etiqueta para tabla (incluye línea usada en ese backtest para OU)
+function pinkey(lab, line){ return /Over|Under/.test(lab) ? lab.replace(/\d+(\.\d+)?/, String(line)) : lab; }
+
+function renderByMarket(byMkt){
+  // orden preferido
+  const order = (keys)=> {
+    const base = ['Over','Under','BTTS Sí','1','X','2'];
+    // agrupa over/under con su línea actual
+    const dyn = Object.keys(byMkt).filter(k=>/^Over|^Under/.test(k) && !base.includes(k));
+    const rest = Object.keys(byMkt).filter(k=>!/^Over|^Under/.test(k) && !base.includes(k));
+    return [...dyn.sort(), 'BTTS Sí', '1', 'X', '2', ...rest.filter(k=>!['BTTS Sí','1','X','2'].includes(k))];
+  };
+
+  const tbm = document.querySelector('#tblByMkt tbody');
+  const rows = [];
+  const keys = order(Object.keys(byMkt));
+  for(const k of keys){
+    const m = byMkt[k]; if(!m || !m.bets) continue;
+    const hr = m.bets ? (m.hits/m.bets) : 0;
+    const roi = m.bets ? (m.units/m.bets) : 0;
+    rows.push(`<tr>
+      <td>${k}</td>
+      <td>${m.bets}</td>
+      <td>${pct(hr)}</td>
+      <td>${fmt(m.units)}</td>
+      <td>${pct(roi)}</td>
+    </tr>`);
+  }
+  tbm.innerHTML = rows.join('') || `<tr><td colspan="5" class="muted">No hay picks suficientes para desglosar por mercado.</td></tr>`;
+}
+
 /* ===== Próximos ===== */
-const tbNext=document.querySelector('#tblNext tbody');  /* ✅ única definición */
+const tbNext=document.querySelector('#tblNext tbody');
 function getLeagueTeams(league){const set=TEAMS_BY_LEAGUE.get(league);return set?Array.from(set).sort((a,b)=>a.localeCompare(b,'es',{sensitivity:'base'})):[];}
 function teamSelectHTML(options,selected=''){const opts=['<option value="">—</option>'].concat(options.map(t=>`<option${t===selected?' selected':''}>${t}</option>`)); return `<select>${opts.join('')}</select>`;}
 function renderRow(next={date:'',home:'',away:'',over:'',under:'',line:'2.5',btts:'',o1:'',ox:'',o2:''}){
