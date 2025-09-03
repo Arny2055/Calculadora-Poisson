@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Backtesting + Entrenar + Próximos Partidos</title>
+<title>Backtesting + Entrenar + Próximos (con equipos por liga)</title>
 <style>
   body{margin:0;background:#0f1115;color:#e6eaf2;font:14px/1.45 system-ui,Inter,Segoe UI,Roboto,Arial}
   header{padding:14px 16px;border-bottom:1px solid #2a3140}
@@ -26,8 +26,8 @@
 </head>
 <body>
 <header class="wrap">
-  <h1>Backtesting + Auto-Entrenamiento + Próximos Partidos</h1>
-  <div class="muted">Importa histórico → entrena → backtest → selecciona próximos y decide con la política.</div>
+  <h1>Backtesting + Auto-Entrenamiento + Próximos — Equipos por liga</h1>
+  <div class="muted">Importa histórico → entrena → backtest → elige próximos con <b>equipos de esa liga</b> y decide con la política.</div>
 </header>
 
 <div class="wrap grid">
@@ -95,10 +95,9 @@
 
 <div class="wrap">
   <section class="card">
-    <h2>Próximos partidos (decisión con política)</h2>
+    <h2>Próximos partidos (elige equipos de la liga)</h2>
     <div class="small muted" style="margin-bottom:6px">
-      Puedes importar JSON (array) con campos como: <code>Date</code>, <code>Match</code> (“Local - Visitante”) y sus <b>cuotas</b> según el mercado seleccionado.<br>
-      OU: <code>Over25</code>, <code>Under25</code> (o usa los mapeos). BTTS: <code>Odd</code>/<code>Odd BTTS</code>. 1X2: <code>Odd 1 PreMatch</code>, <code>Odd X PreMatch</code>, <code>Odd 2 PreMatch</code>.
+      Importa JSON (array) con <code>Date</code>, <code>Match</code> (“Local - Visitante”) y cuotas. Se intentará pre-seleccionar los equipos si existen en el catálogo de la liga.
     </div>
     <div class="row"><label>Archivo JSON próximos</label><input id="fileNext" type="file" accept=".json"></div>
     <div class="row"><label>o Pegar JSON</label><button id="btnPasteNext" class="btn">Cargar próximos</button></div>
@@ -137,7 +136,11 @@ const pct=x=>(x*100).toFixed(2)+'%';
 const fmt=x=>(isFinite(x)?x.toFixed(3):'—');
 function parseFT(s){const m=String(s||'').match(/(-?\d+)\s*[-:]\s*(-?\d+)/);return m?[+m[1],+m[2]]:[null,null];}
 function parseDateAny(s){const d=new Date(s); if(!isNaN(d)) return d; return new Date(NaN);}
-
+function splitTeams(match){
+  if(!match) return ['',''];
+  const parts = String(match).split(/[-–]/);
+  return [ (parts[0]||'').trim(), (parts[1]||'').trim() ];
+}
 function mean(a){return a.reduce((s,x)=>s+x,0)/a.length;}
 function variance(a,mu){let s=0;for(const x of a)s+=(x-mu)*(x-mu);return s/Math.max(1,a.length-1);}
 function covariance(X,Y,mx,my){let s=0;for(let i=0;i<X.length;i++)s+=(X[i]-mx)*(Y[i]-my);return s/Math.max(1,X.length-1);}
@@ -166,7 +169,7 @@ function simulateQuick(muH,muA,sdH,sdA,rho,ns,disc,ou){
 }
 
 // ===== Estado =====
-let RAW=[], BY_LEAGUE=new Map();
+let RAW=[], BY_LEAGUE=new Map(), TEAMS_BY_LEAGUE=new Map();
 
 el('file').addEventListener('change', async e=>{
   const f=e.target.files[0]; if(!f)return;
@@ -182,17 +185,28 @@ el('market').addEventListener('change', ()=>{
   document.getElementById('colBTTS').style.display = (m==='BTTS')?'':'none';
   document.getElementById('col1X2').style.display  = (m==='1X2')?'':'none';
 });
+el('league').addEventListener('change', ()=>{
+  // Cuando cambie la liga, refrescamos selects de próximos
+  refreshNextTeamSelects();
+});
 
 function ingest(arr){
-  RAW=[]; BY_LEAGUE.clear();
+  RAW=[]; BY_LEAGUE.clear(); TEAMS_BY_LEAGUE.clear();
   for(const r of arr){
     const league=String(r.League||'').trim(); if(!league) continue;
-    const [h,a]=parseFT(r["Result FT"]||r.Result); const date=parseDateAny(r.Date||r.date||''); const match=String(r.Match||'').trim();
+    const [h,a]=parseFT(r["Result FT"]||r.Result);
+    const date=parseDateAny(r.Date||r.date||'');
+    const match=String(r.Match||'').trim();
     if(!Number.isFinite(h)||!Number.isFinite(a)||isNaN(date)) continue;
-    const row={league,date,match,h,a,raw:r};
+    const [homeName, awayName] = splitTeams(match);
+    const row={league,date,match,h,a,homeName,awayName,raw:r};
     RAW.push(row);
     if(!BY_LEAGUE.has(league)) BY_LEAGUE.set(league,[]);
     BY_LEAGUE.get(league).push(row);
+    if(!TEAMS_BY_LEAGUE.has(league)) TEAMS_BY_LEAGUE.set(league,new Set());
+    const set=TEAMS_BY_LEAGUE.get(league);
+    if(homeName) set.add(homeName);
+    if(awayName) set.add(awayName);
   }
   for(const rows of BY_LEAGUE.values()) rows.sort((x,y)=>x.date-y.date);
   el('league').innerHTML='<option value="">—</option>'+Array.from(BY_LEAGUE.keys()).sort().map(l=>`<option>${l}</option>`).join('');
@@ -300,7 +314,6 @@ el('run').addEventListener('click', ()=>{
   const stake=+el('stake').value||1; const market=el('market').value; const evMin=+el('evThr').value||0;
   const fOver=el('fOddOver').value.trim(), fUnder=el('fOddUnder').value.trim(), fBTTS=el('fOddBTTS').value.trim(), f1=el('fOdd1').value.trim(), fX=el('fOddX').value.trim(), f2=el('fOdd2').value.trim();
 
-  // Backtest (rápido, sin worker)
   let bets=0,hits=0,units=0; const outRows=[]; const H=[],A=[];
   for(const r of rows){
     if(H.length<minHist){ H.push(r.h); A.push(r.a); continue; }
@@ -348,15 +361,32 @@ el('run').addEventListener('click', ()=>{
   };
 });
 
-// ===== Próximos: UI =====
+// ===== Próximos: UI con equipos por liga =====
 const tbNext = document.querySelector('#tblNext tbody');
+
+function getLeagueTeams(league){
+  const set = TEAMS_BY_LEAGUE.get(league);
+  if(!set) return [];
+  return Array.from(set).sort((a,b)=>a.localeCompare(b,'es',{sensitivity:'base'}));
+}
+
+function teamSelectHTML(options, selected=''){
+  const opts = ['<option value="">—</option>'].concat(options.map(t=>{
+    const sel = (t===selected)?' selected':'';
+    return `<option${sel}>${t}</option>`;
+  }));
+  return `<select>${opts.join('')}</select>`;
+}
+
 function renderRow(next={date:'',home:'',away:'',over:'',under:'',line:'2.5',btts:'',o1:'',ox:'',o2:''}){
   const m=el('market').value;
+  const L=el('league').value;
+  const teams=getLeagueTeams(L);
   const tr=document.createElement('tr');
   tr.innerHTML = `
     <td><input type="date" value="${next.date||''}"></td>
-    <td><input placeholder="Local" value="${next.home||''}"></td>
-    <td><input placeholder="Visitante" value="${next.away||''}"></td>
+    <td>${teamSelectHTML(teams, next.home)}</td>
+    <td>${teamSelectHTML(teams, next.away)}</td>
     <td ${m==='OU'?'':'style="display:none"'}><div class="row2" style="grid-template-columns:80px 1fr 1fr">
       <input placeholder="Línea" value="${next.line||'2.5'}">
       <input placeholder="Over"  value="${next.over||''}">
@@ -370,10 +400,26 @@ function renderRow(next={date:'',home:'',away:'',over:'',under:'',line:'2.5',btt
     </div></td>`;
   tbNext.appendChild(tr);
 }
-el('addRow').addEventListener('click', ()=>renderRow());
+
+function refreshNextTeamSelects(){
+  const L=el('league').value, teams=getLeagueTeams(L);
+  [...tbNext.querySelectorAll('tr')].forEach(tr=>{
+    const tds=tr.querySelectorAll('td'); if(tds.length<3) return;
+    const homeSel=tds[1].querySelector('select');
+    const awaySel=tds[2].querySelector('select');
+    const curH=homeSel?.value||'', curA=awaySel?.value||'';
+    if(homeSel) homeSel.outerHTML = teamSelectHTML(teams, curH);
+    if(awaySel) awaySel.outerHTML = teamSelectHTML(teams, curA);
+  });
+}
+
+el('addRow').addEventListener('click', ()=>{
+  if(!el('league').value){ alert('Elige una liga primero.'); return; }
+  renderRow();
+});
 el('clearRows').addEventListener('click', ()=>{tbNext.innerHTML='';});
 
-// Importar JSON de próximos
+// Importar JSON de próximos (intenta mapear equipos al catálogo)
 el('fileNext').addEventListener('change', async e=>{
   const f=e.target.files[0]; if(!f)return;
   try{ const arr=JSON.parse(await f.text()); loadNextFromJson(arr); }catch(err){alert('Error JSON próximos: '+err);}
@@ -381,12 +427,24 @@ el('fileNext').addEventListener('change', async e=>{
 el('btnPasteNext').addEventListener('click', async ()=>{
   try{ const arr=JSON.parse(await navigator.clipboard.readText()); loadNextFromJson(arr); }catch(err){alert('Portapapeles próximos: '+err);}
 });
+function nearestTeamName(name, teams){
+  // emparejamiento simple por igualdad flexible
+  const n=String(name||'').trim().toLowerCase();
+  const found = teams.find(t=>t.toLowerCase()===n);
+  if(found) return found;
+  // contiene palabras clave
+  const hit = teams.find(t=> n && (t.toLowerCase().includes(n) || n.includes(t.toLowerCase())) );
+  return hit || '';
+}
 function loadNextFromJson(arr){
+  if(!el('league').value){ alert('Elige una liga primero.'); return; }
+  const teams=getLeagueTeams(el('league').value);
   tbNext.innerHTML='';
   for(const r of arr){
     const date =(r.Date||r.date||'').slice(0,10);
-    const m=String(r.Match||'').split(/[-–]/).map(s=>s.trim());
-    const home=m[0]||'', away=m[1]||'';
+    const [mh,ma]=splitTeams(r.Match||'');
+    const home = nearestTeamName(mh, teams) || mh || '';
+    const away = nearestTeamName(ma, teams) || ma || '';
     renderRow({
       date, home, away,
       line: (r.Line||r.line||'2.5'),
@@ -405,6 +463,7 @@ el('predict').addEventListener('click', ()=>{
 
   const alpha=+el('alpha').value||0.15, disc=el('disc').value, ns=+el('nsims').value||12000;
   const market=el('market').value; const evMin=+el('evThr').value||0;
+  const ouDefault = +el('ou').value||2.5;
 
   // parámetros de liga usando TODO el histórico (EWMA si aplica)
   const H=hist.map(r=>r.h), A=hist.map(r=>r.a);
@@ -420,31 +479,29 @@ el('predict').addEventListener('click', ()=>{
   const out=[]; const rows=[...tbNext.querySelectorAll('tr')];
   for(const tr of rows){
     const tds=tr.querySelectorAll('td'); if(!tds.length) continue;
-    const date=tds[0].querySelector('input').value||''; const home=tds[1].querySelector('input').value||''; const away=tds[2].querySelector('input').value||'';
-    let bet=null, odd=null, p=null, ev=null, desc='';
-    const sim=simulateQuick(muH,muA,sdH,sdA,rho,ns,disc, +el('ou').value||2.5);
+    const date=tds[0].querySelector('input').value||'';
+    const home=tds[1].querySelector('select').value||''; const away=tds[2].querySelector('select').value||'';
+    let bet=null, odd=null, p=null, ev=null, desc=`${home} vs ${away}`;
+    const ouLine = (market==='OU') ? +(tds[3].querySelectorAll('input')[0].value||ouDefault) : ouDefault;
+    const sim=simulateQuick(muH,muA,sdH,sdA,rho,ns,disc, ouLine);
 
     if(market==='OU'){
-      const line = +(tds[3].querySelectorAll('input')[0].value||el('ou').value||2.5);
       const over = +tds[3].querySelectorAll('input')[1].value||NaN;
       const under= +tds[3].querySelectorAll('input')[2].value||NaN;
       const cand=[];
-      if(over>1.01)  cand.push({lab:'Over '+line,  p:sim.pOver,  odd:over});
-      if(under>1.01) cand.push({lab:'Under '+line, p:sim.pUnder, odd:under});
+      if(over>1.01)  cand.push({lab:'Over '+ouLine,  p:sim.pOver,  odd:over});
+      if(under>1.01) cand.push({lab:'Under '+ouLine, p:sim.pUnder, odd:under});
       cand.forEach(c=>c.ev=c.p*(c.odd-1)-(1-c.p)); cand.sort((a,b)=>b.ev-a.ev);
       const pick=cand[0]; if(pick){bet=pick.lab; p=pick.p; odd=pick.odd; ev=pick.ev;}
-      desc=`${home} vs ${away}`;
     }else if(market==='BTTS'){
       const btts = +tds[3].querySelector('input').value||NaN;
       if(btts>1.01){ bet='BTTS Sí'; p=sim.pBTTS; odd=btts; ev=p*(odd-1)-(1-p); }
-      desc=`${home} vs ${away}`;
     }else{
       const ins=tds[3].querySelectorAll('input');
       const o1=+ins[0].value||NaN, ox=+ins[1].value||NaN, o2=+ins[2].value||NaN;
       const cand=[]; if(o1>1.01)cand.push({lab:'1',p:sim.p1,odd:o1}); if(ox>1.01)cand.push({lab:'X',p:sim.pX,odd:ox}); if(o2>1.01)cand.push({lab:'2',p:sim.p2,odd:o2});
       cand.forEach(c=>c.ev=c.p*(c.odd-1)-(1-c.p)); cand.sort((a,b)=>b.ev-a.ev);
       const pick=cand[0]; if(pick){bet=pick.lab; p=pick.p; odd=pick.odd; ev=pick.ev;}
-      desc=`${home} vs ${away}`;
     }
 
     const decision = (ev!=null && ev>=evMin) ? 'APOSTAR' : 'NO APOSTAR';
