@@ -2,17 +2,17 @@
 <html lang="es">
 <head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Backtesting — Normal Bivariada (Round vs Floor)</title>
+<title>Backtesting con Perfiles por Liga (AUTO α/Discretización/EV)</title>
 <style>
   body{margin:0;background:#0f1115;color:#e6eaf2;font:14px/1.45 system-ui,Inter,Segoe UI,Roboto,Arial}
   header{padding:14px 16px;border-bottom:1px solid #2a3140}
-  .wrap{max-width:1080px;margin:0 auto;padding:16px}
+  .wrap{max-width:1100px;margin:0 auto;padding:16px}
   .grid{display:grid;gap:16px}
-  @media(min-width:980px){.grid{grid-template-columns:380px 1fr}}
+  @media(min-width:980px){.grid{grid-template-columns:400px 1fr}}
   .card{background:#171a21;border:1px solid #2a3140;border-radius:12px;padding:14px}
   h1{font-size:18px;margin:0 0 6px} h2{font-size:15px;margin:0 0 10px}
-  input,select,button,textarea{width:100%;background:#1f2430;color:#e6eaf2;border:1px solid #2a3140;border-radius:8px;padding:8px}
-  .row{display:grid;grid-template-columns:1fr 180px;gap:8px;align-items:center;margin:8px 0}
+  input,select,button{width:100%;background:#1f2430;color:#e6eaf2;border:1px solid #2a3140;border-radius:8px;padding:8px}
+  .row{display:grid;grid-template-columns:1fr 200px;gap:8px;align-items:center;margin:8px 0}
   .btn{background:#7aa2ff;color:#0a1020;font-weight:700;cursor:pointer}
   .pill{display:inline-block;border:1px solid #2a3140;background:#1f2430;border-radius:999px;padding:4px 8px;margin:4px 6px 0 0}
   table{width:100%;border-collapse:collapse;margin-top:10px}
@@ -23,21 +23,38 @@
 </head>
 <body>
 <header class="wrap">
-  <h1>Backtesting — Normal Bivariada (EWMA, Round/Floor)</h1>
-  <div class="muted">Importa JSON → elige liga y mercado → corre walk-forward con α, EV y #sims configurables.</div>
+  <h1>Backtesting — Normal Bivariada con Perfiles por Liga</h1>
+  <div class="muted">AUTO ajusta α, discretización y EV mínimo por liga (según perfil o heurística por datos). Puedes forzarlo en MANUAL.</div>
 </header>
 
 <div class="wrap grid">
   <!-- Panel izquierdo -->
   <section class="card">
-    <h2>Datos & Configuración</h2>
+    <h2>Datos</h2>
     <div class="row"><label>Archivo JSON</label><input id="file" type="file" accept=".json"></div>
-    <div class="row"><label>o Pegar JSON</label><button id="btnPaste" class="btn">Cargar portapapeles</button></div>
+    <div class="row"><label>o Portapapeles</label><button id="btnPaste" class="btn">Cargar</button></div>
     <div class="row"><label>Liga</label><select id="league"><option value="">—</option></select></div>
 
-    <h2>Mercado</h2>
+    <h2>Perfiles por liga</h2>
     <div class="row">
-      <label>Tipo</label>
+      <label>Modo</label>
+      <select id="profileMode">
+        <option value="AUTO">AUTO (recomendado)</option>
+        <option value="MANUAL">MANUAL</option>
+      </select>
+    </div>
+    <div class="row"><label>α (EWMA)</label><input id="alpha" type="number" min="0" max="0.99" step="0.01" value="0.15" disabled></div>
+    <div class="row"><label>Discretización</label>
+      <select id="disc" disabled>
+        <option value="round">Round</option>
+        <option value="floor">Floor</option>
+      </select>
+    </div>
+    <div class="row"><label>EV mínimo</label><input id="evThr" type="number" step="0.01" value="0.02" disabled></div>
+
+    <h2>Mercado & Modelo</h2>
+    <div class="row">
+      <label>Mercado</label>
       <select id="market">
         <option value="OU">Over/Under</option>
         <option value="BTTS">BTTS (GG)</option>
@@ -45,26 +62,16 @@
       </select>
     </div>
     <div class="row" id="ouLineRow"><label>Línea O/U</label><input id="ouLine" type="number" step="0.5" value="2.5"></div>
-
-    <h2>Modelo</h2>
-    <div class="row"><label>α EWMA (0=uniforme)</label><input id="alpha" type="number" min="0" max="0.99" step="0.01" value="0.15"></div>
-    <div class="row"><label>Discretización</label>
-      <select id="disc"><option value="round">Round</option><option value="floor">Floor</option></select>
-    </div>
-    <div class="row"><label>Simulaciones</label><input id="nsims" type="number" min="2000" step="1000" value="10000"></div>
-    <div class="row"><label>Mín. historial (partidos previos)</label><input id="minHist" type="number" min="3" value="8"></div>
-
-    <h2>Ejecución</h2>
-    <div class="row"><label>Umbral EV para apostar</label><input id="evThr" type="number" step="0.01" value="0.00"></div>
-    <div class="row"><label>Stake por apuesta</label><input id="stake" type="number" step="0.1" value="1"></div>
+    <div class="row"><label>Simulaciones</label><input id="nsims" type="number" min="2000" step="1000" value="15000"></div>
+    <div class="row"><label>Mín. historial</label><input id="minHist" type="number" min="3" value="8"></div>
+    <div class="row"><label>Stake</label><input id="stake" type="number" step="0.1" value="1"></div>
     <button id="run" class="btn">Correr Backtest</button>
-    <p class="muted" id="info">—</p>
 
-    <h2>Mapeo de odds (opcional)</h2>
-    <div class="muted">Si tus campos de cuotas tienen nombres diferentes, especifícalos aquí.</div>
+    <h2>Mapeo de cuotas (opcional)</h2>
+    <div class="muted">Personaliza nombres de campos si difieren de tu JSON</div>
     <div class="row"><label>Odd Over 2.5</label><input id="fOddOver" placeholder="Odd Over25 / OddOver25"></div>
     <div class="row"><label>Odd Under 2.5</label><input id="fOddUnder" placeholder="Odd Under25 / OddUnder25"></div>
-    <div class="row"><label>Odd BTTS (Sí/GG)</label><input id="fOddBTTS" placeholder="Odd BTTS / Odd GG / Odd"></div>
+    <div class="row"><label>Odd BTTS (Sí)</label><input id="fOddBTTS" placeholder="Odd BTTS / Odd GG"></div>
     <div class="row"><label>Odd 1</label><input id="fOdd1" placeholder="Odd 1 PreMatch"></div>
     <div class="row"><label>Odd X</label><input id="fOddX" placeholder="Odd X PreMatch"></div>
     <div class="row"><label>Odd 2</label><input id="fOdd2" placeholder="Odd 2 PreMatch"></div>
@@ -81,7 +88,7 @@
       <span class="pill">Unidades: <b id="units">—</b></span>
       <span class="pill">ROI: <b id="roi">—</b></span>
     </div>
-    <h3 style="margin-top:12px;font-size:14px">Detalle (top 20 por EV)</h3>
+    <h3 style="margin-top:12px;font-size:14px">Detalle (top 200 por orden cronológico)</h3>
     <table id="tbl"><thead><tr>
       <th>Fecha</th><th>Partido</th><th>Mercado</th><th>Odd</th><th>p̂</th><th>EV</th><th>Res</th><th>Win</th>
     </tr></thead><tbody></tbody></table>
@@ -90,31 +97,28 @@
 </div>
 
 <script>
-// ===== Utilidades =====
-const el = id => document.getElementById(id);
-const pct = x => (x*100).toFixed(2)+'%';
-const fmt = x => (isFinite(x)? x.toFixed(3) : '—');
+// ===== Utilidades básicas =====
+const el=id=>document.getElementById(id);
+const pct=x=>(x*100).toFixed(2)+'%';
+const fmt=x=>(isFinite(x)?x.toFixed(3):'—');
 
-function parseFT(s){
-  const m=String(s||'').match(/(-?\d+)\s*[-:]\s*(-?\d+)/);
-  return m? [parseInt(m[1]), parseInt(m[2])] : [null,null];
-}
+function parseFT(s){const m=String(s||'').match(/(-?\d+)\s*[-:]\s*(-?\d+)/);return m?[+m[1],+m[2]]:[null,null];}
 function parseDateAny(s){
-  const d = new Date(s); if(!isNaN(d)) return d;
-  const m = String(s).toLowerCase().replace(/[,\.]/g,'').match(/(\d{1,2})\s+([a-zñ]+)\s+(\d{4})/);
-  const M = {ene:1,feb:2,mar:3,abr:4,may:5,jun:6,jul:7,ago:8,sept:9,sep:9,oct:10,nov:11,dic:12};
-  if(m){ const dd=+m[1], mm=M[m[2].slice(0,4)]||1, yy=+m[3]; return new Date(yy,mm-1,dd); }
+  const d=new Date(s); if(!isNaN(d)) return d;
+  const mm={ene:1,feb:2,mar:3,abr:4,may:5,jun:6,jul:7,ago:8,sept:9,sep:9,oct:10,nov:11,dic:12};
+  const m=String(s).toLowerCase().replace(/[,\.]/g,'').match(/(\d{1,2})\s+([a-zñ]+)\s+(\d{4})/);
+  if(m){return new Date(+m[3], (mm[m[2].slice(0,4)]||1)-1, +m[1]);}
   return new Date(NaN);
 }
-function mean(a){ return a.reduce((s,x)=>s+x,0)/a.length; }
-function variance(a,mu){ let s=0; for(const x of a) s+=(x-mu)*(x-mu); return s/Math.max(1,a.length-1); }
-function covariance(X,Y,mx,my){ let s=0; for(let i=0;i<X.length;i++) s+=(X[i]-mx)*(Y[i]-my); return s/Math.max(1,X.length-1); }
-function ewmaWeights(n,a){ if(a<=0) return null; const w=[]; for(let i=0;i<n;i++) w.push(Math.pow(1-a,i)); w.reverse(); return w; }
-function meanW(a,w){ const sw=w.reduce((s,x)=>s+x,0); let t=0; for(let i=0;i<a.length;i++) t+=a[i]*w[i]; return t/(sw||1); }
-function varW(a,mu,w){ const sw=w.reduce((s,x)=>s+x,0), sw2=w.reduce((s,x)=>s+x*x,0); let s=0; for(let i=0;i<a.length;i++) s+=w[i]*(a[i]-mu)*(a[i]-mu); const c=sw-(sw2/sw); return s/Math.max(1e-9,c); }
-function covW(X,Y,mx,my,w){ const sw=w.reduce((s,a)=>s+a,0), sw2=w.reduce((s,a)=>s+a*a,0); let s=0; for(let i=0;i<X.length;i++) s+=w[i]*(X[i]-mx)*(Y[i]-my); const c=sw-(sw2/sw); return s/Math.max(1e-9,c); }
-
+function mean(a){return a.reduce((s,x)=>s+x,0)/a.length;}
+function variance(a,mu){let s=0;for(const x of a)s+=(x-mu)*(x-mu);return s/Math.max(1,a.length-1);}
+function covariance(X,Y,mx,my){let s=0;for(let i=0;i<X.length;i++)s+=(X[i]-mx)*(Y[i]-my);return s/Math.max(1,X.length-1);}
+function ewmaWeights(n,a){if(a<=0)return null;const w=[];for(let i=0;i<n;i++)w.push(Math.pow(1-a,i));w.reverse();return w;}
+function meanW(a,w){const sw=w.reduce((s,x)=>s+x,0);let t=0;for(let i=0;i<a.length;i++)t+=a[i]*w[i];return t/(sw||1);}
+function varW(a,mu,w){const sw=w.reduce((s,x)=>s+x,0),sw2=w.reduce((s,x)=>s+x*x,0);let s=0;for(let i=0;i<a.length;i++)s+=w[i]*(a[i]-mu)*(a[i]-mu);const c=sw-(sw2/sw);return s/Math.max(1e-9,c);}
+function covW(X,Y,mx,my,w){const sw=w.reduce((s,a)=>s+a,0),sw2=w.reduce((s,a)=>s+a*a,0);let s=0;for(let i=0;i<X.length;i++)s+=w[i]*(X[i]-mx)*(Y[i]-my);const c=sw-(sw2/sw);return s/Math.max(1e-9,c);}
 function randn(){let u=0,v=0;while(u===0)u=Math.random();while(v===0)v=Math.random();return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v);}
+
 function simulate(muH,muA,sdH,sdA,rho,n,disc,ouLine){
   const s=Math.sqrt(1-Math.min(0.999,Math.max(-0.999,rho))**2);
   let over=0,btts=0,wH=0,d=0,wA=0;
@@ -123,201 +127,202 @@ function simulate(muH,muA,sdH,sdA,rho,n,disc,ouLine){
     const x=muH+sdH*z1, y=muA+sdA*(rho*z1+s*z2);
     let H=Math.max(0,disc==='round'?Math.round(x):Math.floor(x));
     let A=Math.max(0,disc==='round'?Math.round(y):Math.floor(y));
-    if(H+A>ouLine) over++;
-    if(H>0&&A>0) btts++;
-    if(H>A) wH++; else if(H===A) d++; else wA++;
+    if(H+A>ouLine)over++; if(H>0&&A>0)btts++;
+    if(H>A)wH++; else if(H===A)d++; else wA++;
   }
-  return { pOver:over/n, pUnder:1-over/n, pBTTS:btts/n, p1:wH/n, pX:d/n, p2:wA/n };
+  return {pOver:over/n,pUnder:1-over/n,pBTTS:btts/n,p1:wH/n,pX:d/n,p2:wA/n};
 }
 
-// ===== Estado =====
+// ===== Estado & carga =====
 let RAW=[], BY_LEAGUE=new Map();
-
+el('file').addEventListener('change',async e=>{
+  const f=e.target.files[0]; if(!f)return;
+  try{ingest(JSON.parse(await f.text()));}catch(err){alert('Error JSON: '+err);}
+});
+el('btnPaste').addEventListener('click',async()=>{
+  try{ingest(JSON.parse(await navigator.clipboard.readText()));}catch(err){alert('Portapapeles: '+err);}
+});
 function ingest(arr){
-  RAW = [];
-  BY_LEAGUE.clear();
+  RAW=[]; BY_LEAGUE.clear();
   for(const r of arr){
-    const league = String(r.League||'').trim(); if(!league) continue;
-    const [h,a] = parseFT(r["Result FT"] || r.Result);
-    const date  = parseDateAny(r.Date || r.fecha || r.date || '');
-    const match = String(r.Match||'').trim();
+    const league=String(r.League||'').trim(); if(!league) continue;
+    const [h,a]=parseFT(r["Result FT"]||r.Result); const date=parseDateAny(r.Date||r.fecha||r.date||'');
+    const match=String(r.Match||'').trim();
     if(!Number.isFinite(h)||!Number.isFinite(a)||isNaN(date)) continue;
-    const row = {league,date,match,h,a,raw:r};
+    const row={league,date,match,h,a,raw:r};
     RAW.push(row);
-    if(!BY_LEAGUE.has(league)) BY_LEAGUE.set(league, []);
+    if(!BY_LEAGUE.has(league)) BY_LEAGUE.set(league,[]);
     BY_LEAGUE.get(league).push(row);
   }
-  for(const arr of BY_LEAGUE.values()) arr.sort((a,b)=>a.date-b.date);
-  el('league').innerHTML = '<option value="">—</option>' + Array.from(BY_LEAGUE.keys()).sort().map(l=>`<option>${l}</option>`).join('');
-  el('info').textContent = `Cargados ${RAW.length} partidos en ${BY_LEAGUE.size} ligas.`;
+  for(const arr2 of BY_LEAGUE.values()) arr2.sort((a,b)=>a.date-b.date);
+  el('league').innerHTML='<option value="">—</option>'+Array.from(BY_LEAGUE.keys()).sort().map(l=>`<option>${l}</option>`).join('');
+  el('market').dispatchEvent(new Event('change'));
+}
+el('market').addEventListener('change',()=>{el('ouLineRow').style.display=(el('market').value==='OU')?'':'none';});
+el('profileMode').addEventListener('change',syncManualDisable);
+function syncManualDisable(){
+  const man = el('profileMode').value==='MANUAL';
+  el('alpha').disabled=!man; el('disc').disabled=!man; el('evThr').disabled=!man;
 }
 
-el('file').addEventListener('change', async e=>{
-  const f=e.target.files[0]; if(!f) return;
-  try{ ingest(JSON.parse(await f.text())); }catch(err){ alert('Error JSON: '+err); }
-});
-el('btnPaste').addEventListener('click', async ()=>{
-  try{ ingest(JSON.parse(await navigator.clipboard.readText())); }catch(err){ alert('No pude leer/parsear el portapapeles: '+err); }
-});
-el('market').addEventListener('change', ()=>{
-  el('ouLineRow').style.display = (el('market').value==='OU') ? '' : 'none';
-});
-el('ouLineRow').style.display = '';
+// ===== Perfiles por liga (tabla base) =====
+const PROFILES = {
+  "Bundesliga":       {alpha:0.12, disc:"round", ev:0.02},
+  "Premier League":   {alpha:0.14, disc:"round", ev:0.02},
+  "LaLiga":           {alpha:0.16, disc:"floor", ev:0.03},
+  "Serie A":          {alpha:0.15, disc:"round", ev:0.02},
+  "Ligue 1":          {alpha:0.14, disc:"round", ev:0.02},
+  "MLS":              {alpha:0.13, disc:"round", ev:0.02},
+  "Liga MX":          {alpha:0.18, disc:"floor", ev:0.03},
+  "Argentina":        {alpha:0.20, disc:"floor", ev:0.035},
+  "Brasil":           {alpha:0.16, disc:"floor", ev:0.03},
+  "Chile":            {alpha:0.17, disc:"floor", ev:0.03}
+};
 
-// ===== Obtener odds del registro =====
-function getOdds_OU(r, fOver, fUnder, line){
-  const obj = r.raw;
-  const candidatesOver = [fOver, 'Odd Over25','OddOver25','Over25','Over 2.5','OddOver2_5','OddOver2.5'].filter(Boolean);
-  const candidatesUnder= [fUnder,'Odd Under25','OddUnder25','Under25','Under 2.5','OddUnder2_5','OddUnder2.5'].filter(Boolean);
-  const over = candidatesOver.map(k=>+obj[k]).find(x=>x>1.01) || null;
-  const under= candidatesUnder.map(k=>+obj[k]).find(x=>x>1.01) || null;
-  return {over, under, line};
+// Heurística si no hay perfil directo: usa media y volatilidad de la liga
+function deriveProfile(rows){
+  const totals = rows.map(r=>r.h+r.a);
+  const mu = mean(totals);
+  const sd = Math.sqrt(variance(totals, mu));
+  // reglas:
+  // - ligas abiertas (mu>=3.0): alpha bajo, round
+  // - medias 2.4–3.0: alpha medio, round
+  // - medias <2.3: alpha más alto, floor
+  // - si sd >=1.9 (muy volátil), favorece round aunque mu sea medio-alto
+  let alpha, disc, ev;
+  if(mu>=3.0){ alpha=0.12; disc='round'; ev=0.02; }
+  else if(mu>=2.4){ alpha=0.15; disc=(sd>=1.9?'round':'round'); ev=0.025; }
+  else { alpha=0.18; disc='floor'; ev=0.03; }
+  return {alpha, disc, ev, mu, sd};
 }
-function getOdds_BTTS(r, fBTTS){
-  const obj = r.raw;
-  const candidates = [fBTTS,'Odd BTTS','OddBTTS','Odd GG','OddGG','Odd'].filter(Boolean);
-  const o = candidates.map(k=>+obj[k]).find(x=>x>1.01) || null;
-  return {yes:o};
+
+function pickProfile(league){
+  // búsqueda exacta o inclusión por nombre
+  for(const key of Object.keys(PROFILES)){
+    if(league.toLowerCase().includes(key.toLowerCase())) return {...PROFILES[key], source:key};
+  }
+  const rows = BY_LEAGUE.get(league)||[];
+  const p = deriveProfile(rows);
+  return {...p, source:'heurística'};
 }
-function getOdds_1X2(r, f1,fX,f2){
-  const obj = r.raw;
-  const o1 = +obj[f1] || +obj['Odd 1 PreMatch'] || +obj['Odd1Prematch'] || null;
-  const ox = +obj[fX] || +obj['Odd X PreMatch'] || +obj['OddXPrematch'] || null;
-  const o2 = +obj[f2] || +obj['Odd 2 PreMatch'] || +obj['Odd2Prematch'] || null;
+
+// ===== Odds helpers =====
+function getOdds_OU(r,fOver,fUnder,line){
+  const o=r.raw, cO=[fOver,'Odd Over25','OddOver25','Over25','Over 2.5','OddOver2_5','OddOver2.5'].filter(Boolean);
+  const cU=[fUnder,'Odd Under25','OddUnder25','Under25','Under 2.5','OddUnder2_5','OddUnder2.5'].filter(Boolean);
+  const over=cO.map(k=>+o[k]).find(x=>x>1.01)||null, under=cU.map(k=>+o[k]).find(x=>x>1.01)||null;
+  return {over,under,line};
+}
+function getOdds_BTTS(r,fBTTS){const o=r.raw;const c=[fBTTS,'Odd BTTS','OddBTTS','Odd GG','OddGG','Odd'].filter(Boolean);
+  const yes=c.map(k=>+o[k]).find(x=>x>1.01)||null;return {yes};}
+function getOdds_1X2(r,f1,fX,f2){const o=r.raw;
+  const o1=+o[f1]||+o['Odd 1 PreMatch']||null, ox=+o[fX]||+o['Odd X PreMatch']||null, o2=+o[f2]||+o['Odd 2 PreMatch']||null;
   return {o1:o1>1.01?o1:null, ox:ox>1.01?ox:null, o2:o2>1.01?o2:null};
 }
 
 // ===== Backtest =====
-el('run').addEventListener('click', ()=>{
+el('league').addEventListener('change', ()=>{
   const L = el('league').value;
-  if(!L){ alert('Elige una liga.'); return; }
-  const rows = (BY_LEAGUE.get(L)||[]).slice();
-  if(rows.length< +el('minHist').value + 1){ alert('Muy pocos partidos para backtest en esta liga.'); return; }
+  if(!L) return;
+  if(el('profileMode').value==='AUTO'){
+    const p = pickProfile(L);
+    el('alpha').value = p.alpha.toFixed(2);
+    el('disc').value  = p.disc;
+    el('evThr').value = p.ev.toFixed(3);
+  }
+});
+el('run').addEventListener('click', ()=>{
+  const L=el('league').value; if(!L){alert('Elige una liga.');return;}
+  const rows=(BY_LEAGUE.get(L)||[]).slice(); if(rows.length<+el('minHist').value+1){alert('Muy pocos partidos en esa liga.');return;}
 
-  const alpha = Math.max(0, Math.min(0.99, +el('alpha').value||0));
-  const disc = el('disc').value;
-  const ns   = Math.max(2000, Math.floor(+el('nsims').value||10000));
-  const minHist = Math.max(3, Math.floor(+el('minHist').value||8));
-  const evThr = +el('evThr').value||0;
-  const stake = +el('stake').value||1;
-  const market = el('market').value;
-  const ouLine = +el('ouLine').value||2.5;
+  // Perfil
+  const auto = el('profileMode').value==='AUTO';
+  const prof = auto ? pickProfile(L) : {alpha:+el('alpha').value||0.15, disc:el('disc').value, ev:+el('evThr').value||0};
+  // (habilitar/deshabilitar inputs)
+  syncManualDisable();
 
-  // campos de odds
-  const fOver = el('fOddOver').value.trim();
-  const fUnder= el('fOddUnder').value.trim();
-  const fBTTS = el('fOddBTTS').value.trim();
+  // Parámetros de ejecución
+  const market=el('market').value; const ouLine=+el('ouLine').value||2.5;
+  const ns=Math.max(2000,Math.floor(+el('nsims').value||15000));
+  const minHist=Math.max(3,Math.floor(+el('minHist').value||8));
+  const stake=+el('stake').value||1;
+
+  const fOver=el('fOddOver').value.trim(), fUnder=el('fOddUnder').value.trim(), fBTTS=el('fOddBTTS').value.trim();
   const f1=el('fOdd1').value.trim(), fX=el('fOddX').value.trim(), f2=el('fOdd2').value.trim();
 
-  let bets=0, hits=0, units=0;
-  const rowsOut=[];
+  let bets=0,hits=0,units=0;
+  const out=[];
 
-  // walk-forward
   for(let i=0;i<rows.length;i++){
-    const r = rows[i];
-    const hist = rows.slice(0,i);              // solo pasado
-    if(hist.length < minHist) continue;
+    const r=rows[i], hist=rows.slice(0,i);
+    if(hist.length<minHist) continue;
 
-    // Datos de liga (histórico) para parámetros
-    const H = hist.map(x=>x.h), A = hist.map(x=>x.a);
+    const H=hist.map(x=>x.h), A=hist.map(x=>x.a);
     let muH,muA,sdH,sdA,cov,rho;
+    const alpha=prof.alpha;
     const w = alpha>0 ? ewmaWeights(hist.length, alpha) : null;
-    if(w){
-      muH = meanW(H,w); muA = meanW(A,w);
-      sdH = Math.sqrt(varW(H,muH,w)); sdA = Math.sqrt(varW(A,muA,w));
-      cov =  covW(H,A,muH,muA,w);
-    }else{
-      muH = mean(H); muA = mean(A);
-      sdH = Math.sqrt(variance(H,muH)); sdA = Math.sqrt(variance(A,muA));
-      cov = covariance(H,A,muH,muA);
-    }
-    sdH = Math.max(sdH,1e-6); sdA=Math.max(sdA,1e-6);
-    rho = Math.max(-0.999, Math.min(0.999, cov/(sdH*sdA)));
+    if(w){ muH=meanW(H,w); muA=meanW(A,w); sdH=Math.sqrt(varW(H,muH,w)); sdA=Math.sqrt(varW(A,muA,w)); cov=covW(H,A,muH,muA,w);}
+    else { muH=mean(H); muA=mean(A); sdH=Math.sqrt(variance(H,muH)); sdA=Math.sqrt(variance(A,muA)); cov=covariance(H,A,muH,muA);}
+    sdH=Math.max(sdH,1e-6); sdA=Math.max(sdA,1e-6); rho=Math.max(-0.999,Math.min(0.999,cov/(sdH*sdA)));
 
-    // Simulación
-    const sim = simulate(muH,muA,sdH,sdA,rho,ns,disc,ouLine);
+    const sim=simulate(muH,muA,sdH,sdA,rho,ns,prof.disc,ouLine);
 
-    // Odds del registro
     let bet=null, odd=null, p=null, res=null, win=0;
-
     if(market==='OU'){
-      const {over,under} = getOdds_OU(r,fOver,fUnder,ouLine);
-      const cand = [];
-      if(over)  cand.push({label:'Over '+ouLine, p:sim.pOver, odd:over, win: (r.h+r.a>ouLine)?1:0});
-      if(under) cand.push({label:'Under '+ouLine,p:sim.pUnder,odd:under,win: (r.h+r.a<=ouLine)?1:0});
-      cand.forEach(c=> c.ev = c.p*(c.odd-1) - (1-c.p));
-      const pick = cand.sort((a,b)=>b.ev-a.ev)[0];
-      if(pick && pick.ev>=evThr){ bet=pick.label; p=pick.p; odd=pick.odd; win=pick.win; }
-      res = (r.h+r.a)+'g';
+      const {over,under}=getOdds_OU(r,fOver,fUnder,ouLine);
+      const cand=[]; if(over)  cand.push({label:'Over '+ouLine, p:sim.pOver,  odd:over,  win:(r.h+r.a>ouLine)?1:0});
+                      if(under) cand.push({label:'Under '+ouLine,p:sim.pUnder, odd:under, win:(r.h+r.a<=ouLine)?1:0});
+      cand.forEach(c=>c.ev=c.p*(c.odd-1)-(1-c.p));
+      const pick=cand.sort((a,b)=>b.ev-a.ev)[0];
+      if(pick && pick.ev>=prof.ev){bet=pick.label;p=pick.p;odd=pick.odd;win=pick.win;}
+      res=(r.h+r.a)+'g';
     }else if(market==='BTTS'){
-      const {yes} = getOdds_BTTS(r,fBTTS);
-      if(yes){
-        const pBTTS = sim.pBTTS, ev = pBTTS*(yes-1)-(1-pBTTS);
-        if(ev>=evThr){ bet='BTTS Sí'; p=pBTTS; odd=yes; win=(r.h>0&&r.a>0)?1:0; }
-      }
-      res = r.h+'-'+r.a;
-    }else if(market==='1X2'){
-      const {o1,ox,o2} = getOdds_1X2(r,f1,fX,f2);
-      const cand=[];
-      if(o1) cand.push({label:'1', p:sim.p1, odd:o1, win:(r.h>r.a)?1:0});
-      if(ox) cand.push({label:'X', p:sim.pX, odd:ox, win:(r.h===r.a)?1:0});
-      if(o2) cand.push({label:'2', p:sim.p2, odd:o2, win:(r.h<r.a)?1:0});
-      cand.forEach(c=> c.ev = c.p*(c.odd-1) - (1-c.p));
-      const pick = cand.sort((a,b)=>b.ev-a.ev)[0];
-      if(pick && pick.ev>=evThr){ bet=pick.label; p=pick.p; odd=pick.odd; win=pick.win; }
-      res = r.h+'-'+r.a;
+      const {yes}=getOdds_BTTS(r,fBTTS);
+      if(yes){const pBTTS=sim.pBTTS,ev=pBTTS*(yes-1)-(1-pBTTS);if(ev>=prof.ev){bet='BTTS Sí';p=pBTTS;odd=yes;win=(r.h>0&&r.a>0)?1:0;}}
+      res=r.h+'-'+r.a;
+    }else{
+      const {o1,ox,o2}=getOdds_1X2(r,f1,fX,f2);
+      const cand=[]; if(o1)cand.push({label:'1',p:sim.p1,odd:o1,win:(r.h>r.a)?1:0});
+                     if(ox)cand.push({label:'X',p:sim.pX,odd:ox,win:(r.h===r.a)?1:0});
+                     if(o2)cand.push({label:'2',p:sim.p2,odd:o2,win:(r.h<r.a)?1:0});
+      cand.forEach(c=>c.ev=c.p*(c.odd-1)-(1-c.p));
+      const pick=cand.sort((a,b)=>b.ev-a.ev)[0];
+      if(pick && pick.ev>=prof.ev){bet=pick.label;p=pick.p;odd=pick.odd;win=pick.win;}
+      res=r.h+'-'+r.a;
     }
 
     if(bet){
-      bets += 1;
-      hits += win;
-      const pnl = win ? stake*(odd-1) : -stake;
-      units += pnl;
-      rowsOut.push({
-        date: r.date.toISOString().slice(0,10),
-        match: r.match,
-        market: bet,
-        odd: odd?.toFixed(2),
-        p_hat: p?.toFixed(3),
-        EV: (p*(odd-1)-(1-p)).toFixed(3),
-        result: res,
-        win: win? '✔' : '✖'
-      });
+      bets++; hits+=win;
+      const pnl=win? stake*(odd-1) : -stake; units+=pnl;
+      out.push({date:r.date.toISOString().slice(0,10),match:r.match,market:bet,odd:odd?.toFixed(2),p_hat:p?.toFixed(3),EV:(p*(odd-1)-(1-p)).toFixed(3),result:res,win:win?'✔':'✖'});
     }
   }
 
-  const roi = bets>0 ? (units/(bets*stake)) : 0;
-  el('bets').textContent = bets;
-  el('hits').textContent = hits;
-  el('hitRate').textContent = bets? pct(hits/bets) : '—';
-  el('units').textContent = fmt(units);
-  el('roi').textContent = bets? pct(roi) : '—';
+  const roi = bets? (units/(bets*stake)) : 0;
+  el('bets').textContent=bets; el('hits').textContent=hits;
+  el('hitRate').textContent=bets?pct(hits/bets):'—';
+  el('units').textContent=fmt(units); el('roi').textContent=bets?pct(roi):'—';
+
+  const pPicked = auto ? pickProfile(L) : {alpha:+el('alpha').value, disc:el('disc').value, ev:+el('evThr').value};
   el('badges').innerHTML = `<span class="pill">Liga: <b>${L}</b></span>
-    <span class="pill">Mercado: <b>${el('market').value}</b></span>
-    <span class="pill">α: <b>${alpha}</b></span>
-    <span class="pill">Disc: <b>${disc}</b></span>
+    <span class="pill">Perfil: <b>${(pPicked.source||'manual')}</b></span>
+    <span class="pill">α: <b>${pPicked.alpha.toFixed(2)}</b></span>
+    <span class="pill">Disc: <b>${pPicked.disc}</b></span>
+    <span class="pill">EV≥ <b>${pPicked.ev.toFixed(3)}</b></span>
     <span class="pill">#Sims: <b>${ns}</b></span>
     <span class="pill">MinHist: <b>${minHist}</b></span>
-    <span class="pill">EV≥ <b>${evThr}</b></span>`;
+    <span class="pill">Mercado: <b>${market}</b></span>`;
 
-  // tabla
-  const tb = document.querySelector('#tbl tbody');
-  tb.innerHTML = rowsOut.slice(0,200).map(r=>`<tr>
+  const tb=document.querySelector('#tbl tbody');
+  tb.innerHTML = out.slice(0,200).map(r=>`<tr>
     <td>${r.date}</td><td>${r.match}</td><td>${r.market}</td>
     <td>${r.odd}</td><td>${r.p_hat}</td><td>${r.EV}</td><td>${r.result}</td><td>${r.win}</td>
   </tr>`).join('') || `<tr><td colspan="8" class="muted">No hubo apuestas con EV ≥ umbral.</td></tr>`;
 
-  // CSV
-  el('btnCsv').onclick = ()=>{
-    const rowsCsv = [['date','match','market','odd','p_hat','EV','result','win']].concat(
-      rowsOut.map(r=>[r.date,r.match,r.market,r.odd,r.p_hat,r.EV,r.result,r.win])
-    );
-    const csv = rowsCsv.map(r=>r.join(',')).join('\n');
-    const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href=url; a.download=`backtest_${L}_${el('market').value}.csv`;
-    document.body.appendChild(a); a.click(); a.remove();
-    URL.revokeObjectURL(url);
+  el('btnCsv').onclick=()=>{
+    const rowsCsv=[['date','match','market','odd','p_hat','EV','result','win']].concat(out.map(r=>[r.date,r.match,r.market,r.odd,r.p_hat,r.EV,r.result,r.win]));
+    const csv=rowsCsv.map(r=>r.join(',')).join('\n'); const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'});
+    const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download=`backtest_${L}_${market}.csv`; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
   };
 });
 </script>
