@@ -3,11 +3,11 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>Modelo BTTS (GG): logística + prior de mercado</title>
+<title>BTTS (GG) — Logística + prior (1/Odd GG) con selectores por liga/equipos</title>
 <style>
   :root{--bg:#0f1115;--card:#171a21;--bd:#2a3140;--fg:#e6eaf2;--mut:#9aa3b2;--btn:#7aa2ff}
   *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--fg);font:14px system-ui,Segoe UI,Roboto,Arial}
-  header{padding:14px 16px;border-bottom:1px solid var(--bd)} .wrap{max-width:980px;margin:0 auto;padding:16px}
+  header{padding:14px 16px;border-bottom:1px solid var(--bd)} .wrap{max-width:1000px;margin:0 auto;padding:16px}
   h1{margin:0;font-size:18px} .card{background:#171a21;border:1px solid var(--bd);border-radius:12px;padding:14px;margin:12px 0}
   label{display:block;margin:6px 0 4px} input,select,button,textarea{width:100%;background:#1e2430;color:var(--fg);border:1px solid var(--bd);border-radius:8px;padding:8px}
   button{background:var(--btn);color:#0b1020;font-weight:700;cursor:pointer}
@@ -31,15 +31,14 @@
         <div class="pill" id="status">Sin datos</div>
       </div>
       <div>
-        <label>Partido a predecir</label>
-        <select id="rowSel"><option value="">—</option></select>
+        <label>Parámetros de entrenamiento</label>
         <div class="grid" style="grid-template-columns:1fr 1fr">
           <div>
             <label>EV mínimo (sugerencia)</label>
             <input id="evMin" type="number" step="0.01" value="0.03"/>
           </div>
           <div>
-            <label>Iteraciones (entreno)</label>
+            <label>Iteraciones</label>
             <input id="iters" type="number" step="100" value="1500"/>
           </div>
         </div>
@@ -55,7 +54,7 @@
         </div>
         <div class="grid" style="grid-template-columns:1fr 1fr;margin-top:8px">
           <button id="train">Entrenar</button>
-          <button id="predict">Predecir BTTS (GG)</button>
+          <button id="reset">Reiniciar</button>
         </div>
       </div>
     </div>
@@ -63,8 +62,35 @@
   </div>
 
   <div class="card">
-    <details>
-      <summary>Ver últimas predicciones / depuración</summary>
+    <h3>Selecciona Liga y Equipos</h3>
+    <div class="grid">
+      <div>
+        <label>Liga</label>
+        <select id="leagueSel"><option value="">—</option></select>
+      </div>
+      <div>
+        <label>Equipo Local</label>
+        <select id="homeSel"><option value="">—</option></select>
+      </div>
+      <div>
+        <label>Equipo Visitante</label>
+        <select id="awaySel"><option value="">—</option></select>
+      </div>
+      <div>
+        <label>Odd (GG) si falta en JSON</label>
+        <input id="oddGGManual" type="number" step="0.01" placeholder="Ej. 2.25"/>
+      </div>
+    </div>
+    <div class="grid" style="grid-template-columns:1fr 1fr;margin-top:10px">
+      <button id="predict">Predecir BTTS (GG)</button>
+      <div></div>
+    </div>
+    <div class="out" id="selInfo" style="margin-top:8px">—</div>
+  </div>
+
+  <div class="card">
+    <details open>
+      <summary>Últimas predicciones / depuración</summary>
       <table id="tbl"><thead><tr><th>Fecha</th><th>Liga</th><th>Partido</th><th>Odd GG</th><th>p̂ BTTS</th><th>EV</th><th>Sugerencia</th></tr></thead><tbody></tbody></table>
     </details>
   </div>
@@ -79,11 +105,15 @@ const logit   = p => Math.log(p/(1-p));
 const dot=(a,b)=>{let s=0; for(let i=0;i<a.length;i++) s+=a[i]*b[i]; return s;};
 const pct = x => isFinite(x) ? (x*100).toFixed(1)+'%' : '—';
 const fmt = x => isFinite(x) ? (+x).toFixed(3) : '—';
+const toISO = s => { const d=new Date(s); return isNaN(d)?'':d.toISOString().slice(0,10); };
+// normaliza strings (minúsculas y sin acentos)
+const norm = s => String(s||'').toLowerCase().normalize('NFD').replace(/\p{Diacritic}/gu,'');
 
 // ===== Dataset y modelo
 let DATA = [];           // array de objetos (tu formato)
 let SCALER = null;       // {mu,sd,keys}
 let MODEL  = null;       // {w,b}
+let TEAMS_BY_LEAGUE = new Map();
 
 // ===== Lectura de datos
 el('file').addEventListener('change', async e=>{
@@ -96,21 +126,39 @@ el('btnPaste').addEventListener('click', async ()=>{
 
 function loadJSON(txt){
   let arr;
-  try{
-    arr = JSON.parse(txt);
-  }catch(e){
-    // NDJSON fallback
-    arr = txt.split(/\r?\n/).map(t=>t.trim()).filter(Boolean).map(JSON.parse);
-  }
+  try{ arr = JSON.parse(txt); }
+  catch{ arr = txt.split(/\r?\n/).map(t=>t.trim()).filter(Boolean).map(JSON.parse); }
   if(!Array.isArray(arr)) throw new Error('El JSON debe ser un array de partidos.');
   DATA = arr;
-  // poblar selector
-  const opts = ['<option value="">—</option>']
-    .concat(arr.map((r,i)=>`<option value="${i}">${(r.Date||'').slice(0,10)} — ${r.League||''} — ${r.Match||''}</option>`));
-  el('rowSel').innerHTML = opts.join('');
-  el('status').textContent = `Cargados ${arr.length} partidos.`;
-  el('out').textContent = 'Lista la carga. Entrena y luego predice.';
+
+  // Construir ligas y equipos por liga (desde campo Match "Local - Visitante")
+  TEAMS_BY_LEAGUE.clear();
+  for(const r of DATA){
+    const lg=(r.League||'').trim(); if(!lg) continue;
+    if(!TEAMS_BY_LEAGUE.has(lg)) TEAMS_BY_LEAGUE.set(lg,new Set());
+    const set=TEAMS_BY_LEAGUE.get(lg);
+    const m=String(r.Match||''); const parts=m.split(/[-–]/);
+    const h=(parts[0]||'').trim(), a=(parts[1]||'').trim();
+    if(h) set.add(h); if(a) set.add(a);
+  }
+  const leagues=[...TEAMS_BY_LEAGUE.keys()].sort((a,b)=>a.localeCompare(b,'es',{sensitivity:'base'}));
+  el('leagueSel').innerHTML = ['<option value="">—</option>'].concat(leagues.map(l=>`<option>${l}</option>`)).join('');
+  el('homeSel').innerHTML = '<option value="">—</option>';
+  el('awaySel').innerHTML = '<option value="">—</option>';
+
+  el('status').textContent = `Cargados ${arr.length} partidos | Ligas: ${leagues.length}`;
+  el('out').textContent = 'Lista la carga. Entrena y luego elige Liga/Local/Visitante para predecir.';
+  el('selInfo').textContent = '—';
 }
+
+el('leagueSel').addEventListener('change', ()=>{
+  const lg=el('leagueSel').value;
+  const teams = lg && TEAMS_BY_LEAGUE.has(lg) ? [...TEAMS_BY_LEAGUE.get(lg)].sort((a,b)=>a.localeCompare(b,'es',{sensitivity:'base'})) : [];
+  const opts = ['<option value="">—</option>'].concat(teams.map(t=>`<option>${t}</option>`)).join('');
+  el('homeSel').innerHTML = opts;
+  el('awaySel').innerHTML = opts;
+  el('selInfo').textContent = '—';
+});
 
 // ===== Labels / features
 function labelBTTS(row){
@@ -121,7 +169,7 @@ function labelBTTS(row){
 }
 function pFromOddGG(row){
   const o = parseFloat(row.Odd);
-  return Number.isFinite(o) && o>1 ? clamp01(1/o) : 0.5;
+  return Number.isFinite(o) && o>1 ? clamp01(1/o) : NaN;
 }
 function buildFeatures(row){
   const f = {};
@@ -200,37 +248,55 @@ function trainLogistic(X, y, priorP, {lr=0.05, l2=1e-3, iters=1500}={}){
 }
 function predictProba(x, model){ return sigmoid(model.b + dot(model.w, x)); }
 
-// ===== Botones
+// ===== Entrenar / Reiniciar
 el('train').addEventListener('click', ()=>{
   if(!DATA.length){ alert('Carga un JSON con histórico.'); return; }
-
-  // Dataset etiquetado: exige marcador FT válido
   const rowsLabeled = DATA.filter(r => labelBTTS(r)===0 || labelBTTS(r)===1);
-  if(rowsLabeled.length<30){ alert('Se requieren ≥30 partidos con Result FT para entrenar decentemente.'); return; }
+  if(rowsLabeled.length<30){ alert('Se requieren ≥30 partidos con Result FT para entrenar.'); return; }
 
   const feats = rowsLabeled.map(buildFeatures);
   SCALER = fitScaler(feats);
   const X = feats.map(f=>toVectorZ(f,SCALER));
   const y = rowsLabeled.map(labelBTTS);
 
-  // prior promedio desde Odd(GG)
   const priors = rowsLabeled.map(pFromOddGG).filter(Number.isFinite);
   const priorP = priors.length ? (priors.reduce((s,x)=>s+x,0)/priors.length) : 0.5;
 
-  const iters = +el('iters').value||1500, lr=+el('lr').value||0.05, l2=+el('l2').value||0.001;
+  const iters=+el('iters').value||1500, lr=+el('lr').value||0.05, l2=+el('l2').value||0.001;
   MODEL = trainLogistic(X,y,priorP,{lr,l2,iters});
-
   el('out').textContent = `Modelo entrenado con ${rowsLabeled.length} partidos. Prior mkt=${fmt(priorP)}.`;
 });
+el('reset').addEventListener('click', ()=>{
+  MODEL=null; SCALER=null;
+  el('out').textContent='—';
+});
 
+// ===== Encontrar partido por liga/local/visitante (último por fecha)
+function findLatestMatch(league, home, away){
+  const lgN=norm(league), hN=norm(home), aN=norm(away);
+  const candidates = DATA.filter(r=>{
+    if(norm(r.League||'')!==lgN) return false;
+    const parts=String(r.Match||'').split(/[-–]/);
+    const h=(parts[0]||'').trim(), a=(parts[1]||'').trim();
+    return norm(h)===hN && norm(a)===aN;
+  }).sort((r1,r2)=> new Date(r2.Date||0) - new Date(r1.Date||0));
+  return candidates[0]||null;
+}
+
+// ===== Predecir
 el('predict').addEventListener('click', ()=>{
-  const idx = +el('rowSel').value;
-  if(!(idx>=0)){ alert('Elige un partido del selector.'); return; }
-  const row = DATA[idx];
-  const oddGG = parseFloat(row.Odd);
-  const evMin = +el('evMin').value || 0.03;
+  const lg=el('leagueSel').value, home=el('homeSel').value, away=el('awaySel').value;
+  if(!lg || !home || !away){ alert('Elige liga, local y visitante.'); return; }
 
-  // Si no hay modelo pero sí cuota, damos prior
+  const row = findLatestMatch(lg, home, away);
+  if(!row){ el('selInfo').textContent='No se encontró ese duelo en la liga. Asegura que el texto coincide con el JSON.'; return; }
+
+  // Odd GG: del JSON si existe; si no, usar manual
+  let oddGG = parseFloat(row.Odd);
+  const oddManual = parseFloat(el('oddGGManual').value);
+  if(!(Number.isFinite(oddGG)&&oddGG>1) && (Number.isFinite(oddManual)&&oddManual>1)) oddGG = oddManual;
+
+  // Probabilidad (prior o modelo, si entrenaste)
   let p = NaN, mode='prior';
   if(MODEL && SCALER){
     const f = buildFeatures(row);
@@ -238,14 +304,16 @@ el('predict').addEventListener('click', ()=>{
     p = predictProba(x, MODEL);
     mode='modelo';
   }else{
-    p = pFromOddGG(row);
+    const pmkt = pFromOddGG(row);
+    p = Number.isFinite(pmkt) ? pmkt : (Number.isFinite(oddGG)? clamp01(1/oddGG): 0.5);
   }
 
+  const evMin = +el('evMin').value || 0.03;
   const ev = (Number.isFinite(oddGG)&&oddGG>1) ? (p*(oddGG-1)-(1-p)) : NaN;
   const sug = Number.isFinite(ev) && ev>=evMin ? 'APOSTAR' : 'NO APOSTAR';
 
-  el('out').innerHTML = `
-    <div><b>${(row.Date||'').slice(0,10)}</b> — ${row.League||''} — ${row.Match||''}</div>
+  el('selInfo').innerHTML = `
+    <div><b>${toISO(row.Date)}</b> — ${row.League||''} — ${row.Match||''}</div>
     <div class="pill">Modo: ${mode}</div>
     <div class="pill">Odd GG: ${Number.isFinite(oddGG)?oddGG.toFixed(2):'—'}</div>
     <div class="pill">p̂ BTTS: <b>${fmt(p)}</b></div>
@@ -255,7 +323,7 @@ el('predict').addEventListener('click', ()=>{
 
   const tb = document.querySelector('#tbl tbody');
   const tr = document.createElement('tr');
-  tr.innerHTML = `<td>${(row.Date||'').slice(0,10)}</td><td>${row.League||''}</td><td>${row.Match||''}</td>
+  tr.innerHTML = `<td>${toISO(row.Date)}</td><td>${row.League||''}</td><td>${row.Match||''}</td>
                   <td>${Number.isFinite(oddGG)?oddGG.toFixed(2):'—'}</td><td>${fmt(p)}</td><td>${fmt(ev)}</td><td>${sug}</td>`;
   tb.prepend(tr);
 });
