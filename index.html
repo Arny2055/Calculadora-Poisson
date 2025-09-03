@@ -129,7 +129,7 @@ const el=id=>document.getElementById(id);
 const pct=x=> (x*100).toFixed(2)+'%';
 const fmt=x=> (isFinite(x)?x.toFixed(3):'—');
 const num=v=>{const t=String(v??'').trim().replace(',','.'); const x=parseFloat(t); return Number.isFinite(x)?x:NaN;};
-function parseFT(s){const m=String(s||'').match(/(-?\d+)\s*[-:]\s*(-?\d+)/);return m?[+m[1],+m[2]]:[null,null];}
+function parseFT(s){const m=String(s||'').match(/(-?\d+)\s*[-:–]\s*(-?\d+)/);return m?[+m[1],+m[2]]:[null,null];}
 function parseDateAny(s){const d=new Date(s); if(!isNaN(d)) return d; return new Date(NaN);}
 function splitTeams(match){ if(!match) return ['','']; const parts=String(match).split(/[-–]/); return [(parts[0]||'').trim(),(parts[1]||'').trim()];}
 function mean(a){return a.reduce((s,x)=>s+x,0)/Math.max(1,a.length);}
@@ -137,39 +137,76 @@ function sampleCov(X,Y){const n=Math.min(X.length,Y.length); if(n<2) return 0; c
 
 /* ===== Estado ===== */
 let RAW=[], BY_LEAGUE=new Map(), TEAMS_BY_LEAGUE=new Map();
-let MODEL=null; // modelo entrenado por liga (almacena lambdas base + cov)
+let MODEL=null; // modelo entrenado por liga
 
-/* ===== Carga histórico ===== */
+/* ===== Carga histórico (parser robusto) ===== */
 el('file').addEventListener('change', async e=>{
   const f=e.target.files[0]; if(!f)return;
-  try{ingest(JSON.parse(await f.text()));}catch(err){alert('Error JSON: '+err);}
+  try{ingest(await f.text());}catch(err){alert('Error JSON: '+err);}
 });
 el('btnPaste').addEventListener('click', async ()=>{
-  try{ingest(JSON.parse(await navigator.clipboard.readText()));}catch(err){alert('Portapapeles: '+err);}
+  try{ingest(await navigator.clipboard.readText());}catch(err){alert('Portapapeles: '+err);}
 });
-function ingest(arr){
+function ingest(rawInput){
+  // Normaliza a array
+  let arr = rawInput;
+  if (typeof arr === 'string') {
+    try { arr = JSON.parse(arr); }
+    catch {
+      // NDJSON (una por línea)
+      arr = arr.split(/\r?\n/).map(t=>t.trim()).filter(Boolean).map(JSON.parse);
+    }
+  }
+  if (!Array.isArray(arr)) {
+    const cand = arr?.data || arr?.rows || arr?.items || arr?.matches || arr?.events;
+    arr = Array.isArray(cand) ? cand : [];
+  }
+
   RAW=[]; BY_LEAGUE.clear(); TEAMS_BY_LEAGUE.clear();
+  let kept=0, skipped=0;
+
+  const pick=(o,keys)=>{for(const k of keys){if(o!=null && o[k]!=null && String(o[k]).trim()!=='') return o[k];}return undefined;};
+  const toInt=v=>Number.isFinite(+v)?+v:NaN;
+
   for(const r of arr){
-    const league=String(r.League||'').trim(); if(!league) continue;
-    const [h,a]=parseFT(r["Result FT"]||r.Result);
-    const date=parseDateAny(r.Date||r.date||'');
-    const match=String(r.Match||'').trim();
-    if(!Number.isFinite(h)||!Number.isFinite(a)||isNaN(date)) continue;
-    const [homeName, awayName]=splitTeams(match);
-    const row={league,date,match,h,a,homeName,awayName,raw:r};
+    const league = pick(r,['League','league','Liga','Competition','competition','Tournament','tournament']);
+    const dateV  = pick(r,['Date','date','Fecha']);
+    const match  = pick(r,['Match','match','Partido']);
+    let ft = pick(r,['Result FT','ResultFT','FT','Score','score','Result','Resultado']);
+
+    let h=null,a=null;
+    if(ft){ const m=String(ft).match(/(-?\d+)\s*[-:–]\s*(-?\d+)/); if(m){h=toInt(m[1]); a=toInt(m[2]);} }
+    if(!Number.isFinite(h)||!Number.isFinite(a)){
+      h=toInt(pick(r,['HomeGoals','HG','GolesLocal','Home FT','h']));
+      a=toInt(pick(r,['AwayGoals','AG','GolesVisitante','Away FT','a']));
+    }
+    const d=parseDateAny(dateV);
+    if(!league || isNaN(d) || !Number.isFinite(h) || !Number.isFinite(a)){ skipped++; continue; }
+
+    let homeName=pick(r,['Home','HomeTeam','Local','home']);
+    let awayName=pick(r,['Away','AwayTeam','Visitante','away']);
+    const matchText = match || (homeName && awayName ? `${homeName} - ${awayName}` : '');
+    if(!homeName || !awayName){
+      const parts=matchText.split(/[-–]/);
+      homeName = homeName || (parts[0]||'').trim();
+      awayName = awayName || (parts[1]||'').trim();
+    }
+
+    const row={league:String(league).trim(), date:d, match:matchText.trim(), h, a, homeName, awayName, raw:r};
     RAW.push(row);
-    if(!BY_LEAGUE.has(league)) BY_LEAGUE.set(league,[]);
-    BY_LEAGUE.get(league).push(row);
-    if(!TEAMS_BY_LEAGUE.has(league)) TEAMS_BY_LEAGUE.set(league,new Set());
-    const set=TEAMS_BY_LEAGUE.get(league); if(homeName) set.add(homeName); if(awayName) set.add(awayName);
+    if(!BY_LEAGUE.has(row.league)) BY_LEAGUE.set(row.league,[]);
+    BY_LEAGUE.get(row.league).push(row);
+    if(!TEAMS_BY_LEAGUE.has(row.league)) TEAMS_BY_LEAGUE.set(row.league,new Set());
+    const set=TEAMS_BY_LEAGUE.get(row.league); if(homeName) set.add(homeName); if(awayName) set.add(awayName);
+    kept++;
   }
   for(const v of BY_LEAGUE.values()) v.sort((x,y)=>x.date-y.date);
   el('league').innerHTML='<option value="">—</option>'+Array.from(BY_LEAGUE.keys()).sort().map(l=>`<option>${l}</option>`).join('');
-  el('info').textContent=`Cargados ${RAW.length} partidos en ${BY_LEAGUE.size} ligas.`;
+  el('info').textContent=`Cargados ${kept} partidos en ${BY_LEAGUE.size} ligas. Omitidos: ${skipped}.`;
 }
 el('league').addEventListener('change', ()=>{ refreshNextTeamSelects(); MODEL=null; el('info').textContent='—'; });
 
-/* ===== Helpers cuotas en histórico ===== */
+/* ===== Helpers cuotas (histórico) ===== */
 function getOdds_OU(r, fOver, fUnder){const o=r.raw;
   const cO=[fOver,'Odd Over25','OddOver25','Over25','Over 2.5','OddOver2_5','OddOver2.5'].filter(Boolean);
   const cU=[fUnder,'Odd Under25','OddUnder25','Under25','Under 2.5','OddUnder2_5','OddUnder2.5'].filter(Boolean);
@@ -183,7 +220,7 @@ function getOdds_1X2(r,f1,fX,f2){const o=r.raw;
 }
 
 /* ===== Ratings por equipo (shrinkage + forma) ===== */
-function ewma(arr, a){ if(!arr.length) return 0; let m=arr[0]; for(let i=1;i<arr.length;i++) m=a*arr[i]+(1-a)*m; return m; }
+function ewma(arr,a){ if(!arr.length) return 0; let m=arr[0]; for(let i=1;i<arr.length;i++) m=a*arr[i]+(1-a)*m; return m; }
 function trainTeams(rows,{tau=8,n_cap=20,alphaForm=0.25,kForm=6}={}){
   const league={gh:0,ga:0,n:0}; for(const r of rows){ league.gh+=r.h; league.ga+=r.a; league.n++; }
   league.gh/=Math.max(1,league.n); league.ga/=Math.max(1,league.n);
@@ -224,7 +261,7 @@ function probsBivariate(lamH, lamA, cov, {lineOU=2.5, maxGoals=10, useDC=false, 
   const M=Array.from({length:maxGoals+1},()=>Array(maxGoals+1).fill(0));
   for(let i=0;i<=maxGoals;i++)for(let j=0;j<=maxGoals;j++) M[i][j]=pIJ(i,j);
 
-  if(useDC){ // tweak 0-0,1-0,0-1,1-1 + renormaliza
+  if(useDC){ // tweak low-score y renormaliza
     const tweak=(i,j)=>{
       if(i===0&&j===0) return 1 - rho;
       if(i===0&&j===1) return 1 + rho;
@@ -245,19 +282,17 @@ function probsBivariate(lamH, lamA, cov, {lineOU=2.5, maxGoals=10, useDC=false, 
   }
   return {p1,pX,p2,pOver,pUnder,pBTTS};
 }
-const ev=(p,odd)=> p*(odd-1)-(1-p);
+const ev=(p,odd)=> p*(c_odd(odd)-1)-(1-p);
+const c_odd=o=> (Number.isFinite(+o)?+o:NaN);
 
 /* ===== Entrenar (botón) ===== */
 el('train').addEventListener('click', ()=>{
   const L=el('league').value; if(!L){alert('Elige una liga.');return;}
   const rows=(BY_LEAGUE.get(L)||[]).slice(); if(rows.length<10){alert('Muy poco histórico.');return;}
-  // ratings equipos
   const teamsModel = trainTeams(rows,{
     tau:+el('tau').value||8, n_cap:+el('ncap').value||20, alphaForm:+el('alphaForm').value||0.25, kForm:+el('kForm').value||6
   });
-  // covarianza liga (para componente compartido)
-  const H=rows.map(r=>r.h), A=rows.map(r=>r.a);
-  const covHA = Math.max(0, sampleCov(H,A));
+  const covHA = Math.max(0, sampleCov(rows.map(r=>r.h), rows.map(r=>r.a)));
   MODEL={...teamsModel, covHA};
   el('info').textContent=`Entrenado: gh=${MODEL.league.gh.toFixed(2)}, ga=${MODEL.league.ga.toFixed(2)}, cov=${MODEL.covHA.toFixed(3)} | equipos=${Object.keys(MODEL.teams).length}`;
 });
@@ -274,14 +309,13 @@ el('run').addEventListener('click', ()=>{
   const beta=+el('beta').value||0.3, tau=+el('tau').value||8, n_cap=+el('ncap').value||20, alphaForm=+el('alphaForm').value||0.25, kForm=+el('kForm').value||6;
   const useDC=el('useDC').checked, rho=+el('rho').value||0.05;
 
-  // acumuladores liga y equipos incrementales
-  const H=[], A[];
-  const T=new Map(); // team -> {gf:[],ga:[]}
-  const mkTeam=t=>{ if(!T.has(t)) T.set(t,{gf:[],ga:[]}); return T.get(t); };
+  // Acumuladores incrementales de liga y equipos
+  let H=[], A=[];                     // ✅ corregido
+  const T=new Map(); const mkTeam=t=>{ if(!T.has(t)) T.set(t,{gf:[],ga:[]}); return T.get(t); };
 
   let bets=0,hits=0,units=0; const outRows=[];
   for(const r of rows){
-    if(H.length<8){ // “warm-up” de liga
+    if(H.length<8){ // warm-up
       H.push(r.h); A.push(r.a);
       mkTeam(r.homeName).gf.push(r.h); mkTeam(r.homeName).ga.push(r.a);
       mkTeam(r.awayName).gf.push(r.a); mkTeam(r.awayName).ga.push(r.h);
@@ -303,7 +337,7 @@ el('run').addEventListener('click', ()=>{
       return {rfor,rcon,ffor:f_for,fcon:f_con,nT};
     }
     const h=teamParams(r.homeName), a=teamParams(r.awayName);
-    if(h.nT<2||a.nT<2){ // poca historia por equipo
+    if(h.nT<2||a.nT<2){
       H.push(r.h); A.push(r.a);
       mkTeam(r.homeName).gf.push(r.h); mkTeam(r.homeName).ga.push(r.a);
       mkTeam(r.awayName).gf.push(r.a); mkTeam(r.awayName).ga.push(r.h);
@@ -320,18 +354,17 @@ el('run').addEventListener('click', ()=>{
 
     const P=probsBivariate(lamH,lamA,covHA,{lineOU:ouLine,maxGoals,useDC,rho});
 
-    // candidatos por mercado (si hay cuotas)
     const {over,under}=getOdds_OU(r,fOver,fUnder);
     const {yes}=getOdds_BTTS(r,fBTTS);
     const {o1,ox,o2}=getOdds_1X2(r,f1,fX,f2);
     const cand=[];
-    if(over) cand.push({lab:'Over '+ouLine,p:P.pOver,odd:over,win:(r.h+r.a>ouLine)?1:0});
-    if(under) cand.push({lab:'Under '+ouLine,p:P.pUnder,odd:under,win:(r.h+r.a<=ouLine)?1:0});
-    if(yes)   cand.push({lab:'BTTS Sí',    p:P.pBTTS,odd:yes, win:(r.h>0&&r.a>0)?1:0});
-    if(o1)    cand.push({lab:'1',          p:P.p1,   odd:o1,  win:(r.h>r.a)?1:0});
-    if(ox)    cand.push({lab:'X',          p:P.pX,   odd:ox,  win:(r.h===r.a)?1:0});
-    if(o2)    cand.push({lab:'2',          p:P.p2,   odd:o2,  win:(r.h<r.a)?1:0});
-    cand.forEach(c=>c.EV= c.p*(c.odd-1)-(1-c.p));
+    if(over) cand.push({lab:'Over '+ouLine,p:P.pOver, odd:over, win:(r.h+r.a>ouLine)?1:0});
+    if(under) cand.push({lab:'Under '+ouLine,p:P.pUnder, odd:under, win:(r.h+r.a<=ouLine)?1:0});
+    if(yes)   cand.push({lab:'BTTS Sí',    p:P.pBTTS, odd:yes,  win:(r.h>0&&r.a>0)?1:0});
+    if(o1)    cand.push({lab:'1',          p:P.p1,    odd:o1,   win:(r.h>r.a)?1:0});
+    if(ox)    cand.push({lab:'X',          p:P.pX,    odd:ox,   win:(r.h===r.a)?1:0});
+    if(o2)    cand.push({lab:'2',          p:P.p2,    odd:o2,   win:(r.h<r.a)?1:0});
+    cand.forEach(c=>c.EV= ev(c.p,c.odd));
     cand.sort((a,b)=>b.EV-a.EV);
     const pick=cand[0];
     if(pick && pick.EV>=evMin){
@@ -339,7 +372,6 @@ el('run').addEventListener('click', ()=>{
       outRows.push({date:r.date.toISOString().slice(0,10),match:r.match,market:pick.lab,odd:pick.odd.toFixed(2),p_hat:pick.p.toFixed(3),EV:pick.EV.toFixed(3),result:`${r.h}-${r.a}`,win:pick.win?'✔':'✖'});
     }
 
-    // actualizar
     H.push(r.h); A.push(r.a);
     mkTeam(r.homeName).gf.push(r.h); mkTeam(r.homeName).ga.push(r.a);
     mkTeam(r.awayName).gf.push(r.a); mkTeam(r.awayName).ga.push(r.h);
@@ -363,7 +395,7 @@ el('run').addEventListener('click', ()=>{
 });
 
 /* ===== Próximos ===== */
-const tbNext=document.querySelector('#tblNext tbody');
+const tbNext=document.querySelector('#tblNext tbody');  /* ✅ única definición */
 function getLeagueTeams(league){const set=TEAMS_BY_LEAGUE.get(league);return set?Array.from(set).sort((a,b)=>a.localeCompare(b,'es',{sensitivity:'base'})):[];}
 function teamSelectHTML(options,selected=''){const opts=['<option value="">—</option>'].concat(options.map(t=>`<option${t===selected?' selected':''}>${t}</option>`)); return `<select>${opts.join('')}</select>`;}
 function renderRow(next={date:'',home:'',away:'',over:'',under:'',line:'2.5',btts:'',o1:'',ox:'',o2:''}){
@@ -440,7 +472,6 @@ el('predict').addEventListener('click', ()=>{
     const home=(tds[1].querySelector('select')?.value)||''; const away=(tds[2].querySelector('select')?.value)||'';
     if(!home||!away){ out.push({date,match:`${home||'?'} vs ${away||'?'}`,market:'-',odd:'-',p:'-',EV:'-',decision:'—'}); continue; }
 
-    // lambdas esperadas (ratings + forma)
     const h=MODEL.teams[home], a=MODEL.teams[away], Lg=MODEL.league;
     if(!h||!a){ out.push({date,match:`${home} vs ${away}`,market:'-',odd:'-',p:'-',EV:'-',decision:'—'}); continue; }
     const atkH=Math.log(Math.max(1e-6,h.rfor))-Math.log(Math.max(1e-6,Lg.gh));
@@ -465,7 +496,7 @@ el('predict').addEventListener('click', ()=>{
     if(o1>1.01)    cand.push({lab:'1',           p:P.p1,    odd:o1});
     if(ox>1.01)    cand.push({lab:'X',           p:P.pX,    odd:ox});
     if(o2>1.01)    cand.push({lab:'2',           p:P.p2,    odd:o2});
-    cand.forEach(c=>c.EV= c.p*(c.odd-1)-(1-c.p));
+    cand.forEach(c=>c.EV= ev(c.p,c.odd));
     cand.sort((a,b)=>b.EV-a.EV);
     const pick=cand[0];
     const decision=(pick && pick.EV>=evMin)?'APOSTAR':'NO APOSTAR';
@@ -475,19 +506,6 @@ el('predict').addEventListener('click', ()=>{
   tb.innerHTML = out.map(r=>`<tr><td>${r.date||'-'}</td><td>${r.match}</td><td>${r.market}</td><td>${r.odd}</td><td>${r.p}</td><td>${r.EV}</td><td>${r.decision}</td></tr>`).join('')
     || `<tr><td colspan="7" class="muted">Agrega o importa próximos partidos.</td></tr>`;
 });
-
-/* ===== Próximos: helpers UI ===== */
-const tbNext=document.querySelector('#tblNext tbody');
-function refreshNextTeamSelects(){
-  const L=el('league').value, teams=getLeagueTeams(L);
-  [...tbNext.querySelectorAll('tr')].forEach(tr=>{
-    const tds=tr.querySelectorAll('td'); if(tds.length<3) return;
-    const h=tds[1].querySelector('select'), a=tds[2].querySelector('select');
-    const ch=h?.value||'', ca=a?.value||'';
-    if(h) h.outerHTML=teamSelectHTML(teams,ch);
-    if(a) a.outerHTML=teamSelectHTML(teams,ca);
-  });
-}
 </script>
 </body>
 </html>
