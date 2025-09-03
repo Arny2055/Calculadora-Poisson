@@ -1,589 +1,263 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Bivariante Poisson + Dixon–Coles — Backtest, Próximos y ROI por mercado</title>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Modelo BTTS (GG): logística + prior de mercado</title>
 <style>
   :root{--bg:#0f1115;--card:#171a21;--bd:#2a3140;--fg:#e6eaf2;--mut:#9aa3b2;--btn:#7aa2ff}
-  *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.45 system-ui,Inter,Segoe UI,Roboto,Arial}
-  header{padding:14px 16px;border-bottom:1px solid var(--bd)} .wrap{max-width:1200px;margin:0 auto;padding:16px}
-  h1{margin:0 0 6px;font-size:18px} h2{margin:0 0 10px;font-size:15px}
-  .grid{display:grid;gap:16px} @media(min-width:1080px){.grid{grid-template-columns:440px 1fr}}
-  .card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:14px}
-  input,select,button{width:100%;background:#1f2430;color:var(--fg);border:1px solid var(--bd);border-radius:8px;padding:8px}
-  .row{display:grid;grid-template-columns:1fr 220px;gap:8px;align-items:center;margin:8px 0}
-  .row2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
-  .btn{background:var(--btn);color:#0a1020;font-weight:700;cursor:pointer}
-  .pill{display:inline-block;background:#1f2430;border:1px solid var(--bd);border-radius:999px;padding:4px 8px;margin:4px 6px 0 0}
-  table{width:100%;border-collapse:collapse;margin-top:10px} th,td{border-bottom:1px solid var(--bd);padding:6px;text-align:right}
-  th:first-child,td:first-child{text-align:left} .muted{color:var(--mut);font-size:12px} .small{font-size:12px}
-  .switch{display:flex;align-items:center;gap:8px}
+  *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--fg);font:14px system-ui,Segoe UI,Roboto,Arial}
+  header{padding:14px 16px;border-bottom:1px solid var(--bd)} .wrap{max-width:980px;margin:0 auto;padding:16px}
+  h1{margin:0;font-size:18px} .card{background:#171a21;border:1px solid var(--bd);border-radius:12px;padding:14px;margin:12px 0}
+  label{display:block;margin:6px 0 4px} input,select,button,textarea{width:100%;background:#1e2430;color:var(--fg);border:1px solid var(--bd);border-radius:8px;padding:8px}
+  button{background:var(--btn);color:#0b1020;font-weight:700;cursor:pointer}
+  .grid{display:grid;gap:12px} @media(min-width:900px){.grid{grid-template-columns:1fr 1fr}}
+  .pill{display:inline-block;background:#1e2430;border:1px solid var(--bd);border-radius:999px;padding:4px 8px;margin:4px 6px 0 0;font-size:12px;color:var(--mut)}
+  .out{font-size:15px;margin-top:8px}
+  table{width:100%;border-collapse:collapse;margin-top:8px} th,td{border-bottom:1px solid var(--bd);padding:6px;text-align:left}
 </style>
 </head>
 <body>
-<header class="wrap">
-  <h1>Bivariante Poisson + Dixon–Coles — Backtest, Próximos y ROI por mercado</h1>
-  <div class="muted">Importa histórico → elige liga → Entrenar → Backtest → Próximos (equipos por liga, EV).</div>
-</header>
-
-<div class="wrap grid">
-  <!-- IZQ -->
-  <section class="card">
-    <h2>Histórico</h2>
-    <div class="row"><label>Archivo JSON</label><input id="file" type="file" accept=".json"></div>
-    <div class="row"><label>o Pegar JSON</label><button id="btnPaste" class="btn">Cargar portapapeles</button></div>
-    <div class="row"><label>Liga</label><select id="league"><option value="">—</option></select></div>
-
-    <h2>Parámetros del modelo</h2>
-    <div class="row"><label>Línea O/U</label><input id="ou" type="number" step="0.5" value="2.5"></div>
-    <div class="row"><label>EV mínimo</label><input id="evThr" type="number" step="0.01" value="0.03"></div>
-    <div class="row"><label>maxGoals (convolución)</label><input id="maxGoals" type="number" min="8" max="14" step="1" value="10"></div>
-    <div class="row"><label>β (impacto forma)</label><input id="beta" type="number" step="0.05" value="0.30"></div>
-    <div class="row"><label>τ (shrinkage)</label><input id="tau" type="number" step="1" value="8"></div>
-    <div class="row"><label>n_cap (hist equipo)</label><input id="ncap" type="number" step="1" value="20"></div>
-    <div class="row"><label>α forma (EWMA)</label><input id="alphaForm" type="number" step="0.01" value="0.25"></div>
-    <div class="row"><label>k forma (últimos k)</label><input id="kForm" type="number" step="1" value="6"></div>
-
-    <h2>Correcciones</h2>
-    <div class="row switch"><label>Usar Dixon–Coles</label><input id="useDC" type="checkbox" checked></div>
-    <div class="row"><label>ρ (Dixon–Coles)</label><input id="rho" type="number" step="0.01" value="0.05"></div>
-
-    <div class="row2" style="margin-top:6px">
-      <button id="train" class="btn">Entrenar (Bivariante)</button>
-      <button id="run" class="btn">Correr Backtest</button>
-    </div>
-
-    <h2>Mapeo de cuotas (opcional)</h2>
-    <div class="muted small">Si tus campos difieren, indícalos (se prueban primero).</div>
-    <div class="row"><label>Odd Over 2.5</label><input id="fOddOver" placeholder="Odd Over25 / OddOver25"></div>
-    <div class="row"><label>Odd Under 2.5</label><input id="fOddUnder" placeholder="Odd Under25 / OddUnder25"></div>
-    <div class="row"><label>Odd BTTS (Sí)</label><input id="fOddBTTS" placeholder="Odd BTTS / Odd GG / Odd"></div>
-    <div class="row"><label>Odd 1</label><input id="fOdd1" placeholder="Odd 1 PreMatch"></div>
-    <div class="row"><label>Odd X</label><input id="fOddX" placeholder="Odd X PreMatch"></div>
-    <div class="row"><label>Odd 2</label><input id="fOdd2" placeholder="Odd 2 PreMatch"></div>
-
-    <p class="muted" id="info">—</p>
-  </section>
-
-  <!-- DER -->
-  <section class="card">
-    <h2>Resultados (Backtest)</h2>
-    <div class="muted" id="badges">—</div>
-    <div class="small" style="margin-top:6px">
-      <span class="pill">Bets: <b id="bets">—</b></span>
-      <span class="pill">Aciertos: <b id="hits">—</b></span>
-      <span class="pill">Hit Rate: <b id="hr">—</b></span>
-      <span class="pill">Unidades: <b id="units">—</b></span>
-      <span class="pill">ROI: <b id="roi">—</b></span>
-    </div>
-
-    <h3 style="margin-top:10px;font-size:14px">ROI por mercado (solo picks tomados)</h3>
-    <table id="tblByMkt">
-      <thead>
-        <tr>
-          <th>Mercado</th><th>Bets</th><th>Hit%</th><th>Unidades</th><th>ROI</th>
-        </tr>
-      </thead>
-      <tbody></tbody>
-    </table>
-
-    <table id="tbl" style="margin-top:12px"><thead><tr>
-      <th>Fecha</th><th>Partido</th><th>Mercado</th><th>Odd</th><th>p̂</th><th>EV</th><th>Res</th><th>Win</th>
-    </tr></thead><tbody></tbody></table>
-
-    <div style="margin-top:10px"><button id="btnCsv" class="btn">Descargar CSV (picks)</button></div>
-  </section>
-</div>
+<header class="wrap"><h1>BTTS (GG) — Modelo logístico con features de partido + prior (1/Odd GG)</h1></header>
 
 <div class="wrap">
-  <section class="card">
-    <h2>Próximos (elige equipos de la liga)</h2>
-    <div class="small muted" style="margin-bottom:6px">
-      Importa JSON (array) con <code>Date</code> y <code>Match</code> (“Local - Visitante”). Para EV agrega cuotas.
+  <div class="card">
+    <div class="grid">
+      <div>
+        <label>Importar JSON (histórico, array de objetos)</label>
+        <input id="file" type="file" accept=".json"/>
+        <label style="margin-top:10px">o pegar JSON (array de partidos)</label>
+        <button id="btnPaste">Pegar desde portapapeles</button>
+        <div class="pill" id="status">Sin datos</div>
+      </div>
+      <div>
+        <label>Partido a predecir</label>
+        <select id="rowSel"><option value="">—</option></select>
+        <div class="grid" style="grid-template-columns:1fr 1fr">
+          <div>
+            <label>EV mínimo (sugerencia)</label>
+            <input id="evMin" type="number" step="0.01" value="0.03"/>
+          </div>
+          <div>
+            <label>Iteraciones (entreno)</label>
+            <input id="iters" type="number" step="100" value="1500"/>
+          </div>
+        </div>
+        <div class="grid" style="grid-template-columns:1fr 1fr">
+          <div>
+            <label>LR (learning rate)</label>
+            <input id="lr" type="number" step="0.01" value="0.05"/>
+          </div>
+          <div>
+            <label>L2 (regularización)</label>
+            <input id="l2" type="number" step="0.0001" value="0.001"/>
+          </div>
+        </div>
+        <div class="grid" style="grid-template-columns:1fr 1fr;margin-top:8px">
+          <button id="train">Entrenar</button>
+          <button id="predict">Predecir BTTS (GG)</button>
+        </div>
+      </div>
     </div>
-    <div class="row"><label>Archivo JSON próximos</label><input id="fileNext" type="file" accept=".json"></div>
-    <div class="row"><label>o Pegar JSON</label><button id="btnPasteNext" class="btn">Cargar próximos</button></div>
+    <div class="out" id="out">—</div>
+  </div>
 
-    <div class="row2" style="margin:8px 0">
-      <button id="addRow" class="btn">Agregar fila</button>
-      <button id="clearRows" class="btn">Limpiar</button>
-    </div>
-
-    <table id="tblNext">
-      <thead>
-        <tr>
-          <th style="width:120px">Fecha</th>
-          <th>Local</th>
-          <th>Visitante</th>
-          <th>Línea OU / Over / Under</th>
-          <th>Odd BTTS Sí</th>
-          <th>Odd 1 / X / 2</th>
-        </tr>
-      </thead>
-      <tbody></tbody>
-    </table>
-
-    <div class="row2" style="margin-top:10px">
-      <button id="predict" class="btn">Predecir Próximos (Bivariante)</button>
-      <div></div>
-    </div>
-
-    <h3 style="margin-top:12px;font-size:14px">Decisiones</h3>
-    <table id="tblOutNext"><thead><tr>
-      <th>Fecha</th><th>Partido</th><th>Mercado</th><th>Odd</th><th>p̂</th><th>EV</th><th>Decisión</th>
-    </tr></thead><tbody></tbody></table>
-  </section>
+  <div class="card">
+    <details>
+      <summary>Ver últimas predicciones / depuración</summary>
+      <table id="tbl"><thead><tr><th>Fecha</th><th>Liga</th><th>Partido</th><th>Odd GG</th><th>p̂ BTTS</th><th>EV</th><th>Sugerencia</th></tr></thead><tbody></tbody></table>
+    </details>
+  </div>
 </div>
 
 <script>
-/* ===== Utils ===== */
+// ===== Utilidades
 const el=id=>document.getElementById(id);
-const pct=x=> (x*100).toFixed(2)+'%';
-const fmt=x=> (isFinite(x)?x.toFixed(3):'—');
-const num=v=>{const t=String(v??'').trim().replace(',','.'); const x=parseFloat(t); return Number.isFinite(x)?x:NaN;};
-function parseFT(s){const m=String(s||'').match(/(-?\d+)\s*[-:–]\s*(-?\d+)/);return m?[+m[1],+m[2]]:[null,null];}
-function parseDateAny(s){const d=new Date(s); if(!isNaN(d)) return d; return new Date(NaN);}
-function splitTeams(match){ if(!match) return ['','']; const parts=String(match).split(/[-–]/); return [(parts[0]||'').trim(),(parts[1]||'').trim()];}
-function mean(a){return a.reduce((s,x)=>s+x,0)/Math.max(1,a.length);}
-function sampleCov(X,Y){const n=Math.min(X.length,Y.length); if(n<2) return 0; const mx=mean(X.slice(0,n)), my=mean(Y.slice(0,n)); let s=0; for(let i=0;i<n;i++) s+=(X[i]-mx)*(Y[i]-my); return s/Math.max(1,n-1);}
+const clamp01 = p => Math.min(0.999, Math.max(0.001, p));
+const sigmoid = z => 1/(1+Math.exp(-z));
+const logit   = p => Math.log(p/(1-p));
+const dot=(a,b)=>{let s=0; for(let i=0;i<a.length;i++) s+=a[i]*b[i]; return s;};
+const pct = x => isFinite(x) ? (x*100).toFixed(1)+'%' : '—';
+const fmt = x => isFinite(x) ? (+x).toFixed(3) : '—';
 
-/* ===== Estado ===== */
-let RAW=[], BY_LEAGUE=new Map(), TEAMS_BY_LEAGUE=new Map();
-let MODEL=null; // modelo entrenado por liga
+// ===== Dataset y modelo
+let DATA = [];           // array de objetos (tu formato)
+let SCALER = null;       // {mu,sd,keys}
+let MODEL  = null;       // {w,b}
 
-/* ===== Carga histórico (parser robusto) ===== */
+// ===== Lectura de datos
 el('file').addEventListener('change', async e=>{
-  const f=e.target.files[0]; if(!f)return;
-  try{ingest(await f.text());}catch(err){alert('Error JSON: '+err);}
+  const f=e.target.files[0]; if(!f) return;
+  try{ const txt=await f.text(); loadJSON(txt); }catch(err){ alert('Error JSON: '+err); }
 });
 el('btnPaste').addEventListener('click', async ()=>{
-  try{ingest(await navigator.clipboard.readText());}catch(err){alert('Portapapeles: '+err);}
-});
-function ingest(rawInput){
-  // Normaliza a array
-  let arr = rawInput;
-  if (typeof arr === 'string') {
-    try { arr = JSON.parse(arr); }
-    catch {
-      // NDJSON (una por línea)
-      arr = arr.split(/\r?\n/).map(t=>t.trim()).filter(Boolean).map(JSON.parse);
-    }
-  }
-  if (!Array.isArray(arr)) {
-    const cand = arr?.data || arr?.rows || arr?.items || arr?.matches || arr?.events;
-    arr = Array.isArray(cand) ? cand : [];
-  }
-
-  RAW=[]; BY_LEAGUE.clear(); TEAMS_BY_LEAGUE.clear();
-  let kept=0, skipped=0;
-
-  const pick=(o,keys)=>{for(const k of keys){if(o!=null && o[k]!=null && String(o[k]).trim()!=='') return o[k];}return undefined;};
-  const toInt=v=>Number.isFinite(+v)?+v:NaN;
-
-  for(const r of arr){
-    const league = pick(r,['League','league','Liga','Competition','competition','Tournament','tournament']);
-    const dateV  = pick(r,['Date','date','Fecha']);
-    const match  = pick(r,['Match','match','Partido']);
-    let ft = pick(r,['Result FT','ResultFT','FT','Score','score','Result','Resultado']);
-
-    let h=null,a=null;
-    if(ft){ const m=String(ft).match(/(-?\d+)\s*[-:–]\s*(-?\d+)/); if(m){h=toInt(m[1]); a=toInt(m[2]);} }
-    if(!Number.isFinite(h)||!Number.isFinite(a)){
-      h=toInt(pick(r,['HomeGoals','HG','GolesLocal','Home FT','h']));
-      a=toInt(pick(r,['AwayGoals','AG','GolesVisitante','Away FT','a']));
-    }
-    const d=parseDateAny(dateV);
-    if(!league || isNaN(d) || !Number.isFinite(h) || !Number.isFinite(a)){ skipped++; continue; }
-
-    let homeName=pick(r,['Home','HomeTeam','Local','home']);
-    let awayName=pick(r,['Away','AwayTeam','Visitante','away']);
-    const matchText = match || (homeName && awayName ? `${homeName} - ${awayName}` : '');
-    if(!homeName || !awayName){
-      const parts=matchText.split(/[-–]/);
-      homeName = homeName || (parts[0]||'').trim();
-      awayName = awayName || (parts[1]||'').trim();
-    }
-
-    const row={league:String(league).trim(), date:d, match:matchText.trim(), h, a, homeName, awayName, raw:r};
-    RAW.push(row);
-    if(!BY_LEAGUE.has(row.league)) BY_LEAGUE.set(row.league,[]);
-    BY_LEAGUE.get(row.league).push(row);
-    if(!TEAMS_BY_LEAGUE.has(row.league)) TEAMS_BY_LEAGUE.set(row.league,new Set());
-    const set=TEAMS_BY_LEAGUE.get(row.league); if(homeName) set.add(homeName); if(awayName) set.add(awayName);
-    kept++;
-  }
-  for(const v of BY_LEAGUE.values()) v.sort((x,y)=>x.date-y.date);
-  el('league').innerHTML='<option value="">—</option>'+Array.from(BY_LEAGUE.keys()).sort().map(l=>`<option>${l}</option>`).join('');
-  el('info').textContent=`Cargados ${kept} partidos en ${BY_LEAGUE.size} ligas. Omitidos: ${skipped}.`;
-}
-el('league').addEventListener('change', ()=>{ refreshNextTeamSelects(); MODEL=null; el('info').textContent='—'; });
-
-/* ===== Helpers cuotas (histórico) ===== */
-function getOdds_OU(r, fOver, fUnder){const o=r.raw;
-  const cO=[fOver,'Odd Over25','OddOver25','Over25','Over 2.5','OddOver2_5','OddOver2.5'].filter(Boolean);
-  const cU=[fUnder,'Odd Under25','OddUnder25','Under25','Under 2.5','OddUnder2_5','OddUnder2.5'].filter(Boolean);
-  const over=cO.map(k=>+o[k]).find(x=>x>1.01)||null, under=cU.map(k=>+o[k]).find(x=>x>1.01)||null; return {over,under};
-}
-function getOdds_BTTS(r, fBTTS){const o=r.raw; const c=[fBTTS,'Odd BTTS','OddBTTS','Odd GG','OddGG','Odd'].filter(Boolean);
-  const yes=c.map(k=>+o[k]).find(x=>x>1.01)||null; return {yes};}
-function getOdds_1X2(r,f1,fX,f2){const o=r.raw;
-  const o1=+o[f1]||+o['Odd 1 PreMatch']||null, ox=+o[fX]||+o['Odd X PreMatch']||null, o2=+o[f2]||+o['Odd 2 PreMatch']||null;
-  return {o1:o1>1.01?o1:null, ox:ox>1.01?ox:null, o2:o2>1.01?o2:null};
-}
-
-/* ===== Ratings por equipo (shrinkage + forma) ===== */
-function ewma(arr,a){ if(!arr.length) return 0; let m=arr[0]; for(let i=1;i<arr.length;i++) m=a*arr[i]+(1-a)*m; return m; }
-function trainTeams(rows,{tau=8,n_cap=20,alphaForm=0.25,kForm=6}={}){
-  const league={gh:0,ga:0,n:0}; for(const r of rows){ league.gh+=r.h; league.ga+=r.a; league.n++; }
-  league.gh/=Math.max(1,league.n); league.ga/=Math.max(1,league.n);
-  const HFA=Math.log(Math.max(1e-6,league.gh)) - Math.log(Math.max(1e-6,league.ga));
-  const perTeam=new Map(), push=(t,gf,ga,d)=>{ if(!perTeam.has(t)) perTeam.set(t,{gf:[],ga:[],d:[]}); const o=perTeam.get(t); o.gf.push(gf); o.ga.push(ga); o.d.push(d); };
-  for(const r of rows){ push(r.homeName,r.h,r.a,r.date); push(r.awayName,r.a,r.h,r.date); }
-  for(const o of perTeam.values()){ const idx=[...o.gf.keys()].sort((i,j)=>o.d[i]-o.d[j]); o.gf=idx.map(i=>o.gf[i]); o.ga=idx.map(i=>o.ga[i]); o.d=idx.map(i=>o.d[i]); }
-  const teams={};
-  for(const [name,o] of perTeam){
-    const n=o.gf.length, nEff=Math.min(n_cap,n);
-    const r_for=o.gf.slice(-nEff).reduce((s,x)=>s+x,0)/Math.max(1,nEff);
-    const r_con=o.ga.slice(-nEff).reduce((s,x)=>s+x,0)/Math.max(1,nEff);
-    const w=n/(n+tau);
-    const rfor=w*r_for + (1-w)*league.gh;
-    const rcon=w*r_con + (1-w)*league.ga;
-    const k=Math.min(kForm,n);
-    const f_for=(k>0?ewma(o.gf.slice(-k),alphaForm):rfor)-rfor;
-    const f_con=(k>0?ewma(o.ga.slice(-k),alphaForm):rcon)-rcon;
-    teams[name]={rfor,rcon,ffor:f_for,fcon:f_con,n};
-  }
-  return {league,HFA,teams};
-}
-
-/* ===== Probabilidades: Poisson bivariante + DC opcional ===== */
-function probsBivariate(lamH, lamA, cov, {lineOU=2.5, maxGoals=10, useDC=false, rho=0.05}={}){
-  const lamc=Math.max(0,cov||0);
-  const lam1=Math.max(1e-6,lamH-lamc), lam2=Math.max(1e-6,lamA-lamc);
-  const e=Math.exp(-(lam1+lam2+lamc));
-  const fact=[1]; for(let i=1;i<=maxGoals;i++) fact[i]=fact[i-1]*i;
-  const pIJ=(i,j)=>{
-    const m=Math.min(i,j); let s=0;
-    for(let k=0;k<=m;k++){
-      s += Math.pow(lam1,i-k)/fact[i-k] * Math.pow(lam2,j-k)/fact[j-k] * Math.pow(lamc,k)/fact[k];
-    }
-    return e*s;
-  };
-  // matriz base
-  const M=Array.from({length:maxGoals+1},()=>Array(maxGoals+1).fill(0));
-  for(let i=0;i<=maxGoals;i++)for(let j=0;j<=maxGoals;j++) M[i][j]=pIJ(i,j);
-
-  if(useDC){ // tweak low-score y renormaliza
-    const tweak=(i,j)=>{
-      if(i===0&&j===0) return 1 - rho;
-      if(i===0&&j===1) return 1 + rho;
-      if(i===1&&j===0) return 1 + rho;
-      if(i===1&&j===1) return 1 - rho;
-      return 1;
-    };
-    let S=0; for(let i=0;i<=maxGoals;i++)for(let j=0;j<=maxGoals;j++){ M[i][j]*=tweak(i,j); S+=M[i][j]; }
-    for(let i=0;i<=maxGoals;i++)for(let j=0;j<=maxGoals;j++) M[i][j]/=S;
-  }
-
-  let p1=0,pX=0,p2=0,pOver=0,pUnder=0,pBTTS=0;
-  for(let i=0;i<=maxGoals;i++)for(let j=0;j<=maxGoals;j++){
-    const p=M[i][j];
-    if(i>j)p1+=p; else if(i===j)pX+=p; else p2+=p;
-    if(i+j>lineOU)pOver+=p; else pUnder+=p;
-    if(i>0&&j>0)pBTTS+=p;
-  }
-  return {p1,pX,p2,pOver,pUnder,pBTTS};
-}
-const c_odd=o=> (Number.isFinite(+o)?+o:NaN);
-const ev=(p,odd)=> p*(c_odd(odd)-1)-(1-p);
-
-/* ===== Entrenar (botón) ===== */
-el('train').addEventListener('click', ()=>{
-  const L=el('league').value; if(!L){alert('Elige una liga.');return;}
-  const rows=(BY_LEAGUE.get(L)||[]).slice(); if(rows.length<10){alert('Muy poco histórico.');return;}
-  const teamsModel = trainTeams(rows,{
-    tau:+el('tau').value||8, n_cap:+el('ncap').value||20, alphaForm:+el('alphaForm').value||0.25, kForm:+el('kForm').value||6
-  });
-  const covHA = Math.max(0, sampleCov(rows.map(r=>r.h), rows.map(r=>r.a)));
-  MODEL={...teamsModel, covHA};
-  el('info').textContent=`Entrenado: gh=${MODEL.league.gh.toFixed(2)}, ga=${MODEL.league.ga.toFixed(2)}, cov=${MODEL.covHA.toFixed(3)} | equipos=${Object.keys(MODEL.teams).length}`;
+  try{ const txt=await navigator.clipboard.readText(); loadJSON(txt); }catch(err){ alert('Portapapeles: '+err); }
 });
 
-/* ===== Backtest walk-forward (bivariante + DC opcional) ===== */
-el('run').addEventListener('click', ()=>{
-  const L=el('league').value; if(!L){alert('Elige una liga.');return;}
-  const rows=(BY_LEAGUE.get(L)||[]).slice(); if(rows.length<12){alert('Muy poco histórico.');return;}
-
-  const fOver=el('fOddOver').value.trim(), fUnder=el('fOddUnder').value.trim(), fBTTS=el('fOddBTTS').value.trim();
-  const f1=el('fOdd1').value.trim(), fX=el('fOddX').value.trim(), f2=el('fOdd2').value.trim();
-
-  const ouLine=+el('ou').value||2.5, evMin=+el('evThr').value||0.03, maxGoals=Math.max(8,Math.min(14, +el('maxGoals').value||10));
-  const beta=+el('beta').value||0.3, tau=+el('tau').value||8, n_cap=+el('ncap').value||20, alphaForm=+el('alphaForm').value||0.25, kForm=+el('kForm').value||6;
-  const useDC=el('useDC').checked, rho=+el('rho').value||0.05;
-
-  // Acumuladores incrementales de liga y equipos
-  let H=[], A=[];
-  const T=new Map(); const mkTeam=t=>{ if(!T.has(t)) T.set(t,{gf:[],ga:[]}); return T.get(t); };
-
-  let bets=0,hits=0,units=0; const outRows=[];
-  // 👉 nuevo: acumuladores por mercado
-  const byMkt = {
-    ['Over '+ouLine]: {bets:0,hits:0,units:0},
-    ['Under '+ouLine]:{bets:0,hits:0,units:0},
-    ['BTTS Sí']:{bets:0,hits:0,units:0},
-    ['1']:{bets:0,hits:0,units:0},
-    ['X']:{bets:0,hits:0,units:0},
-    ['2']:{bets:0,hits:0,units:0}
-  };
-
-  for(const r of rows){
-    if(H.length<8){ // warm-up
-      H.push(r.h); A.push(r.a);
-      mkTeam(r.homeName).gf.push(r.h); mkTeam(r.homeName).ga.push(r.a);
-      mkTeam(r.awayName).gf.push(r.a); mkTeam(r.awayName).ga.push(r.h);
-      continue;
-    }
-    const league={gh:mean(H), ga:mean(A)};
-    const HFA=Math.log(Math.max(1e-6,league.gh)) - Math.log(Math.max(1e-6,league.ga));
-    const covHA=Math.max(0, sampleCov(H,A));
-
-    function teamParams(name){
-      const o=T.get(name)||{gf:[],ga:[]}, nT=o.gf.length, nEff=Math.min(n_cap,nT);
-      const r_for=o.gf.slice(-nEff).reduce((s,x)=>s+x,0)/Math.max(1,nEff);
-      const r_con=o.ga.slice(-nEff).reduce((s,x)=>s+x,0)/Math.max(1,nEff);
-      const w=nT/(nT+tau);
-      const rfor=w*r_for+(1-w)*league.gh, rcon=w*r_con+(1-w)*league.ga;
-      const k=Math.min(kForm,nT);
-      const f_for=(k>0?ewma(o.gf.slice(-k),alphaForm):rfor)-rfor;
-      const f_con=(k>0?ewma(o.ga.slice(-k),alphaForm):rcon)-rcon;
-      return {rfor,rcon,ffor:f_for,fcon:f_con,nT};
-    }
-    const h=teamParams(r.homeName), a=teamParams(r.awayName);
-    if(h.nT<2||a.nT<2){
-      H.push(r.h); A.push(r.a);
-      mkTeam(r.homeName).gf.push(r.h); mkTeam(r.homeName).ga.push(r.a);
-      mkTeam(r.awayName).gf.push(r.a); mkTeam(r.awayName).ga.push(r.h);
-      continue;
-    }
-
-    const atkH=Math.log(Math.max(1e-6,h.rfor))-Math.log(Math.max(1e-6,league.gh));
-    const defA=Math.log(Math.max(1e-6,a.rcon))-Math.log(Math.max(1e-6,league.ga));
-    const atkA=Math.log(Math.max(1e-6,a.rfor))-Math.log(Math.max(1e-6,league.ga));
-    const defH=Math.log(Math.max(1e-6,h.rcon))-Math.log(Math.max(1e-6,league.gh));
-    const logLamH=Math.log(Math.max(1e-6,league.gh))+HFA+atkH-defA+beta*(h.ffor-a.fcon);
-    const logLamA=Math.log(Math.max(1e-6,league.ga))     +atkA-defH+beta*(a.ffor-h.fcon);
-    const lamH=Math.max(1e-6,Math.exp(logLamH)), lamA=Math.max(1e-6,Math.exp(logLamA));
-
-    const P=probsBivariate(lamH,lamA,covHA,{lineOU:ouLine,maxGoals,useDC,rho});
-
-    const {over,under}=getOdds_OU(r,fOver,fUnder);
-    const {yes}=getOdds_BTTS(r,fBTTS);
-    const {o1,ox,o2}=getOdds_1X2(r,f1,fX,f2);
-    const cand=[];
-    if(over) cand.push({lab:'Over '+ouLine,p:P.pOver, odd:over, win:(r.h+r.a>ouLine)?1:0});
-    if(under) cand.push({lab:'Under '+ouLine,p:P.pUnder, odd:under, win:(r.h+r.a<=ouLine)?1:0});
-    if(yes)   cand.push({lab:'BTTS Sí',    p:P.pBTTS, odd:yes,  win:(r.h>0&&r.a>0)?1:0});
-    if(o1)    cand.push({lab:'1',          p:P.p1,    odd:o1,   win:(r.h>r.a)?1:0});
-    if(ox)    cand.push({lab:'X',          p:P.pX,    odd:ox,   win:(r.h===r.a)?1:0});
-    if(o2)    cand.push({lab:'2',          p:P.p2,    odd:o2,   win:(r.h<r.a)?1:0});
-    cand.forEach(c=>c.EV= ev(c.p,c.odd));
-    cand.sort((a,b)=>b.EV-a.EV);
-    const pick=cand[0];
-
-    if(pick && pick.EV>=evMin){
-      // global
-      bets++; hits+=pick.win; units += pick.win ? (pick.odd-1) : -1;
-      // por mercado
-      if(byMkt[pick.lab]){
-        byMkt[pick.lab].bets += 1;
-        byMkt[pick.lab].hits += pick.win ? 1 : 0;
-        byMkt[pick.lab].units += pick.win ? (pick.odd-1) : -1;
-      } else {
-        // si la línea cambia (ej. 3.0) crea la clave dinámica
-        if(!byMkt[pick.lab]) byMkt[pick.lab] = {bets:0,hits:0,units:0};
-        byMkt[pick.lab].bets += 1;
-        byMkt[pick.lab].hits += pick.win ? 1 : 0;
-        byMkt[pick.lab].units += pick.win ? (pick.odd-1) : -1;
-      }
-
-      outRows.push({
-        date:r.date.toISOString().slice(0,10),
-        match:r.match,market:pinkey(pick.lab,ouLine),odd:pick.odd.toFixed(2),
-        p_hat:pick.p.toFixed(3),EV:pick.EV.toFixed(3),
-        result:`${r.h}-${r.a}`,win:pick.win?'✔':'✖'
-      });
-    }
-
-    H.push(r.h); A.push(r.a);
-    mkTeam(r.homeName).gf.push(r.h); mkTeam(r.homeName).ga.push(r.a);
-    mkTeam(r.awayName).gf.push(r.a); mkTeam(r.awayName).ga.push(r.h);
+function loadJSON(txt){
+  let arr;
+  try{
+    arr = JSON.parse(txt);
+  }catch(e){
+    // NDJSON fallback
+    arr = txt.split(/\r?\n/).map(t=>t.trim()).filter(Boolean).map(JSON.parse);
   }
+  if(!Array.isArray(arr)) throw new Error('El JSON debe ser un array de partidos.');
+  DATA = arr;
+  // poblar selector
+  const opts = ['<option value="">—</option>']
+    .concat(arr.map((r,i)=>`<option value="${i}">${(r.Date||'').slice(0,10)} — ${r.League||''} — ${r.Match||''}</option>`));
+  el('rowSel').innerHTML = opts.join('');
+  el('status').textContent = `Cargados ${arr.length} partidos.`;
+  el('out').textContent = 'Lista la carga. Entrena y luego predice.';
+}
 
-  const roi=bets?units/bets:0;
-  el('bets').textContent=bets; el('hits').textContent=hits; el('hr').textContent=bets?pct(hits/bets):'—';
-  el('units').textContent=fmt(units); el('roi').textContent=bets?pct(roi):'—';
-  el('badges').innerHTML=`<span class="pill">Liga: <b>${L}</b></span><span class="pill">Modelo: Bivariante</span><span class="pill">DC: ${useDC?'on':'off'} (ρ=${rho})</span>`;
-
-  // Render picks
-  const tb=document.querySelector('#tbl tbody');
-  tb.innerHTML = outRows.slice(0,400).map(r=>`<tr><td>${r.date}</td><td>${r.match}</td><td>${r.market}</td><td>${r.odd}</td><td>${r.p_hat}</td><td>${r.EV}</td><td>${r.result}</td><td>${r.win}</td></tr>`).join('')
-    || `<tr><td colspan="8" class="muted">No hubo apuestas con EV ≥ umbral.</td></tr>`;
-
-  // CSV
-  el('btnCsv').onclick=()=>{
-    const rowsCsv=[['date','match','market','odd','p_hat','EV','result','win']]
-      .concat(outRows.map(r=>[r.date,r.match,r.market,r.odd,r.p_hat,r.EV,r.result,r.win]));
-    const csv=rowsCsv.map(r=>r.join(',')).join('\n');
-    const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'}); const url=URL.createObjectURL(blob);
-    const a=document.createElement('a'); a.href=url; a.download=`backtest_bivar_${L}.csv`; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
-  };
-
-  // ROI por mercado
-  renderByMarket(byMkt);
-});
-
-// normaliza etiqueta para tabla (incluye línea usada en ese backtest para OU)
-function pinkey(lab, line){ return /Over|Under/.test(lab) ? lab.replace(/\d+(\.\d+)?/, String(line)) : lab; }
-
-function renderByMarket(byMkt){
-  // orden preferido
-  const order = (keys)=> {
-    const base = ['Over','Under','BTTS Sí','1','X','2'];
-    // agrupa over/under con su línea actual
-    const dyn = Object.keys(byMkt).filter(k=>/^Over|^Under/.test(k) && !base.includes(k));
-    const rest = Object.keys(byMkt).filter(k=>!/^Over|^Under/.test(k) && !base.includes(k));
-    return [...dyn.sort(), 'BTTS Sí', '1', 'X', '2', ...rest.filter(k=>!['BTTS Sí','1','X','2'].includes(k))];
-  };
-
-  const tbm = document.querySelector('#tblByMkt tbody');
-  const rows = [];
-  const keys = order(Object.keys(byMkt));
+// ===== Labels / features
+function labelBTTS(row){
+  const m = String(row["Result FT"]||row.Result||"").match(/(-?\d+)\s*[-:]\s*(-?\d+)/);
+  if(!m) return null;
+  const h=+m[1], a=+m[2];
+  return (h>0 && a>0) ? 1 : 0;
+}
+function pFromOddGG(row){
+  const o = parseFloat(row.Odd);
+  return Number.isFinite(o) && o>1 ? clamp01(1/o) : 0.5;
+}
+function buildFeatures(row){
+  const f = {};
+  f.att_home = +row["Home Attacks at FT"] || 0;
+  f.att_away = +row["Away Attacks at FT"] || 0;
+  f.datt_home= +row["Home Dangerous Attacks at FT"] || 0;
+  f.datt_away= +row["Away Dangerous Attacks at FT"] || 0;
+  f.ong_home = +row["Home OnGoal Shots at FT"] || 0;
+  f.ong_away = +row["Away OnGoal Shots at FT"] || 0;
+  f.sh_home  = +row["Home Total Shots at FT"] || 0;
+  f.sh_away  = +row["Away Total Shots at FT"] || 0;
+  f.pos_home = (+row["Home Ball Possession at FT"] || 0)/100;
+  f.pos_away = (+row["Away Ball Possession at FT"] || 0)/100;
+  f.cor_home = +row["Home Corners at FT"] || 0;
+  f.cor_away = +row["Away Corners at FT"] || 0;
+  f.rc_home  = +row["Home RedCards at FT"] || 0;
+  f.rc_away  = +row["Away RedCards at FT"] || 0;
+  f.yc_home  = +row["Home YellowCards at FT"] || 0;
+  f.yc_away  = +row["Away YellowCards at FT"] || 0;
+  f.posH     = +row["Home Position"] || 999;
+  f.posA     = +row["Away Position"] || 999;
+  f.homeFlag = 1;
+  const o1=+row["Odd 1 PreMatch"]||NaN, ox=+row["Odd X PreMatch"]||NaN, o2=+row["Odd 2 PreMatch"]||NaN;
+  f.p1 = Number.isFinite(o1)&&o1>1 ? 1/o1 : 0.0;
+  f.px = Number.isFinite(ox)&&ox>1 ? 1/ox : 0.0;
+  f.p2 = Number.isFinite(o2)&&o2>1 ? 1/o2 : 0.0;
+  f.d_att  = f.att_home  - f.att_away;
+  f.d_datt = f.datt_home - f.datt_away;
+  f.d_ong  = f.ong_home  - f.ong_away;
+  f.d_sh   = f.sh_home   - f.sh_away;
+  f.d_pos  = f.pos_home  - f.pos_away;
+  f.d_cor  = f.cor_home  - f.cor_away;
+  f.d_cards= (f.rc_home*3+f.yc_home) - (f.rc_away*3+f.yc_away);
+  f.d_rank = (isFinite(f.posH)?f.posH:999) - (isFinite(f.posA)?f.posA:999);
+  return f;
+}
+const FEAT_ORDER = [
+  'att_home','att_away','datt_home','datt_away','ong_home','ong_away','sh_home','sh_away',
+  'pos_home','pos_away','cor_home','cor_away','rc_home','rc_away','yc_home','yc_away',
+  'p1','px','p2','d_att','d_datt','d_ong','d_sh','d_pos','d_cor','d_cards','d_rank','homeFlag'
+];
+function fitScaler(feats){
+  const keys = FEAT_ORDER.slice();
+  const mu={}, sd={};
   for(const k of keys){
-    const m = byMkt[k]; if(!m || !m.bets) continue;
-    const hr = m.bets ? (m.hits/m.bets) : 0;
-    const roi = m.bets ? (m.units/m.bets) : 0;
-    rows.push(`<tr>
-      <td>${k}</td>
-      <td>${m.bets}</td>
-      <td>${pct(hr)}</td>
-      <td>${fmt(m.units)}</td>
-      <td>${pct(roi)}</td>
-    </tr>`);
+    const vals = feats.map(r=>+r[k]||0);
+    const m = vals.reduce((s,x)=>s+x,0)/Math.max(1,vals.length);
+    const v = vals.reduce((s,x)=>s+(x-m)*(x-m),0)/Math.max(1,vals.length);
+    mu[k]=m; sd[k]=Math.sqrt(v)||1;
   }
-  tbm.innerHTML = rows.join('') || `<tr><td colspan="5" class="muted">No hay picks suficientes para desglosar por mercado.</td></tr>`;
+  return {mu,sd,keys};
+}
+function toVectorZ(f,scaler){
+  return FEAT_ORDER.map(k=>(((+f[k]||0)-scaler.mu[k])/scaler.sd[k]));
 }
 
-/* ===== Próximos ===== */
-const tbNext=document.querySelector('#tblNext tbody');
-function getLeagueTeams(league){const set=TEAMS_BY_LEAGUE.get(league);return set?Array.from(set).sort((a,b)=>a.localeCompare(b,'es',{sensitivity:'base'})):[];}
-function teamSelectHTML(options,selected=''){const opts=['<option value="">—</option>'].concat(options.map(t=>`<option${t===selected?' selected':''}>${t}</option>`)); return `<select>${opts.join('')}</select>`;}
-function renderRow(next={date:'',home:'',away:'',over:'',under:'',line:'2.5',btts:'',o1:'',ox:'',o2:''}){
-  const L=el('league').value, teams=getLeagueTeams(L); const tr=document.createElement('tr');
-  tr.innerHTML=`
-    <td><input type="date" value="${next.date||''}"></td>
-    <td>${teamSelectHTML(teams,next.home)}</td>
-    <td>${teamSelectHTML(teams,next.away)}</td>
-    <td><div class="row2" style="grid-template-columns:80px 1fr 1fr">
-      <input data-field="line" placeholder="Línea" value="${next.line||'2.5'}">
-      <input data-field="over" placeholder="Over"  value="${next.over||''}">
-      <input data-field="under" placeholder="Under" value="${next.under||''}">
-    </div></td>
-    <td><input data-field="btts" placeholder="Odd BTTS Sí" value="${next.btts||''}"></td>
-    <td><div class="row2">
-      <input data-field="o1" placeholder="Odd 1" value="${next.o1||''}">
-      <input data-field="ox" placeholder="Odd X" value="${next.ox||''}">
-      <input data-field="o2" placeholder="Odd 2" value="${next.o2||''}">
-    </div></td>`;
-  tbNext.appendChild(tr);
-}
-function refreshNextTeamSelects(){
-  const L=el('league').value, teams=getLeagueTeams(L);
-  [...tbNext.querySelectorAll('tr')].forEach(tr=>{
-    const tds=tr.querySelectorAll('td'); if(tds.length<3) return;
-    const h=tds[1].querySelector('select'), a=tds[2].querySelector('select');
-    const ch=h?.value||'', ca=a?.value||'';
-    if(h) h.outerHTML=teamSelectHTML(teams,ch);
-    if(a) a.outerHTML=teamSelectHTML(teams,ca);
-  });
-}
-el('addRow').addEventListener('click', ()=>{ if(!el('league').value){alert('Elige una liga primero.');return;} renderRow(); });
-el('clearRows').addEventListener('click', ()=>{tbNext.innerHTML='';});
-el('fileNext').addEventListener('change', async e=>{
-  const f=e.target.files[0]; if(!f)return;
-  try{ loadNextFromJson(JSON.parse(await f.text())); }catch(err){alert('Error JSON próximos: '+err);}
-});
-el('btnPasteNext').addEventListener('click', async ()=>{
-  try{ loadNextFromJson(JSON.parse(await navigator.clipboard.readText())); }catch(err){alert('Portapapeles próximos: '+err);}
-});
-function nearestTeamName(name,teams){const n=String(name||'').trim().toLowerCase(); const eq=teams.find(t=>t.toLowerCase()===n); if(eq) return eq; const hit=teams.find(t=>n&&(t.toLowerCase().includes(n)||n.includes(t.toLowerCase()))); return hit||'';}
-function loadNextFromJson(arr){
-  if(!el('league').value){alert('Elige una liga primero.');return;}
-  const teams=getLeagueTeams(el('league').value); tbNext.innerHTML='';
-  for(const r of arr){
-    const date=(r.Date||r.date||'').slice(0,10); const [mh,ma]=splitTeams(r.Match||'');
-    renderRow({
-      date, home:nearestTeamName(mh,teams)||mh||'', away:nearestTeamName(ma,teams)||ma||'',
-      line:(r.Line||r.line||'2.5'),
-      over:(r['Odd Over25']||r.Over25||r['Over 2.5']||r.Over||''), under:(r['Odd Under25']||r.Under25||r['Under 2.5']||r.Under||''),
-      btts:(r['Odd BTTS']||r['Odd GG']||r.Odd||''),
-      o1:(r['Odd 1 PreMatch']||r.Odd1||''), ox:(r['Odd X PreMatch']||r.OddX||''), o2:(r['Odd 2 PreMatch']||r.Odd2||'')
-    });
+// ===== Entrenamiento logística L2
+function trainLogistic(X, y, priorP, {lr=0.05, l2=1e-3, iters=1500}={}){
+  const n = X.length, d = X[0].length;
+  let w = new Array(d).fill(0);
+  let b = logit(clamp01(priorP));
+  for(let t=0;t<iters;t++){
+    let gb = 0; const gw = new Array(d).fill(0);
+    for(let i=0;i<n;i++){
+      const z = b + dot(w,X[i]);
+      const p = sigmoid(z);
+      const e = (p - y[i]);
+      gb += e;
+      for(let j=0;j<d;j++) gw[j] += e*X[i][j];
+    }
+    for(let j=0;j<d;j++) gw[j] += l2*w[j];
+    b -= lr * gb/n;
+    for(let j=0;j<d;j++) w[j] -= lr * gw[j]/n;
   }
+  return {w,b};
 }
+function predictProba(x, model){ return sigmoid(model.b + dot(model.w, x)); }
 
-/* ===== Predecir Próximos (bivariante + DC opcional) ===== */
+// ===== Botones
+el('train').addEventListener('click', ()=>{
+  if(!DATA.length){ alert('Carga un JSON con histórico.'); return; }
+
+  // Dataset etiquetado: exige marcador FT válido
+  const rowsLabeled = DATA.filter(r => labelBTTS(r)===0 || labelBTTS(r)===1);
+  if(rowsLabeled.length<30){ alert('Se requieren ≥30 partidos con Result FT para entrenar decentemente.'); return; }
+
+  const feats = rowsLabeled.map(buildFeatures);
+  SCALER = fitScaler(feats);
+  const X = feats.map(f=>toVectorZ(f,SCALER));
+  const y = rowsLabeled.map(labelBTTS);
+
+  // prior promedio desde Odd(GG)
+  const priors = rowsLabeled.map(pFromOddGG).filter(Number.isFinite);
+  const priorP = priors.length ? (priors.reduce((s,x)=>s+x,0)/priors.length) : 0.5;
+
+  const iters = +el('iters').value||1500, lr=+el('lr').value||0.05, l2=+el('l2').value||0.001;
+  MODEL = trainLogistic(X,y,priorP,{lr,l2,iters});
+
+  el('out').textContent = `Modelo entrenado con ${rowsLabeled.length} partidos. Prior mkt=${fmt(priorP)}.`;
+});
+
 el('predict').addEventListener('click', ()=>{
-  const L=el('league').value; if(!L){alert('Elige una liga.');return;}
-  const hist=(BY_LEAGUE.get(L)||[]).slice(); if(hist.length<10){alert('Poco histórico.');return;}
-  if(!MODEL){
-    const tm=trainTeams(hist,{tau:+el('tau').value||8,n_cap:+el('ncap').value||20,alphaForm:+el('alphaForm').value||0.25,kForm:+el('kForm').value||6});
-    const covHA=Math.max(0, sampleCov(hist.map(r=>r.h), hist.map(r=>r.a)));
-    MODEL={...tm,covHA};
+  const idx = +el('rowSel').value;
+  if(!(idx>=0)){ alert('Elige un partido del selector.'); return; }
+  const row = DATA[idx];
+  const oddGG = parseFloat(row.Odd);
+  const evMin = +el('evMin').value || 0.03;
+
+  // Si no hay modelo pero sí cuota, damos prior
+  let p = NaN, mode='prior';
+  if(MODEL && SCALER){
+    const f = buildFeatures(row);
+    const x = toVectorZ(f, SCALER);
+    p = predictProba(x, MODEL);
+    mode='modelo';
+  }else{
+    p = pFromOddGG(row);
   }
-  const beta=+el('beta').value||0.3, evMin=+el('evThr').value||0.03;
-  const maxGoals=Math.max(8,Math.min(14, +el('maxGoals').value||10));
-  const useDC=el('useDC').checked, rho=+el('rho').value||0.05;
 
-  const out=[], rows=[...tbNext.querySelectorAll('tr')];
-  for(const tr of rows){
-    const tds=tr.querySelectorAll('td'); if(!tds.length) continue;
-    const date=(tds[0].querySelector('input')?.value)||'';
-    const home=(tds[1].querySelector('select')?.value)||''; const away=(tds[2].querySelector('select')?.value)||'';
-    if(!home||!away){ out.push({date,match:`${home||'?'} vs ${away||'?'}`,market:'-',odd:'-',p:'-',EV:'-',decision:'—'}); continue; }
+  const ev = (Number.isFinite(oddGG)&&oddGG>1) ? (p*(oddGG-1)-(1-p)) : NaN;
+  const sug = Number.isFinite(ev) && ev>=evMin ? 'APOSTAR' : 'NO APOSTAR';
 
-    const h=MODEL.teams[home], a=MODEL.teams[away], Lg=MODEL.league;
-    if(!h||!a){ out.push({date,match:`${home} vs ${away}`,market:'-',odd:'-',p:'-',EV:'-',decision:'—'}); continue; }
-    const atkH=Math.log(Math.max(1e-6,h.rfor))-Math.log(Math.max(1e-6,Lg.gh));
-    const defA=Math.log(Math.max(1e-6,a.rcon))-Math.log(Math.max(1e-6,Lg.ga));
-    const atkA=Math.log(Math.max(1e-6,a.rfor))-Math.log(Math.max(1e-6,Lg.ga));
-    const defH=Math.log(Math.max(1e-6,h.rcon))-Math.log(Math.max(1e-6,Lg.gh));
-    const HFA=Math.log(Math.max(1e-6,Lg.gh)) - Math.log(Math.max(1e-6,Lg.ga));
-    const logLamH=Math.log(Math.max(1e-6,Lg.gh))+HFA+atkH-defA+beta*(h.ffor-a.fcon);
-    const logLamA=Math.log(Math.max(1e-6,Lg.ga))     +atkA-defH+beta*(a.ffor-h.fcon);
-    const lamH=Math.max(1e-6,Math.exp(logLamH)), lamA=Math.max(1e-6,Math.exp(logLamA));
+  el('out').innerHTML = `
+    <div><b>${(row.Date||'').slice(0,10)}</b> — ${row.League||''} — ${row.Match||''}</div>
+    <div class="pill">Modo: ${mode}</div>
+    <div class="pill">Odd GG: ${Number.isFinite(oddGG)?oddGG.toFixed(2):'—'}</div>
+    <div class="pill">p̂ BTTS: <b>${fmt(p)}</b></div>
+    <div class="pill">EV: <b>${fmt(ev)}</b></div>
+    <div class="pill">Sugerencia (${fmt(evMin)} EV min): <b>${sug}</b></div>
+  `;
 
-    const ouLine=num(tr.querySelector('[data-field="line"]')?.value) || (+el('ou').value||2.5);
-    const over=num(tr.querySelector('[data-field="over"]')?.value), under=num(tr.querySelector('[data-field="under"]')?.value);
-    const btts=num(tr.querySelector('[data-field="btts"]')?.value);
-    const o1=num(tr.querySelector('[data-field="o1"]')?.value), ox=num(tr.querySelector('[data-field="ox"]')?.value), o2=num(tr.querySelector('[data-field="o2"]')?.value);
-
-    const P=probsBivariate(lamH,lamA,MODEL.covHA,{lineOU:ouLine,maxGoals,useDC,rho});
-    const cand=[];
-    if(over>1.01)  cand.push({lab:'Over '+ouLine, p:P.pOver,  odd:over});
-    if(under>1.01) cand.push({lab:'Under '+ouLine,p:P.pUnder, odd:under});
-    if(btts>1.01)  cand.push({lab:'BTTS Sí',     p:P.pBTTS, odd:btts});
-    if(o1>1.01)    cand.push({lab:'1',           p:P.p1,    odd:o1});
-    if(ox>1.01)    cand.push({lab:'X',           p:P.pX,    odd:ox});
-    if(o2>1.01)    cand.push({lab:'2',           p:P.p2,    odd:o2});
-    cand.forEach(c=>c.EV= ev(c.p,c.odd));
-    cand.sort((a,b)=>b.EV-a.EV);
-    const pick=cand[0];
-    const decision=(pick && pick.EV>=evMin)?'APOSTAR':'NO APOSTAR';
-    out.push({date,match:`${home} vs ${away}`,market:pick?pick.lab:'-',odd:pick?pick.odd.toFixed(2):'-',p:pick?pick.p.toFixed(3):'-',EV:pick?pick.EV.toFixed(3):'-',decision});
-  }
-  const tb=document.querySelector('#tblOutNext tbody');
-  tb.innerHTML = out.map(r=>`<tr><td>${r.date||'-'}</td><td>${r.match}</td><td>${r.market}</td><td>${r.odd}</td><td>${r.p}</td><td>${r.EV}</td><td>${r.decision}</td></tr>`).join('')
-    || `<tr><td colspan="7" class="muted">Agrega o importa próximos partidos.</td></tr>`;
+  const tb = document.querySelector('#tbl tbody');
+  const tr = document.createElement('tr');
+  tr.innerHTML = `<td>${(row.Date||'').slice(0,10)}</td><td>${row.League||''}</td><td>${row.Match||''}</td>
+                  <td>${Number.isFinite(oddGG)?oddGG.toFixed(2):'—'}</td><td>${fmt(p)}</td><td>${fmt(ev)}</td><td>${sug}</td>`;
+  tb.prepend(tr);
 });
 </script>
 </body>
