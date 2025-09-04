@@ -1,367 +1,527 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-<meta charset="utf-8" />
+<meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>JATCO-MAINT-AI — Diagnóstico y Contramedidas</title>
+<title>Backtesting Fútbol — HTML (TRAIN/TEST, Kelly, Walk-Forward, Monte Carlo)</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1"></script>
 <style>
-  :root{ --bg:#0f1115; --panel:#171a21; --panel2:#1f2430; --text:#e6eaf2; --muted:#9aa3b2;
-         --accent:#7aa2ff; --ok:#79e2a6; --warn:#ffb84d; --danger:#ff6b6b; --border:#2a3140; --focus:#b9ccff;}
-  *{box-sizing:border-box} html,body{height:100%;margin:0;background:var(--bg);color:var(--text);font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Arial}
-  header{position:sticky;top:0;z-index:10;background:linear-gradient(180deg, rgba(15,17,21,.95), rgba(15,17,21,.65));border-bottom:1px solid var(--border);backdrop-filter:blur(8px)}
-  .wrap{max-width:1200px;margin:0 auto;padding:14px}
-  h1{margin:0 0 4px;font-size:22px} .sub{color:var(--muted);font-size:13px}
-  .layout{display:grid;grid-template-columns:360px 1fr;gap:16px;padding:16px}
-  @media(max-width:1100px){.layout{grid-template-columns:1fr}}
-  aside,section.card{background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:14px}
-  h2{margin:0 0 10px;font-size:18px} h3{margin:12px 0 6px;font-size:16px}
-  .grid{display:grid;gap:10px} .grid.two{grid-template-columns:1fr 1fr} .grid.three{grid-template-columns:repeat(3,1fr)}
-  @media(max-width:980px){.grid.two,.grid.three{grid-template-columns:1fr}}
-  label{font-size:12px;color:var(--muted)}
-  input:not([type="file"]),select,textarea{width:100%;padding:10px 12px;background:#0c0f18;color:var(--text);border:1px solid var(--border);border-radius:10px;outline:none}
-  textarea{min-height:100px;resize:vertical}
-  input:focus,select:focus,textarea:focus{border-color:var(--focus);box-shadow:0 0 0 3px #b9ccff22}
-  .toolbar{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
-  .btn{background:var(--panel2);color:var(--text);border:1px solid var(--border);padding:10px 12px;border-radius:10px;font-weight:700;cursor:pointer}
-  .btn:hover{border-color:var(--accent)} .btn-ok{background:var(--ok);color:#0b1020;border-color:transparent}
-  .chipbar{display:flex;flex-wrap:wrap;gap:8px}
-  .chip{display:inline-flex;align-items:center;gap:8px;padding:6px 10px;border-radius:999px;background:#0c0f18;border:1px solid var(--border);cursor:pointer}
-  .chip.active{background:#10192a;border-color:var(--focus);box-shadow:0 0 0 3px #b9ccff22 inset}
-  pre{background:#0c0f18;border:1px solid var(--border);border-radius:10px;padding:10px;overflow:auto}
-  .pill{display:inline-block;padding:.25rem .5rem;border-radius:999px;background:#101521;border:1px solid var(--border);color:var(--muted);font-size:12px}
-  .badge{font-weight:800;font-size:11px;padding:4px 8px;border-radius:999px;border:1px solid var(--border)}
-  .ok{background:#102017;color:#b7ffcc} .warn{background:#261c09;color:#ffddaa} .danger{background:#281214;color:#ffbdbd}
-  table{width:100%;border-collapse:collapse;border:1px solid var(--border)} th,td{border-bottom:1px solid var(--border);padding:8px 10px;text-align:left;font-size:14px}
-  th{background:#131824;color:var(--muted)}
+  :root{
+    --bg:#0f1115; --panel:#171a21; --panel2:#1f2430; --text:#e6eaf2; --muted:#9aa3b2;
+    --accent:#7aa2ff; --accent2:#5dd4a4; --warn:#ffb84d; --danger:#ff6b6b; --ok:#79e2a6;
+    --border:#2a3140;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; background:var(--bg); color:var(--text); font-family:Inter,system-ui,Segoe UI,Arial; 
+  }
+  header{
+    padding:20px; border-bottom:1px solid var(--border); background:linear-gradient(180deg,var(--panel),transparent);
+  }
+  h1{font-size:20px;margin:0}
+  .wrap{max-width:1200px;margin:0 auto;padding:20px;display:grid;gap:16px}
+  .grid{display:grid;gap:16px}
+  @media(min-width:900px){ .grid-2{grid-template-columns:1fr 1fr} .grid-3{grid-template-columns:repeat(3,1fr)}}
+  .card{
+    background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:16px;
+  }
+  .card h2{font-size:16px;margin:.2rem 0 1rem; color:var(--accent)}
+  .row{display:flex;gap:12px;flex-wrap:wrap}
+  label{font-size:12px;color:var(--muted);display:block;margin-bottom:6px}
+  input, select, button{
+    background:var(--panel2); border:1px solid var(--border); color:var(--text); 
+    padding:10px 12px; border-radius:10px; font-size:14px;
+  }
+  input[type="date"]{padding:8px 10px}
+  button{cursor:pointer}
+  button.primary{background:var(--accent);border-color:transparent;color:#0b1020;font-weight:700}
+  button.ghost{background:transparent}
+  table{width:100%;border-collapse:collapse;font-size:14px}
+  th,td{border-bottom:1px solid var(--border);padding:8px;text-align:right}
+  th{color:var(--muted);text-align:right}
+  td:first-child, th:first-child{text-align:left}
+  .badge{display:inline-block;padding:2px 8px;border-radius:999px;font-size:12px;border:1px solid var(--border);color:var(--muted)}
+  .ok{color:var(--ok)} .warn{color:var(--warn)} .danger{color:var(--danger)}
+  .muted{color:var(--muted)}
+  .hint{font-size:12px;color:var(--muted)}
+  .hr{height:1px;background:var(--border);margin:8px 0 0}
+  .footer{color:var(--muted);font-size:12px;text-align:center;padding:10px}
+  canvas{max-height:320px}
+  .nowrap{white-space:nowrap}
 </style>
 </head>
 <body>
-<header>
-  <div class="wrap">
-    <h1>JATCO-MAINT-AI — Diagnóstico y Contramedidas</h1>
-    <div class="sub">CNC FANUC/Gleason/ROBODRILL · Honeadoras · Tornos/Brochas · Robots FANUC · PLC Mitsubishi/Omron</div>
-  </div>
-</header>
-
-<div class="layout wrap">
-  <aside>
-    <h2>Conexión LLM</h2>
-    <div class="grid two">
-      <div>
-        <label>API Base (OpenAI-compatible)</label>
-        <input id="apiBase" value="https://api.openai.com/v1">
-      </div>
-      <div>
-        <label>Modelo</label>
-        <input id="model" value="gpt-4o-mini">
-      </div>
-      <div>
-        <label>API Key</label>
-        <input id="apiKey" type="password" placeholder="sk-...">
-      </div>
-      <div>
-        <label>Temperature</label>
-        <input id="temp" type="number" min="0" max="1" step="0.1" value="0.2">
-      </div>
+  <header>
+    <div class="wrap">
+      <h1>Backtesting de Fútbol — HTML (Yield, Drawdown, TRAIN/TEST, Walk-Forward 3M, Monte Carlo)</h1>
+      <div class="hint">Carga tu CSV histórico (≤ 2 años). El cálculo es local en tu navegador.</div>
     </div>
-    <div class="toolbar">
-      <button class="btn" id="btnTest">Probar conexión</button>
-      <button class="btn" id="btnSaveConn">Guardar conexión local</button>
-      <span class="pill">Tu clave se guarda solo en este navegador (localStorage).</span>
-    </div>
+  </header>
 
-    <h2 style="margin-top:14px">Caso de falla</h2>
-    <div class="grid two">
-      <div><label>Equipo (tipo + marca/modelo)</label><input id="equipo" placeholder="CNC FANUC 0i-MF / ROBODRILL / GLEASON"></div>
-      <div><label>Ubicación / Línea / Turno</label><input id="ubic" placeholder="Línea 2 · Estación 5 · Noche"></div>
-    </div>
-    <div>
-      <label>Descripción breve</label>
-      <textarea id="desc" placeholder="¿Qué pasó? ¿Patrón? ¿Frecuencia?"></textarea>
-    </div>
-
-    <h3>Síntomas</h3>
-    <div id="symptoms" class="chipbar"></div>
-
-    <h3 style="margin-top:6px">Cambios recientes</h3>
-    <div class="chipbar" id="changes"></div>
-
-    <div class="grid two" style="margin-top:6px">
-      <div><label>Alarmas / Códigos / I/O</label><input id="alarmas" placeholder="SRVO-xxx, PMC, DI: X7, Overtravel…"></div>
-      <div><label>Condiciones de proceso</label><input id="cond" placeholder="avances/velocidad/presión/temperatura"></div>
-    </div>
-
-    <div class="toolbar" style="margin-top:10px">
-      <button class="btn-ok" id="btnDiagnosticar">🧠 Generar diagnóstico</button>
-      <button class="btn" id="btnLimpiar">Limpiar</button>
-    </div>
-  </aside>
-
-  <main>
+  <main class="wrap">
     <section class="card">
-      <h2>Resultado del modelo</h2>
-      <div id="status" class="pill">Listo</div>
-      <h3 style="margin-top:10px">Explicación</h3>
-      <div id="texto" style="white-space:pre-wrap;line-height:1.4"></div>
-
-      <h3 style="margin-top:10px">JSON estructurado</h3>
-      <pre id="jsonView">{}</pre>
-
-      <h3 style="margin-top:10px">Checklist (vista rápida)</h3>
-      <table id="checkTable">
-        <thead><tr><th>Tarea</th><th>Responsable</th><th>Fecha</th><th>Estatus</th></tr></thead>
-        <tbody></tbody>
-      </table>
-
-      <div class="toolbar" style="margin-top:10px;justify-content:flex-end">
-        <button class="btn" id="btnExport">Exportar JSON</button>
-        <label class="btn" style="display:inline-flex;align-items:center;gap:8px;cursor:pointer">
-          Importar JSON
-          <input id="impJson" type="file" accept="application/json" style="display:none">
-        </label>
+      <h2>1) Datos & Parámetros</h2>
+      <div class="grid grid-3">
+        <div>
+          <label>Archivo CSV de apuestas</label>
+          <input id="file" type="file" accept=".csv" />
+          <div class="hint">Encabezados: Date,League,Season,MatchID,Home,Away,Market,Selection,Model_Prob,Odds_Taken,Closing_Odds,Result</div>
+        </div>
+        <div>
+          <label>Split Date (TRAIN ≤ fecha, TEST > fecha)</label>
+          <input id="splitDate" type="date" />
+          <div class="hint">Ej. hoy o fin de la 1ª temporada del rango</div>
+        </div>
+        <div class="row">
+          <div style="min-width:160px">
+            <label>Bankroll inicial</label>
+            <input id="bankroll" type="number" step="0.01" value="100" />
+          </div>
+          <div style="min-width:160px">
+            <label>Método de Stake</label>
+            <select id="stakeMethod">
+              <option value="FLAT">FLAT</option>
+              <option value="KELLY">KELLY</option>
+            </select>
+          </div>
+          <div style="min-width:160px">
+            <label>Fracción de Kelly</label>
+            <input id="kellyFrac" type="number" step="0.01" value="0.25" />
+          </div>
+        </div>
+      </div>
+      <div class="row" style="margin-top:12px">
+        <button id="run" class="primary">Calcular Backtest</button>
+        <button id="exportProcessed" class="ghost">Exportar Apuestas Procesadas (CSV)</button>
+        <button id="exportResults" class="ghost">Exportar Resultados (CSV)</button>
       </div>
     </section>
 
-    <section class="card" style="margin-top:12px">
-      <h2>Prompt de sistema (JATCO-MAINT-AI)</h2>
-      <details>
-        <summary class="pill">Ver/ocultar</summary>
-        <pre id="sysPrompt"></pre>
-      </details>
+    <section class="grid grid-2">
+      <div class="card">
+        <h2>2) Métricas Globales</h2>
+        <table id="metricsTotal">
+          <thead><tr><th>Métrica</th><th>Valor</th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <div class="hr"></div>
+        <h2>TRAIN / TEST</h2>
+        <div class="grid grid-2">
+          <div>
+            <div class="badge">TRAIN</div>
+            <table id="metricsTrain"><thead><tr><th>Métrica</th><th>Valor</th></tr></thead><tbody></tbody></table>
+          </div>
+          <div>
+            <div class="badge">TEST</div>
+            <table id="metricsTest"><thead><tr><th>Métrica</th><th>Valor</th></tr></thead><tbody></tbody></table>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>3) Curva de Equity</h2>
+        <canvas id="equityChart"></canvas>
+        <div class="hint">Incluye stake según método seleccionado.</div>
+      </div>
+    </section>
+
+    <section class="grid grid-2">
+      <div class="card">
+        <h2>4) Walk-Forward (bloques 3M)</h2>
+        <table id="wf">
+          <thead>
+            <tr>
+              <th class="nowrap">Train Start</th><th class="nowrap">Train End</th>
+              <th class="nowrap">Test Start</th><th class="nowrap">Test End</th>
+              <th>Bets (Train)</th><th>Yield (Train)</th>
+              <th>Bets (Test)</th><th>Yield (Test)</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+
+      <div class="card">
+        <h2>5) Monte Carlo (Yield por apuesta)</h2>
+        <table id="mc">
+          <thead>
+            <tr><th>p05</th><th>p50</th><th>p95</th><th>N Sim</th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+        <div class="hint">Bootstrap con reemplazo sobre el rendimiento por unidad.</div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>6) Resumen por Liga / Mercado</h2>
+      <div class="grid grid-2">
+        <div>
+          <div class="badge">Por Liga (TEST)</div>
+          <table id="byLeague"><thead><tr><th>Liga</th><th>Bets</th><th>Yield</th><th>Profit</th></tr></thead><tbody></tbody></table>
+        </div>
+        <div>
+          <div class="badge">Por Mercado (TEST)</div>
+          <table id="byMarket"><thead><tr><th>Mercado</th><th>Bets</th><th>Yield</th><th>Profit</th></tr></thead><tbody></tbody></table>
+        </div>
+      </div>
+    </section>
+
+    <section class="footer muted">
+      Recomendación: compara tu EV contra <span class="badge">Closing_Odds</span>. Si tu edge supera al cierre de forma consistente, es señal de ventaja real.
     </section>
   </main>
-</div>
-
-<footer class="wrap" style="color:#9aa3b2;font-size:12px">
-  ⚠️ Seguridad primero: aplica LOTO y procedimientos de la planta JATCO antes de intervenir cualquier equipo.
-</footer>
 
 <script>
-/* ====== Chips base ====== */
-const SYMPTOMS = [
-  'EMI/ruido','intermitencia','sobrecorriente','sobretemperatura','vibración','desalineo/holgura',
-  'no detecta/sin señal','falsos positivos','carrera incompleta/atoro','fuga aire/aceite',
-  'fallo I/O PLC/Fieldbus','sobrecarga servo/spindle','sobretravel','herramienta fuera de posición',
-  'pieza fuera de tolerancia','mala calidad superficial','chaveteo/barridos','cavitación','baja presión'
-];
-const CHANGES = ['setup reciente','mantenimiento reciente','proveedor/material nuevo','firmware/param cambiado','ajuste de proceso','cables potencia cercanos','ambiente húmedo/aceite'];
+/* -------------------- Utilidades -------------------- */
+const fmt = n => (Number.isFinite(n) ? (Math.abs(n)>=1 ? n.toFixed(2) : n.toFixed(4)) : "");
+const pct = n => (Number.isFinite(n) ? (n*100).toFixed(2)+"%" : "");
+const parseNum = v => v===null||v===undefined||v==="" ? NaN : Number(v);
+const parseDate = s => (s ? new Date(s+"T00:00:00") : null);
 
-/* ====== System Prompt (lo que nos diste) ====== */
-const SYSTEM_PROMPT = `
-Eres "JATCO-MAINT-AI", un ingeniero de mantenimiento industrial digital para JATCO (automotriz). Tu objetivo: 
-(1) Diagnosticar fallas con evidencia, (2) proponer acciones inmediatas de contención, 
-(3) acciones correctivas hacia causa raíz, y (4) contramedidas definitivas (permanentes) 
-alineadas a manufactura automotriz, seguridad y calidad.
-
-### ÁMBITO Y EQUIPOS (JATCO)
-- CNC: FANUC (series 0i/30i/31i/32i), ROBODRILL, GLEASON (corte/rectificado engranes).
-- Máquinas: honeadoras (honing), tornos, brochadoras.
-- Robots: FANUC (R-30iA/B/iB+).
-- PLC: Mitsubishi (FX/Q/iQ), Omron (CJ/CS/NX).
-- Periféricos: VFD, unidades servo/Spindle, sistemas de visión, hidráulico/neumático, sistemas de refrigeración/lubricación.
-
-### CUANDO CONTESTES
-- Pide solo los datos estrictamente necesarios si faltan (máx. 5 preguntas). 
-- Da respuestas accionables y priorizadas. Evita teoría excesiva.
-- Separa SIEMPRE en: Contención inmediata, Corrección (causa raíz), Contramedidas definitivas, Riesgo/FMEA rápido, Checklist y Repuestos.
-- Incluye seguridad (LOTO, E-Stop, resguardo) antes de intervenir.
-- Si hay riesgo de daño a personas/equipo, señaliza “PARO SEGURO”.
-
-### ENTRADA ESPERADA (input del usuario)
-Estructura flexible, pero intenta obtener (si no viene):
-- activo/equipo (tipo + marca/modelo), ubicación/línea, turno.
-- síntomas observados (qué/patrón: continuo/intermitente/frecuencia).
-- cambios recientes (setup, proveedor, mantenimiento, firmware).
-- alarmas/códigos (CNC/robot/PLC), señales I/O afectadas.
-- condiciones de proceso (velocidad/avance/presión/temperatura).
-- evidencias: fotos, tendencias, vibración/corriente, firmas de soldadura, etc.
-
-### TAXONOMÍA DE SÍNTOMAS (usa como etiquetas)
-EMI/ruido • intermitencia • sobrecorriente • sobretemperatura • vibración • desalineo/holgura • 
-no detecta/sin señal • falsos positivos • carrera incompleta/atoro • fuga aire/aceite • 
-fallo I/O PLC/Fieldbus • sobrecarga servo/spindle • sobretravel • herramienta fuera de posición • 
-pieza fuera de tolerancia • mala calidad superficial • chaveteo/barridos • cavitación • baja presión.
-
-### REGLAS/HEURÍSTICAS POR EQUIPO (resumen operativo)
-- FANUC CNC / ROBODRILL:
-  • Alarmas típicas: servo 401/414, spindle 12xx, OT/OT+/- (overtravel), PMC I/O, 910/911 (batería/param), 100/101 (program/seq).
-  • Chequeos rápidos: E-Stop y cadenas de seguridad; alimentación trifásica; LEDs servo amp; parámetros alterados; backlash/comp; lubricación husillos; aire seco.
-  • I/O/EMI: Segregar mazos señal/potencia, ferritas, tierra única; revisar conectores M12; debounce en PMC.
-- GLEASON (engranes):
-  • Calidad fluctuante: temperatura aceite, rigidez/fixturas, desgaste muela/rodillos, alineación ejes, backlash y vibración.
-  • Enfriamiento/filtración: pureza y caudal; dressing programado; trazas SPC.
-- Honeadoras:
-  • Ovalidad/cono/superficie: presión y caudal de aceite/honing, condición piedra, guías; temperatura pieza/fluido; flushing de viruta.
-- Tornos/Brochadoras:
-  • Desalineo y rebaba: guías/contrapunto, torque herramientas; fijación pieza; vibración; presión hidráulica; avance/corte; lubricación.
-- Robots FANUC:
-  • Faults SRVO-xxx, INTP-xxx, MOTN-xxx: revisar frenos, mastering, payload, colisiones blandas, cableado ejes; ruido EMI cerca de cables potencia.
-- PLC Mitsubishi/Omron:
-  • I/O intermitente: earthing único; separación rutas; filtros en salidas analógicas; diagnósticos (error codes, watchdog); revisar temporizadores/scan.
-
-### FORMATO DE RESPUESTA (obligatorio)
-Devuelve SIEMPRE además de tu texto una estructura JSON al final (para que una app pueda leerla).
-Campos obligatorios:
-
-{
-  "equipo": "<tipo + marca/modelo>",
-  "riesgo": "OK | PARO SEGURO",
-  "hipotesis_causa_raiz": ["...", "..."],
-  "acciones_inmediatas": ["...", "..."],
-  "acciones_correctivas": ["...", "..."],
-  "contramedidas_definitivas": ["...", "..."],
-  "fmea_rapido": { "S": 1-10, "O": 1-10, "D": 1-10, "RPN": "S*O*D", "ideas_bajar_RPN": ["..."] },
-  "checklist": [
-    {"tarea":"...", "resp":"...", "fecha":"YYYY-MM-DD", "estatus":"Pendiente|En curso|Hecha"}
-  ],
-  "repuestos_sugeridos": ["código_fanuc_xxx", "sensor_M12_IP67", "filtro_EMI_linea", "sellos_FKM", "piedra_honing_xxx"],
-  "datos_faltantes": ["...", "..."]
-}
-`;
-
-/* ====== UI Helpers ====== */
-const $ = s => document.querySelector(s);
-const $$ = s => Array.from(document.querySelectorAll(s));
-function chipify(container, items){
-  container.innerHTML='';
-  items.forEach(txt=>{
-    const el=document.createElement('span');
-    el.className='chip'; el.textContent=txt;
-    el.onclick=()=> el.classList.toggle('active');
-    container.appendChild(el);
-  });
-}
-function toast(msg){
-  const t=document.createElement('div');
-  t.textContent=msg;
-  Object.assign(t.style,{position:'fixed',right:'16px',bottom:'16px',background:'#111725',color:'#e6eaf2',padding:'10px 12px',border:'1px solid var(--border)',borderRadius:'10px',zIndex:9999});
-  document.body.appendChild(t); setTimeout(()=>t.remove(),2200);
-}
-function getChips(container){ return $$(container+' .chip.active').map(x=>x.textContent); }
-function saveConn(){ localStorage.setItem('jatco_conn', JSON.stringify({apiBase:$('#apiBase').value, apiKey:$('#apiKey').value, model:$('#model').value, temp:$('#temp').value})); toast('Conexión guardada'); }
-function loadConn(){ const raw=localStorage.getItem('jatco_conn'); if(!raw) return; try{const j=JSON.parse(raw); $('#apiBase').value=j.apiBase||$('#apiBase').value; $('#apiKey').value=j.apiKey||''; $('#model').value=j.model||$('#model').value; $('#temp').value=j.temp||'0.2';}catch{} }
-function setStatus(txt, cls=''){ const el=$('#status'); el.textContent=txt; el.className='pill ' + cls; }
-
-/* ====== Build user message ====== */
-function buildUserInput(){
-  const equipo=$('#equipo').value.trim();
-  const ubic=$('#ubic').value.trim();
-  const desc=$('#desc').value.trim();
-  const sintomas=getChips('#symptoms');
-  const cambios=getChips('#changes');
-  const alarmas=$('#alarmas').value.trim();
-  const cond=$('#cond').value.trim();
-  return `
-Empresa: JATCO.
-Equipo: ${equipo||'(no indicado)'}.
-Ubicación/Turno: ${ubic||'(no indicado)'}.
-Descripción: ${desc||'(no indicado)'}.
-Síntomas: ${sintomas.join(', ')||'(no indicado)'}.
-Cambios recientes: ${cambios.join(', ')||'(no indicado)'}.
-Alarmas / I/O: ${alarmas||'(no indicado)'}.
-Condiciones de proceso: ${cond||'(no indicado)'}.
-
-Responde siguiendo exactamente las secciones y el JSON especificado en el system prompt.`;
+function monthAdd(d, m){
+  const nd = new Date(d);
+  nd.setMonth(nd.getMonth()+m);
+  return nd;
 }
 
-/* ====== Call LLM ====== */
-async function callLLM(){
-  try{
-    setStatus('Consultando modelo…');
-    const apiBase=$('#apiBase').value.trim().replace(/\/$/,'');
-    const apiKey=$('#apiKey').value.trim();
-    const model=$('#model').value.trim();
-    const temperature=parseFloat($('#temp').value||'0.2');
-
-    if(!apiBase || !model) throw new Error('Falta API Base o modelo');
-    if(apiBase.includes('openai.com') && !apiKey) throw new Error('Falta API Key');
-
-    const body={
-      model,
-      temperature,
-      messages:[
-        {role:'system', content:SYSTEM_PROMPT},
-        {role:'user', content:buildUserInput()}
-      ]
-    };
-
-    const r = await fetch(apiBase + '/chat/completions', {
-      method:'POST',
-      headers:{'Content-Type':'application/json', ...(apiKey? {'Authorization':'Bearer '+apiKey}:{})},
-      body: JSON.stringify(body)
+function csvToArray(csvFile){
+  return new Promise((resolve, reject)=>{
+    Papa.parse(csvFile, {
+      header:true, skipEmptyLines:true, dynamicTyping:false,
+      complete: res => resolve(res.data), error: err => reject(err)
     });
-    if(!r.ok){
-      const err=await r.json().catch(()=>({}));
-      throw new Error(err.error?.message || (r.status+' '+r.statusText));
-    }
-    const j = await r.json();
-    const txt = j.choices?.[0]?.message?.content || '';
-    $('#texto').textContent = txt;
-    parseAndRenderJSON(txt);
-    setStatus('Hecho','ok');
-  }catch(e){
-    setStatus('Error: ' + e.message,'danger');
-  }
-}
-
-/* ====== Parse JSON from model answer ====== */
-function parseAndRenderJSON(text){
-  let found=null;
-  // 1) intenta bloque ```json ... ```
-  const codeBlock = text.match(/```json([\s\S]*?)```/i);
-  if(codeBlock){ try{ found = JSON.parse(codeBlock[1].trim()); }catch{} }
-  // 2) si no, intenta encontrar el último {...} grande
-  if(!found){
-    const lastBrace = text.lastIndexOf('{');
-    if(lastBrace>=0){ const maybe = text.slice(lastBrace); try{ found = JSON.parse(maybe); }catch{} }
-  }
-  // 3) render
-  if(found){
-    $('#jsonView').textContent = JSON.stringify(found, null, 2);
-    renderChecklist(found.checklist||[]);
-  }else{
-    $('#jsonView').textContent = '{}';
-    renderChecklist([]);
-  }
-}
-function renderChecklist(items){
-  const tb=$('#checkTable tbody'); tb.innerHTML='';
-  (items||[]).forEach(r=>{
-    const tr=document.createElement('tr');
-    tr.innerHTML = `<td>${escapeHTML(r.tarea||'')}</td><td>${escapeHTML(r.resp||'')}</td><td>${escapeHTML(r.fecha||'')}</td><td>${escapeHTML(r.estatus||'')}</td>`;
-    tb.appendChild(tr);
   });
 }
-function escapeHTML(s){ return (''+s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
 
-/* ====== Export / Import ====== */
-function exportJSON(){
-  const blob=new Blob([$('#jsonView').textContent||'{}'],{type:'application/json'});
-  const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='jatco_maint_result.json'; a.click(); URL.revokeObjectURL(a.href);
-}
-function importJSON(file){
-  const rdr=new FileReader();
-  rdr.onload=()=>{ try{ const obj=JSON.parse(rdr.result); $('#jsonView').textContent=JSON.stringify(obj,null,2); renderChecklist(obj.checklist||[]); toast('Importado'); }catch(e){ alert('JSON inválido: '+e.message); } };
-  rdr.readAsText(file);
+function downloadCSV(filename, rows){
+  const process = rows.map(r=>Array.isArray(r)?r:Object.values(r));
+  const csv = process.map(r => r.map(x => (x==null?"":String(x)).replace(/"/g,'""')).map(x=>`"${x}"`).join(",")).join("\n");
+  const blob = new Blob([csv], {type:"text/csv;charset=utf-8;"});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = filename; a.click();
+  URL.revokeObjectURL(url);
 }
 
-/* ====== Init ====== */
-function init(){
-  chipify($('#symptoms'), SYMPTOMS);
-  chipify($('#changes'), CHANGES);
-  $('#sysPrompt').textContent = SYSTEM_PROMPT.trim();
-  loadConn();
-  // events
-  $('#btnDiagnosticar').onclick=callLLM;
-  $('#btnTest').onclick=()=>{ saveConn(); setStatus('Conexión guardada. Haz una prueba con un caso.','ok'); };
-  $('#btnSaveConn').onclick=saveConn;
-  $('#btnLimpiar').onclick=()=>{ ['equipo','ubic','desc','alarmas','cond'].forEach(id=> document.getElementById(id).value=''); $$('#symptoms .chip, #changes .chip').forEach(c=>c.classList.remove('active')); $('#texto').textContent=''; $('#jsonView').textContent='{}'; $('#checkTable tbody').innerHTML=''; setStatus('Listo'); };
-  $('#btnExport').onclick=exportJSON;
-  $('#impJson').addEventListener('change',e=>{ const f=e.target.files[0]; if(f) importJSON(f); });
+/* -------------------- Cálculos núcleo -------------------- */
+function computeRows(rows, params){
+  // Orden cronológico
+  rows = rows.map(r => ({
+    Date: r.Date, League: r.League, Season: r.Season, MatchID: r.MatchID,
+    Home: r.Home, Away: r.Away, Market: r.Market, Selection: r.Selection,
+    Model_Prob: parseNum(r.Model_Prob), Odds_Taken: parseNum(r.Odds_Taken),
+    Closing_Odds: parseNum(r.Closing_Odds), Result: String(r.Result||"").toUpperCase()
+  })).filter(r => r.Date && r.Odds_Taken);
+
+  rows.sort((a,b)=> new Date(a.Date) - new Date(b.Date));
+
+  const split = parseDate(params.splitDate);
+  let bk = Number(params.bankroll);
+  const stakeMethod = params.stakeMethod.toUpperCase();
+  const kf = Number(params.kellyFrac);
+
+  const out = [];
+  for (let i=0;i<rows.length;i++){
+    const r = rows[i];
+    const date = parseDate(r.Date);
+    const set = (split && date && date<=split) ? "TRAIN" : "TEST";
+    const closingImp = Number.isFinite(r.Closing_Odds) && r.Closing_Odds>0 ? 1/r.Closing_Odds : null;
+    const edgeClosing = Number.isFinite(closingImp) && Number.isFinite(r.Model_Prob) ? (r.Model_Prob - closingImp) : null;
+
+    // Stake
+    let stakeEff = "FLAT";
+    let stake = 1;
+    if (stakeMethod==="KELLY" && Number.isFinite(r.Model_Prob) && r.Model_Prob>=0 && r.Model_Prob<=1 && r.Odds_Taken>1){
+      const p = r.Model_Prob, o = r.Odds_Taken;
+      const fstar = ((p*o)-(1-p)) / (o-1);
+      const fpos = Math.max(fstar, 0);
+      stake = fpos * bk * kf;
+      stakeEff = "KELLY";
+      if (!Number.isFinite(stake) || stake<=0) { stake=1; stakeEff="FLAT"; }
+    }
+
+    // Profit por resultado
+    let profit = 0;
+    if (r.Result==="W") profit = stake*(r.Odds_Taken - 1);
+    else if (r.Result==="L") profit = -stake;
+    else profit = 0; // V o vacío
+
+    const bkBefore = bk;
+    const bkAfter = bkBefore + profit;
+    bk = bkAfter;
+
+    out.push({
+      ...r,
+      Closing_ImpProb: closingImp,
+      Edge_vs_Closing: edgeClosing,
+      Stake_Method_Effective: stakeEff,
+      Stake: stake,
+      Profit: profit,
+      Bankroll_Before: bkBefore,
+      Bankroll_After: bkAfter,
+      Set: set,
+      Equity_Curve: bkAfter
+    });
+  }
+  return out;
 }
-init();
+
+function kpis(list){
+  const n = list.length;
+  const wins = list.filter(x=>x.Profit>0).length;
+  const losses = list.filter(x=>x.Profit<0).length;
+  const hit = (wins+losses)>0 ? wins/(wins+losses) : NaN;
+  const stakeSum = list.reduce((s,x)=>s+(Number.isFinite(x.Stake)?x.Stake:0),0);
+  const profitSum = list.reduce((s,x)=>s+(Number.isFinite(x.Profit)?x.Profit:0),0);
+  const yieldR = stakeSum>0 ? profitSum/stakeSum : NaN;
+
+  // Max drawdown sobre equity
+  const eq = list.map(x=>x.Equity_Curve);
+  let runmax = -Infinity, maxDD = 0;
+  for (const v of eq){
+    if (!Number.isFinite(v)) continue;
+    runmax = Math.max(runmax, v);
+    if (runmax>0){
+      const dd = (runmax - v)/runmax;
+      maxDD = Math.max(maxDD, dd);
+    }
+  }
+  const avgOdds = prom(list.map(x=>x.Odds_Taken));
+  const avgStake = prom(list.map(x=>x.Stake));
+  return {Bets:n, HitRate:hit, Yield:yieldR, Profit:profitSum, MaxDrawdown:maxDD, AvgOdds:avgOdds, AvgStake:avgStake};
+}
+
+function prom(arr){
+  const v = arr.filter(Number.isFinite);
+  if (!v.length) return NaN;
+  return v.reduce((a,b)=>a+b,0)/v.length;
+}
+
+/* Walk-Forward 3M */
+function walkForward3M(list){
+  if (!list.length) return [];
+  const dates = list.map(x=>parseDate(x.Date)).filter(Boolean);
+  if (!dates.length) return [];
+  dates.sort((a,b)=>a-b);
+  let cur = new Date(dates[0]); cur.setDate(1);
+  const end = new Date(dates[dates.length-1]);
+  const out = [];
+  while (cur <= end){
+    const trainEnd = new Date(monthAdd(cur,3).getTime()-24*3600*1000);
+    const testEnd = monthAdd(cur,6);
+    const train = list.filter(x=> {
+      const d = parseDate(x.Date); return d && d>=cur && d<=trainEnd;
+    });
+    const test = list.filter(x=> {
+      const d = parseDate(x.Date); return d && d>trainEnd && d<=testEnd;
+    });
+    if (test.length){
+      const mTrain = train.length ? kpis(train) : {Yield:NaN,Bets:0};
+      const mTest = kpis(test);
+      out.push({
+        Train_Start: cur.toISOString().slice(0,10),
+        Train_End: trainEnd.toISOString().slice(0,10),
+        Test_Start: new Date(trainEnd.getTime()+24*3600*1000).toISOString().slice(0,10),
+        Test_End: testEnd.toISOString().slice(0,10),
+        Train_Bets: mTrain.Bets|0,
+        Train_Yield: mTrain.Yield,
+        Test_Bets: mTest.Bets|0,
+        Test_Yield: mTest.Yield
+      });
+    }
+    cur = monthAdd(cur,3);
+  }
+  return out;
+}
+
+/* Monte Carlo del yield por unidad */
+function monteCarlo(list, nSims=2000){
+  const perUnit = list
+    .map(x => Number.isFinite(x.Stake) && x.Stake>0 ? x.Profit/x.Stake : NaN)
+    .filter(Number.isFinite);
+  if (!perUnit.length) return {p05:NaN,p50:NaN,p95:NaN,n:0};
+  const rng = (function(seed=42){
+    let s = seed >>> 0;
+    return ()=> (s = (s*1664525 + 1013904223) >>> 0) / 2**32;
+  })();
+
+  function choice(){
+    const i = Math.floor(rng()*perUnit.length);
+    return perUnit[i];
+    }
+  const sims = [];
+  for (let i=0;i<nSims;i++){
+    const draw = Array.from({length:perUnit.length}, choice);
+    const m = draw.reduce((a,b)=>a+b,0)/draw.length;
+    sims.push(m);
+  }
+  sims.sort((a,b)=>a-b);
+  const q = p => sims[Math.min(sims.length-1, Math.max(0, Math.floor(p*(sims.length-1))))];
+  return {p05:q(0.05), p50:q(0.50), p95:q(0.95), n:nSims};
+}
+
+/* Agrupados por liga/mercado (TEST) */
+function groupByKey(list, key){
+  const map = new Map();
+  for (const x of list){
+    const k = x[key] || "(sin dato)";
+    if (!map.has(k)) map.set(k, []);
+    map.get(k).push(x);
+  }
+  const rows = [];
+  for (const [k, arr] of map){
+    const m = kpis(arr);
+    rows.push({Key:k, Bets:m.Bets, Yield:m.Yield, Profit:m.Profit});
+  }
+  rows.sort((a,b)=> b.Yield - a.Yield);
+  return rows;
+}
+
+/* -------------------- UI Lógica -------------------- */
+let equityChart;
+
+function fillMetrics(tbodyEl, m){
+  const rows = [
+    ["Total Bets", m.Bets],
+    ["Hit Rate", pct(m.HitRate)],
+    ["Yield (ROI)", pct(m.Yield)],
+    ["Profit", fmt(m.Profit)],
+    ["Max Drawdown", pct(m.MaxDrawdown)],
+    ["Avg Odds", fmt(m.AvgOdds)],
+    ["Avg Stake", fmt(m.AvgStake)]
+  ];
+  tbodyEl.innerHTML = rows.map(r=>`<tr><td>${r[0]}</td><td>${r[1]}</td></tr>`).join("");
+}
+
+function fillTable(tableBody, rows, cols){
+  tableBody.innerHTML = rows.map(r=>{
+    return `<tr>${cols.map(c => `<td>${c.format ? c.format(r[c.key]) : (r[c.key]??"")}</td>`).join("")}</tr>`;
+  }).join("");
+}
+
+function drawEquity(list){
+  const labels = list.map(x=>x.Date);
+  const data = list.map(x=>x.Equity_Curve);
+  const ctx = document.getElementById("equityChart");
+  if (equityChart) equityChart.destroy();
+  equityChart = new Chart(ctx, {
+    type: "line",
+    data: {
+      labels,
+      datasets: [{label:"Equity", data, tension:.2, borderWidth:2, pointRadius:0}]
+    },
+    options: {
+      responsive:true,
+      scales:{ x:{ticks:{maxTicksLimit:8}}, y:{beginAtZero:false} },
+      plugins:{ legend:{display:false} }
+    }
+  });
+}
+
+/* -------------------- Eventos -------------------- */
+const fileEl = document.getElementById("file");
+const splitEl = document.getElementById("splitDate");
+const bankrollEl = document.getElementById("bankroll");
+const stakeMethodEl = document.getElementById("stakeMethod");
+const kellyFracEl = document.getElementById("kellyFrac");
+
+document.getElementById("run").addEventListener("click", async ()=>{
+  const file = fileEl.files && fileEl.files[0];
+  if (!file){ alert("Carga un archivo CSV primero."); return; }
+
+  const raw = await csvToArray(file);
+  const params = {
+    splitDate: splitEl.value || new Date().toISOString().slice(0,10),
+    bankroll: bankrollEl.value || 100,
+    stakeMethod: stakeMethodEl.value || "FLAT",
+    kellyFrac: kellyFracEl.value || 0.25
+  };
+  const processed = computeRows(raw, params);
+
+  // KPIs
+  const total = kpis(processed);
+  const train = kpis(processed.filter(x=>x.Set==="TRAIN"));
+  const test = kpis(processed.filter(x=>x.Set==="TEST"));
+
+  fillMetrics(document.querySelector("#metricsTotal tbody"), total);
+  fillMetrics(document.querySelector("#metricsTrain tbody"), train);
+  fillMetrics(document.querySelector("#metricsTest tbody"), test);
+
+  // Equity
+  drawEquity(processed);
+
+  // Walk-Forward
+  const wfRows = walkForward3M(processed);
+  fillTable(document.querySelector("#wf tbody"), wfRows, [
+    {key:"Train_Start"}, {key:"Train_End"}, {key:"Test_Start"}, {key:"Test_End"},
+    {key:"Train_Bets"}, {key:"Train_Yield", format:pct}, {key:"Test_Bets"}, {key:"Test_Yield", format:pct}
+  ]);
+
+  // Monte Carlo (TOTAL y TEST por simplicidad mostramos TOTAL)
+  const mc = monteCarlo(processed);
+  document.querySelector("#mc tbody").innerHTML =
+    `<tr><td>${pct(mc.p05)}</td><td>${pct(mc.p50)}</td><td>${pct(mc.p95)}</td><td>${mc.n}</td></tr>`;
+
+  // Resumen por Liga/Mercado en TEST
+  const testSet = processed.filter(x=>x.Set==="TEST");
+  const byLeague = groupByKey(testSet, "League");
+  const byMarket = groupByKey(testSet, "Market");
+
+  fillTable(document.querySelector("#byLeague tbody"), byLeague, [
+    {key:"Key"}, {key:"Bets"}, {key:"Yield", format:pct}, {key:"Profit", format:fmt}
+  ]);
+  fillTable(document.querySelector("#byMarket tbody"), byMarket, [
+    {key:"Key"}, {key:"Bets"}, {key:"Yield", format:pct}, {key:"Profit", format:fmt}
+  ]);
+
+  // Guardamos en ventana para exportar
+  window.__bt_last = {processed, total, train, test, wfRows, mc, byLeague, byMarket};
+});
+
+document.getElementById("exportProcessed").addEventListener("click", ()=>{
+  const st = window.__bt_last;
+  if (!st?.processed) { alert("Primero ejecuta el backtest."); return; }
+  const headers = Object.keys(st.processed[0]||{});
+  const rows = [headers].concat(st.processed.map(o=>headers.map(h=>o[h])));
+  downloadCSV("apuestas_procesadas.csv", rows);
+});
+
+document.getElementById("exportResults").addEventListener("click", ()=>{
+  const st = window.__bt_last;
+  if (!st){ alert("Primero ejecuta el backtest."); return; }
+  const rows = [];
+  const pushBlock = (name, m) => {
+    rows.push([name,"Valor"]);
+    rows.push(["Bets", m.Bets]);
+    rows.push(["HitRate", m.HitRate]);
+    rows.push(["Yield", m.Yield]);
+    rows.push(["Profit", m.Profit]);
+    rows.push(["MaxDrawdown", m.MaxDrawdown]);
+    rows.push(["AvgOdds", m.AvgOdds]);
+    rows.push(["AvgStake", m.AvgStake]);
+    rows.push([]);
+  };
+  pushBlock("TOTAL", st.total);
+  pushBlock("TRAIN", st.train);
+  pushBlock("TEST", st.test);
+  rows.push(["WF","Train_Start","Train_End","Test_Start","Test_End","Train_Bets","Train_Yield","Test_Bets","Test_Yield"]);
+  (st.wfRows||[]).forEach(r=> rows.push(["WF", r.Train_Start, r.Train_End, r.Test_Start, r.Test_End, r.Train_Bets, r.Train_Yield, r.Test_Bets, r.Test_Yield]));
+  rows.push([]);
+  rows.push(["MonteCarlo","p05","p50","p95","N"]);
+  rows.push(["TOTAL", st.mc.p05, st.mc.p50, st.mc.p95, st.mc.n]);
+  rows.push([]);
+  rows.push(["ByLeague TEST","Liga","Bets","Yield","Profit"]);
+  (st.byLeague||[]).forEach(r=> rows.push(["ByLeague", r.Key, r.Bets, r.Yield, r.Profit]));
+  rows.push([]);
+  rows.push(["ByMarket TEST","Mercado","Bets","Yield","Profit"]);
+  (st.byMarket||[]).forEach(r=> rows.push(["ByMarket", r.Key, r.Bets, r.Yield, r.Profit]));
+  downloadCSV("resultados_backtesting.csv", rows);
+});
 </script>
 </body>
 </html>
