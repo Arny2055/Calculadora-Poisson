@@ -1,543 +1,387 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-<meta charset="UTF-8"/>
-<meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>Backtesting Fútbol — Cargador + Mapeo de Campos</title>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Calculadora Poisson de Fútbol — Ataque, Defensa, xG y Probabilidades</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet" />
 <style>
-  :root{--bg:#0f1115;--panel:#171a21;--panel2:#1f2430;--text:#e6eaf2;--muted:#9aa3b2;--accent:#7aa2ff;--border:#2a3140}
-  *{box-sizing:border-box;font-family:'Inter',sans-serif}
-  body{margin:0;background:var(--bg);color:var(--text)}
-  header{padding:1rem;background:var(--panel);border-bottom:1px solid var(--border)}
-  main{display:grid;grid-template-columns:1.2fr 2.8fr;gap:1rem;padding:1rem}
-  section{background:var(--panel2);padding:1rem;border-radius:10px;overflow:auto}
-  h1{margin:0;font-size:1.1rem}
-  label{display:block;margin-top:.5rem;color:var(--muted)}
-  input,select,button,textarea{width:100%;padding:.55rem;margin-top:.35rem;background:var(--panel);color:var(--text);border:1px solid var(--border);border-radius:8px}
-  textarea{min-height:120px;resize:vertical}
-  button{cursor:pointer;background:var(--accent)}
-  table{width:100%;border-collapse:collapse;font-size:.85rem;margin-top:.5rem}
-  th,td{border:1px solid var(--border);padding:.35rem;text-align:center}
-  th{background:var(--panel)}
-  .row{display:grid;grid-template-columns:1fr 1fr;gap:.5rem}
-  .row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:.5rem}
-  .status{background:#10151d;border:1px solid var(--border);border-radius:8px;padding:.6rem;margin-top:.6rem;font-size:.9rem}
-  .ok{color:#7ee787}.warn{color:#ffb86b}.err{color:#ff6b6b}
-  .dropzone{border:2px dashed var(--accent);border-radius:10px;padding:1rem;text-align:center;color:var(--muted);margin-top:.5rem}
-  .dropzone.dragover{background:rgba(122,162,255,.1)}
-  canvas{width:100%!important;height:260px!important;margin-top:1rem}
+  :root{
+    --bg:#0f1115; --panel:#171a21; --panel2:#1f2430; --text:#e8ecf3; --muted:#9aa3b2;
+    --accent:#7aa2ff; --accent2:#5dd4a4; --warn:#ffb84d; --danger:#ff6b6b; --border:#2a3140;
+  }
+  *{box-sizing:border-box}
+  body{margin:0; font-family:Inter,system-ui,Segoe UI,Roboto,Arial,sans-serif; background:var(--bg); color:var(--text)}
+  header{padding:18px 20px; border-bottom:1px solid var(--border); background:linear-gradient(180deg, #121520, #0f1115)}
+  h1{margin:0; font-size:20px}
+  .wrap{max-width:1100px; margin:20px auto; padding:0 16px}
+  .grid{display:grid; gap:14px}
+  @media(min-width:900px){ .grid{grid-template-columns: 1.1fr 1fr} }
+  .card{background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:14px}
+  .card h2{margin:6px 0 12px; font-size:16px}
+  label{display:block; font-size:13px; color:var(--muted); margin:10px 0 6px}
+  select, input[type="number"], input[type="text"]{
+    width:100%; padding:10px 12px; background:var(--panel2); color:var(--text);
+    border:1px solid var(--border); border-radius:10px; font-size:14px;
+  }
+  input[type="file"]{width:100%}
+  .row{display:grid; gap:10px}
+  @media(min-width:640px){ .row{grid-template-columns:1fr 1fr} }
+  .btn{display:inline-block; padding:10px 14px; border-radius:10px; border:1px solid var(--border);
+    background:linear-gradient(180deg,#1b2130,#171a21); color:var(--text); font-weight:600; cursor:pointer}
+  .btn:hover{filter:brightness(1.05)}
+  .accent{background:linear-gradient(180deg,#2a58ff,#264bda); border-color:#2c4fd0}
+  .muted{color:var(--muted)}
+  .kpis{display:grid; gap:10px; grid-template-columns:repeat(2,1fr)}
+  @media(min-width:900px){ .kpis{grid-template-columns:repeat(4,1fr)} }
+  .kpi{background:var(--panel2); border:1px solid var(--border); border-radius:12px; padding:12px}
+  .kpi .t{font-size:12px; color:var(--muted)}
+  .kpi .v{font-size:18px; font-weight:800; margin-top:4px}
+  table{width:100%; border-collapse:collapse; font-size:13px}
+  th,td{padding:8px 10px; border-bottom:1px solid var(--border)}
+  th{text-align:left; color:#c9d3e7; background:#1a1f2a; position:sticky; top:0}
+  .pill{display:inline-block; padding:2px 8px; border-radius:999px; font-size:12px; border:1px solid var(--border); background:var(--panel2)}
+  .ok{color:#0dd88d} .bad{color:#ff7d7d} .warn{color:#ffcc66}
+  details {background:var(--panel2); border:1px solid var(--border); border-radius:10px; padding:10px; }
+  summary{cursor:pointer; font-weight:600}
+  .code{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; font-size:12px; color:#cfe1ff}
+  .footer{color:var(--muted); font-size:12px; text-align:center; padding:18px}
 </style>
 </head>
 <body>
-<header><h1>⚽ Backtesting Fútbol — Cargador + Mapeo</h1></header>
-
-<main>
-  <section>
-    <h2>1) Carga tu JSON</h2>
-    <input type="file" id="fileInput" accept=".json"/>
-    <div id="dropzone" class="dropzone">Arrastra aquí tu .json</div>
-    <label>…o pega el JSON</label>
-    <textarea id="jsonText" placeholder="Pega aquí tu JSON (array, objeto, o NDJSON)"></textarea>
-    <div class="row">
-      <button id="btnParse">Leer JSON</button>
-      <button id="btnDemo">Cargar DEMO</button>
-    </div>
-
-    <h2 style="margin-top:1rem">2) Mapea los campos</h2>
-    <div class="row3">
-      <div><label>Fecha</label><select id="fldDate"></select></div>
-      <div><label>Partido (Local - Visitante)</label><select id="fldMatch"></select></div>
-      <div><label>Cuota (Odd)</label><select id="fldOdd"></select></div>
-    </div>
-    <div class="row3">
-      <div><label>Resultado FT (ej. 2-1)</label><select id="fldResFT"></select></div>
-      <div><label>Resultado (Winning/Losing)</label><select id="fldResult"></select></div>
-      <div><label>Desired Outcome (GG/BTTS/...)</label><select id="fldDesired"></select></div>
-    </div>
-    <div class="row">
-      <button id="btnApplyMap">Aplicar mapeo y procesar</button>
-      <button id="btnClear">Limpiar todo</button>
-    </div>
-
-    <h2 style="margin-top:1rem">3) Filtros</h2>
-    <label>Liga</label><select id="leagueSelect" onchange="applyFilters()"></select>
-    <div class="row">
-      <div><label>Equipo Local</label><select id="homeSelect" onchange="applyFilters()"></select></div>
-      <div><label>Equipo Visitante</label><select id="awaySelect" onchange="applyFilters()"></select></div>
-    </div>
-
-    <h2 style="margin-top:1rem">Apuesta & Riesgo</h2>
+<header><h1>Calculadora Poisson • xG por fuerzas (Ataque/Defensa) • 1X2 / O2.5 / BTTS</h1></header>
+<div class="wrap grid">
+  <div class="card">
+    <h2>1) Cargar JSON & elegir equipos</h2>
+    <label>Archivo JSON (array, objeto o NDJSON). Acepta datos agregados por equipo o partidos crudos.</label>
+    <input id="file" type="file" accept=".json,.txt,.ndjson,.csv" />
     <div class="row">
       <div>
-        <label>Stop Drawdown (%)</label><input type="number" id="ddStop" value="30" min="0" max="95"/>
+        <label> Liga </label>
+        <select id="league" disabled></select>
       </div>
       <div>
-        <label>Stake</label>
-        <select id="stakeMode" onchange="applyFilters()">
-          <option value="flat">Flat (1 unidad)</option>
-          <option value="kelly">Kelly fraccional (cap 25%)</option>
-        </select>
+        <label> Ventaja local (HA) <span class="muted">(1.00 = sin ventaja)</span></label>
+        <input id="ha" type="number" step="0.01" min="0.5" max="1.6" value="1.10" />
       </div>
     </div>
-    <label>Mín. apuestas (entrenamiento) para validar α</label><input type="number" id="minBets" value="20" min="0"/>
+    <div class="row">
+      <div>
+        <label> Local </label>
+        <select id="home" disabled></select>
+      </div>
+      <div>
+        <label> Visitante </label>
+        <select id="away" disabled></select>
+      </div>
+    </div>
+    <div style="margin-top:12px">
+      <button id="calc" class="btn accent" disabled>Calcular Poisson</button>
+      <span id="status" class="muted" style="margin-left:10px"></span>
+    </div>
 
-    <button onclick="exportCSV()" style="margin-top:.6rem">Exportar CSV (picks test)</button>
+    <details style="margin-top:14px">
+      <summary>Formato de datos aceptado (ejemplos)</summary>
+      <div class="code" style="margin-top:8px">
+        <!-- Ejemplo agregado por equipo -->
+        [
+          {"League":"Argentina Liga Profesional","Team":"Banfield","GF":45,"GA":40,"Matches":30},
+          {"League":"Argentina Liga Profesional","Team":"Instituto","GF":38,"GA":42,"Matches":30}
+        ]<br/><br/>
+        <!-- Ejemplo partidos crudos -->
+        [
+          {"League":"Argentina Liga Profesional","HomeTeam":"Banfield","AwayTeam":"Instituto","FTHG":1,"FTAG":2},
+          {"League":"Argentina Liga Profesional","HomeTeam":"Instituto","AwayTeam":"Banfield","FTHG":0,"FTAG":1}
+        ]
+      </div>
+    </details>
+  </div>
 
-    <div id="status" class="status">Carga un JSON y mapea los campos.</div>
+  <div class="card">
+    <h2>2) Métricas y xG (a partir del JSON)</h2>
+    <div class="kpis">
+      <div class="kpi"><div class="t">Promedio liga (goles/eq/part)</div><div class="v" id="k_mu">—</div></div>
+      <div class="kpi"><div class="t">Ataque Local</div><div class="v" id="k_att_h">—</div></div>
+      <div class="kpi"><div class="t">Defensa Local</div><div class="v" id="k_def_h">—</div></div>
+      <div class="kpi"><div class="t">Ataque Visitante</div><div class="v" id="k_att_a">—</div></div>
+      <div class="kpi"><div class="t">Defensa Visitante</div><div class="v" id="k_def_a">—</div></div>
+      <div class="kpi"><div class="t">λ Local (xG)</div><div class="v" id="k_lh">—</div></div>
+      <div class="kpi"><div class="t">λ Visitante (xG)</div><div class="v" id="k_la">—</div></div>
+    </div>
+    <p class="muted" style="margin-top:8px">
+      Fórmulas: ataque = (GF/Part) / μ_liga; defensa = (GA/Part) / μ_liga; <br/>
+      λ_local = ataque_local × defensa_visitante × μ_liga × HA; λ_visit = ataque_visitante × defensa_local × μ_liga.
+    </p>
+  </div>
 
-    <h3>Vista previa (primeras 20 filas)</h3>
-    <table id="preview"></table>
+  <div class="card">
+    <h2>3) Mercados</h2>
+    <div class="row">
+      <div class="kpi"><div class="t">Home Win (1)</div><div class="v" id="m_1">—</div></div>
+      <div class="kpi"><div class="t">Draw (X)</div><div class="v" id="m_x">—</div></div>
+      <div class="kpi"><div class="t">Away Win (2)</div><div class="v" id="m_2">—</div></div>
+      <div class="kpi"><div class="t">BTTS: Sí</div><div class="v" id="m_btts">—</div></div>
+      <div class="kpi"><div class="t">Over 2.5</div><div class="v" id="m_o25">—</div></div>
+      <div class="kpi"><div class="t">Under 2.5</div><div class="v" id="m_u25">—</div></div>
+    </div>
+  </div>
 
-    <h3>Errores / Logs</h3>
-    <div id="logs" class="status"></div>
-  </section>
+  <div class="card">
+    <h2>4) Probabilidades de marcadores (0–10)</h2>
+    <div style="overflow:auto; max-height:420px">
+      <table id="scoretab">
+        <thead><tr><th>Marcador</th><th>Prob.</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+</div>
 
-  <section>
-    <h2>📊 Resultados</h2>
-    <div id="metrics"></div>
-    <canvas id="equityChart"></canvas>
-    <canvas id="confusionChart"></canvas>
-    <h3>Top Reglas/Patrones</h3><table id="rulesTable"></table>
-    <h3>Segmentación por Liga</h3><table id="leagueTable"></table>
-    <h3>Segmentación por Equipo (Local)</h3><table id="teamTable"></table>
-    <h3>Segmentación por Rangos de Cuotas</h3><table id="oddsTable"></table>
-    <canvas id="equityOddsChart"></canvas>
-    <h3>Partidos Evaluados (TEST)</h3><table id="matchesTable"></table>
-  </section>
-</main>
+<div class="wrap footer">Tip: Si tu JSON tiene claves distintas, intenta mantener equivalentes como <em>League/Liga</em>, <em>Team/Equipo</em>, <em>GF/GA</em>, <em>Matches/PJ</em> o <em>HomeTeam/AwayTeam</em>, <em>FTHG/FTAG</em>.</div>
 
 <script>
-/*** ====== Estado global ====== ***/
-let rawOriginal = [];     // JSON crudo (arreglo de objetos)
-let mapped = [];          // con nombres estandarizados
-let working = [];         // dataset listo (features)
-let charts = {};
-let lastTestPicks = [];
+(function(){
+  const el = (id)=>document.getElementById(id);
+  const status = el('status');
+  const leagueSel = el('league');
+  const homeSel = el('home');
+  const awaySel = el('away');
+  const btnCalc = el('calc');
+  const haInput = el('ha');
+  const scoreTbody = document.querySelector('#scoretab tbody');
 
-/*** ====== Utilidades ====== ***/
-const mesesES = {ene:"Jan",feb:"Feb",mar:"Mar",abr:"Apr",may:"May",jun:"Jun",jul:"Jul",ago:"Aug",sept:"Sep",sep:"Sep",oct:"Oct",nov:"Nov",dic:"Dec"};
-function log(msg){ const el=document.getElementById("logs"); el.innerText = (el.innerText? el.innerText+"\n": "") + msg; console.log(msg); }
-function setStatus(html,cls=""){ const s=document.getElementById("status"); s.innerHTML=html; s.className=`status ${cls}`; }
-function normalizeString(s){ if(typeof s!=="string") return s; return s.trim().replace("F�tbol","Fútbol").replace("Ftbol","Fútbol"); }
-function toNumber(x){ if(typeof x==="number") return x; if(x==null) return NaN; const t=String(x).replace(/,/g,".").replace(/[^\d.\-]/g,""); return parseFloat(t); }
-function parseScore(s){ const m=String(s||"").match(/(\d+)\s*[-:]\s*(\d+)/); return m?{hg:+m[1],ag:+m[2]}:null; }
-function parseDateES(s){
-  if(!s) return null;
-  s=String(s).trim();
-  let d=new Date(s); if(!isNaN(d)) return d;
-  const m=s.match(/(\d{1,2})\s+([a-zA-ZñÑ.]+)\.?,?\s+(\d{4})\s+(\d{1,2}:\d{2})/);
-  if(m){ let day=m[1], mes=m[2].toLowerCase().replace(".",""); mes=mesesES[mes]||mes; const str=`${day} ${mes} ${m[3]} ${m[4]}`; d=new Date(str); if(!isNaN(d)) return d; }
-  return new Date(s);
-}
-function safeSplitTeams(matchStr){
-  matchStr = normalizeString(matchStr||"");
-  const p = matchStr.split(" - ");
-  if(p.length===2) return p;
-  const i = matchStr.indexOf("-");
-  if(i>0) return [matchStr.slice(0,i).trim(), matchStr.slice(i+1).trim()];
-  return [matchStr,""];
-}
-function destroyChart(id){ if(charts[id]){ charts[id].destroy(); charts[id]=null; } }
+  // Data estructurada a partir del JSON
+  // teams[league][team] = { gf, ga, matches }
+  let teams = {};
+  let ready = false;
 
-/*** ====== Lectura flexible JSON ====== ***/
-function parseJsonLoose(txt){
-  try{
-    const j = JSON.parse(txt);
-    if(Array.isArray(j)) return j;
-    if(j && typeof j==="object"){
-      if(Array.isArray(j.data)) return j.data;
-      if(Array.isArray(j.records)) return j.records;
-      if(Array.isArray(j.items)) return j.items;
+  // Utiles robustos de parseo
+  function parsePotentialJSON(text){
+    // Intenta: JSON.parse directo; si falla, prueba NDJSON
+    try{
+      const j = JSON.parse(text);
+      if (Array.isArray(j)) return j;
       return [j];
-    }
-  }catch(e){
-    // NDJSON
-    const lines = txt.split(/\r?\n/).map(l=>l.trim()).filter(Boolean);
-    if(lines.length>1){
-      try{ return lines.map(JSON.parse); }catch(e2){}
-    }
-  }
-  return [];
-}
-
-/*** ====== Mapeo de campos ====== ***/
-function autoFillMapping(keys){
-  const tryPick = (cands)=> keys.find(k=> cands.some(c=> k.toLowerCase().includes(c))) || "";
-  const dateGuess   = tryPick(["date","fecha"]);
-  const matchGuess  = tryPick(["match","partido"]);
-  const oddGuess    = tryPick(["odd","cuota","gg"]);
-  const resFTGuess  = tryPick(["result ft","ft result","marcador"]);
-  const resultGuess = tryPick(["result"]);
-  const desGuess    = tryPick(["desired outcome","desiredoutcome","btts","gg"]);
-
-  document.getElementById("fldDate").value = dateGuess || "";
-  document.getElementById("fldMatch").value = matchGuess || "";
-  document.getElementById("fldOdd").value   = oddGuess || "";
-  document.getElementById("fldResFT").value = resFTGuess || "";
-  document.getElementById("fldResult").value= resultGuess || "";
-  document.getElementById("fldDesired").value= desGuess || "";
-}
-
-function fillMappingSelectors(keys){
-  const ids = ["fldDate","fldMatch","fldOdd","fldResFT","fldResult","fldDesired"];
-  ids.forEach(id=>{
-    const sel=document.getElementById(id);
-    sel.innerHTML = `<option value="">— Selecciona —</option>` + keys.map(k=>`<option value="${k}">${k}</option>`).join("");
-  });
-  autoFillMapping(keys);
-}
-
-function applyMapping(){
-  const fDate   = document.getElementById("fldDate").value;
-  const fMatch  = document.getElementById("fldMatch").value;
-  const fOdd    = document.getElementById("fldOdd").value;
-  const fResFT  = document.getElementById("fldResFT").value;
-  const fResult = document.getElementById("fldResult").value;
-  const fDesired= document.getElementById("fldDesired").value;
-
-  if(!fDate || !fMatch){ setStatus("Debes mapear al menos Fecha y Partido.", "err"); return []; }
-
-  const out = rawOriginal.map(r=>{
-    const o = {...r};
-    const dateVal = o[fDate];
-    const matchVal= o[fMatch];
-    const oddVal  = fOdd? o[fOdd] : null;
-    const resFT   = fResFT? o[fResFT] : null;
-    const res     = fResult? o[fResult] : null;
-    const des     = fDesired? o[fDesired] : null;
-    return {
-      Date: dateVal,
-      Match: matchVal,
-      Odd: oddVal,
-      "Result FT": resFT,
-      Result: res,
-      "Desired Outcome": des,
-      League: o.League || o.league || o.LeagueName || o.competition || ""
-    };
-  });
-  return out;
-}
-
-/*** ====== Limpieza, features, split, modelo ====== ***/
-function baseClean(ds){
-  return ds.map(r=>{
-    const o={...r};
-    o.League = normalizeString(o.League);
-    o.Match  = normalizeString(o.Match);
-    o["Desired Outcome"] = normalizeString(o["Desired Outcome"]||"");
-    o.DateObj = parseDateES(o.Date);
-    o.Odd = toNumber(o.Odd);
-    // target:
-    let target=null;
-    const out = (o["Desired Outcome"]||"").toUpperCase();
-    const sc  = parseScore(o["Result FT"]);
-    if((out==="GG"||out==="BTTS") && sc){ target = (sc.hg>0 && sc.ag>0)?1:0; }
-    else{
-      const rs = String(o.Result||"").toLowerCase();
-      target = (rs.includes("win") || rs==="1") ? 1 : 0;
-    }
-    o.target = Number(target===1);
-    return o;
-  }).filter(r=> r.DateObj && r.Match);
-}
-
-function buildFeatures(ds){
-  return ds.map(m=>{
-    const [home,away]=safeSplitTeams(m.Match);
-    const diff=(a,b)=> (toNumber(m[a])||0)-(toNumber(m[b])||0);
-    const odd = toNumber(m.Odd)||NaN;
-    return {
-      ...m, home, away, odd,
-      impProb: odd? 1/odd : NaN,
-      diffAttacks:  diff("Home Attacks at FT","Away Attacks at FT"),
-      diffDanger:   diff("Home Dangerous Attacks at FT","Away Dangerous Attacks at FT"),
-      diffOnTarget: diff("Home OnGoal Shots at FT","Away OnGoal Shots at FT"),
-      diffShots:    diff("Home Total Shots at FT","Away Total Shots at FT"),
-      diffPoss:     diff("Home Ball Possession at FT","Away Ball Possession at FT"),
-      diffCorners:  diff("Home Corners at FT","Away Corners at FT"),
-      diffYellows:  diff("Home YellowCards at FT","Away YellowCards at FT"),
-      diffReds:     diff("Home RedCards at FT","Away RedCards at FT"),
-      diffPosRank: (toNumber(m["Away Position"])||0) - (toNumber(m["Home Position"])||0),
-    };
-  });
-}
-
-function splitTemporal(ds){ const arr=[...ds].sort((a,b)=>a.DateObj-b.DateObj); const cut=Math.floor(arr.length*0.7); return {train:arr.slice(0,cut), test:arr.slice(cut)}; }
-
-function standardize(train, fields){
-  const stats={}; fields.forEach(f=>{ const vals=train.map(x=>+x[f]||0); const mu=vals.reduce((a,b)=>a+b,0)/Math.max(vals.length,1); const sd=Math.sqrt(vals.reduce((a,b)=>a+(b-mu)*(b-mu),0)/Math.max(vals.length,1))||1; stats[f]={mu,sd}; });
-  const apply=row=>{ const r={...row}; fields.forEach(f=> r[f+"_z"]=((+row[f]||0)-stats[f].mu)/stats[f].sd ); return r; };
-  return {stats,apply};
-}
-function logisticTrain(train,zfeats,iters=700,lr=0.02){
-  let w0=0,w={}; zfeats.forEach(f=>w[f]=0);
-  for(let it=0;it<iters;it++){
-    for(const r of train){
-      let z=w0; zfeats.forEach(f=> z+=w[f]*(+r[f+"_z"]||0) );
-      const p=1/(1+Math.exp(-z)); const e=(r.target||0)-p;
-      w0+=lr*e; zfeats.forEach(f=> w[f]+=lr*e*(+r[f+"_z"]||0) );
+    }catch(e){
+      // NDJSON
+      const lines = text.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
+      const arr = [];
+      for (const ln of lines){
+        try{ arr.push(JSON.parse(ln)); }catch(_){}
+      }
+      if (arr.length) return arr;
+      throw new Error("No se pudo leer el JSON. Verifica formato (array/objeto/NDJSON).");
     }
   }
-  return {w0,w};
-}
-function predictProb(row,model,zfeats){ let z=model.w0; zfeats.forEach(f=> z+=model.w[f]*(+row[f+"_z"]||0) ); return 1/(1+Math.exp(-z)); }
 
-function gridSearchAlpha(train){
-  const feats = ["diffAttacks","diffDanger","diffOnTarget","diffShots","diffPoss","diffCorners","diffYellows","diffReds","diffPosRank","impProb","odd"];
-  const {apply} = standardize(train,feats);
-  const Z = train.map(apply);
-  const model = logisticTrain(Z,feats,700,0.02);
-  const minBets = Math.max( Number(document.getElementById("minBets").value||0), Math.ceil(train.length*0.05) );
-  let best={alpha:0,roi:-Infinity,bets:0};
-  for(let a=0;a<=10;a++){
-    const alpha=a/100;
-    let pl=0,bets=0;
-    for(const r of Z){
-      const odd=r.odd; if(!(odd>1)) continue;
-      const p=predictProb(r,model,feats);
-      if(p>(1/odd)+alpha){ bets++; pl += (r.target==1)?(odd-1):(-1); }
-    }
-    const roi = bets>0? pl/bets : -Infinity;
-    if(bets>=minBets && roi>best.roi) best={alpha,roi,bets};
-  }
-  return {alpha:best.alpha, model, zfeats:feats, applyFn:apply};
-}
+  // Normalización de claves
+  const keyMap = {
+    league: /^(league|liga)$/i,
+    team: /^(team|equipo|name|nombre)$/i,
+    gf: /^(gf|goals\s*for|goles\s*a\s*favor|golesf|golesaf)$/i,
+    ga: /^(ga|goals\s*against|goles\s*en\s*contra|golesc|golesec|golesen)$/i,
+    matches: /^(matches|mp|pj|games|partidos)$/i,
 
-function evaluateTest(test, policy){
-  const ddStopPct = Number(document.getElementById("ddStop").value||0);
-  const stakeMode = document.getElementById("stakeMode").value;
-  let tp=0,fp=0,fn=0,tn=0, equity=[0], peak=0, stop=false, picks=[];
-  for(const r0 of test){
-    const r=policy.applyFn(r0); const odd=r.odd; if(!(odd>1)){ equity.push(equity[equity.length-1]); continue; }
-    const p=predictProb(r,policy.model,policy.zfeats); const th=(1/odd)+policy.alpha; const bet=!stop && (p>th);
-    let stake=1; if(stakeMode==="kelly"){ const b=(odd-1), q=1-p; let f=(b*p - q)/b; if(!isFinite(f)) f=0; stake=Math.max(0,Math.min(f,0.25)); }
-    let gain=0; if(bet && stake>0){ gain=(r.target==1)? stake*(odd-1) : -stake; }
-    const predCls=bet?1:0;
-    if(predCls==1&&r.target==1)tp++; if(predCls==1&&r.target==0)fp++; if(predCls==0&&r.target==1)fn++; if(predCls==0&&r.target==0)tn++;
-    equity.push(equity[equity.length-1]+gain); peak=Math.max(peak,equity[equity.length-1]); const dd=peak>0?100*(peak-equity[equity.length-1])/peak:0; if(ddStopPct>0 && dd>=ddStopPct) stop=true;
-    if(bet && stake>0){ picks.push({date:r.DateObj, league:r.League||"", match:r.Match||"", odd:+odd, p:+p.toFixed(3), stake:+stake.toFixed(3), win:r.target, profit:+gain.toFixed(3)}); }
-  }
-  const bets=picks.length, pnl=equity[equity.length-1], roi=bets>0? pnl/bets : 0;
-  const acc=(tp+tn)>0? (tp+tn)/(tp+tn+fp+fn) : 0;
-  return {tp,fp,fn,tn,acc:+acc.toFixed(3),roi:+roi.toFixed(3),equity,picks};
-}
-
-function segmentBy(picks,key,bins=null){
-  const groups={};
-  for(const p of picks){
-    let g = key==="odd"? null : p[key];
-    if(bins){ for(const b of bins){ if(p.odd>=b.min && p.odd<b.max){ g=b.label; break; } } }
-    if(!g) g="N/A"; if(!groups[g]) groups[g]=[]; groups[g].push(p);
-  }
-  const rows=[];
-  for(const k of Object.keys(groups)){
-    const arr=groups[k]; const bets=arr.length;
-    let wins=0,pl=0; arr.forEach(x=>{ if(x.win==1){wins++; pl+=x.stake*(x.odd-1);} else {pl-=x.stake;} });
-    rows.push({group:k,roi:+(pl/Math.max(1,bets)).toFixed(3),acc:+(wins/Math.max(1,bets)).toFixed(3),bets});
-  }
-  return rows.sort((a,b)=>b.roi-a.roi);
-}
-
-function discoverRulesOnTest(test){
-  const conds=[
-    {desc:"diffAttacks>10", fn:(m)=>m.diffAttacks>10},
-    {desc:"diffDanger>5",  fn:(m)=>m.diffDanger>5},
-    {desc:"diffShots>4",   fn:(m)=>m.diffShots>4},
-    {desc:"odd>2.0",       fn:(m)=>m.odd>2.0},
-    {desc:"odd<2.0",       fn:(m)=>m.odd<2.0}
-  ];
-  const rules=[];
-  for(const c of conds){
-    const sub=test.filter(c.fn);
-    if(sub.length>=8){
-      const wins=sub.filter(x=>x.target==1).length;
-      const roi=(wins*((sub[0].odd||2)-1)-(sub.length-wins))/sub.length;
-      rules.push({cond:c.desc,n:sub.length,roi:+roi.toFixed(3)});
-    }
-  }
-  return rules.sort((a,b)=>b.roi-a.roi).slice(0,10);
-}
-
-/*** ====== Render & UI ====== ***/
-function renderPreview(arr){
-  const t=document.getElementById("preview");
-  if(!arr.length){ t.innerHTML=""; return; }
-  const keys=Object.keys(arr[0]);
-  let html="<tr>"+keys.map(k=>`<th>${k}</th>`).join("")+"</tr>";
-  arr.slice(0,20).forEach(r=>{
-    html+="<tr>"+keys.map(k=>`<td>${(r[k]??"")}</td>`).join("")+"</tr>";
-  });
-  t.innerHTML=html;
-}
-
-function render(dataset){
-  if(!dataset || dataset.length<3){
-    setStatus("Pocas filas tras mapeo/filtros (se requieren ≥3).", "warn");
-    ["equityChart","confusionChart","equityOddsChart"].forEach(destroyChart);
-    ["metrics","rulesTable","leagueTable","teamTable","oddsTable","matchesTable"].forEach(id=>document.getElementById(id).innerHTML="");
-    return;
-  }
-
-  const {train,test}=splitTemporal(dataset);
-  const policy=gridSearchAlpha(train);
-  const ev=evaluateTest(test,policy);
-  lastTestPicks = ev.picks;
-
-  setStatus(`Train: ${train.length} · Test: ${test.length} · α*: <b>${policy.alpha.toFixed(2)}</b> · Picks test: <b>${ev.picks.length}</b>`, "ok");
-  document.getElementById("metrics").innerHTML =
-    `<p>Acc(test): <b>${ev.acc}</b> · ROI(test): <b>${ev.roi}</b> · Picks: <b>${ev.picks.length}</b></p>`;
-
-  destroyChart("equityChart");
-  charts.equityChart=new Chart(document.getElementById("equityChart"),{
-    type:"line",
-    data:{labels:test.map(x=>x.DateObj.toISOString().slice(0,10)),datasets:[{label:"Equity (test)",data:ev.equity,borderWidth:2}]}
-  });
-
-  destroyChart("confusionChart");
-  charts.confusionChart=new Chart(document.getElementById("confusionChart"),{
-    type:"bar",data:{labels:["TP","FP","FN","TN"],datasets:[{label:"Confusión",data:[ev.tp,ev.fp,ev.fn,ev.tn]}]}
-  });
-
-  const rules=discoverRulesOnTest(test);
-  let rt="<tr><th>Condición</th><th>n</th><th>ROI estim.</th></tr>";
-  rules.forEach(r=> rt+=`<tr><td>${r.cond}</td><td>${r.n}</td><td>${r.roi}</td></tr>`);
-  document.getElementById("rulesTable").innerHTML=rt;
-
-  ev.picks.forEach(p=>{ const [h,a]=safeSplitTeams(p.match||""); p.matchHome=h; p.matchAway=a; });
-  const segLeague=segmentBy(ev.picks,"league"), segTeam=segmentBy(ev.picks,"matchHome");
-  let lt="<tr><th>Liga</th><th>ROI</th><th>Acierto</th><th>#Apuestas</th></tr>";
-  segLeague.forEach(s=> lt+=`<tr><td>${s.group}</td><td>${s.roi}</td><td>${s.acc}</td><td>${s.bets}</td></tr>`);
-  document.getElementById("leagueTable").innerHTML=lt;
-  let tt="<tr><th>Equipo Local</th><th>ROI</th><th>Acierto</th><th>#Apuestas</th></tr>";
-  segTeam.forEach(s=> tt+=`<tr><td>${s.group}</td><td>${s.roi}</td><td>${s.acc}</td><td>${s.bets}</td></tr>`);
-  document.getElementById("teamTable").innerHTML=tt;
-
-  const bins=[{min:1,max:1.5,label:"1.00–1.50"},{min:1.5,max:2,label:"1.50–2.00"},{min:2,max:2.5,label:"2.00–2.50"},{min:2.5,max:3,label:"2.50–3.00"},{min:3,max:100,label:"3.00+"}];
-  const segOdds=segmentBy(ev.picks,"odd",bins);
-  let ot="<tr><th>Rango Cuota</th><th>ROI</th><th>Acierto</th><th>#Apuestas</th></tr>";
-  segOdds.forEach(s=> ot+=`<tr><td>${s.group}</td><td>${s.roi}</td><td>${s.acc}</td><td>${s.bets}</td></tr>`);
-  document.getElementById("oddsTable").innerHTML=ot;
-
-  destroyChart("equityOddsChart");
-  const equityByBin = segOdds.map(s=>({label:s.group,data:buildEquityForBin(ev.picks,bins,s.group)}));
-  const maxLen=Math.max(...equityByBin.map(e=>e.data.length),0);
-  charts.equityOddsChart=new Chart(document.getElementById("equityOddsChart"),{
-    type:"line",
-    data:{labels:Array.from({length:maxLen},(_,i)=>i),datasets:equityByBin.map(e=>({label:e.label,data:e.data,borderWidth:2}))}
-  });
-
-  let mt="<tr><th>Fecha</th><th>Liga</th><th>Partido</th><th>Odd</th><th>p̂</th><th>Stake</th><th>Win</th><th>Profit</th></tr>";
-  ev.picks.forEach(p=> mt+=`<tr><td>${p.date?new Date(p.date).toISOString().slice(0,10):""}</td><td>${p.league||""}</td><td>${p.match||""}</td><td>${p.odd}</td><td>${p.p}</td><td>${p.stake}</td><td>${p.win}</td><td>${p.profit}</td></tr>`);
-  document.getElementById("matchesTable").innerHTML=mt;
-}
-
-function buildEquityForBin(picks,bins,label){
-  const seq=[]; let eq=0;
-  for(const p of picks){
-    let g=null; for(const b of bins){ if(p.odd>=b.min && p.odd<b.max){ g=b.label; break; } }
-    if(g===label){ eq += (p.win==1)? (p.stake*(p.odd-1)) : (-p.stake); seq.push(+eq.toFixed(4)); }
-  }
-  if(seq.length===0) seq.push(0); return seq;
-}
-
-/*** ====== Filtros & Selects ====== ***/
-function applyFilters(){
-  if(!mapped.length){ setStatus("Primero carga y mapea tu JSON.", "warn"); return; }
-  const l=document.getElementById("leagueSelect").value;
-  const h=document.getElementById("homeSelect").value;
-  const a=document.getElementById("awaySelect").value;
-  const subset = mapped.filter(m=>{
-    let ok=true;
-    if(l!=="Todos" && normalizeString(m.League)!==l) ok=false;
-    const [home,away]=safeSplitTeams(m.Match);
-    if(h!=="Todos" && home!==h) ok=false;
-    if(a!=="Todos" && away!==a) ok=false;
-    return ok;
-  });
-  working = buildFeatures(baseClean(subset));
-  setStatus(`Filtrados: <b>${subset.length}</b> filas`, subset.length?"ok":"warn");
-  render(working);
-}
-function fillSelect(id,arr){ const sel=document.getElementById(id); sel.innerHTML="<option>Todos</option>"+arr.map(v=>`<option>${v}</option>`).join(""); }
-
-/*** ====== Export ====== ***/
-function exportCSV(){
-  const rows=[["Fecha","Liga","Partido","Odd","p_hat","Stake","Win","Profit"]];
-  (lastTestPicks||[]).forEach(p=> rows.push([p.date?new Date(p.date).toISOString():"",p.league||"",p.match||"",p.odd,p.p,p.stake,p.win,p.profit]));
-  const csv=rows.map(r=>r.join(",")).join("\n");
-  const a=document.createElement("a"); a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv"})); a.download="backtesting_test_picks.csv"; a.click();
-}
-
-/*** ====== Carga archivo / texto ====== ***/
-const drop=document.getElementById("dropzone");
-drop.addEventListener("dragover",e=>{e.preventDefault();drop.classList.add("dragover");});
-drop.addEventListener("dragleave",()=>drop.classList.remove("dragover"));
-drop.addEventListener("drop",e=>{e.preventDefault();drop.classList.remove("dragover");handleTextDrop(e.dataTransfer.files[0]);});
-document.getElementById("fileInput").addEventListener("change",e=>handleTextDrop(e.target.files[0]));
-
-function handleTextDrop(file){
-  const r=new FileReader();
-  r.onload=e=>{
-    document.getElementById("jsonText").value = e.target.result;
-    document.getElementById("btnParse").click();
+    homeTeam: /^(hometeam|local|equipo\s*local)$/i,
+    awayTeam: /^(awayteam|visitante|equipo\s*visitante)$/i,
+    fthg: /^(fthg|home(goals)?|goles\s*local|gf\s*local)$/i,
+    ftag: /^(ftag|away(goals)?|goles\s*visitante|gf\s*visitante)$/i
   };
-  r.readAsText(file,"UTF-8");
-}
 
-document.getElementById("btnParse").onclick = ()=>{
-  document.getElementById("logs").innerText="";
-  const txt=document.getElementById("jsonText").value.trim();
-  if(!txt){ setStatus("Pega tu JSON o carga un archivo.", "warn"); return; }
-  const arr = parseJsonLoose(txt);
-  if(!arr.length){ setStatus("No se pudo leer el JSON. Revisa que sea un array, objeto o NDJSON válido.", "err"); return; }
-  rawOriginal = arr.map(row=>{
-    const o={}; Object.keys(row||{}).forEach(k=>o[k]=row[k]); return o;
+  function findKey(obj, regex){
+    for (const k of Object.keys(obj)){
+      if (regex.test(k)) return k;
+    }
+    return null;
+  }
+
+  function num(x){ const n = Number(x); return Number.isFinite(n) ? n : 0; }
+
+  function accumulateTeam(leag, team, gf, ga, m){
+    if (!leag || !team) return;
+    teams[leag] = teams[leag] || {};
+    const t = teams[leag][team] || {gf:0, ga:0, matches:0};
+    t.gf += gf; t.ga += ga; t.matches += m;
+    teams[leag][team] = t;
+  }
+
+  function buildFromArray(arr){
+    teams = {};
+    for (const row of arr){
+      if (!row || typeof row!=='object') continue;
+      const kLeague = findKey(row, keyMap.league);
+      const league = kLeague ? String(row[kLeague]).trim() : null;
+
+      // Caso 1: datos agregados por equipo
+      const kTeam = findKey(row, keyMap.team);
+      const kGF = findKey(row, keyMap.gf);
+      const kGA = findKey(row, keyMap.ga);
+      const kM  = findKey(row, keyMap.matches);
+
+      // Caso 2: partidos crudos
+      const kHT = findKey(row, keyMap.homeTeam);
+      const kAT = findKey(row, keyMap.awayTeam);
+      const kFTHG = findKey(row, keyMap.fthg);
+      const kFTAG = findKey(row, keyMap.ftag);
+
+      if (kTeam && (kGF || kGA) && kM){
+        // Agregado por equipo
+        const team = String(row[kTeam]).trim();
+        const gf = num(row[kGF]);
+        const ga = num(row[kGA]);
+        const m  = Math.max(1, num(row[kM]));
+        accumulateTeam(league, team, gf, ga, m);
+      } else if (kHT && kAT && (kFTHG || kFTAG)){
+        // Partidos crudos (1 partido = 1 fila)
+        const ht = String(row[kHT]).trim();
+        const at = String(row[kAT]).trim();
+        const gh = num(row[kFTHG]);
+        const ga = num(row[kFTAG]);
+        // Cada partido suma 1 para cada equipo
+        accumulateTeam(league, ht, gh, ga, 1);
+        accumulateTeam(league, at, ga, gh, 1);
+      } else {
+        // Fila no reconocida: la ignoramos de forma segura
+        continue;
+      }
+    }
+  }
+
+  function fillSelectors(){
+    // Liga
+    const leagues = Object.keys(teams).sort((a,b)=>a.localeCompare(b));
+    leagueSel.innerHTML = '<option value="">— Selecciona liga —</option>' + leagues.map(l=>`<option>${escapeHtml(l)}</option>`).join('');
+    leagueSel.disabled = leagues.length===0;
+
+    function setTeamsForLeague(lig){
+      const list = lig && teams[lig] ? Object.keys(teams[lig]).sort((a,b)=>a.localeCompare(b)) : [];
+      const opts = '<option value="">— Equipo —</option>' + list.map(t=>`<option>${escapeHtml(t)}</option>`).join('');
+      homeSel.innerHTML = opts; awaySel.innerHTML = opts;
+      homeSel.disabled = !list.length; awaySel.disabled = !list.length;
+    }
+
+    setTeamsForLeague(leagues[0] || "");
+    leagueSel.addEventListener('change', e=> setTeamsForLeague(leagueSel.value));
+  }
+
+  function escapeHtml(s){ return String(s).replace(/[&<>"']/g, m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m])); }
+
+  // Poisson helpers
+  const factMemo = [1];
+  function fact(n){ for(let i=factMemo.length;i<=n;i++) factMemo[i]=factMemo[i-1]*i; return factMemo[n]; }
+  function poisPMF(k, lambda){ return Math.exp(-lambda) * Math.pow(lambda, k) / fact(k); }
+  function clamp(x,min,max){ return Math.max(min, Math.min(max,x)); }
+
+  function compute(){
+    status.textContent = '';
+    const lig = leagueSel.value;
+    const home = homeSel.value;
+    const away = awaySel.value;
+    const HA = clamp(Number(haInput.value)||1.00, 0.5, 1.6);
+
+    if (!lig || !teams[lig]){ status.textContent='Elige una liga.'; return; }
+    if (!home || !away || home===away){ status.textContent='Elige dos equipos distintos.'; return; }
+
+    const tH = teams[lig][home];
+    const tA = teams[lig][away];
+    if (!tH || !tA){ status.textContent='Faltan datos para esos equipos.'; return; }
+
+    // μ_liga = (sum_GF / sum_Partidos) -> goles por equipo por partido
+    let sumGF=0, sumM=0;
+    for (const t of Object.values(teams[lig])){
+      sumGF += t.gf;
+      sumM  += t.matches;
+    }
+    const mu = sumM>0 ? (sumGF/sumM) : 1.2; // fallback prudente
+
+    // Promedios por equipo
+    const h_gfpm = tH.gf / Math.max(1,tH.matches);
+    const h_gapm = tH.ga / Math.max(1,tH.matches);
+    const a_gfpm = tA.gf / Math.max(1,tA.matches);
+    const a_gapm = tA.ga / Math.max(1,tA.matches);
+
+    // Fuerzas
+    const attH = h_gfpm / mu;
+    const defH = h_gapm / mu;
+    const attA = a_gfpm / mu;
+    const defA = a_gapm / mu;
+
+    // Lambdas (xG)
+    const lambdaH = attH * defA * mu * HA;
+    const lambdaA = attA * defH * mu;
+
+    // KPI render
+    el('k_mu').textContent     = mu.toFixed(3);
+    el('k_att_h').textContent  = attH.toFixed(3);
+    el('k_def_h').textContent  = defH.toFixed(3);
+    el('k_att_a').textContent  = attA.toFixed(3);
+    el('k_def_a').textContent  = defA.toFixed(3);
+    el('k_lh').textContent     = lambdaH.toFixed(3);
+    el('k_la').textContent     = lambdaA.toFixed(3);
+
+    // Scoreline matrix (0..10)
+    const MAXG = 10;
+    const pH = Array.from({length:MAXG+1}, (_,k)=>poisPMF(k, lambdaH));
+    const pA = Array.from({length:MAXG+1}, (_,k)=>poisPMF(k, lambdaA));
+
+    // 1X2, draws, totals
+    let p1=0, px=0, p2=0, pUnder25=0;
+    let probScores = [];
+    for (let h=0; h<=MAXG; h++){
+      for (let a=0; a<=MAXG; a++){
+        const p = pH[h]*pA[a];
+        probScores.push({score:`${h}-${a}`, p});
+        if (h>a) p1+=p; else if (h===a) px+=p; else p2+=p;
+        if (h+a <= 2) pUnder25 += p;
+      }
+    }
+    const pOver25 = 1 - pUnder25;
+
+    // BTTS Sí = 1 - P(H=0) - P(A=0) + P(H=0,A=0)
+    const btts = 1 - pH[0] - pA[0] + (pH[0]*pA[0]);
+
+    // Render mercados
+    el('m_1').textContent   = (p1*100).toFixed(1)+'%';
+    el('m_x').textContent   = (px*100).toFixed(1)+'%';
+    el('m_2').textContent   = (p2*100).toFixed(1)+'%';
+    el('m_btts').textContent= (btts*100).toFixed(1)+'%';
+    el('m_o25').textContent = (pOver25*100).toFixed(1)+'%';
+    el('m_u25').textContent = (pUnder25*100).toFixed(1)+'%';
+
+    // Render scorelines top→bottom por prob.
+    probScores.sort((a,b)=>b.p-a.p);
+    const rows = probScores.slice(0,50).map(x=>(
+      `<tr><td><span class="pill">${x.score}</span></td><td>${(x.p*100).toFixed(3)}%</td></tr>`
+    )).join('');
+    scoreTbody.innerHTML = rows || '<tr><td colspan="2">—</td></tr>';
+  }
+
+  // Eventos
+  btnCalc.addEventListener('click', compute);
+
+  el('file').addEventListener('change', async (e)=>{
+    const f = e.target.files?.[0];
+    if (!f){ return; }
+    try{
+      const text = await f.text();
+      const arr = parsePotentialJSON(text);
+      if (!arr.length) throw new Error("El archivo está vacío.");
+      buildFromArray(arr);
+      fillSelectors();
+      ready = true;
+      btnCalc.disabled = false;
+      status.textContent = 'Datos cargados ✔';
+    }catch(err){
+      ready = false;
+      btnCalc.disabled = true;
+      leagueSel.disabled = true; homeSel.disabled = true; awaySel.disabled = true;
+      leagueSel.innerHTML=''; homeSel.innerHTML=''; awaySel.innerHTML='';
+      status.textContent = err.message || 'Error al leer el JSON.';
+    }
   });
-  renderPreview(rawOriginal);
-  const keys = Object.keys(rawOriginal[0]||{});
-  fillMappingSelectors(keys);
-  setStatus(`Leídas: <b>${rawOriginal.length}</b> filas. Ahora mapea los campos y presiona “Aplicar mapeo”.`,"ok");
-};
-
-document.getElementById("btnApplyMap").onclick = ()=>{
-  const mappedRaw = applyMapping();
-  if(!mappedRaw.length){ return; }
-  mapped = mappedRaw;
-  // llenar selects de liga/equipos
-  const leagues=[...new Set(mapped.map(d=>(normalizeString(d.League)||"")).filter(Boolean))].sort();
-  const teams=[...new Set(mapped.flatMap(d=>safeSplitTeams(d.Match))).filter(Boolean)].sort();
-  fillSelect("leagueSelect", leagues);
-  fillSelect("homeSelect", teams);
-  fillSelect("awaySelect", teams);
-  // render inicial con todo
-  working = buildFeatures(baseClean(mapped));
-  setStatus(`Mapeo OK. Filas válidas: <b>${working.length}</b>.`, working.length?"ok":"warn");
-  render(working);
-};
-
-document.getElementById("btnClear").onclick = ()=>{
-  rawOriginal=[]; mapped=[]; working=[];
-  ["preview","metrics","rulesTable","leagueTable","teamTable","oddsTable","matchesTable"].forEach(id=>document.getElementById(id).innerHTML="");
-  ["equityChart","confusionChart","equityOddsChart"].forEach(destroyChart);
-  document.getElementById("jsonText").value="";
-  document.getElementById("logs").innerText="";
-  setStatus("Reiniciado. Carga tu JSON y mapea los campos.","");
-};
-
-document.getElementById("btnDemo").onclick = ()=>{
-  const demo = [
-    {"Date":"dom., 01 sept. 2024 18:00","League":"Argentina Liga Profesional de Fútbol","Match":"Banfield - Instituto","Odd":"2.25","Result":"Winning","Result FT":"2-1","Home Attacks at FT":"98","Away Attacks at FT":"94"},
-    {"Date":"jue., 05 sept. 2024 20:00","League":"Argentina Liga Profesional de Fútbol","Match":"River - Racing","Odd":"1.90","Result":"Losing","Result FT":"1-0","Home Attacks at FT":"70","Away Attacks at FT":"68"},
-    {"Date":"lun., 09 sept. 2024 19:00","League":"Argentina Liga Profesional de Fútbol","Match":"Independiente - San Lorenzo","Odd":"2.10","Result":"Winning","Result FT":"1-1","Home Attacks at FT":"95","Away Attacks at FT":"90"},
-    {"Date":"vie., 13 sept. 2024 17:00","League":"Argentina Liga Profesional de Fútbol","Match":"Banfield - Tigre","Odd":"2.05","Result":"Winning","Result FT":"2-2","Home Attacks at FT":"80","Away Attacks at FT":"75"},
-    {"Date":"mar., 17 sept. 2024 16:00","League":"Argentina Liga Profesional de Fútbol","Match":"River - Boca","Odd":"1.95","Result":"Losing","Result FT":"1-0","Home Attacks at FT":"60","Away Attacks at FT":"70"}
-  ];
-  rawOriginal = demo;
-  document.getElementById("jsonText").value = JSON.stringify(demo, null, 2);
-  document.getElementById("btnParse").click();
-};
+})();
 </script>
 </body>
 </html>
