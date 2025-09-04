@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
-  <title>Backtesting Fútbol — ROI, Segmentos & Patrones</title>
+  <title>Backtesting Fútbol — ROI, Segmentos & Cuotas</title>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
@@ -22,11 +22,11 @@
     button{cursor:pointer;background:var(--accent);}
     .dropzone{border:2px dashed var(--accent);border-radius:6px;padding:1rem;text-align:center;color:var(--muted);margin-top:.5rem;}
     .dropzone.dragover{background:rgba(122,162,255,0.1);}
-    canvas{width:100%!important;height:250px!important;}
+    canvas{width:100%!important;height:250px!important;margin-top:1rem;}
   </style>
 </head>
 <body>
-<header><h1>⚽ Backtesting Fútbol — ROI, Segmentos & Patrones</h1></header>
+<header><h1>⚽ Backtesting Fútbol — ROI, Segmentos & Cuotas</h1></header>
 <main>
   <section>
     <h2>⚙️ Configuración</h2>
@@ -46,6 +46,8 @@
     <h3>Top Reglas/Patrones</h3><table id="rulesTable"></table>
     <h3>Segmentación por Liga</h3><table id="leagueTable"></table>
     <h3>Segmentación por Equipo</h3><table id="teamTable"></table>
+    <h3>Segmentación por Rangos de Cuotas</h3><table id="oddsTable"></table>
+    <canvas id="equityOddsChart"></canvas>
     <h3>Partidos Evaluados</h3><table id="matchesTable"></table>
   </section>
 </main>
@@ -81,7 +83,7 @@ function buildFeatures(ds){
       diffAttacks:(+m["Home Attacks at FT"]||0) - (+m["Away Attacks at FT"]||0),
       diffCorners:(+m["Home Corners at FT"]||0) - (+m["Away Corners at FT"]||0),
       diffPoss:(+m["Home Ball Possession at FT"]||0) - (+m["Away Ball Possession at FT"]||0),
-      diffPosRank:(+m["Away Position"]||0) - (+m["Home Position"]||0), // positivo si away mejor pos.
+      diffPosRank:(+m["Away Position"]||0) - (+m["Home Position"]||0),
       odd:+m.Odd||2.0,
       impProb:1/(+m.Odd||2.0)
     };
@@ -146,26 +148,31 @@ function evaluate(test,preds){
 }
 
 // ---------- Segmentación ----------
-function segmentBy(test,preds,key){
+function segmentBy(test,preds,key,bins=null){
   let groups={};
   test.forEach((m,i)=>{
-    const k=m[key];
+    let k=m[key];
+    if(bins){ // para odds
+      for(const b of bins){
+        if(m.odd>=b.min && m.odd<b.max){ k=b.label; break; }
+      }
+    }
     if(!groups[k])groups[k]=[];
-    groups[k].push({m,bet:(preds[i]>0.5?1:0),p:preds[i]});
+    groups[k].push({m,bet:(preds[i]>0.5?1:0)});
   });
   let rows=[];
   Object.keys(groups).forEach(g=>{
     let arr=groups[g];
-    let bets=0,wins=0,pl=0;
+    let bets=0,wins=0,pl=0,equity=[0];
     arr.forEach(r=>{
       if(r.bet==1){
         bets++;
-        if(r.m.target==1){wins++;pl+=(r.m.odd-1);}
-        else{pl-=1;}
+        if(r.m.target==1){wins++;pl+=(r.m.odd-1);} else {pl-=1;}
+        equity.push(equity[equity.length-1]+(r.m.target==1?(r.m.odd-1):-1));
       }
     });
     if(bets>0){
-      rows.push({group:g,roi:(pl/bets).toFixed(2),acc:(wins/bets).toFixed(2),bets});
+      rows.push({group:g,roi:(pl/bets).toFixed(2),acc:(wins/bets).toFixed(2),bets,equity});
     }
   });
   return rows.sort((a,b)=>b.roi-a.roi);
@@ -179,38 +186,68 @@ function render(ds){
   const w=logisticTrain(train,feats);
   const preds=test.map(m=>logisticPredict(m,w,feats));
   const ev=evaluate(test,preds);
+
   document.getElementById("metrics").innerHTML=
     `<p>Train: ${train.length} | Test: ${test.length}<br>
      Acc: ${ev.acc} | ROI: ${ev.roi}</p>`;
-  // Equity chart
+
+  // Equity chart general
   new Chart(document.getElementById("equityChart"),{
     type:"line",
-    data:{labels:test.map(m=>m.Date),datasets:[{label:"Equity",data:ev.equity}]}
+    data:{labels:test.map(m=>m.Date),datasets:[{label:"Equity General",data:ev.equity}]}
   });
+
   // Confusion
   new Chart(document.getElementById("confusionChart"),{
     type:"bar",
     data:{labels:["TP","FP","FN","TN"],datasets:[{label:"Confusión",data:[ev.tp,ev.fp,ev.fn,ev.tn]}]}
   });
+
   // Reglas
   let r=discoverRules(test);
   let rt="<tr><th>Condición</th><th>ROI</th><th>n</th></tr>";
   r.forEach(x=>{rt+=`<tr><td>${x.cond}</td><td>${x.roi}</td><td>${x.n}</td></tr>`;});
   document.getElementById("rulesTable").innerHTML=rt;
+
   // Segmentación liga
   let leagues=segmentBy(test,preds,"League");
   let lt="<tr><th>Liga</th><th>ROI</th><th>Acierto</th><th>#apuestas</th></tr>";
   leagues.forEach(x=>{lt+=`<tr><td>${x.group}</td><td>${x.roi}</td><td>${x.acc}</td><td>${x.bets}</td></tr>`;});
   document.getElementById("leagueTable").innerHTML=lt;
+
   // Segmentación equipo
   let teams=segmentBy(test,preds,"home");
   let tt="<tr><th>Equipo Local</th><th>ROI</th><th>Acierto</th><th>#apuestas</th></tr>";
   teams.forEach(x=>{tt+=`<tr><td>${x.group}</td><td>${x.roi}</td><td>${x.acc}</td><td>${x.bets}</td></tr>`;});
   document.getElementById("teamTable").innerHTML=tt;
+
+  // Segmentación odds
+  const bins=[
+    {min:1.0,max:1.5,label:"1.0–1.5"},
+    {min:1.5,max:2.0,label:"1.5–2.0"},
+    {min:2.0,max:2.5,label:"2.0–2.5"},
+    {min:2.5,max:3.0,label:"2.5–3.0"},
+    {min:3.0,max:100,label:"3.0+"}
+  ];
+  let oddsSeg=segmentBy(test,preds,"odd",bins);
+  let ot="<tr><th>Rango Cuota</th><th>ROI</th><th>Acierto</th><th>#apuestas</th></tr>";
+  oddsSeg.forEach(x=>{ot+=`<tr><td>${x.group}</td><td>${x.roi}</td><td>${x.acc}</td><td>${x.bets}</td></tr>`;});
+  document.getElementById("oddsTable").innerHTML=ot;
+
+  // Equity curves por rango de cuotas
+  new Chart(document.getElementById("equityOddsChart"),{
+    type:"line",
+    data:{
+      labels:Array.from({length:Math.max(...oddsSeg.map(s=>s.equity.length))},(_,i)=>i),
+      datasets:oddsSeg.map(s=>({label:s.group,data:s.equity}))
+    }
+  });
+
   // Matches
   let mt="<tr><th>Fecha</th><th>Partido</th><th>Odd</th><th>Pred Prob</th><th>Real</th></tr>";
   test.forEach((m,i)=>{mt+=`<tr><td>${m.Date}</td><td>${m.Match}</td><td>${m.odd}</td><td>${preds[i].toFixed(2)}</td><td>${m.target}</td></tr>`;});
   document.getElementById("matchesTable").innerHTML=mt;
+
   // Selects
   fillSelect("leagueSelect",[...new Set(ds.map(x=>x.League))]);
   fillSelect("homeSelect",[...new Set(ds.map(x=>x.home))]);
