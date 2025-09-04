@@ -55,7 +55,7 @@
 <div class="wrap grid">
   <div class="card">
     <h2>1) Cargar JSON & elegir equipos</h2>
-    <label>Archivo JSON (array, objeto o NDJSON). Acepta datos agregados por equipo o partidos crudos.</label>
+    <label>Archivo JSON (array, objeto o NDJSON). Acepta datos agregados por equipo, partidos crudos o esquema “Match + Result FT”.</label>
     <input id="file" type="file" accept=".json,.txt,.ndjson,.csv" />
     <div class="row">
       <div>
@@ -85,15 +85,18 @@
     <details style="margin-top:14px">
       <summary>Formato de datos aceptado (ejemplos)</summary>
       <div class="code" style="margin-top:8px">
-        <!-- Ejemplo agregado por equipo -->
+        <!-- Agregado por equipo -->
         [
           {"League":"Argentina Liga Profesional","Team":"Banfield","GF":45,"GA":40,"Matches":30},
           {"League":"Argentina Liga Profesional","Team":"Instituto","GF":38,"GA":42,"Matches":30}
         ]<br/><br/>
-        <!-- Ejemplo partidos crudos -->
+        <!-- Partidos crudos -->
         [
-          {"League":"Argentina Liga Profesional","HomeTeam":"Banfield","AwayTeam":"Instituto","FTHG":1,"FTAG":2},
-          {"League":"Argentina Liga Profesional","HomeTeam":"Instituto","AwayTeam":"Banfield","FTHG":0,"FTAG":1}
+          {"League":"Argentina Liga Profesional","HomeTeam":"Banfield","AwayTeam":"Instituto","FTHG":1,"FTAG":2}
+        ]<br/><br/>
+        <!-- Match + Result FT -->
+        [
+          {"League":"Argentina Liga Profesional","Match":"Banfield - Instituto","Result FT":"1-2"}
         ]
       </div>
     </details>
@@ -139,7 +142,7 @@
   </div>
 </div>
 
-<div class="wrap footer">Tip: Si tu JSON tiene claves distintas, intenta mantener equivalentes como <em>League/Liga</em>, <em>Team/Equipo</em>, <em>GF/GA</em>, <em>Matches/PJ</em> o <em>HomeTeam/AwayTeam</em>, <em>FTHG/FTAG</em>.</div>
+<div class="wrap footer">Tip: Este archivo reconoce también “Match” y “Result FT”. Si tu liga trae caracteres raros (�) por codificación, igual se usa como texto de liga.</div>
 
 <script>
 (function(){
@@ -152,20 +155,16 @@
   const haInput = el('ha');
   const scoreTbody = document.querySelector('#scoretab tbody');
 
-  // Data estructurada a partir del JSON
   // teams[league][team] = { gf, ga, matches }
   let teams = {};
-  let ready = false;
 
-  // Utiles robustos de parseo
+  // ---------- Parseo robusto ----------
   function parsePotentialJSON(text){
-    // Intenta: JSON.parse directo; si falla, prueba NDJSON
     try{
       const j = JSON.parse(text);
       if (Array.isArray(j)) return j;
       return [j];
     }catch(e){
-      // NDJSON
       const lines = text.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
       const arr = [];
       for (const ln of lines){
@@ -176,18 +175,19 @@
     }
   }
 
-  // Normalización de claves
+  // Mapeo de claves (incluye Match + Result FT)
   const keyMap = {
     league: /^(league|liga)$/i,
     team: /^(team|equipo|name|nombre)$/i,
     gf: /^(gf|goals\s*for|goles\s*a\s*favor|golesf|golesaf)$/i,
     ga: /^(ga|goals\s*against|goles\s*en\s*contra|golesc|golesec|golesen)$/i,
     matches: /^(matches|mp|pj|games|partidos)$/i,
-
     homeTeam: /^(hometeam|local|equipo\s*local)$/i,
     awayTeam: /^(awayteam|visitante|equipo\s*visitante)$/i,
     fthg: /^(fthg|home(goals)?|goles\s*local|gf\s*local)$/i,
-    ftag: /^(ftag|away(goals)?|goles\s*visitante|gf\s*visitante)$/i
+    ftag: /^(ftag|away(goals)?|goles\s*visitante|gf\s*visitante)$/i,
+    matchStr: /^(match|partido)$/i,
+    resultFT: /^(result\s*ft|resultado\s*ft|ft\s*result|final\s*score)$/i
   };
 
   function findKey(obj, regex){
@@ -198,7 +198,6 @@
   }
 
   function num(x){ const n = Number(x); return Number.isFinite(n) ? n : 0; }
-
   function accumulateTeam(leag, team, gf, ga, m){
     if (!leag || !team) return;
     teams[leag] = teams[leag] || {};
@@ -207,14 +206,28 @@
     teams[leag][team] = t;
   }
 
+  function parseMatchTeams(s){
+    // Admite separadores " - ", "-", " vs ", "VS", "—", "–", " : "
+    const sep = /\s+(?:-|–|—|vs\.?|VS|:)\s+/i;
+    const parts = String(s).split(sep).map(x=>x.trim()).filter(Boolean);
+    if (parts.length>=2) return [parts[0], parts[1]];
+    return [null, null];
+  }
+  function parseScoreFT(s){
+    // Admite "1-2", "1 – 2", "1:2", "1 : 2"
+    const m = String(s).match(/(\d+)\s*(?:-|–|—|:)\s*(\d+)/);
+    if (!m) return [null,null];
+    return [num(m[1]), num(m[2])];
+  }
+
   function buildFromArray(arr){
     teams = {};
     for (const row of arr){
       if (!row || typeof row!=='object') continue;
       const kLeague = findKey(row, keyMap.league);
-      const league = kLeague ? String(row[kLeague]).trim() : null;
+      const league = kLeague ? String(row[kLeague]).trim() : "—";
 
-      // Caso 1: datos agregados por equipo
+      // Caso 1: agregado por equipo
       const kTeam = findKey(row, keyMap.team);
       const kGF = findKey(row, keyMap.gf);
       const kGA = findKey(row, keyMap.ga);
@@ -226,31 +239,40 @@
       const kFTHG = findKey(row, keyMap.fthg);
       const kFTAG = findKey(row, keyMap.ftag);
 
+      // Caso 3: Match + Result FT
+      const kMatch = findKey(row, keyMap.matchStr);
+      const kResFT = findKey(row, keyMap.resultFT);
+
       if (kTeam && (kGF || kGA) && kM){
-        // Agregado por equipo
         const team = String(row[kTeam]).trim();
         const gf = num(row[kGF]);
         const ga = num(row[kGA]);
         const m  = Math.max(1, num(row[kM]));
         accumulateTeam(league, team, gf, ga, m);
       } else if (kHT && kAT && (kFTHG || kFTAG)){
-        // Partidos crudos (1 partido = 1 fila)
         const ht = String(row[kHT]).trim();
         const at = String(row[kAT]).trim();
         const gh = num(row[kFTHG]);
         const ga = num(row[kFTAG]);
-        // Cada partido suma 1 para cada equipo
         accumulateTeam(league, ht, gh, ga, 1);
         accumulateTeam(league, at, ga, gh, 1);
+      } else if (kMatch && kResFT){
+        const [ht, at] = parseMatchTeams(row[kMatch]);
+        const [gh, ga] = parseScoreFT(row[kResFT]);
+        if (ht && at && Number.isFinite(gh) && Number.isFinite(ga)){
+          accumulateTeam(league, ht, gh, ga, 1);
+          accumulateTeam(league, at, ga, gh, 1);
+        }
       } else {
-        // Fila no reconocida: la ignoramos de forma segura
+        // Fila no reconocida: ignorar de forma segura
         continue;
       }
     }
   }
 
+  // ---------- UI Helpers ----------
+  function escapeHtml(s){ return String(s).replace(/[&<>"']/g, m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m])); }
   function fillSelectors(){
-    // Liga
     const leagues = Object.keys(teams).sort((a,b)=>a.localeCompare(b));
     leagueSel.innerHTML = '<option value="">— Selecciona liga —</option>' + leagues.map(l=>`<option>${escapeHtml(l)}</option>`).join('');
     leagueSel.disabled = leagues.length===0;
@@ -260,15 +282,14 @@
       const opts = '<option value="">— Equipo —</option>' + list.map(t=>`<option>${escapeHtml(t)}</option>`).join('');
       homeSel.innerHTML = opts; awaySel.innerHTML = opts;
       homeSel.disabled = !list.length; awaySel.disabled = !list.length;
+      btnCalc.disabled = !list.length;
     }
 
     setTeamsForLeague(leagues[0] || "");
-    leagueSel.addEventListener('change', e=> setTeamsForLeague(leagueSel.value));
+    leagueSel.addEventListener('change', ()=> setTeamsForLeague(leagueSel.value));
   }
 
-  function escapeHtml(s){ return String(s).replace(/[&<>"']/g, m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m])); }
-
-  // Poisson helpers
+  // ---------- Poisson ----------
   const factMemo = [1];
   function fact(n){ for(let i=factMemo.length;i<=n;i++) factMemo[i]=factMemo[i-1]*i; return factMemo[n]; }
   function poisPMF(k, lambda){ return Math.exp(-lambda) * Math.pow(lambda, k) / fact(k); }
@@ -288,15 +309,12 @@
     const tA = teams[lig][away];
     if (!tH || !tA){ status.textContent='Faltan datos para esos equipos.'; return; }
 
-    // μ_liga = (sum_GF / sum_Partidos) -> goles por equipo por partido
+    // μ_liga: goles por equipo por partido
     let sumGF=0, sumM=0;
-    for (const t of Object.values(teams[lig])){
-      sumGF += t.gf;
-      sumM  += t.matches;
-    }
-    const mu = sumM>0 ? (sumGF/sumM) : 1.2; // fallback prudente
+    for (const t of Object.values(teams[lig])){ sumGF+=t.gf; sumM+=t.matches; }
+    const mu = sumM>0 ? (sumGF/sumM) : 1.2;
 
-    // Promedios por equipo
+    // Promedios eq/part
     const h_gfpm = tH.gf / Math.max(1,tH.matches);
     const h_gapm = tH.ga / Math.max(1,tH.matches);
     const a_gfpm = tA.gf / Math.max(1,tA.matches);
@@ -312,7 +330,7 @@
     const lambdaH = attH * defA * mu * HA;
     const lambdaA = attA * defH * mu;
 
-    // KPI render
+    // KPIs
     el('k_mu').textContent     = mu.toFixed(3);
     el('k_att_h').textContent  = attH.toFixed(3);
     el('k_def_h').textContent  = defH.toFixed(3);
@@ -321,12 +339,11 @@
     el('k_lh').textContent     = lambdaH.toFixed(3);
     el('k_la').textContent     = lambdaA.toFixed(3);
 
-    // Scoreline matrix (0..10)
+    // Discretización (0..10)
     const MAXG = 10;
     const pH = Array.from({length:MAXG+1}, (_,k)=>poisPMF(k, lambdaH));
     const pA = Array.from({length:MAXG+1}, (_,k)=>poisPMF(k, lambdaA));
 
-    // 1X2, draws, totals
     let p1=0, px=0, p2=0, pUnder25=0;
     let probScores = [];
     for (let h=0; h<=MAXG; h++){
@@ -338,11 +355,8 @@
       }
     }
     const pOver25 = 1 - pUnder25;
-
-    // BTTS Sí = 1 - P(H=0) - P(A=0) + P(H=0,A=0)
     const btts = 1 - pH[0] - pA[0] + (pH[0]*pA[0]);
 
-    // Render mercados
     el('m_1').textContent   = (p1*100).toFixed(1)+'%';
     el('m_x').textContent   = (px*100).toFixed(1)+'%';
     el('m_2').textContent   = (p2*100).toFixed(1)+'%';
@@ -350,18 +364,17 @@
     el('m_o25').textContent = (pOver25*100).toFixed(1)+'%';
     el('m_u25').textContent = (pUnder25*100).toFixed(1)+'%';
 
-    // Render scorelines top→bottom por prob.
+    // Scorelines top 50
     probScores.sort((a,b)=>b.p-a.p);
-    const rows = probScores.slice(0,50).map(x=>(
+    scoreTbody.innerHTML = probScores.slice(0,50).map(x=>(
       `<tr><td><span class="pill">${x.score}</span></td><td>${(x.p*100).toFixed(3)}%</td></tr>`
     )).join('');
-    scoreTbody.innerHTML = rows || '<tr><td colspan="2">—</td></tr>';
   }
 
   // Eventos
   btnCalc.addEventListener('click', compute);
 
-  el('file').addEventListener('change', async (e)=>{
+  document.getElementById('file').addEventListener('change', async (e)=>{
     const f = e.target.files?.[0];
     if (!f){ return; }
     try{
@@ -370,13 +383,9 @@
       if (!arr.length) throw new Error("El archivo está vacío.");
       buildFromArray(arr);
       fillSelectors();
-      ready = true;
-      btnCalc.disabled = false;
-      status.textContent = 'Datos cargados ✔';
+      status.textContent = 'Datos cargados ✔ Elige liga y equipos.';
     }catch(err){
-      ready = false;
-      btnCalc.disabled = true;
-      leagueSel.disabled = true; homeSel.disabled = true; awaySel.disabled = true;
+      leagueSel.disabled = true; homeSel.disabled = true; awaySel.disabled = true; btnCalc.disabled = true;
       leagueSel.innerHTML=''; homeSel.innerHTML=''; awaySel.innerHTML='';
       status.textContent = err.message || 'Error al leer el JSON.';
     }
