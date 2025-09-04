@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
-  <title>Backtesting Fútbol — ROI & Patrones Avanzados</title>
+  <title>Backtesting Fútbol — ROI, Segmentos & Patrones</title>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
@@ -15,7 +15,7 @@
     h1{font-size:1.2rem;margin:0;}
     main{display:grid;grid-template-columns:1fr 3fr;gap:1rem;padding:1rem;}
     section{background:var(--panel2);padding:1rem;border-radius:8px;overflow:auto;}
-    table{width:100%;border-collapse:collapse;font-size:.8rem;}
+    table{width:100%;border-collapse:collapse;font-size:.8rem;margin-top:.5rem;}
     th,td{padding:.4rem;border:1px solid var(--border);text-align:center;}
     th{background:var(--panel);}
     select,input,button{width:100%;padding:.4rem;margin-top:.4rem;background:var(--panel);color:var(--text);border:1px solid var(--border);border-radius:4px;}
@@ -26,7 +26,7 @@
   </style>
 </head>
 <body>
-<header><h1>⚽ Backtesting Fútbol — ROI & Patrones Avanzados</h1></header>
+<header><h1>⚽ Backtesting Fútbol — ROI, Segmentos & Patrones</h1></header>
 <main>
   <section>
     <h2>⚙️ Configuración</h2>
@@ -44,6 +44,8 @@
     <canvas id="equityChart"></canvas>
     <canvas id="confusionChart"></canvas>
     <h3>Top Reglas/Patrones</h3><table id="rulesTable"></table>
+    <h3>Segmentación por Liga</h3><table id="leagueTable"></table>
+    <h3>Segmentación por Equipo</h3><table id="teamTable"></table>
     <h3>Partidos Evaluados</h3><table id="matchesTable"></table>
   </section>
 </main>
@@ -51,11 +53,11 @@
 <script>
 // ---------- Datos demo ----------
 let data = [
-  {"Date":"2024-08-01 18:00","League":"Argentina Liga Profesional de Fútbol","Match":"Banfield - Boca","Desired Outcome":"GG","Odd":2.25,"Result":"Winning","Result FT":"2-1","Home Attacks at FT":90,"Away Attacks at FT":85},
-  {"Date":"2024-08-05 20:00","League":"Argentina Liga Profesional de Fútbol","Match":"River - Racing","Desired Outcome":"GG","Odd":1.90,"Result":"Losing","Result FT":"1-0","Home Attacks at FT":70,"Away Attacks at FT":68},
-  {"Date":"2024-08-09 19:00","League":"Argentina Liga Profesional de Fútbol","Match":"Independiente - San Lorenzo","Desired Outcome":"GG","Odd":2.10,"Result":"Winning","Result FT":"1-1","Home Attacks at FT":95,"Away Attacks at FT":90},
-  {"Date":"2024-08-13 17:00","League":"Argentina Liga Profesional de Fútbol","Match":"Banfield - Tigre","Desired Outcome":"GG","Odd":2.05,"Result":"Winning","Result FT":"2-2","Home Attacks at FT":80,"Away Attacks at FT":75},
-  {"Date":"2024-08-17 16:00","League":"Argentina Liga Profesional de Fútbol","Match":"River - Boca","Desired Outcome":"GG","Odd":1.95,"Result":"Losing","Result FT":"1-0","Home Attacks at FT":60,"Away Attacks at FT":70}
+  {"Date":"2024-08-01 18:00","League":"Argentina Liga Profesional de Fútbol","Match":"Banfield - Boca","Desired Outcome":"GG","Odd":2.25,"Result":"Winning","Result FT":"2-1","Home Attacks at FT":90,"Away Attacks at FT":85,"Home Corners at FT":7,"Away Corners at FT":3,"Home Ball Possession at FT":55,"Away Ball Possession at FT":45,"Home Position":15,"Away Position":3},
+  {"Date":"2024-08-05 20:00","League":"Argentina Liga Profesional de Fútbol","Match":"River - Racing","Desired Outcome":"GG","Odd":1.90,"Result":"Losing","Result FT":"1-0","Home Attacks at FT":70,"Away Attacks at FT":68,"Home Corners at FT":4,"Away Corners at FT":5,"Home Ball Possession at FT":60,"Away Ball Possession at FT":40,"Home Position":1,"Away Position":5},
+  {"Date":"2024-08-09 19:00","League":"Argentina Liga Profesional de Fútbol","Match":"Independiente - San Lorenzo","Desired Outcome":"GG","Odd":2.10,"Result":"Winning","Result FT":"1-1","Home Attacks at FT":95,"Away Attacks at FT":90,"Home Corners at FT":6,"Away Corners at FT":6,"Home Ball Possession at FT":48,"Away Ball Possession at FT":52,"Home Position":10,"Away Position":8},
+  {"Date":"2024-08-13 17:00","League":"Argentina Liga Profesional de Fútbol","Match":"Banfield - Tigre","Desired Outcome":"GG","Odd":2.05,"Result":"Winning","Result FT":"2-2","Home Attacks at FT":80,"Away Attacks at FT":75,"Home Corners at FT":8,"Away Corners at FT":4,"Home Ball Possession at FT":51,"Away Ball Possession at FT":49,"Home Position":15,"Away Position":12},
+  {"Date":"2024-08-17 16:00","League":"Argentina Liga Profesional de Fútbol","Match":"River - Boca","Desired Outcome":"GG","Odd":1.95,"Result":"Losing","Result FT":"1-0","Home Attacks at FT":60,"Away Attacks at FT":70,"Home Corners at FT":3,"Away Corners at FT":7,"Home Ball Possession at FT":58,"Away Ball Possession at FT":42,"Home Position":1,"Away Position":3}
 ];
 
 // ---------- Parsing ----------
@@ -77,7 +79,11 @@ function buildFeatures(ds){
       home,away,
       target:m.Result=="Winning"?1:0,
       diffAttacks:(+m["Home Attacks at FT"]||0) - (+m["Away Attacks at FT"]||0),
-      odd:+m.Odd||2.0
+      diffCorners:(+m["Home Corners at FT"]||0) - (+m["Away Corners at FT"]||0),
+      diffPoss:(+m["Home Ball Possession at FT"]||0) - (+m["Away Ball Possession at FT"]||0),
+      diffPosRank:(+m["Away Position"]||0) - (+m["Home Position"]||0), // positivo si away mejor pos.
+      odd:+m.Odd||2.0,
+      impProb:1/(+m.Odd||2.0)
     };
   });
 }
@@ -105,6 +111,7 @@ function discoverRules(test){
   let rules=[];
   const conds=[
     {desc:"diffAttacks>10",fn:m=>m.diffAttacks>10},
+    {desc:"diffCorners>2",fn:m=>m.diffCorners>2},
     {desc:"odd>2.0",fn:m=>m.odd>2.0},
     {desc:"odd<2.0",fn:m=>m.odd<2.0}
   ];
@@ -112,7 +119,7 @@ function discoverRules(test){
     const subset=test.filter(c.fn);
     if(subset.length>1){
       let wins=subset.filter(m=>m.target==1).length;
-      let roi=(wins* (subset[0].odd-1) - (subset.length-wins))/subset.length;
+      let roi=(wins*(subset[0].odd-1) - (subset.length-wins))/subset.length;
       rules.push({cond:c.desc,roi:roi.toFixed(2),n:subset.length});
     }
   });
@@ -129,9 +136,8 @@ function evaluate(test,preds){
     if(p==1&&m.target==0)fp++;
     if(p==0&&m.target==1)fn++;
     if(p==0&&m.target==0)tn++;
-    // ROI stake 1
     let gain=0;
-    if(p==1){ gain=m.target==1?(m.odd-1): -1; }
+    if(p==1){ gain=m.target==1?(m.odd-1):-1; }
     equity.push(equity[equity.length-1]+gain);
   });
   const acc=((tp+tn)/test.length).toFixed(2);
@@ -139,11 +145,37 @@ function evaluate(test,preds){
   return {tp,fp,fn,tn,acc,roi,equity};
 }
 
+// ---------- Segmentación ----------
+function segmentBy(test,preds,key){
+  let groups={};
+  test.forEach((m,i)=>{
+    const k=m[key];
+    if(!groups[k])groups[k]=[];
+    groups[k].push({m,bet:(preds[i]>0.5?1:0),p:preds[i]});
+  });
+  let rows=[];
+  Object.keys(groups).forEach(g=>{
+    let arr=groups[g];
+    let bets=0,wins=0,pl=0;
+    arr.forEach(r=>{
+      if(r.bet==1){
+        bets++;
+        if(r.m.target==1){wins++;pl+=(r.m.odd-1);}
+        else{pl-=1;}
+      }
+    });
+    if(bets>0){
+      rows.push({group:g,roi:(pl/bets).toFixed(2),acc:(wins/bets).toFixed(2),bets});
+    }
+  });
+  return rows.sort((a,b)=>b.roi-a.roi);
+}
+
 // ---------- Render ----------
 function render(ds){
   ds=buildFeatures(ds);
   const {train,test}=splitTemporal(ds);
-  const feats=["diffAttacks","odd"];
+  const feats=["diffAttacks","diffCorners","diffPoss","diffPosRank","odd","impProb"];
   const w=logisticTrain(train,feats);
   const preds=test.map(m=>logisticPredict(m,w,feats));
   const ev=evaluate(test,preds);
@@ -165,6 +197,16 @@ function render(ds){
   let rt="<tr><th>Condición</th><th>ROI</th><th>n</th></tr>";
   r.forEach(x=>{rt+=`<tr><td>${x.cond}</td><td>${x.roi}</td><td>${x.n}</td></tr>`;});
   document.getElementById("rulesTable").innerHTML=rt;
+  // Segmentación liga
+  let leagues=segmentBy(test,preds,"League");
+  let lt="<tr><th>Liga</th><th>ROI</th><th>Acierto</th><th>#apuestas</th></tr>";
+  leagues.forEach(x=>{lt+=`<tr><td>${x.group}</td><td>${x.roi}</td><td>${x.acc}</td><td>${x.bets}</td></tr>`;});
+  document.getElementById("leagueTable").innerHTML=lt;
+  // Segmentación equipo
+  let teams=segmentBy(test,preds,"home");
+  let tt="<tr><th>Equipo Local</th><th>ROI</th><th>Acierto</th><th>#apuestas</th></tr>";
+  teams.forEach(x=>{tt+=`<tr><td>${x.group}</td><td>${x.roi}</td><td>${x.acc}</td><td>${x.bets}</td></tr>`;});
+  document.getElementById("teamTable").innerHTML=tt;
   // Matches
   let mt="<tr><th>Fecha</th><th>Partido</th><th>Odd</th><th>Pred Prob</th><th>Real</th></tr>";
   test.forEach((m,i)=>{mt+=`<tr><td>${m.Date}</td><td>${m.Match}</td><td>${m.odd}</td><td>${preds[i].toFixed(2)}</td><td>${m.target}</td></tr>`;});
