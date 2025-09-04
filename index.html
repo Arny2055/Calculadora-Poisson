@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
-  <title>Backtesting Fútbol — JSON dinámico</title>
+  <title>Backtesting Fútbol — EV>0, ROI & Patrones</title>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
@@ -18,165 +18,515 @@
     table{width:100%;border-collapse:collapse;font-size:.8rem;margin-top:.5rem;}
     th,td{padding:.4rem;border:1px solid var(--border);text-align:center;}
     th{background:var(--panel);}
-    select,input,button{width:100%;padding:.4rem;margin-top:.4rem;background:var(--panel);color:var(--text);border:1px solid var(--border);border-radius:4px;}
+    select,input,button{width:100%;padding:.45rem;margin-top:.45rem;background:var(--panel);color:var(--text);border:1px solid var(--border);border-radius:4px;}
     button{cursor:pointer;background:var(--accent);}
+    .row{display:grid;grid-template-columns:1fr 1fr;gap:.5rem;}
     .dropzone{border:2px dashed var(--accent);border-radius:6px;padding:1rem;text-align:center;color:var(--muted);margin-top:.5rem;}
     .dropzone.dragover{background:rgba(122,162,255,0.1);}
-    canvas{width:100%!important;height:250px!important;margin-top:1rem;}
+    canvas{width:100%!important;height:260px!important;margin-top:1rem;}
+    .muted{color:var(--muted);font-size:.85rem;}
   </style>
 </head>
 <body>
-<header><h1>⚽ Backtesting Fútbol — JSON dinámico</h1></header>
+<header><h1>⚽ Backtesting Fútbol — Selección por EV>0 + Margen</h1></header>
 <main>
   <section>
     <h2>⚙️ Configuración</h2>
     <input type="file" id="fileInput" accept=".json"/>
     <div id="dropzone" class="dropzone">Arrastra tu JSON aquí</div>
-    <label>Liga:</label><select id="leagueSelect" onchange="applyFilters()"></select>
-    <label>Equipo Local:</label><select id="homeSelect" onchange="applyFilters()"></select>
-    <label>Equipo Visitante:</label><select id="awaySelect" onchange="applyFilters()"></select>
-    <button onclick="exportCSV()">Exportar CSV</button>
+    <div class="row">
+      <div>
+        <label>Liga</label><select id="leagueSelect" onchange="applyFilters()"></select>
+      </div>
+      <div>
+        <label>Equipo Local</label><select id="homeSelect" onchange="applyFilters()"></select>
+      </div>
+    </div>
+    <div class="row">
+      <div>
+        <label>Equipo Visitante</label><select id="awaySelect" onchange="applyFilters()"></select>
+      </div>
+      <div>
+        <label>Stop Drawdown (%)</label><input type="number" id="ddStop" value="30" min="0" max="95"/>
+      </div>
+    </div>
+    <div class="row">
+      <div>
+        <label>Stake</label>
+        <select id="stakeMode" onchange="applyFilters()">
+          <option value="flat">Flat (1 unidad)</option>
+          <option value="kelly">Kelly fraccional (cap 25%)</option>
+        </select>
+      </div>
+      <div>
+        <label>Mín. apuestas en TRAIN para validar α</label><input type="number" id="minBets" value="20" min="0"/>
+      </div>
+    </div>
+    <button onclick="exportCSV()">Exportar CSV (test picks)</button>
+    <p class="muted">El sistema optimiza el margen α en el 70% (train) y apuesta en test solo si p̂ &gt; 1/odd + α. Si no hay EV&gt;0, no apuesta.</p>
   </section>
+
   <section>
     <h2>📊 Resultados</h2>
     <div id="metrics"></div>
     <canvas id="equityChart"></canvas>
     <canvas id="confusionChart"></canvas>
+
     <h3>Top Reglas/Patrones</h3><table id="rulesTable"></table>
     <h3>Segmentación por Liga</h3><table id="leagueTable"></table>
     <h3>Segmentación por Equipo</h3><table id="teamTable"></table>
-    <h3>Partidos Evaluados</h3><table id="matchesTable"></table>
+    <h3>Segmentación por Rangos de Cuotas</h3><table id="oddsTable"></table>
+    <canvas id="equityOddsChart"></canvas>
+
+    <h3>Partidos Evaluados (TEST)</h3><table id="matchesTable"></table>
   </section>
 </main>
 
 <script>
-// ---------- Variables globales ----------
-let data=[];      // datos originales cargados
-let filtered=[];  // datos después de filtros activos
+/* ==================== Globals ==================== */
+let rawData=[];      // datos originales
+let filtered=[];     // datos filtrados por selects
+let charts={};       // refs Chart.js para destruir previamente
+let lastTestPicks=[]; // para export CSV
 
-// ---------- Parsing ----------
-function parseJson(txt){ try{return JSON.parse(txt);}catch(e){alert("Error JSON");return [];} }
-
-// ---------- Split temporal ----------
-function splitTemporal(ds){
-  ds.sort((a,b)=>new Date(a.Date)-new Date(b.Date));
-  const s=Math.floor(ds.length*0.7);
-  return {train:ds.slice(0,s),test:ds.slice(s)};
+/* ==================== Utilidades ==================== */
+const mesesES = {
+  "ene":"Jan","feb":"Feb","mar":"Mar","abr":"Apr","may":"May","jun":"Jun",
+  "jul":"Jul","ago":"Aug","sept":"Sep","sep":"Sep","oct":"Oct","nov":"Nov","dic":"Dec"
+};
+function normalizeString(s){
+  if(typeof s!=="string") return s;
+  s=s.trim();
+  s=s.replace("F�tbol","Fútbol").replace("Ftbol","Fútbol");
+  return s;
+}
+function toNumber(x){
+  if(typeof x==="number") return x;
+  if(x==null) return NaN;
+  const t=String(x).replace(",","." ).replace(/[^\d.\-]/g,"");
+  return parseFloat(t);
+}
+function parseDateES(s){
+  if(!s) return null;
+  s=String(s).trim();
+  // intenta ISO directo
+  const d1=new Date(s);
+  if(!isNaN(d1)) return d1;
+  // intenta "dom., 01 sept. 2024 18:00"
+  const m = s.match(/(\d{1,2})\s+([a-zA-ZñÑ.]+)\.?\s+(\d{4})\s+(\d{1,2}:\d{2})/);
+  if(m){
+    let day=m[1], mes=m[2].toLowerCase().replace(".","");
+    mes = mesesES[mes] || mes;
+    let year=m[3], hm=m[4];
+    const str = `${day} ${mes} ${year} ${hm}`;
+    const d2=new Date(str);
+    if(!isNaN(d2)) return d2;
+  }
+  return new Date(s); // último intento
+}
+function safeSplitTeams(matchStr){
+  matchStr = normalizeString(matchStr||"");
+  const parts = matchStr.split(" - ");
+  if(parts.length===2) return parts;
+  // fallback: intenta por guion
+  const idx = matchStr.indexOf("-");
+  if(idx>0) return [matchStr.slice(0,idx).trim(), matchStr.slice(idx+1).trim()];
+  return [matchStr, ""];
+}
+function destroyChart(id){
+  if(charts[id]){ charts[id].destroy(); charts[id]=null; }
 }
 
-// ---------- Features ----------
+/* ==================== Parsing & Features ==================== */
+function parseJson(txt){
+  try{
+    const arr=JSON.parse(txt);
+    return Array.isArray(arr)?arr:[];
+  }catch(e){ alert("Error al parsear JSON"); return []; }
+}
+function baseClean(ds){
+  return ds.map(r=>{
+    const obj={...r};
+    // normaliza strings conocidos
+    obj.League = normalizeString(obj.League);
+    obj.Match  = normalizeString(obj.Match);
+    obj.DesiredOutcome = normalizeString(obj["Desired Outcome"] || obj.DesiredOutcome || "");
+    obj.DateObj = parseDateES(obj.Date || obj["Fecha"] || obj["date"]);
+    // numéricos
+    obj.Odd = toNumber(obj.Odd ?? obj["Odd"]);
+    [
+      "Home Attacks at FT","Away Attacks at FT","Home Dangerous Attacks at FT","Away Dangerous Attacks at FT",
+      "Home OnGoal Shots at FT","Away OnGoal Shots at FT","Home Total Shots at FT","Away Total Shots at FT",
+      "Home Ball Possession at FT","Away Ball Possession at FT","Home Corners at FT","Away Corners at FT",
+      "Home RedCards at FT","Away RedCards at FT","Home YellowCards at FT","Away YellowCards at FT",
+      "Home Position","Away Position","Odd 1 PreMatch","Odd X PreMatch","Odd 2 PreMatch"
+    ].forEach(k=>{ if(obj[k]!=null) obj[k]=toNumber(obj[k]); });
+    // resultado → binario para GG (demo genérico, puedes ajustar por mercado)
+    const res = (obj.Result || "").toString().toLowerCase();
+    obj.target = res.includes("win") || res==="1" ? 1 : 0;
+    return obj;
+  }).filter(r=>r.DateObj && !isNaN(r.DateObj));
+}
 function buildFeatures(ds){
   return ds.map(m=>{
-    const [home,away]=m.Match.split(" - ");
+    const [home,away] = safeSplitTeams(m.Match);
+    const diff = (a,b)=> (toNumber(m[a])||0) - (toNumber(m[b])||0);
+    const odd = toNumber(m.Odd)||NaN;
     return {
       ...m,
-      home,away,
-      target:m.Result=="Winning"?1:0,
-      diffAttacks:(+m["Home Attacks at FT"]||0) - (+m["Away Attacks at FT"]||0),
-      diffCorners:(+m["Home Corners at FT"]||0) - (+m["Away Corners at FT"]||0),
-      diffPoss:(+m["Home Ball Possession at FT"]||0) - (+m["Away Ball Possession at FT"]||0),
-      odd:+m.Odd||2.0
+      home, away,
+      odd,
+      impProb: odd? 1/odd : NaN,
+      diffAttacks:  diff("Home Attacks at FT","Away Attacks at FT"),
+      diffDanger:   diff("Home Dangerous Attacks at FT","Away Dangerous Attacks at FT"),
+      diffOnTarget: diff("Home OnGoal Shots at FT","Away OnGoal Shots at FT"),
+      diffShots:    diff("Home Total Shots at FT","Away Total Shots at FT"),
+      diffPoss:     diff("Home Ball Possession at FT","Away Ball Possession at FT"),
+      diffCorners:  diff("Home Corners at FT","Away Corners at FT"),
+      diffYellows:  diff("Home YellowCards at FT","Away YellowCards at FT"),
+      diffReds:     diff("Home RedCards at FT","Away RedCards at FT"),
+      diffPosRank: (toNumber(m["Away Position"])||0) - (toNumber(m["Home Position"])||0), // + si away mejor pos
     };
   });
 }
 
-// ---------- Logistic regression ----------
-function logisticTrain(train,feats,iters=500,lr=0.01){
-  let w={}; feats.forEach(f=>w[f]=0);
-  for(let i=0;i<iters;i++){
-    train.forEach(m=>{
-      let z=0; feats.forEach(f=>{z+=w[f]*(+m[f]||0);});
-      const pred=1/(1+Math.exp(-z));
-      const err=m.target-pred;
-      feats.forEach(f=>{ w[f]+=lr*err*(+m[f]||0); });
-    });
-  }
-  return w;
+/* ==================== Split temporal ==================== */
+function splitTemporal(ds){
+  const arr = [...ds].sort((a,b)=>a.DateObj-b.DateObj);
+  const cut = Math.floor(arr.length*0.7);
+  return {train:arr.slice(0,cut), test:arr.slice(cut)};
 }
-function logisticPredict(m,w,feats){
-  let z=0; feats.forEach(f=>{z+=w[f]*(+m[f]||0);});
+
+/* ==================== Modelo logístico sencillo ==================== */
+function standardize(train, fields){
+  const stats={};
+  fields.forEach(f=>{
+    const vals=train.map(x=>+x[f]||0);
+    const mu=vals.reduce((a,b)=>a+b,0)/Math.max(vals.length,1);
+    const sd=Math.sqrt(vals.reduce((a,b)=>a+(b-mu)*(b-mu),0)/Math.max(vals.length,1)) || 1;
+    stats[f]={mu,sd};
+  });
+  const apply=(row)=> {
+    const r={...row};
+    fields.forEach(f=>{ r[f+"_z"] = ((+row[f]||0)-stats[f].mu)/stats[f].sd; });
+    return r;
+  };
+  return {stats, apply};
+}
+function logisticTrain(train, zfeats, iters=600, lr=0.02){
+  // y ~ sigmoid( w0 + sum(wf * zfeat) )
+  let w0=0, w={}; zfeats.forEach(f=>w[f]=0);
+  for(let it=0; it<iters; it++){
+    for(const r of train){
+      let z = w0;
+      zfeats.forEach(f=>{ z += w[f]*(+r[f+"_z"]||0); });
+      const p = 1/(1+Math.exp(-z));
+      const e = (r.target||0) - p;
+      w0 += lr*e*1.0;
+      zfeats.forEach(f=>{ w[f] += lr*e*(+r[f+"_z"]||0); });
+    }
+  }
+  return {w0,w};
+}
+function predictProb(row, model, zfeats){
+  let z=model.w0;
+  zfeats.forEach(f=>{ z += model.w[f]*(+row[f+"_z"]||0); });
   return 1/(1+Math.exp(-z));
 }
 
-// ---------- Evaluación ----------
-function evaluate(test,preds){
+/* ==================== Política de selección (EV>0 + margen α) ==================== */
+function gridSearchAlpha(train, zfeats, minBets){
+  // Optimiza α en TRAIN (walk-forward simple): ROI con stake 1 y stop drawdown inactivo en train
+  const candidates=[];
+  for(let a=0; a<=10; a++) candidates.push(a/100); // 0.00 ... 0.10
+  // Estandariza
+  const featsBase = ["diffAttacks","diffDanger","diffOnTarget","diffShots","diffPoss","diffCorners","diffYellows","diffReds","diffPosRank","impProb","odd"];
+  const {stats, apply} = standardize(train, featsBase);
+  const trainZ = train.map(apply);
+  const model = logisticTrain(trainZ, featsBase, 700, 0.02);
+
+  let best={alpha:0, roi:-Infinity, bets:0};
+  for(const alpha of candidates){
+    let pl=0, bets=0;
+    for(const r of trainZ){
+      if(!r.odd || !isFinite(r.odd) || r.odd<=1) continue;
+      const p = predictProb(r, model, featsBase);
+      const edge = p - (1/r.odd);
+      if(edge > alpha){
+        bets++;
+        pl += (r.target==1)? (r.odd-1) : -1;
+      }
+    }
+    const roi = bets>0? (pl/bets) : -Infinity;
+    if(bets>=minBets && roi>best.roi){ best={alpha, roi, bets}; }
+  }
+  return {alpha:best.alpha, model, applyFn:apply, zfeats:featsBase, stats};
+}
+
+/* ==================== Evaluación en TEST ==================== */
+function evaluateTest(test, policy, ddStopPct=30, stakeMode="flat"){
+  // policy: {alpha, model, applyFn, zfeats}
   let tp=0,fp=0,fn=0,tn=0;
   let equity=[0];
-  test.forEach((m,i)=>{
-    const p=preds[i]>0.5?1:0;
-    if(p==1&&m.target==1)tp++;
-    if(p==1&&m.target==0)fp++;
-    if(p==0&&m.target==1)fn++;
-    if(p==0&&m.target==0)tn++;
-    let gain=0;
-    if(p==1){ gain=m.target==1?(m.odd-1):-1; }
+  let peak=0, stop=false;
+  const picks=[];
+  for(const r0 of test){
+    const r = policy.applyFn(r0);
+    const odd=r.odd;
+    // predicción
+    const p = predictProb(r, policy.model, policy.zfeats);
+    const threshold = (1/(odd||Infinity)) + policy.alpha;
+    const willBet = (!stop) && isFinite(odd) && odd>1 && (p>threshold);
+
+    let bet=0, gain=0, stake=1;
+    if(willBet){
+      bet=1;
+      if(stakeMode==="kelly"){
+        const b = (odd-1);
+        const q = 1-p;
+        let f = (b*p - q)/b; // Kelly
+        if(!isFinite(f)) f=0;
+        f = Math.max(0, Math.min(f, 0.25)); // cap 25%
+        stake = f<=0? 0 : f;
+      }
+      if(stake>0){
+        gain = (r.target==1)? (stake*(odd-1)) : (-stake);
+      }
+    }
+    // confusión (considera "apostar" como +)
+    const predCls = willBet?1:0;
+    if(predCls==1&&r.target==1)tp++;
+    if(predCls==1&&r.target==0)fp++;
+    if(predCls==0&&r.target==1)fn++;
+    if(predCls==0&&r.target==0)tn++;
+
     equity.push(equity[equity.length-1]+gain);
-  });
-  const acc=((tp+tn)/test.length).toFixed(2);
-  const roi=(equity[equity.length-1]/test.length).toFixed(2);
-  return {tp,fp,fn,tn,acc,roi,equity};
+    peak = Math.max(peak, equity[equity.length-1]);
+    const dd = peak>0 ? 100*(peak - equity[equity.length-1]) / peak : 0;
+    if(ddStopPct>0 && dd>=ddStopPct){ stop=true; }
+
+    if(bet){ picks.push({date:r.Date, league:r.League, match:r.Match, odd:odd, p: +p.toFixed(3), win:r.target, stake:+stake.toFixed(3), profit:+gain.toFixed(3)}); }
+  }
+  const bets = picks.length;
+  const pnl  = equity[equity.length-1];
+  const roi  = bets>0? (pnl/bets) : 0;
+  const acc  = (tp+tn)>0 ? ((tp+tn)/(tp+tn+fp+fn)) : 0;
+  return {tp,fp,fn,tn,acc:+acc.toFixed(3),roi:+roi.toFixed(3),equity,picks};
 }
 
-// ---------- Render principal ----------
-function render(ds){
-  if(ds.length<3){ document.getElementById("metrics").innerHTML="<p>Muy pocos partidos</p>"; return; }
-  ds=buildFeatures(ds);
-  const {train,test}=splitTemporal(ds);
-  const feats=["diffAttacks","diffCorners","diffPoss","odd"];
-  const w=logisticTrain(train,feats);
-  const preds=test.map(m=>logisticPredict(m,w,feats));
-  const ev=evaluate(test,preds);
+/* ==================== Segmentación y Reglas ==================== */
+function segmentBy(picks, key, oddsBins=null){
+  // picks: sólo donde bet=1 (ya filtrado)
+  const groups={};
+  for(const p of picks){
+    let g = key==="odd" ? null : p[key];
+    if(oddsBins){
+      for(const b of oddsBins){ if(p.odd>=b.min && p.odd<b.max){ g=b.label; break; } }
+    }
+    if(!g) g = "N/A";
+    if(!groups[g]) groups[g]=[];
+    groups[g].push(p);
+  }
+  const rows=[];
+  Object.keys(groups).forEach(k=>{
+    const arr=groups[k];
+    const bets=arr.length;
+    let wins=0, pl=0;
+    arr.forEach(x=>{ if(x.win==1) {wins++; pl += x.stake*(x.odd-1);} else {pl -= x.stake;} });
+    rows.push({group:k, roi: +(pl/Math.max(1,bets)).toFixed(3), acc:+(wins/Math.max(1,bets)).toFixed(3), bets});
+  });
+  return rows.sort((a,b)=>b.roi-a.roi);
+}
+function discoverRulesOnTest(test){
+  // reglas simples sobre test (interpretables)
+  const conds=[
+    {desc:"diffAttacks>10", fn:(m)=>m.diffAttacks>10},
+    {desc:"diffDanger>5",  fn:(m)=>m.diffDanger>5},
+    {desc:"diffShots>4",   fn:(m)=>m.diffShots>4},
+    {desc:"odd>2.0",       fn:(m)=>m.odd>2.0},
+    {desc:"odd<2.0",       fn:(m)=>m.odd<2.0}
+  ];
+  const rules=[];
+  for(const c of conds){
+    const sub=test.filter(c.fn);
+    if(sub.length>=10){
+      const wins=sub.filter(x=>x.target==1).length;
+      const roi = (wins*( (sub[0].odd||2)-1 ) - (sub.length-wins)) / sub.length;
+      rules.push({cond:c.desc, n:sub.length, roi:+roi.toFixed(3)});
+    }
+  }
+  return rules.sort((a,b)=>b.roi-a.roi).slice(0,10);
+}
 
-  document.getElementById("metrics").innerHTML=
+/* ==================== Render principal ==================== */
+function render(dataset){
+  if(!dataset || dataset.length<3){
+    document.getElementById("metrics").innerHTML="<p>Muy pocos partidos tras filtros.</p>";
+    ["equityChart","confusionChart","equityOddsChart"].forEach(destroyChart);
+    document.getElementById("rulesTable").innerHTML="";
+    document.getElementById("leagueTable").innerHTML="";
+    document.getElementById("teamTable").innerHTML="";
+    document.getElementById("oddsTable").innerHTML="";
+    document.getElementById("matchesTable").innerHTML="";
+    return;
+  }
+
+  // Split
+  const {train,test} = splitTemporal(dataset);
+
+  // Grid search α en TRAIN
+  const minBets = Math.max( Number(document.getElementById("minBets").value||0 ), Math.ceil(train.length*0.05) );
+  const {alpha, model, applyFn, zfeats} = gridSearchAlpha(train, null, minBets);
+
+  // TEST evaluation con stop drawdown + stake mode
+  const ddStopPct = Number(document.getElementById("ddStop").value||0);
+  const stakeMode = document.getElementById("stakeMode").value;
+  const ev = evaluateTest(test, {alpha, model, applyFn, zfeats}, ddStopPct, stakeMode);
+  lastTestPicks = ev.picks;
+
+  // Métricas
+  document.getElementById("metrics").innerHTML =
     `<p>Train: ${train.length} | Test: ${test.length}<br>
-     Acc: ${ev.acc} | ROI: ${ev.roi}</p>`;
+      α óptimo (train): <b>${alpha.toFixed(2)}</b> | Acc (test): <b>${ev.acc}</b> | ROI (test): <b>${ev.roi}</b><br>
+      Apuestas (test): <b>${ev.picks.length}</b> | Stop-DD: ${ddStopPct}% | Stake: ${stakeMode}</p>`;
 
-  new Chart(document.getElementById("equityChart"),{
-    type:"line",data:{labels:test.map(m=>m.Date),datasets:[{label:"Equity",data:ev.equity}]}
-  });
-  new Chart(document.getElementById("confusionChart"),{
-    type:"bar",data:{labels:["TP","FP","FN","TN"],datasets:[{label:"Confusión",data:[ev.tp,ev.fp,ev.fn,ev.tn]}]}
+  // Gráficos
+  destroyChart("equityChart");
+  charts.equityChart = new Chart(document.getElementById("equityChart"),{
+    type:"line",
+    data:{labels:test.map(x=>x.DateObj.toISOString().slice(0,10)),
+          datasets:[{label:"Equity (test)",data:ev.equity, borderWidth:2}]}
   });
 
-  // Matches table
-  let mt="<tr><th>Fecha</th><th>Liga</th><th>Partido</th><th>Odd</th><th>Pred</th><th>Real</th></tr>";
-  test.forEach((m,i)=>{mt+=`<tr><td>${m.Date}</td><td>${m.League}</td><td>${m.Match}</td><td>${m.odd}</td><td>${preds[i].toFixed(2)}</td><td>${m.target}</td></tr>`;});
-  document.getElementById("matchesTable").innerHTML=mt;
+  destroyChart("confusionChart");
+  charts.confusionChart = new Chart(document.getElementById("confusionChart"),{
+    type:"bar",
+    data:{labels:["TP","FP","FN","TN"],datasets:[{label:"Matriz de confusión",data:[ev.tp,ev.fp,ev.fn,ev.tn]}]}
+  });
+
+  // Reglas (sobre test, descriptivas, no de trading)
+  const rules = discoverRulesOnTest(test);
+  let rt="<tr><th>Condición</th><th>n</th><th>ROI estimado</th></tr>";
+  rules.forEach(r=> rt+=`<tr><td>${r.cond}</td><td>${r.n}</td><td>${r.roi}</td></tr>`);
+  document.getElementById("rulesTable").innerHTML=rt;
+
+  // Segmentación por LIGA (solo picks)
+  const segLeague = segmentBy(ev.picks, "league", null);
+  let lt="<tr><th>Liga</th><th>ROI</th><th>Acierto</th><th>#Apuestas</th></tr>";
+  segLeague.forEach(s=> lt+=`<tr><td>${s.group}</td><td>${s.roi}</td><td>${s.acc}</td><td>${s.bets}</td></tr>`);
+  document.getElementById("leagueTable").innerHTML=lt;
+
+  // Segmentación por EQUIPO LOCAL (solo picks)
+  const segTeam = segmentBy(ev.picks, "matchHome", null); // añadiremos matchHome en picks más abajo
+  // Si aún no existe matchHome en picks (primera vez), lo construimos al vuelo abajo.
+
+  // Segmentación por ODDS (solo picks)
+  const bins=[
+    {min:1.00,max:1.50,label:"1.00–1.50"},
+    {min:1.50,max:2.00,label:"1.50–2.00"},
+    {min:2.00,max:2.50,label:"2.00–2.50"},
+    {min:2.50,max:3.00,label:"2.50–3.00"},
+    {min:3.00,max:100,label:"3.00+"}
+  ];
+  // Aseguramos campos para segmentación:
+  ev.picks.forEach(p=>{
+    const [h,a] = safeSplitTeams(p.match||"");
+    p.matchHome = h; p.matchAway = a;
+  });
+  const segOdds = segmentBy(ev.picks, "odd", bins);
+  let ot="<tr><th>Rango Cuota</th><th>ROI</th><th>Acierto</th><th>#Apuestas</th></tr>";
+  segOdds.forEach(s=> ot+=`<tr><td>${s.group}</td><td>${s.roi}</td><td>${s.acc}</td><td>${s.bets}</td></tr>`);
+  document.getElementById("oddsTable").innerHTML=ot;
+
+  destroyChart("equityOddsChart");
+  // Curvas de equity por rango de cuota (construimos equity por grupo)
+  const equityByBin = segOdds.map(s=>({label:s.group, data: buildEquityForGroup(ev.picks, bins, s.group)}));
+  const maxLen = Math.max(...equityByBin.map(e=>e.data.length), 0);
+  charts.equityOddsChart = new Chart(document.getElementById("equityOddsChart"),{
+    type:"line",
+    data:{
+      labels:Array.from({length:maxLen},(_,i)=>i),
+      datasets: equityByBin.map(e=>({label:e.label, data:e.data, borderWidth:2}))
+    }
+  });
+
+  // Tabla de picks (test)
+  let mt="<tr><th>Fecha</th><th>Liga</th><th>Partido</th><th>Odd</th><th>p̂</th><th>Stake</th><th>Resultado</th><th>Profit</th></tr>";
+  ev.picks.forEach(p=>{
+    mt+=`<tr>
+      <td>${p.date ? new Date(p.date).toISOString().slice(0,10) : ""}</td>
+      <td>${p.league||""}</td>
+      <td>${p.match||""}</td>
+      <td>${p.odd}</td>
+      <td>${p.p}</td>
+      <td>${p.stake}</td>
+      <td>${p.win}</td>
+      <td>${p.profit}</td>
+    </tr>`;
+  });
+  document.getElementById("matchesTable").innerHTML = mt;
+
+  // Segmentación por equipo local ahora que ya existe matchHome:
+  const segTeam2 = segmentBy(ev.picks, "matchHome", null);
+  let tt="<tr><th>Equipo Local</th><th>ROI</th><th>Acierto</th><th>#Apuestas</th></tr>";
+  segTeam2.forEach(s=> tt+=`<tr><td>${s.group}</td><td>${s.roi}</td><td>${s.acc}</td><td>${s.bets}</td></tr>`);
+  document.getElementById("teamTable").innerHTML=tt;
+}
+function buildEquityForGroup(picks, bins, label){
+  const seq = [];
+  let equity=0;
+  for(const p of picks){
+    // Determina el bin del pick
+    let g=null;
+    for(const b of bins){ if(p.odd>=b.min && p.odd<b.max){ g=b.label; break; } }
+    if(g===label){
+      equity += (p.win==1)? (p.stake*(p.odd-1)) : (-p.stake);
+      seq.push(+equity.toFixed(4));
+    }
+  }
+  if(seq.length===0) seq.push(0);
+  return seq;
 }
 
-// ---------- Filtros ----------
+/* ==================== Filtros & Selects ==================== */
 function applyFilters(){
-  let l=document.getElementById("leagueSelect").value;
-  let h=document.getElementById("homeSelect").value;
-  let a=document.getElementById("awaySelect").value;
-  filtered=data.filter(m=>{
+  const l = document.getElementById("leagueSelect").value;
+  const h = document.getElementById("homeSelect").value;
+  const a = document.getElementById("awaySelect").value;
+
+  filtered = rawData.filter(m=>{
     let ok=true;
-    if(l!="Todos" && m.League!=l) ok=false;
-    if(h!="Todos" && !m.Match.startsWith(h+" -")) ok=false;
-    if(a!="Todos" && !m.Match.endsWith(" - "+a) && !m.Match.endsWith(a)) ok=false;
+    if(l!=="Todos" && normalizeString(m.League)!==l) ok=false;
+    const [home,away] = safeSplitTeams(m.Match);
+    if(h!=="Todos" && home!==h) ok=false;
+    if(a!=="Todos" && away!==a) ok=false;
     return ok;
   });
-  render(filtered);
+  const ds = buildFeatures(filtered);
+  render(ds);
 }
-
-// ---------- Cargar selects ----------
-function fillSelect(id,arr){
+function fillSelect(id, arr){
   const sel=document.getElementById(id);
   sel.innerHTML="<option>Todos</option>";
-  arr.forEach(v=> sel.innerHTML+=`<option>${v}</option>`);
+  arr.forEach(v=> sel.innerHTML += `<option>${v}</option>`);
 }
 
-// ---------- Export ----------
+/* ==================== Export CSV ==================== */
 function exportCSV(){
-  let rows=[["Fecha","Liga","Partido","Odd","Resultado"]];
-  filtered.forEach(m=>rows.push([m.Date,m.League,m.Match,m.Odd,m.Result]));
-  let csv=rows.map(r=>r.join(",")).join("\n");
-  let a=document.createElement("a");
+  const rows=[["Fecha","Liga","Partido","Odd","p_hat","Stake","Win","Profit"]];
+  (lastTestPicks||[]).forEach(p=>{
+    rows.push([
+      p.date ? new Date(p.date).toISOString() : "",
+      p.league||"", p.match||"", p.odd, p.p, p.stake, p.win, p.profit
+    ]);
+  });
+  const csv=rows.map(r=>r.join(",")).join("\n");
+  const a=document.createElement("a");
   a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv"}));
-  a.download="backtesting.csv";a.click();
+  a.download="backtesting_test_picks.csv"; a.click();
 }
 
-// ---------- File / Drop ----------
+/* ==================== Carga de archivo ==================== */
 const drop=document.getElementById("dropzone");
 drop.addEventListener("dragover",e=>{e.preventDefault();drop.classList.add("dragover");});
 drop.addEventListener("dragleave",()=>drop.classList.remove("dragover"));
@@ -186,17 +536,40 @@ document.getElementById("fileInput").addEventListener("change",e=>handleFile(e.t
 function handleFile(file){
   const reader=new FileReader();
   reader.onload=e=>{
-    data=parseJson(e.target.result);
-    filtered=[...data];
-    // llenar selects dinámicamente
-    fillSelect("leagueSelect",[...new Set(data.map(d=>d.League))]);
-    const teams=[...new Set(data.flatMap(d=>d.Match.split(" - ")))];
-    fillSelect("homeSelect",teams);
-    fillSelect("awaySelect",teams);
-    render(filtered);
+    const parsed = parseJson(e.target.result);
+    rawData = baseClean(parsed);
+    if(rawData.length===0){ alert("No se encontraron filas válidas con fecha."); return; }
+    // Llenar selects
+    const leagues=[...new Set(rawData.map(d=>normalizeString(d.League)).filter(Boolean))].sort();
+    const teams=[...new Set(rawData.flatMap(d=>safeSplitTeams(d.Match))).filter(Boolean)].sort();
+    fillSelect("leagueSelect", leagues);
+    fillSelect("homeSelect", teams);
+    fillSelect("awaySelect", teams);
+    // Render inicial
+    filtered=[...rawData];
+    render(buildFeatures(filtered));
   };
   reader.readAsText(file);
 }
+
+/* ==================== Demo mínima si no se carga JSON ==================== */
+(function demo(){
+  const demo = [
+    {"Date":"dom., 01 sept. 2024 18:00","League":"Argentina Liga Profesional de Fútbol","Match":"Banfield - Instituto","Odd":"2.25","Result":"Winning","Home Attacks at FT":"98","Away Attacks at FT":"94","Home Dangerous Attacks at FT":"62","Away Dangerous Attacks at FT":"59","Home Total Shots at FT":"15","Away Total Shots at FT":"22","Home OnGoal Shots at FT":"5","Away OnGoal Shots at FT":"8","Home Ball Possession at FT":"49","Away Ball Possession at FT":"51","Home Corners at FT":"7","Away Corners at FT":"8","Home YellowCards at FT":"3","Away YellowCards at FT":"5","Home RedCards at FT":"0","Away RedCards at FT":"0","Home Position":"25","Away Position":"7"},
+    {"Date":"jue., 05 sept. 2024 20:00","League":"Argentina Liga Profesional de Fútbol","Match":"River - Racing","Odd":"1.90","Result":"Losing","Home Attacks at FT":"70","Away Attacks at FT":"68","Home Dangerous Attacks at FT":"40","Away Dangerous Attacks at FT":"38","Home Total Shots at FT":"10","Away Total Shots at FT":"9","Home OnGoal Shots at FT":"4","Away OnGoal Shots at FT":"3","Home Ball Possession at FT":"60","Away Ball Possession at FT":"40","Home Corners at FT":"4","Away Corners at FT":"5","Home YellowCards at FT":"2","Away YellowCards at FT":"3","Home RedCards at FT":"0","Away RedCards at FT":"0","Home Position":"1","Away Position":"5"},
+    {"Date":"lun., 09 sept. 2024 19:00","League":"Argentina Liga Profesional de Fútbol","Match":"Independiente - San Lorenzo","Odd":"2.10","Result":"Winning","Home Attacks at FT":"95","Away Attacks at FT":"90","Home Dangerous Attacks at FT":"55","Away Dangerous Attacks at FT":"51","Home Total Shots at FT":"13","Away Total Shots at FT":"12","Home OnGoal Shots at FT":"5","Away OnGoal Shots at FT":"4","Home Ball Possession at FT":"48","Away Ball Possession at FT":"52","Home Corners at FT":"6","Away Corners at FT":"6","Home YellowCards at FT":"3","Away YellowCards at FT":"2","Home RedCards at FT":"0","Away RedCards at FT":"0","Home Position":"10","Away Position":"8"},
+    {"Date":"vie., 13 sept. 2024 17:00","League":"Argentina Liga Profesional de Fútbol","Match":"Banfield - Tigre","Odd":"2.05","Result":"Winning","Home Attacks at FT":"80","Away Attacks at FT":"75","Home Dangerous Attacks at FT":"49","Away Dangerous Attacks at FT":"45","Home Total Shots at FT":"12","Away Total Shots at FT":"11","Home OnGoal Shots at FT":"5","Away OnGoal Shots at FT":"4","Home Ball Possession at FT":"51","Away Ball Possession at FT":"49","Home Corners at FT":"8","Away Corners at FT":"4","Home YellowCards at FT":"2","Away YellowCards at FT":"2","Home RedCards at FT":"0","Away RedCards at FT":"0","Home Position":"15","Away Position":"12"},
+    {"Date":"mar., 17 sept. 2024 16:00","League":"Argentina Liga Profesional de Fútbol","Match":"River - Boca","Odd":"1.95","Result":"Losing","Home Attacks at FT":"60","Away Attacks at FT":"70","Home Dangerous Attacks at FT":"35","Away Dangerous Attacks at FT":"44","Home Total Shots at FT":"8","Away Total Shots at FT":"14","Home OnGoal Shots at FT":"3","Away OnGoal Shots at FT":"7","Home Ball Possession at FT":"58","Away Ball Possession at FT":"42","Home Corners at FT":"3","Away Corners at FT":"7","Home YellowCards at FT":"4","Away YellowCards at FT":"5","Home RedCards at FT":"0","Away RedCards at FT":"0","Home Position":"1","Away Position":"3"}
+  ];
+  rawData = baseClean(demo);
+  const leagues=[...new Set(rawData.map(d=>normalizeString(d.League)).filter(Boolean))].sort();
+  const teams=[...new Set(rawData.flatMap(d=>safeSplitTeams(d.Match))).filter(Boolean)].sort();
+  fillSelect("leagueSelect", leagues);
+  fillSelect("homeSelect", teams);
+  fillSelect("awaySelect", teams);
+  filtered=[...rawData];
+  render(buildFeatures(filtered));
+})();
 </script>
 </body>
 </html>
