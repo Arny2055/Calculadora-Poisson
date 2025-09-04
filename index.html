@@ -3,12 +3,9 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Backtesting Fútbol — HTML (TRAIN/TEST, Kelly, Walk-Forward, Monte Carlo)</title>
+<title>Backtesting Fútbol — Over/Under, BTTS, 1X2, Corners, Tarjetas</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
-<script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1"></script>
 <style>
   :root{
     --bg:#0f1115; --panel:#171a21; --panel2:#1f2430; --text:#e6eaf2; --muted:#9aa3b2;
@@ -16,510 +13,660 @@
     --border:#2a3140;
   }
   *{box-sizing:border-box}
-  body{
-    margin:0; background:var(--bg); color:var(--text); font-family:Inter,system-ui,Segoe UI,Arial; 
+  body{margin:0; background:var(--bg); color:var(--text); font-family:Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif}
+  header{padding:20px; border-bottom:1px solid var(--border); background:linear-gradient(180deg,#121620, #0f1115)}
+  h1{margin:0; font-size:20px}
+  .wrap{max-width:1200px; margin:0 auto; padding:20px}
+  .grid{display:grid; gap:16px}
+  .g2{grid-template-columns: repeat(2, minmax(0,1fr))}
+  .g3{grid-template-columns: repeat(3, minmax(0,1fr))}
+  @media (max-width:980px){ .g2,.g3{grid-template-columns:1fr}}
+  .card{background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:16px}
+  .card h2{margin:0 0 10px; font-size:16px}
+  label{font-size:13px; color:var(--muted); display:block; margin-bottom:6px}
+  select,input,textarea,button{
+    width:100%; padding:10px 12px; border-radius:10px; border:1px solid var(--border);
+    background:var(--panel2); color:var(--text); font-size:14px; outline:none;
   }
-  header{
-    padding:20px; border-bottom:1px solid var(--border); background:linear-gradient(180deg,var(--panel),transparent);
-  }
-  h1{font-size:20px;margin:0}
-  .wrap{max-width:1200px;margin:0 auto;padding:20px;display:grid;gap:16px}
-  .grid{display:grid;gap:16px}
-  @media(min-width:900px){ .grid-2{grid-template-columns:1fr 1fr} .grid-3{grid-template-columns:repeat(3,1fr)}}
-  .card{background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:16px;}
-  .card h2{font-size:16px;margin:.2rem 0 1rem; color:var(--accent)}
-  .row{display:flex;gap:12px;flex-wrap:wrap}
-  label{font-size:12px;color:var(--muted);display:block;margin-bottom:6px}
-  input, select, button{
-    background:var(--panel2); border:1px solid var(--border); color:var(--text); 
-    padding:10px 12px; border-radius:10px; font-size:14px;
-  }
-  input[type="date"]{padding:8px 10px}
-  button{cursor:pointer}
-  button.primary{background:var(--accent);border-color:transparent;color:#0b1020;font-weight:700}
-  button.ghost{background:transparent}
-  table{width:100%;border-collapse:collapse;font-size:14px}
-  th,td{border-bottom:1px solid var(--border);padding:8px;text-align:right}
-  th{color:var(--muted);text-align:right}
-  td:first-child, th:first-child{text-align:left}
-  .badge{display:inline-block;padding:2px 8px;border-radius:999px;font-size:12px;border:1px solid var(--border);color:var(--muted)}
-  .ok{color:var(--ok)} .warn{color:var(--warn)} .danger{color:var(--danger)}
-  .muted{color:var(--muted)}
-  .hint{font-size:12px;color:var(--muted)}
-  .hr{height:1px;background:var(--border);margin:8px 0 0}
-  .footer{color:var(--muted);font-size:12px;text-align:center;padding:10px}
-  canvas{max-height:320px}
-  .nowrap{white-space:nowrap}
+  textarea{min-height:120px; resize:vertical}
+  button{background:var(--accent); border:none; font-weight:600; cursor:pointer}
+  button.secondary{background:transparent; border:1px solid var(--border)}
+  .row{display:flex; gap:10px; flex-wrap:wrap}
+  .row > *{flex:1}
+  .badge{display:inline-block; padding:4px 8px; border-radius:999px; font-size:12px; border:1px solid var(--border); background:var(--panel2); color:var(--muted)}
+  .ok{color:#0fd08b}
+  .warn{color:#ffc36a}
+  .danger{color:#ff7b7b}
+  table{width:100%; border-collapse:collapse; font-size:13px}
+  th, td{padding:10px; border-bottom:1px solid var(--border); text-align:left}
+  th{color:var(--muted); font-weight:600}
+  .stat{font-weight:700}
+  .foot{margin-top:6px; color:var(--muted); font-size:12px}
+  .pill{display:inline-flex; gap:8px; align-items:center; padding:8px 10px; border:1px solid var(--border); background:var(--panel2); border-radius:10px}
+  .flex{display:flex; gap:12px; flex-wrap:wrap}
+  .section-title{display:flex; align-items:center; justify-content:space-between; margin-bottom:8px}
 </style>
 </head>
 <body>
-  <header>
-    <div class="wrap">
-      <h1>Backtesting de Fútbol — HTML (Yield, Drawdown, TRAIN/TEST, Walk-Forward 3M, Monte Carlo)</h1>
-      <div class="hint">Carga tu CSV histórico (≤ 2 años). El cálculo es local en tu navegador.</div>
+<header>
+  <div class="wrap">
+    <h1>Backtesting Fútbol — Over/Under, BTTS, 1X2, Corners, Tarjetas</h1>
+    <div class="foot">Carga tu JSON → elige Liga/Local/Visita → ajusta líneas/odds → Calcula. Split temporal 70%/30% Train/Test. Señal: L5 ≥ 70% y L10 ≥ 60%.</div>
+  </div>
+</header>
+
+<main class="wrap grid g2">
+
+  <!-- Carga de datos -->
+  <section class="card">
+    <h2>1) Cargar datos</h2>
+    <div class="grid g2">
+      <div>
+        <label>Archivo JSON (.json) — array u objeto</label>
+        <input type="file" id="fileInput" accept=".json,application/json">
+      </div>
+      <div>
+        <label>Pegar JSON (opcional)</label>
+        <textarea id="jsonTextarea" placeholder='Pegue aquí su JSON...'></textarea>
+      </div>
     </div>
-  </header>
+    <div class="row" style="margin-top:10px">
+      <button id="btnLoad">Cargar</button>
+      <button class="secondary" id="btnDemo">Cargar Demo</button>
+    </div>
+    <div id="loadStatus" class="foot"></div>
+  </section>
 
-  <main class="wrap">
-    <section class="card">
-      <h2>1) Datos & Parámetros</h2>
-      <div class="grid grid-3">
-        <div>
-          <label>Archivo CSV de apuestas</label>
-          <input id="file" type="file" accept=".csv" />
-          <div class="hint">Encabezados: Date,League,Season,MatchID,Home,Away,Market,Selection,Model_Prob,Odds_Taken,Closing_Odds,Result</div>
-        </div>
-        <div>
-          <label>Split Date (TRAIN ≤ fecha, TEST > fecha)</label>
-          <input id="splitDate" type="date" />
-          <div class="hint">Ej. hoy o fin de la 1ª temporada del rango</div>
-        </div>
-        <div class="row">
-          <div style="min-width:160px">
-            <label>Bankroll inicial</label>
-            <input id="bankroll" type="number" step="0.01" value="100" />
-          </div>
-          <div style="min-width:160px">
-            <label>Método de Stake</label>
-            <select id="stakeMethod">
-              <option value="FLAT">FLAT</option>
-              <option value="KELLY">KELLY</option>
-            </select>
-          </div>
-          <div style="min-width:160px">
-            <label>Fracción de Kelly</label>
-            <input id="kellyFrac" type="number" step="0.01" value="0.25" />
-          </div>
-        </div>
+  <!-- Selección -->
+  <section class="card">
+    <h2>2) Selección de Liga y Equipos</h2>
+    <div class="grid g3">
+      <div>
+        <label>Liga</label>
+        <select id="leagueSelect"><option value="">—</option></select>
       </div>
-      <div class="row" style="margin-top:12px">
-        <button id="run" class="primary">Calcular Backtest</button>
-        <button id="exportProcessed" class="ghost">Exportar Apuestas Procesadas (CSV)</button>
-        <button id="exportResults" class="ghost">Exportar Resultados (CSV)</button>
+      <div>
+        <label>Equipo Local</label>
+        <select id="homeSelect"><option value="">—</option></select>
       </div>
-    </section>
+      <div>
+        <label>Equipo Visitante</label>
+        <select id="awaySelect"><option value="">—</option></select>
+      </div>
+    </div>
+    <div class="foot">Los equipos se basan en los partidos detectados de la liga seleccionada.</div>
+  </section>
 
-    <section class="grid grid-2">
-      <div class="card">
-        <h2>2) Métricas Globales</h2>
-        <table id="metricsTotal">
-          <thead><tr><th>Métrica</th><th>Valor</th></tr></thead>
-          <tbody></tbody>
-        </table>
-        <div class="hr"></div>
-        <h2>TRAIN / TEST</h2>
-        <div class="grid grid-2">
-          <div>
-            <div class="badge">TRAIN</div>
-            <table id="metricsTrain"><thead><tr><th>Métrica</th><th>Valor</th></tr></thead><tbody></tbody></table>
-          </div>
-          <div>
-            <div class="badge">TEST</div>
-            <table id="metricsTest"><thead><tr><th>Métrica</th><th>Valor</th></tr></thead><tbody></tbody></table>
-          </div>
-        </div>
+  <!-- Parámetros de señal -->
+  <section class="card">
+    <div class="section-title">
+      <h2>3) Condiciones de Señal (aplican a todos los mercados)</h2>
+      <span class="badge">Rolling previos del equipo (misma liga)</span>
+    </div>
+    <div class="grid g3">
+      <div>
+        <label>Últimos 5 — mínimo %</label>
+        <input id="th5" type="number" min="0" max="100" step="1" value="70">
       </div>
-
-      <div class="card">
-        <h2>3) Curva de Equity</h2>
-        <canvas id="equityChart"></canvas>
-        <div class="hint">Incluye stake según método seleccionado.</div>
+      <div>
+        <label>Últimos 10 — mínimo %</label>
+        <input id="th10" type="number" min="0" max="100" step="1" value="60">
       </div>
-    </section>
+      <div>
+        <label>Fecha de corte rolling</label>
+        <select id="rollingScope">
+          <option value="league" selected>Misma liga (recomendado)</option>
+          <option value="all">Todas las ligas</option>
+        </select>
+      </div>
+    </div>
+    <div class="foot">El % se calcula combinando los últimos N partidos previos de ambos equipos.</div>
+  </section>
 
-    <section class="grid grid-2">
-      <div class="card">
-        <h2>4) Walk-Forward (bloques 3M)</h2>
-        <table id="wf">
-          <thead>
-            <tr>
-              <th class="nowrap">Train Start</th><th class="nowrap">Train End</th>
-              <th class="nowrap">Test Start</th><th class="nowrap">Test End</th>
-              <th>Bets (Train)</th><th>Yield (Train)</th>
-              <th>Bets (Test)</th><th>Yield (Test)</th>
-            </tr>
-          </thead>
-          <tbody></tbody>
-        </table>
+  <!-- Parámetros de mercados -->
+  <section class="card">
+    <h2>4) Parámetros de Mercados</h2>
+    <div class="grid g3">
+      <div>
+        <label>Over/Under Goles — Línea</label>
+        <select id="ouGoalsLine">
+          <option>1.5</option><option selected>2.5</option><option>3.5</option><option>4.5</option>
+        </select>
+      </div>
+      <div>
+        <label>ODD por defecto Over/Under Goles</label>
+        <input id="ouGoalsOdd" type="number" step="0.01" value="1.90">
+      </div>
+      <div>
+        <label>Dirección Over/Under</label>
+        <select id="ouGoalsDir">
+          <option value="over" selected>Over</option>
+          <option value="under">Under</option>
+        </select>
       </div>
 
-      <div class="card">
-        <h2>5) Monte Carlo (Yield por apuesta)</h2>
-        <table id="mc">
-          <thead>
-            <tr><th>p05</th><th>p50</th><th>p95</th><th>N Sim</th></tr>
-          </thead>
-          <tbody></tbody>
-        </table>
-        <div class="hint">Bootstrap con reemplazo sobre el rendimiento por unidad.</div>
+      <div>
+        <label>BTTS (Ambos marcan) — ODD por defecto</label>
+        <input id="bttsOdd" type="number" step="0.01" value="2.00">
       </div>
-    </section>
-
-    <section class="card">
-      <h2>6) Resumen por Liga / Mercado</h2>
-      <div class="grid grid-2">
-        <div>
-          <div class="badge">Por Liga (TEST)</div>
-          <table id="byLeague"><thead><tr><th>Liga</th><th>Bets</th><th>Yield</th><th>Profit</th></tr></thead><tbody></tbody></table>
-        </div>
-        <div>
-          <div class="badge">Por Mercado (TEST)</div>
-          <table id="byMarket"><thead><tr><th>Mercado</th><th>Bets</th><th>Yield</th><th>Profit</th></tr></thead><tbody></tbody></table>
-        </div>
+      <div>
+        <label>1X2 — Selección</label>
+        <select id="w12Pick">
+          <option value="1" selected>1 (Local)</option>
+          <option value="X">X (Empate)</option>
+          <option value="2">2 (Visita)</option>
+        </select>
       </div>
-    </section>
+      <div>
+        <label>1X2 — ODD por defecto (si faltan odds prematch)</label>
+        <input id="w12Odd" type="number" step="0.01" value="2.10">
+      </div>
 
-    <section class="footer muted">
-      Recomendación: compara tu EV contra <span class="badge">Closing_Odds</span>. Si tu edge supera al cierre de forma consistente, es señal de ventaja real.
-    </section>
-  </main>
+      <div>
+        <label>Over/Under Corners — Línea</label>
+        <select id="ouCornersLine">
+          <option>7.5</option><option selected>8.5</option><option>9.5</option><option>10.5</option>
+        </select>
+      </div>
+      <div>
+        <label>ODD por defecto Corners</label>
+        <input id="ouCornersOdd" type="number" step="0.01" value="1.90">
+      </div>
+      <div>
+        <label>Dirección Corners</label>
+        <select id="ouCornersDir">
+          <option value="over" selected>Over</option>
+          <option value="under">Under</option>
+        </select>
+      </div>
+
+      <div>
+        <label>Over/Under Tarjetas — Línea</label>
+        <select id="ouCardsLine">
+          <option>3.5</option><option selected>4.5</option><option>5.5</option><option>6.5</option>
+        </select>
+      </div>
+      <div>
+        <label>ODD por defecto Tarjetas</label>
+        <input id="ouCardsOdd" type="number" step="0.01" value="1.85">
+      </div>
+      <div>
+        <label>Dirección Tarjetas</label>
+        <select id="ouCardsDir">
+          <option value="over" selected>Over</option>
+          <option value="under">Under</option>
+        </select>
+      </div>
+    </div>
+  </section>
+
+  <!-- Ejecutar -->
+  <section class="card">
+    <h2>5) Ejecutar Backtest</h2>
+    <div class="row">
+      <button id="btnRun">Calcular Backtesting</button>
+      <span class="pill"><strong>Split:</strong> 70% Train • 30% Test (orden temporal)</span>
+      <span class="pill"><strong>Stake:</strong> 1 por apuesta</span>
+    </div>
+    <div id="runStatus" class="foot"></div>
+  </section>
+
+  <!-- Resultados -->
+  <section class="card" style="grid-column:1/-1">
+    <h2>Resultados</h2>
+    <div id="summary"></div>
+    <div style="margin-top:12px" id="tables"></div>
+  </section>
+
+</main>
 
 <script>
-/* -------------------- Utilidades -------------------- */
-const fmt = n => (Number.isFinite(n) ? (Math.abs(n)>=1 ? n.toFixed(2) : n.toFixed(4)) : "");
-const pct = n => (Number.isFinite(n) ? (n*100).toFixed(2)+"%" : "");
-const parseNum = v => v===null||v===undefined||v==="" ? NaN : Number(v);
-const parseDate = s => (s ? new Date(s+"T00:00:00") : null);
+(() => {
+  // ======= Utilidades =======
+  const months = {
+    'ene':'01','feb':'02','mar':'03','abr':'04','may':'05','jun':'06',
+    'jul':'07','ago':'08','sep':'09','sept':'09','oct':'10','nov':'11','dic':'12'
+  };
 
-function monthAdd(d, m){
-  const nd = new Date(d);
-  nd.setMonth(nd.getMonth()+m);
-  return nd;
-}
+  function parseSpanishDate(s){
+    if(!s || typeof s !== 'string') return null;
+    let t = s.toLowerCase().replaceAll('\u00a0',' ').trim(); // nbsp
+    t = t.replace(/^[a-záéíóúüñ]{2,4}\.,?\s*/i,''); // elimina "lun.,"
+    // ej: "01 sept. 2024 18:00" o "01 sep. 2024 18:00"
+    const m = t.match(/(\d{1,2})\s+([a-záéíóúüñ\.]{3,5})\.?\s+(\d{4})(?:\s+(\d{1,2}):(\d{2}))?/i);
+    if(!m) return new Date(t); // intenta parseo nativo
+    const dd = m[1].padStart(2,'0');
+    const monKey = m[2].replace('.', '').slice(0,4).replace('sépt', 'sept').replace('set', 'sep');
+    const mm = months[monKey] || months[monKey.slice(0,3)] || '01';
+    const yyyy = m[3];
+    const HH = (m[4]||'00').padStart(2,'0');
+    const MM = (m[5]||'00').padStart(2,'0');
+    // construimos ISO local (sin tz)
+    return new Date(`${yyyy}-${mm}-${dd}T${HH}:${MM}:00`);
+  }
 
-function csvToArray(csvFile){
-  return new Promise((resolve, reject)=>{
-    Papa.parse(csvFile, {
-      header:true, skipEmptyLines:true, dynamicTyping:false,
-      complete: res => resolve(res.data), error: err => reject(err)
-    });
+  function toNumber(x){
+    if (x === null || x === undefined) return null;
+    const n = Number(String(x).toString().replace(',', '.').replace(/[^\d\.\-]/g,''));
+    return Number.isFinite(n) ? n : null;
+  }
+
+  function cleanStr(s){
+    if(!s) return '';
+    return String(s).replace(/�/g,'ú').trim();
+  }
+
+  function deriveFields(rec){
+    const out = {...rec};
+    out.League = cleanStr(rec.League);
+    out.Match = cleanStr(rec.Match);
+    // equipos desde "Match": "Banfield - Instituto"
+    let homeName = null, awayName = null;
+    if (out.Match && out.Match.includes('-')){
+      const [h,a] = out.Match.split('-');
+      homeName = cleanStr(h);
+      awayName = cleanStr(a);
+    }
+    out.HomeTeam = homeName || cleanStr(rec.HomeTeam) || '';
+    out.AwayTeam = awayName || cleanStr(rec.AwayTeam) || '';
+    out._date = parseSpanishDate(rec.Date);
+
+    // marcador FT "x-y"
+    const ft = cleanStr(rec['Result FT'] || rec['FT'] || '');
+    let gh=null, ga=null;
+    if (/\d+\s*-\s*\d+/.test(ft)){
+      const [h,a] = ft.split('-').map(v=>toNumber(v));
+      gh = h; ga = a;
+    }
+    out.GoalsHome = gh;
+    out.GoalsAway = ga;
+    const totalGoals = (gh ?? 0) + (ga ?? 0);
+
+    // corners / tarjetas
+    const hc = toNumber(rec['Home Corners at FT']);
+    const ac = toNumber(rec['Away Corners at FT']);
+    const hy = toNumber(rec['Home YellowCards at FT']);
+    const ay = toNumber(rec['Away YellowCards at FT']);
+    const hr = toNumber(rec['Home RedCards at FT']);
+    const ar = toNumber(rec['Away RedCards at FT']);
+    out.CornersTotal = (hc ?? 0) + (ac ?? 0);
+    // Si prefieres roja=2, cambia la siguiente línea a: (hy??0)+(ay??0)+2*((hr??0)+(ar??0))
+    out.CardsTotal = (hy ?? 0) + (ay ?? 0) + (hr ?? 0) + (ar ?? 0);
+
+    // BTTS
+    out.BTTS = (Number.isFinite(gh) && Number.isFinite(ga)) ? (gh>0 && ga>0) : null;
+
+    // Resultado 1X2
+    out.W12 = (Number.isFinite(gh) && Number.isFinite(ga))
+      ? (gh>ga ? '1' : (gh<ga ? '2' : 'X')) : null;
+
+    // Odds 1X2 si existen
+    out.Odd1 = toNumber(rec['Odd 1 PreMatch']);
+    out.OddX = toNumber(rec['Odd X PreMatch']);
+    out.Odd2 = toNumber(rec['Odd 2 PreMatch']);
+    // Odd genérica (p.ej. Desired Outcome)
+    out.OddGeneric = toNumber(rec['Odd']);
+
+    out._valid = !!(out.League && out.HomeTeam && out.AwayTeam && out._date instanceof Date && !isNaN(out._date));
+    out._totalGoals = totalGoals;
+    return out;
+  }
+
+  function ensureArray(data){
+    if (Array.isArray(data)) return data;
+    if (typeof data === 'object' && data) return [data];
+    return [];
+  }
+
+  function byDateAsc(a,b){ return a._date - b._date; }
+
+  // ======= Estado =======
+  let RAW = [];
+  let DATA = [];
+  let filteredLeague = '';
+  let selectedHome = '';
+  let selectedAway = '';
+
+  // ======= DOM =======
+  const fileInput = document.getElementById('fileInput');
+  const jsonTextarea = document.getElementById('jsonTextarea');
+  const btnLoad = document.getElementById('btnLoad');
+  const btnDemo = document.getElementById('btnDemo');
+  const loadStatus = document.getElementById('loadStatus');
+
+  const leagueSelect = document.getElementById('leagueSelect');
+  const homeSelect = document.getElementById('homeSelect');
+  const awaySelect = document.getElementById('awaySelect');
+
+  const th5 = document.getElementById('th5');
+  const th10 = document.getElementById('th10');
+  const rollingScope = document.getElementById('rollingScope');
+
+  const ouGoalsLine = document.getElementById('ouGoalsLine');
+  const ouGoalsOdd  = document.getElementById('ouGoalsOdd');
+  const ouGoalsDir  = document.getElementById('ouGoalsDir');
+
+  const bttsOdd = document.getElementById('bttsOdd');
+
+  const w12Pick = document.getElementById('w12Pick');
+  const w12Odd  = document.getElementById('w12Odd');
+
+  const ouCornersLine = document.getElementById('ouCornersLine');
+  const ouCornersOdd  = document.getElementById('ouCornersOdd');
+  const ouCornersDir  = document.getElementById('ouCornersDir');
+
+  const ouCardsLine = document.getElementById('ouCardsLine');
+  const ouCardsOdd  = document.getElementById('ouCardsOdd');
+  const ouCardsDir  = document.getElementById('ouCardsDir');
+
+  const btnRun = document.getElementById('btnRun');
+  const runStatus = document.getElementById('runStatus');
+  const summary = document.getElementById('summary');
+  const tables = document.getElementById('tables');
+
+  // ======= Carga de datos =======
+  btnDemo.addEventListener('click', () => {
+    const demo = [{
+      "Name":"12 Meses","Desired Outcome":"GG","Odd":"2.25","Date":"dom., 01 sept. 2024 18:00",
+      "League":"Argentina Liga Profesional de Fútbol","Match":"Banfield - Instituto",
+      "Home Attacks at FT":"98","Away Attacks at FT":"94","Home Dangerous Attacks at FT":"62","Away Dangerous Attacks at FT":"59",
+      "Home OnGoal Shots at FT":"5","Away OnGoal Shots at FT":"8","Home Total Shots at FT":"15","Away Total Shots at FT":"22",
+      "Home Ball Possession at FT":"49","Away Ball Possession at FT":"51","Home Corners at FT":"7","Away Corners at FT":"8",
+      "Home RedCards at FT":"0","Away RedCards at FT":"0","Home YellowCards at FT":"3","Away YellowCards at FT":"5",
+      "Result HT":"0-1","Result FT":"1-2","Odd 1 PreMatch":"3.00","Odd X PreMatch":"2.80","Odd 2 PreMatch":"2.75",
+      "Home Position":"25","Away Position":"7","Result":"Winning","Success Rate":"","Overall ROI":""
+    }];
+    jsonTextarea.value = JSON.stringify(demo, null, 2);
   });
-}
 
-function downloadCSV(filename, rows){
-  const process = rows.map(r=>Array.isArray(r)?r:Object.values(r));
-  const csv = process.map(r => r.map(x => (x==null?"":String(x)).replace(/"/g,'""')).map(x=>`"${x}"`).join(",")).join("\n");
-  const blob = new Blob([csv], {type:"text/csv;charset=utf-8;"});
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url; a.download = filename; a.click();
-  URL.revokeObjectURL(url);
-}
+  btnLoad.addEventListener('click', async () => {
+    try{
+      let text = jsonTextarea.value.trim();
+      if (!text && fileInput.files && fileInput.files[0]){
+        text = await fileInput.files[0].text();
+      }
+      if (!text){ loadStatus.textContent = '❗ Proporciona un archivo o pega JSON.'; return; }
 
-/* -------------------- Cálculos núcleo -------------------- */
-function computeRows(rows, params){
-  // Orden cronológico
-  rows = rows.map(r => ({
-    Date: r.Date, League: r.League, Season: r.Season, MatchID: r.MatchID,
-    Home: r.Home, Away: r.Away, Market: r.Market, Selection: r.Selection,
-    Model_Prob: parseNum(r.Model_Prob), Odds_Taken: parseNum(r.Odds_Taken),
-    Closing_Odds: parseNum(r.Closing_Odds), Result: String(r.Result||"").toUpperCase()
-  })).filter(r => r.Date && r.Odds_Taken);
+      const parsed = JSON.parse(text);
+      RAW = ensureArray(parsed).filter(Boolean);
+      if (!RAW.length){ loadStatus.textContent = '❗ JSON vacío.'; return; }
 
-  rows.sort((a,b)=> new Date(a.Date) - new Date(b.Date));
+      DATA = RAW.map(deriveFields).filter(r=>r._valid).sort(byDateAsc);
 
-  const split = parseDate(params.splitDate);
-  let bk = Number(params.bankroll);
-  const stakeMethod = params.stakeMethod.toUpperCase();
-  const kf = Number(params.kellyFrac);
+      // Liga y equipos
+      const leagues = [...new Set(DATA.map(d=>d.League).filter(Boolean))].sort();
+      leagueSelect.innerHTML = '<option value="">—</option>' + leagues.map(l=>`<option>${l}</option>`).join('');
+      homeSelect.innerHTML = '<option value="">—</option>';
+      awaySelect.innerHTML = '<option value="">—</option>';
 
-  const out = [];
-  for (let i=0;i<rows.length;i++){
-    const r = rows[i];
-    const date = parseDate(r.Date);
-    const set = (split && date && date<=split) ? "TRAIN" : "TEST";
-    const closingImp = Number.isFinite(r.Closing_Odds) && r.Closing_Odds>0 ? 1/r.Closing_Odds : null;
-    const edgeClosing = Number.isFinite(closingImp) && Number.isFinite(r.Model_Prob) ? (r.Model_Prob - closingImp) : null;
-
-    // Stake
-    let stakeEff = "FLAT";
-    let stake = 1;
-    if (stakeMethod==="KELLY" && Number.isFinite(r.Model_Prob) && r.Model_Prob>=0 && r.Model_Prob<=1 && r.Odds_Taken>1){
-      const p = r.Model_Prob, o = r.Odds_Taken;
-      const fstar = ((p*o)-(1-p)) / (o-1);
-      const fpos = Math.max(fstar, 0);
-      stake = fpos * bk * kf;
-      stakeEff = "KELLY";
-      if (!Number.isFinite(stake) || stake<=0) { stake=1; stakeEff="FLAT"; }
+      loadStatus.textContent = `✅ Registros cargados: ${DATA.length}. Ligas detectadas: ${leagues.length}.`;
+    }catch(err){
+      console.error(err);
+      loadStatus.textContent = '❗ Error al leer/parsear JSON.';
     }
+  });
 
-    // Profit por resultado
-    let profit = 0;
-    if (r.Result==="W") profit = stake*(r.Odds_Taken - 1);
-    else if (r.Result==="L") profit = -stake;
-    else profit = 0; // V o vacío
+  leagueSelect.addEventListener('change', () => {
+    filteredLeague = leagueSelect.value || '';
+    const teams = new Set();
+    DATA.filter(d => !filteredLeague || d.League === filteredLeague)
+        .forEach(d => { teams.add(d.HomeTeam); teams.add(d.AwayTeam); });
+    const options = '<option value="">—</option>' + [...teams].filter(Boolean).sort().map(t=>`<option>${t}</option>`).join('');
+    homeSelect.innerHTML = options;
+    awaySelect.innerHTML = options;
+  });
 
-    const bkBefore = bk;
-    const bkAfter = bkBefore + profit;
-    bk = bkAfter;
+  homeSelect.addEventListener('change', () => selectedHome = homeSelect.value || '');
+  awaySelect.addEventListener('change', () => selectedAway = awaySelect.value || '');
 
-    out.push({
-      ...r,
-      Closing_ImpProb: closingImp,
-      Edge_vs_Closing: edgeClosing,
-      Stake_Method_Effective: stakeEff,
-      Stake: stake,
-      Profit: profit,
-      Bankroll_Before: bkBefore,
-      Bankroll_After: bkAfter,
-      Set: set,
-      Equity_Curve: bkAfter
-    });
-  }
-  return out;
-}
+  // ======= Lógica de mercados =======
+  function isOver(total, line){ return total > line; }
+  function isUnder(total, line){ return total < line; }
 
-function kpis(list){
-  const n = list.length;
-  const wins = list.filter(x=>x.Profit>0).length;
-  const losses = list.filter(x=>x.Profit<0).length;
-  const hit = (wins+losses)>0 ? wins/(wins+losses) : NaN;
-  const stakeSum = list.reduce((s,x)=>s+(Number.isFinite(x.Stake)?x.Stake:0),0);
-  const profitSum = list.reduce((s,x)=>s+(Number.isFinite(x.Profit)?x.Profit:0),0);
-  const yieldR = stakeSum>0 ? profitSum/stakeSum : NaN;
-
-  // Max drawdown sobre equity
-  const eq = list.map(x=>x.Equity_Curve);
-  let runmax = -Infinity, maxDD = 0;
-  for (const v of eq){
-    if (!Number.isFinite(v)) continue;
-    runmax = Math.max(runmax, v);
-    if (runmax>0){
-      const dd = (runmax - v)/runmax;
-      maxDD = Math.max(maxDD, dd);
+  function marketEval(rec, cfg){
+    // cfg: {type, line, dir, pick, oddsDefaults}
+    switch(cfg.type){
+      case 'OU_GOALS': {
+        const line = parseFloat(cfg.line);
+        if (!Number.isFinite(rec._totalGoals)) return null;
+        return (cfg.dir === 'over') ? isOver(rec._totalGoals, line) : isUnder(rec._totalGoals, line);
+      }
+      case 'BTTS': {
+        return rec.BTTS === true ? true : (rec.BTTS === false ? false : null);
+      }
+      case 'W12': {
+        if (!rec.W12) return null;
+        return rec.W12 === cfg.pick;
+      }
+      case 'OU_CORNERS': {
+        if (!Number.isFinite(rec.CornersTotal)) return null;
+        const line = parseFloat(cfg.line);
+        return (cfg.dir === 'over') ? isOver(rec.CornersTotal, line) : isUnder(rec.CornersTotal, line);
+      }
+      case 'OU_CARDS': {
+        if (!Number.isFinite(rec.CardsTotal)) return null;
+        const line = parseFloat(cfg.line);
+        return (cfg.dir === 'over') ? isOver(rec.CardsTotal, line) : isUnder(rec.CardsTotal, line);
+      }
+      default: return null;
     }
   }
-  const avgOdds = prom(list.map(x=>x.Odds_Taken));
-  const avgStake = prom(list.map(x=>x.Stake));
-  return {Bets:n, HitRate:hit, Yield:yieldR, Profit:profitSum, MaxDrawdown:maxDD, AvgOdds:avgOdds, AvgStake:avgStake};
-}
 
-function prom(arr){
-  const v = arr.filter(Number.isFinite);
-  if (!v.length) return NaN;
-  return v.reduce((a,b)=>a+b,0)/v.length;
-}
+  function getOdd(rec, cfg){
+    // Prioridad: odds específicas si existen; si no, defaults
+    switch(cfg.type){
+      case 'OU_GOALS': return toNumber(rec.OddOUGoals) || cfg.oddDefault;
+      case 'BTTS': return toNumber(rec.OddBTTS) || rec.OddGeneric || cfg.oddDefault;
+      case 'W12':
+        if (cfg.pick==='1') return rec.Odd1 || cfg.oddDefault;
+        if (cfg.pick==='X') return rec.OddX || cfg.oddDefault;
+        if (cfg.pick==='2') return rec.Odd2 || cfg.oddDefault;
+        return cfg.oddDefault;
+      case 'OU_CORNERS': return toNumber(rec.OddOUCorners) || cfg.oddDefault;
+      case 'OU_CARDS': return toNumber(rec.OddOUCards) || cfg.oddDefault;
+      default: return cfg.oddDefault;
+    }
+  }
 
-/* Walk-Forward 3M */
-function walkForward3M(list){
-  if (!list.length) return [];
-  const dates = list.map(x=>parseDate(x.Date)).filter(Boolean);
-  if (!dates.length) return [];
-  dates.sort((a,b)=>a-b);
-  let cur = new Date(dates[0]); cur.setDate(1);
-  const end = new Date(dates[dates.length-1]);
-  const out = [];
-  while (cur <= end){
-    const trainEnd = new Date(monthAdd(cur,3).getTime()-24*3600*1000);
-    const testEnd = monthAdd(cur,6);
-    const train = list.filter(x=> {
-      const d = parseDate(x.Date); return d && d>=cur && d<=trainEnd;
+  // últimos N previos de un equipo (misma liga por defecto)
+  function lastMatchesForTeam(all, team, untilDate, scope, league){
+    return all.filter(r=>{
+      if (!(r._date instanceof Date)) return false;
+      if (r._date >= untilDate) return false; // estrictamente antes
+      if (scope === 'league' && league && r.League !== league) return false;
+      return (r.HomeTeam === team || r.AwayTeam === team);
+    }).sort(byDateAsc);
+  }
+
+  // % combinado de ambos equipos para un mercado
+  function rollingPct(all, home, away, untilDate, scope, league, cfg){
+    const L5 = 5, L10 = 10;
+    const prevH = lastMatchesForTeam(all, home, untilDate, scope, league);
+    const prevA = lastMatchesForTeam(all, away, untilDate, scope, league);
+    const arr5 = prevH.slice(-L5).concat(prevA.slice(-L5));
+    const arr10 = prevH.slice(-L10).concat(prevA.slice(-L10));
+
+    function pct(arr){
+      const evals = arr.map(r=>marketEval(r, cfg)).filter(v=>v!==null);
+      if (!evals.length) return { hits:0, n:0, pct:null };
+      const hits = evals.filter(Boolean).length;
+      return { hits, n: evals.length, pct: 100*hits/evals.length };
+    }
+    return { p5:pct(arr5), p10:pct(arr10) };
+  }
+
+  function qualifiesSignal(sig, th5, th10){
+    const ok5 = sig.p5.pct !== null && sig.p5.pct >= th5;
+    const ok10 = sig.p10.pct !== null && sig.p10.pct >= th10;
+    return ok5 && ok10;
+  }
+
+  // Split 70/30 temporal dentro de los partidos entre los equipos (misma liga)
+  function splitTrainTest(records){
+    const n = records.length;
+    if (n === 0) return {train:[], test:[]};
+    const cut = Math.max(1, Math.floor(n * 0.7));
+    return { train: records.slice(0, cut), test: records.slice(cut) };
+  }
+
+  function roiFromBets(bets){ // bets: [{win:boolean, odd:number}]
+    if (!bets.length) return {bets:0, wins:0, hit:null, pnl:0, roi:null};
+    let pnl = 0, wins = 0;
+    bets.forEach(b=>{
+      if (b.win){ pnl += (b.odd - 1); wins++; }
+      else { pnl -= 1; }
     });
-    const test = list.filter(x=> {
-      const d = parseDate(x.Date); return d && d>trainEnd && d<=testEnd;
-    });
-    if (test.length){
-      const mTrain = train.length ? kpis(train) : {Yield:NaN,Bets:0};
-      const mTest = kpis(test);
-      out.push({
-        Train_Start: cur.toISOString().slice(0,10),
-        Train_End: trainEnd.toISOString().slice(0,10),
-        Test_Start: new Date(trainEnd.getTime()+24*3600*1000).toISOString().slice(0,10),
-        Test_End: testEnd.toISOString().slice(0,10),
-        Train_Bets: mTrain.Bets|0,
-        Train_Yield: mTrain.Yield,
-        Test_Bets: mTest.Bets|0,
-        Test_Yield: mTest.Yield
+    const hit = 100 * wins / bets.length;
+    const roi = 100 * pnl / bets.length;
+    return {bets:bets.length, wins, hit, pnl, roi};
+  }
+
+  function formatPct(x){ return (x===null || x===undefined) ? '—' : x.toFixed(1)+'%'; }
+  function formatNum(x, d=2){ return (x===null || x===undefined) ? '—' : x.toFixed(d); }
+
+  function marketReport(allMatchesBetween, allUniverse, home, away, league, cfg, th5, th10, scope){
+    // Para cada partido en el subconjunto entre equipos, usamos rolling previo para decidir señal.
+    // Evaluamos por separado Train y Test (split temporal sobre los partidos entre ambos equipos).
+    const { train, test } = splitTrainTest(allMatchesBetween);
+
+    function runOn(set){
+      const bets = [];
+      set.forEach(rec=>{
+        const sig = rollingPct(allUniverse, home, away, rec._date, scope, league, cfg);
+        if (qualifiesSignal(sig, th5, th10)){
+          const win = marketEval(rec, cfg);
+          const odd = getOdd(rec, cfg);
+          if (win !== null && Number.isFinite(odd) && odd>1){
+            bets.push({win, odd});
+          }
+        }
       });
+      const agg = roiFromBets(bets);
+      return { ...agg, sample:set.length };
     }
-    cur = monthAdd(cur,3);
+
+    const aggTrain = runOn(train);
+    const aggTest = runOn(test);
+
+    // Hit% global simple (sobre todos los partidos entre ambos, no solo señales)
+    const evalsAll = allMatchesBetween.map(r=>marketEval(r, cfg)).filter(v=>v!==null);
+    const hitAll = evalsAll.length ? (100*evalsAll.filter(Boolean).length/evalsAll.length) : null;
+
+    return { aggTrain, aggTest, hitAll, nAll: allMatchesBetween.length };
   }
-  return out;
-}
 
-/* Monte Carlo del yield por unidad */
-function monteCarlo(list, nSims=2000){
-  const perUnit = list
-    .map(x => Number.isFinite(x.Stake) && x.Stake>0 ? x.Profit/x.Stake : NaN)
-    .filter(Number.isFinite);
-  if (!perUnit.length) return {p05:NaN,p50:NaN,p95:NaN,n:0};
-  const rng = (function(seed=42){
-    let s = seed >>> 0;
-    return ()=> (s = (s*1664525 + 1013904223) >>> 0) / 2**32;
-  })();
-
-  function choice(){
-    const i = Math.floor(rng()*perUnit.length);
-    return perUnit[i];
-    }
-  const sims = [];
-  for (let i=0;i<nSims;i++){
-    const draw = Array.from({length:perUnit.length}, choice);
-    const m = draw.reduce((a,b)=>a+b,0)/draw.length;
-    sims.push(m);
+  function buildTableRow(name, res){
+    return `
+      <tr>
+        <td>${name}</td>
+        <td>${res.nAll}</td>
+        <td class="stat">${formatPct(res.hitAll)}</td>
+        <td>${res.aggTrain.sample}</td>
+        <td>${res.aggTrain.bets}</td>
+        <td>${formatPct(res.aggTrain.hit)}</td>
+        <td>${formatNum(res.aggTrain.pnl)}</td>
+        <td class="stat">${formatPct(res.aggTrain.roi)}</td>
+        <td>${res.aggTest.sample}</td>
+        <td>${res.aggTest.bets}</td>
+        <td>${formatPct(res.aggTest.hit)}</td>
+        <td>${formatNum(res.aggTest.pnl)}</td>
+        <td class="stat">${formatPct(res.aggTest.roi)}</td>
+      </tr>
+    `;
   }
-  sims.sort((a,b)=>a-b);
-  const q = p => sims[Math.min(sims.length-1, Math.max(0, Math.floor(p*(sims.length-1))))];
-  return {p05:q(0.05), p50:q(0.50), p95:q(0.95), n:nSims};
-}
 
-/* Agrupados por liga/mercado (TEST) */
-function groupByKey(list, key){
-  const map = new Map();
-  for (const x of list){
-    const k = x[key] || "(sin dato)";
-    if (!map.has(k)) map.set(k, []);
-    map.get(k).push(x);
+  function renderResults(ctx){
+    const { league, home, away, th5, th10, scope, cfgs, between, universe } = ctx;
+    summary.innerHTML = `
+      <div class="flex">
+        <span class="pill"><strong>Liga:</strong> ${league || '—'}</span>
+        <span class="pill"><strong>Local:</strong> ${home || '—'}</span>
+        <span class="pill"><strong>Visita:</strong> ${away || '—'}</span>
+        <span class="pill"><strong>Señal:</strong> L5 ≥ ${th5}% • L10 ≥ ${th10}%</span>
+        <span class="pill"><strong>Partidos H2H:</strong> ${between.length}</span>
+      </div>
+      <div class="foot" style="margin-top:6px">
+        Las señales se generan con rolling de partidos previos de ambos equipos (${scope==='league'?'misma liga':'todas las ligas'}), y se evalúan en el H2H. 
+        Train = 70% más antiguos; Test = 30% más recientes.
+      </div>
+    `;
+
+    let html = `
+      <table>
+        <thead>
+          <tr>
+            <th>Mercado</th>
+            <th>H2H N</th>
+            <th>Hit% Global (sin señal)</th>
+            <th colspan="5">TRAIN (70%)</th>
+            <th colspan="5">TEST (30%)</th>
+          </tr>
+          <tr>
+            <th></th>
+            <th></th>
+            <th></th>
+            <th>Muestras</th><th>Bets</th><th>Hit%</th><th>PNL</th><th>ROI</th>
+            <th>Muestras</th><th>Bets</th><th>Hit%</th><th>PNL</th><th>ROI</th>
+          </tr>
+        </thead>
+        <tbody>
+    `;
+
+    cfgs.forEach(cfg=>{
+      const rep = marketReport(between, universe, home, away, league, cfg, th5, th10, scope);
+      const name = cfg._label;
+      html += buildTableRow(name, rep);
+    });
+
+    html += `</tbody></table>`;
+    tables.innerHTML = html;
   }
-  const rows = [];
-  for (const [k, arr] of map){
-    const m = kpis(arr);
-    rows.push({Key:k, Bets:m.Bets, Yield:m.Yield, Profit:m.Profit});
-  }
-  rows.sort((a,b)=> b.Yield - a.Yield);
-  return rows;
-}
 
-/* -------------------- UI Lógica -------------------- */
-let equityChart;
+  // ======= Ejecutar =======
+  btnRun.addEventListener('click', () => {
+    tables.innerHTML = '';
+    summary.innerHTML = '';
+    runStatus.textContent = '';
 
-function fillMetrics(tbodyEl, m){
-  const rows = [
-    ["Total Bets", m.Bets],
-    ["Hit Rate", pct(m.HitRate)],
-    ["Yield (ROI)", pct(m.Yield)],
-    ["Profit", fmt(m.Profit)],
-    ["Max Drawdown", pct(m.MaxDrawdown)],
-    ["Avg Odds", fmt(m.AvgOdds)],
-    ["Avg Stake", fmt(m.AvgStake)]
-  ];
-  tbodyEl.innerHTML = rows.map(r=>`<tr><td>${r[0]}</td><td>${r[1]}</td></tr>`).join("");
-}
+    const league = leagueSelect.value || '';
+    const home = homeSelect.value || '';
+    const away = awaySelect.value || '';
+    if (!DATA.length){ runStatus.textContent = '❗ Carga datos primero.'; return; }
+    if (!league || !home || !away){ runStatus.textContent = '❗ Selecciona liga, local y visita.'; return; }
+    if (home === away){ runStatus.textContent = '❗ Local y visita no pueden ser iguales.'; return; }
 
-function fillTable(tableBody, rows, cols){
-  tableBody.innerHTML = rows.map(r=>{
-    return `<tr>${cols.map(c => `<td>${c.format ? c.format(r[c.key]) : (r[c.key]??"")}</td>`).join("")}</tr>`;
-  }).join("");
-}
+    const scope = rollingScope.value;
+    const th_5 = Number(th5.value)||70;
+    const th_10 = Number(th10.value)||60;
 
-function drawEquity(list){
-  const labels = list.map(x=>x.Date);
-  const data = list.map(x=>x.Equity_Curve);
-  const ctx = document.getElementById("equityChart");
-  if (equityChart) equityChart.destroy();
-  equityChart = new Chart(ctx, {
-    type: "line",
-    data: {
-      labels,
-      datasets: [{label:"Equity", data, tension:.2, borderWidth:2, pointRadius:0}]
-    },
-    options: {
-      responsive:true,
-      scales:{ x:{ticks:{maxTicksLimit:8}}, y:{beginAtZero:false} },
-      plugins:{ legend:{display:false} }
-    }
+    // Subconjunto universo (para rolling)
+    const universe = DATA; // podrías filtrar por país/torneo mayor si quisieras
+
+    // Partidos H2H en la liga seleccionada (ambas direcciones, por fecha asc)
+    const between = DATA.filter(r=>{
+      if (r.League !== league) return false;
+      if (!(r._date instanceof Date)) return false;
+      const h2h = (r.HomeTeam===home && r.AwayTeam===away) || (r.HomeTeam===away && r.AwayTeam===home);
+      return h2h;
+    }).sort(byDateAsc);
+
+    // Configuración de mercados desde UI
+    const cfgs = [
+      { type:'OU_GOALS', line: parseFloat(ouGoalsLine.value), dir: ouGoalsDir.value, oddDefault: parseFloat(ouGoalsOdd.value), _label:`Over/Under Goles ${ouGoalsDir.value.toUpperCase()} ${ouGoalsLine.value}` },
+      { type:'BTTS', oddDefault: parseFloat(bttsOdd.value), _label:'BTTS (Ambos marcan)' },
+      { type:'W12', pick: w12Pick.value, oddDefault: parseFloat(w12Odd.value), _label:`1X2 — Pick ${w12Pick.value}` },
+      { type:'OU_CORNERS', line: parseFloat(ouCornersLine.value), dir: ouCornersDir.value, oddDefault: parseFloat(ouCornersOdd.value), _label:`Over/Under Corners ${ouCornersDir.value.toUpperCase()} ${ouCornersLine.value}` },
+      { type:'OU_CARDS', line: parseFloat(ouCardsLine.value), dir: ouCardsDir.value, oddDefault: parseFloat(ouCardsOdd.value), _label:`Over/Under Tarjetas ${ouCardsDir.value.toUpperCase()} ${ouCardsLine.value}` },
+    ];
+
+    renderResults({ league, home, away, th5:th_5, th10:th_10, scope, cfgs, between, universe });
+
+    runStatus.textContent = between.length
+      ? `✅ Calculado sobre ${between.length} partidos H2H.`
+      : `⚠️ No hay partidos H2H en la liga seleccionada para ${home} vs ${away}.`;
   });
-}
 
-/* -------------------- Eventos -------------------- */
-const fileEl = document.getElementById("file");
-const splitEl = document.getElementById("splitDate");
-const bankrollEl = document.getElementById("bankroll");
-const stakeMethodEl = document.getElementById("stakeMethod");
-const kellyFracEl = document.getElementById("kellyFrac");
-
-document.getElementById("run").addEventListener("click", async ()=>{
-  const file = fileEl.files && fileEl.files[0];
-  if (!file){ alert("Carga un archivo CSV primero."); return; }
-
-  const raw = await csvToArray(file);
-  const params = {
-    splitDate: splitEl.value || new Date().toISOString().slice(0,10),
-    bankroll: bankrollEl.value || 100,
-    stakeMethod: stakeMethodEl.value || "FLAT",
-    kellyFrac: kellyFracEl.value || 0.25
-  };
-  const processed = computeRows(raw, params);
-
-  // KPIs
-  const total = kpis(processed);
-  const train = kpis(processed.filter(x=>x.Set==="TRAIN"));
-  const test = kpis(processed.filter(x=>x.Set==="TEST"));
-
-  fillMetrics(document.querySelector("#metricsTotal tbody"), total);
-  fillMetrics(document.querySelector("#metricsTrain tbody"), train);
-  fillMetrics(document.querySelector("#metricsTest tbody"), test);
-
-  // Equity
-  drawEquity(processed);
-
-  // Walk-Forward
-  const wfRows = walkForward3M(processed);
-  fillTable(document.querySelector("#wf tbody"), wfRows, [
-    {key:"Train_Start"}, {key:"Train_End"}, {key:"Test_Start"}, {key:"Test_End"},
-    {key:"Train_Bets"}, {key:"Train_Yield", format:pct}, {key:"Test_Bets"}, {key:"Test_Yield", format:pct}
-  ]);
-
-  // Monte Carlo (TOTAL)
-  const mc = monteCarlo(processed);
-  document.querySelector("#mc tbody").innerHTML =
-    `<tr><td>${pct(mc.p05)}</td><td>${pct(mc.p50)}</td><td>${pct(mc.p95)}</td><td>${mc.n}</td></tr>`;
-
-  // Resumen por Liga/Mercado en TEST
-  const testSet = processed.filter(x=>x.Set==="TEST");
-  const byLeague = groupByKey(testSet, "League");
-  const byMarket = groupByKey(testSet, "Market");
-
-  fillTable(document.querySelector("#byLeague tbody"), byLeague, [
-    {key:"Key"}, {key:"Bets"}, {key:"Yield", format:pct}, {key:"Profit", format:fmt}
-  ]);
-  fillTable(document.querySelector("#byMarket tbody"), byMarket, [
-    {key:"Key"}, {key:"Bets"}, {key:"Yield", format:pct}, {key:"Profit", format:fmt}
-  ]);
-
-  // Guardamos en ventana para exportar
-  window.__bt_last = {processed, total, train, test, wfRows, mc, byLeague, byMarket};
-});
-
-document.getElementById("exportProcessed").addEventListener("click", ()=>{
-  const st = window.__bt_last;
-  if (!st?.processed) { alert("Primero ejecuta el backtest."); return; }
-  const headers = Object.keys(st.processed[0]||{});
-  const rows = [headers].concat(st.processed.map(o=>headers.map(h=>o[h])));
-  downloadCSV("apuestas_procesadas.csv", rows);
-});
-
-document.getElementById("exportResults").addEventListener("click", ()=>{
-  const st = window.__bt_last;
-  if (!st){ alert("Primero ejecuta el backtest."); return; }
-  const rows = [];
-  const pushBlock = (name, m) => {
-    rows.push([name,"Valor"]);
-    rows.push(["Bets", m.Bets]);
-    rows.push(["HitRate", m.HitRate]);
-    rows.push(["Yield", m.Yield]);
-    rows.push(["Profit", m.Profit]);
-    rows.push(["MaxDrawdown", m.MaxDrawdown]);
-    rows.push(["AvgOdds", m.AvgOdds]);
-    rows.push(["AvgStake", m.AvgStake]);
-    rows.push([]);
-  };
-  pushBlock("TOTAL", st.total);
-  pushBlock("TRAIN", st.train);
-  pushBlock("TEST", st.test);
-  rows.push(["WF","Train_Start","Train_End","Test_Start","Test_End","Train_Bets","Train_Yield","Test_Bets","Test_Yield"]);
-  (st.wfRows||[]).forEach(r=> rows.push(["WF", r.Train_Start, r.Train_End, r.Test_Start, r.Test_End, r.Train_Bets, r.Train_Yield, r.Test_Bets, r.Test_Yield]));
-  rows.push([]);
-  rows.push(["MonteCarlo","p05","p50","p95","N"]);
-  rows.push(["TOTAL", st.mc.p05, st.mc.p50, st.mc.p95, st.mc.n]);
-  rows.push([]);
-  rows.push(["ByLeague TEST","Liga","Bets","Yield","Profit"]);
-  (st.byLeague||[]).forEach(r=> rows.push(["ByLeague", r.Key, r.Bets, r.Yield, r.Profit]));
-  rows.push([]);
-  rows.push(["ByMarket TEST","Mercado","Bets","Yield","Profit"]);
-  (st.byMarket||[]).forEach(r=> rows.push(["ByMarket", r.Key, r.Bets, r.Yield, r.Profit]));
-  downloadCSV("resultados_backtesting.csv", rows);
-});
+})();
 </script>
 </body>
 </html>
