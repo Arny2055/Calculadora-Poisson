@@ -50,8 +50,6 @@
   .badge-hot{ position:absolute; top:8px; right:8px; font-size:11px; font-weight:700; letter-spacing:.2px;
     background:linear-gradient(180deg,#54e3b2,#3bc48f); color:#0e1a14; border:0; border-radius:999px; padding:4px 8px; display:none; }
   .kpi.hot .badge-hot{ display:inline-block; }
-
-  /* ===== Ocultar MÉTRICAS ===== */
   .metrics{ display:none; }
 </style>
 </head>
@@ -80,6 +78,7 @@
     </div>
     <div style="margin-top:12px">
       <button id="calc" class="btn accent" disabled>Calcular</button>
+      <button id="assist" class="btn" disabled style="margin-left:8px">IA asistida (reforzar JSON)</button>
       <span id="status" class="muted" style="margin-left:10px"></span>
     </div>
   </div>
@@ -275,8 +274,12 @@
   const leagueSel=$('league'), homeSel=$('home'), awaySel=$('away');
   const btnCalc=$('calc'), haInput=$('ha'), htFactorInput=$('htFactor'), haHTInput=$('ha_ht');
   const haCornersInput=$('ha_corners'), haCardsInput=$('ha_cards'), status=$('status');
+  const assistBtn=$('assist');
   const scoreFT = document.querySelector('#scoretab_ft tbody');
   const scoreHT = document.querySelector('#scoretab_ht tbody');
+
+  // Guardamos el último dataset crudo para poder reforzarlo
+  let rawRows = [];
 
   // teams[league][team] = {...}
   let teams = {};
@@ -324,8 +327,10 @@
     ay:/^(away\s*yellow(?:\s*cards?)?(?:\s*at\s*ft)?|amarillas\s*visitante|tarjetas\s*amarillas\s*visitante)$/i,
     hr:/^(home\s*red(?:\s*cards?)?(?:\s*at\s*ft)?|rojas\s*local|tarjetas\s*rojas\s*local)$/i,
     ar:/^(away\s*red(?:\s*cards?)?(?:\s*at\s*ft)?|rojas\s*visitante|tarjetas\s*rojas\s*visitante)$/i,
+    // shots on target
     hSOT:/^(home\s*(on\s*goal|on\-?target)\s*shots(?:\s*at\s*ft)?|tiros\s*a\s*puerta?\s*local|disparos\s*a\s*puerta?\s*local)$/i,
     aSOT:/^(away\s*(on\s*goal|on\-?target)\s*shots(?:\s*at\s*ft)?|tiros\s*a\s*puerta?\s*visitante|disparos\s*a\s*puerta?\s*visitante)$/i,
+    // total shots
     hSH:/^(home\s*total\s*shots(?:\s*at\s*ft)?|total\s*shots\s*home|tiros\s*totales?\s*local|disparos\s*totales?\s*local)$/i,
     aSH:/^(away\s*total\s*shots(?:\s*at\s*ft)?|total\s*shots\s*away|tiros\s*totales?\s*visitante|disparos\s*totales?\s*visitante)$/i
   };
@@ -421,7 +426,7 @@
     leagueSel.addEventListener('change',()=>setTeams(leagueSel.value));
   }
 
-  // ---------- Poisson ----------
+  // ---------- Poisson util ----------
   const factMemo=[1]; function fact(n){ for(let i=factMemo.length;i<=n;i++) factMemo[i]=factMemo[i-1]*i; return factMemo[n]; }
   const poisPMF=(k,λ)=> Math.exp(-λ)*Math.pow(λ,k)/fact(k);
   function poisCDF(k,λ){ let s=0; for(let i=0;i<=k;i++) s+=poisPMF(i,λ); return s; }
@@ -437,7 +442,61 @@
     if(!items.length) return; items.forEach(x=>x.k.classList.remove('hot')); items.sort((a,b)=>b.p-a.p); items[0].k.classList.add('hot');
   }
 
-  // ---------- Compute ----------
+  // ---------- IA asistida: reforzar JSON ----------
+  function normalizeTeamName(s){
+    if(!s) return s;
+    return String(s).replace(/\s+/g,' ').trim();
+  }
+  function reinforceRows(rows){
+    let fixed = 0, added = 0;
+    const out = rows.map(r=>{
+      if(!r || typeof r!=='object') return r;
+      const o = {...r};
+
+      // Detectar y convertir "Match" + "Result FT" -> HomeTeam/AwayTeam + FTHG/FTAG
+      const kMatch = findKey(o, keyMap.matchStr);
+      const kRes   = findKey(o, keyMap.resultFT);
+      if(kMatch && kRes){
+        const [ht,at] = parseMatchTeams(o[kMatch]);
+        const [gh,ga] = parseScoreFT(o[kRes]);
+        if(ht && at){ o.HomeTeam = normalizeTeamName(ht); o.AwayTeam = normalizeTeamName(at); fixed++; }
+        if(Number.isFinite(gh) && Number.isFinite(ga)){ o.FTHG = gh; o.FTAG = ga; fixed++; }
+      }
+
+      // Normalizar nombres de equipo (si existen)
+      const kHT=findKey(o,keyMap.homeTeam), kAT=findKey(o,keyMap.awayTeam);
+      if(kHT){ o[kHT] = normalizeTeamName(o[kHT]); }
+      if(kAT){ o[kAT] = normalizeTeamName(o[kAT]); }
+
+      // Forzar numéricos en campos típicos si existen
+      const numericKeys = [
+        keyMap.fthg, keyMap.ftag, keyMap.gf, keyMap.ga, keyMap.matches,
+        keyMap.hc, keyMap.ac, keyMap.hy, keyMap.ay, keyMap.hr, keyMap.ar,
+        keyMap.hSOT, keyMap.aSOT, keyMap.hSH, keyMap.aSH
+      ];
+      for(const rx of numericKeys){
+        const k = findKey(o, rx);
+        if(k && o[k]!=null){ const before=o[k]; o[k]=num(o[k]); if(o[k]!==before) fixed++; }
+      }
+
+      // Si falta "league", poner la seleccionada (si hay) o "—"
+      const kLeague=findKey(o,keyMap.league);
+      if(!kLeague){
+        const ligVal = leagueSel.value || '—';
+        o.League = ligVal; added++;
+      }
+
+      return o;
+    });
+    return {rows:out, fixed, added};
+  }
+
+  function rebuildFromRaw(rows){
+    buildFromArray(rows);
+    fillSelectors(true);
+  }
+
+  // ---------- Compute principal ----------
   function compute(){
     status && (status.textContent='');
 
@@ -533,7 +592,6 @@
     markGroupTop('[data-group="g_ft_btts"]');
 
     rows.sort((a,b)=>b.p-a.p);
-    // Top 3 marcadores FT, marcando el más probable
     const top3 = rows.slice(0,3);
     scoreFT.innerHTML = top3.map((x,i)=>{
       const star = i===0 ? ' ⭐' : '';
@@ -647,18 +705,30 @@
 
   // Eventos
   btnCalc.addEventListener('click', compute);
+
+  assistBtn.addEventListener('click', ()=>{
+    if(!rawRows.length){ status.textContent='Primero carga un archivo.'; return; }
+    const {rows, fixed, added} = reinforceRows(rawRows);
+    buildFromArray(rows);
+    fillSelectors(true);
+    status.textContent = `JSON reforzado ✔ (${fixed} campos normalizados, ${added} ligas completadas). Vuelve a elegir equipos si es necesario y pulsa Calcular.`;
+  });
+
   document.getElementById('file').addEventListener('change', async (e)=>{
     const f=e.target.files?.[0]; if(!f) return;
     try{
       const text=await f.text();
       const arr=parsePotentialJSON(text);
       if(!arr.length) throw new Error("El archivo está vacío.");
+      rawRows = arr.slice(); // guardamos
       buildFromArray(arr);
       fillSelectors(true);
-      status && (status.textContent='Datos cargados ✔ Elige (o usa los preseleccionados) y pulsa Calcular.');
+      status && (status.textContent='Datos cargados ✔ Elige (o usa los preseleccionados) y pulsa Calcular. Puedes usar “IA asistida” para reforzar el JSON.');
       btnCalc.disabled=false;
+      assistBtn.disabled=false;
     }catch(err){
-      leagueSel.disabled=true; homeSel.disabled=true; awaySel.disabled=true; btnCalc.disabled=true;
+      rawRows = [];
+      leagueSel.disabled=true; homeSel.disabled=true; awaySel.disabled=true; btnCalc.disabled=true; assistBtn.disabled=true;
       leagueSel.innerHTML=''; homeSel.innerHTML=''; awaySel.innerHTML='';
       status && (status.textContent=err.message||'Error al leer el JSON.');
     }
