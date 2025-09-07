@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Poisson FT/HT + Córners + Tarjetas + BTTS + Disparos + IA</title>
+<title>Poisson FT/HT + Córners + Tarjetas + BTTS + Disparos</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet" />
@@ -32,7 +32,6 @@
     background:linear-gradient(180deg,#1b2130,#171a21); color:var(--text); font-weight:600; cursor:pointer}
   .btn:hover{filter:brightness(1.05)}
   .accent{background:linear-gradient(180deg,#2a58ff,#264bda); border-color:#2c4fd0}
-  .ai{background:linear-gradient(180deg,#38d39f,#2fb889); border-color:#2aa97f}
   .muted{color:var(--muted)}
   .kpis{display:grid; gap:10px; grid-template-columns:repeat(2,1fr)}
   @media(min-width:960px){ .kpis{grid-template-columns:repeat(4,1fr)} }
@@ -51,24 +50,17 @@
   .badge-hot{ position:absolute; top:8px; right:8px; font-size:11px; font-weight:700; letter-spacing:.2px;
     background:linear-gradient(180deg,#54e3b2,#3bc48f); color:#0e1a14; border:0; border-radius:999px; padding:4px 8px; display:none; }
   .kpi.hot .badge-hot{ display:inline-block; }
-  .metrics{ display:none; }
 
-  /* Marca visual para resultados reforzados por IA */
-  .reinforced::after{
-    content:"🔮 IA";
-    position:absolute; top:8px; left:8px;
-    font-size:11px; font-weight:700; letter-spacing:.2px;
-    background:linear-gradient(180deg,#8ee6c7,#5dd4a4); color:#0e1a14;
-    border-radius:999px; padding:3px 6px;
-  }
+  /* Ocultar métricas (μ, λ) pero mantener cálculo */
+  .metrics{ display:none; }
 </style>
 </head>
 <body>
-<header><h1>Poisson FT/HT + Córners + Tarjetas + BTTS + Disparos + IA</h1></header>
+<header><h1>Poisson FT/HT + Córners + Tarjetas + BTTS + Disparos</h1></header>
 <div class="wrap grid">
   <div class="card">
     <h2>1) Cargar JSON & elegir</h2>
-    <label>JSON (array/objeto/NDJSON). Reconoce: <code>Match + Result FT</code>, <code>HomeTeam/AwayTeam + FTHG/FTAG</code>, agregados por equipo (<code>Team, GF, GA, Matches</code>) y, si existen, <i>OnGoal/Total Shots</i>, Córners, Amarillas, Rojas.</label>
+    <label>JSON (array/objeto/NDJSON) o CSV (encabezados). Reconoce: <code>Match + Result FT</code>, <code>HomeTeam/AwayTeam + FTHG/FTAG</code>, agregados por equipo (<code>Team, GF, GA, Matches</code>) y, si existen, <i>OnGoal/Total Shots</i>, Córners, Amarillas, Rojas.</label>
     <input id="file" type="file" accept=".json,.txt,.ndjson,.csv" />
     <div class="row">
       <div><label> Liga </label><select id="league" disabled></select></div>
@@ -88,12 +80,11 @@
     </div>
     <div style="margin-top:12px">
       <button id="calc" class="btn accent" disabled>Calcular</button>
-      <button id="ai" class="btn ai" disabled>IA Asistida (reforzar pronósticos)</button>
       <span id="status" class="muted" style="margin-left:10px"></span>
     </div>
   </div>
 
-  <!-- 2) Métricas FT — Goles (OCULTA) -->
+  <!-- Métricas ocultas -->
   <div class="card metrics" id="card_metrics_goals">
     <h2>2) Métricas FT — Goles</h2>
     <div class="kpis">
@@ -261,14 +252,14 @@
     </div>
   </div>
 
-  <div class="card" id="card_scores_ft">
-    <h2>11) Marcadores FT (Top 3)</h2>
+  <div class="card">
+    <h2>11) Marcadores FT (0–10)</h2>
     <div style="overflow:auto; max-height:280px">
       <table id="scoretab_ft"><thead><tr><th>Marcador</th><th>Prob.</th></tr></thead><tbody></tbody></table>
     </div>
   </div>
 
-  <div class="card" id="card_scores_ht">
+  <div class="card">
     <h2>12) Marcadores HT (0–5)</h2>
     <div style="overflow:auto; max-height:280px">
       <table id="scoretab_ht"><thead><tr><th>Marcador HT</th><th>Prob.</th></tr></thead><tbody></tbody></table>
@@ -276,20 +267,19 @@
   </div>
 </div>
 
-<div class="wrap footer">“IA Asistida” aplica suavizado bayesiano hacia la media de liga (según partidos por equipo) para λ de goles, córners, tarjetas y disparos. Destaca 🔥 el más probable por mercado y 🔮 en tarjetas reforzadas.</div>
+<div class="wrap footer">Las métricas (μ y λ) están ocultas para una vista limpia. Siguen alimentando los cálculos.</div>
 
 <script>
 (function(){
   const $ = (id)=>document.getElementById(id);
   const leagueSel=$('league'), homeSel=$('home'), awaySel=$('away');
-  const btnCalc=$('calc'), btnAI=$('ai');
-  const haInput=$('ha'), htFactorInput=$('htFactor'), haHTInput=$('ha_ht');
+  const btnCalc=$('calc'), haInput=$('ha'), htFactorInput=$('htFactor'), haHTInput=$('ha_ht');
   const haCornersInput=$('ha_corners'), haCardsInput=$('ha_cards'), status=$('status');
   const scoreFT = document.querySelector('#scoretab_ft tbody');
   const scoreHT = document.querySelector('#scoretab_ht tbody');
 
-  // teams[league][team] = {...}
-  let teams = {};
+  let teams = {}; // teams[league][team] = {aggregados}
+
   function ensureTeam(league, team){
     teams[league]=teams[league]||{};
     teams[league][team]=teams[league][team]||{
@@ -300,21 +290,53 @@
     return teams[league][team];
   }
 
-  // ---------- Parseo ----------
-  function parsePotentialJSON(text){
-    try{ const j=JSON.parse(text); return Array.isArray(j)? j:[j]; }
+  // ------- Parsers -------
+  function stripBOM(s){ return s.charCodeAt(0)===0xFEFF ? s.slice(1) : s; }
+
+  function tryParseJSONorNDJSON(text){
+    const t=stripBOM(text);
+    try{ const j=JSON.parse(t); return Array.isArray(j)? j:[j]; }
     catch(e){
-      const lines=text.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
+      const lines=t.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
       const arr=[]; for(const ln of lines){ try{arr.push(JSON.parse(ln));}catch(_){}} 
-      if(arr.length) return arr;
-      throw new Error("No se pudo leer el JSON. Verifica formato (array/objeto/NDJSON).");
+      return arr.length? arr : null;
     }
   }
+
+  function parseCSV(text){
+    // Soporta separador , o ; (detecta por la línea de cabecera)
+    const raw = stripBOM(text).replace(/\r/g,'');
+    const firstLine = raw.split('\n')[0] || '';
+    const sep = (firstLine.match(/;/g)||[]).length > (firstLine.match(/,/g)||[]).length ? ';' : ',';
+    const lines = raw.split('\n').filter(x=>x.trim().length>0);
+    if(lines.length<2) return [];
+    const headers = lines[0].split(sep).map(h=>h.trim());
+    const rows = [];
+    for(let i=1;i<lines.length;i++){
+      const cols = lines[i].split(sep).map(c=>c.trim());
+      const o={};
+      headers.forEach((h,idx)=>{ o[h]=cols[idx]??''; });
+      rows.push(o);
+    }
+    return rows;
+  }
+
+  function parsePotential(text){
+    // intenta JSON / NDJSON; si falla, prueba CSV
+    const js = tryParseJSONorNDJSON(text);
+    if(js && js.length) return js;
+    // CSV
+    const csv = parseCSV(text);
+    if(csv && csv.length) return csv;
+    throw new Error("No se pudo leer el archivo. Usa JSON (array/objeto/NDJSON) o CSV con encabezados.");
+  }
+
   const num = x => {
     if (x==null || x==='') return 0;
     const s = String(x).replace(/,/g,'.').replace(/[^\d.\-+eE]/g,'');
     const n = Number(s); return Number.isFinite(n)? n:0;
   };
+
   const keyMap = {
     league:/^(league|liga)$/i, team:/^(team|equipo|name|nombre)$/i,
     matches:/^(matches|mp|pj|games|partidos)$/i,
@@ -333,8 +355,10 @@
     ay:/^(away\s*yellow(?:\s*cards?)?(?:\s*at\s*ft)?|amarillas\s*visitante|tarjetas\s*amarillas\s*visitante)$/i,
     hr:/^(home\s*red(?:\s*cards?)?(?:\s*at\s*ft)?|rojas\s*local|tarjetas\s*rojas\s*local)$/i,
     ar:/^(away\s*red(?:\s*cards?)?(?:\s*at\s*ft)?|rojas\s*visitante|tarjetas\s*rojas\s*visitante)$/i,
+    // shots on target
     hSOT:/^(home\s*(on\s*goal|on\-?target)\s*shots(?:\s*at\s*ft)?|tiros\s*a\s*puerta?\s*local|disparos\s*a\s*puerta?\s*local)$/i,
     aSOT:/^(away\s*(on\s*goal|on\-?target)\s*shots(?:\s*at\s*ft)?|tiros\s*a\s*puerta?\s*visitante|disparos\s*a\s*puerta?\s*visitante)$/i,
+    // total shots
     hSH:/^(home\s*total\s*shots(?:\s*at\s*ft)?|total\s*shots\s*home|tiros\s*totales?\s*local|disparos\s*totales?\s*local)$/i,
     aSH:/^(away\s*total\s*shots(?:\s*at\s*ft)?|total\s*shots\s*away|tiros\s*totales?\s*visitante|disparos\s*totales?\s*visitante)$/i
   };
@@ -364,7 +388,7 @@
       const kLeague=findKey(row,keyMap.league);
       const league= kLeague? String(row[kLeague]).trim() :"—";
 
-      const kTeam=findKey(row,keyMap.team), kGF=findKey(row,keyMap.gf), kGA=findKey(row,keyMap.ga), kM=findKey(row[keyMap.matches]);
+      const kTeam=findKey(row,keyMap.team), kGF=findKey(row,keyMap.gf), kGA=findKey(row,keyMap.ga), kM=findKey(row,keyMap.matches);
       const kHT=findKey(row,keyMap.homeTeam), kAT=findKey(row,keyMap.awayTeam), kFTHG=findKey(row,keyMap.fthg), kFTAG=findKey(row,keyMap.ftag);
       const kMatch=findKey(row,keyMap.matchStr), kResFT=findKey(row,keyMap.resultFT);
       const kHC=findKey(row,keyMap.hc), kAC=findKey(row,keyMap.ac);
@@ -409,31 +433,43 @@
     }
   }
 
-  // ---------- UI ----------
+  // ------- UI helpers -------
   function escapeHtml(s){ return String(s).replace(/[&<>"']/g, m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m])); }
+
   function fillSelectors(autoselect=true){
     const leagues=Object.keys(teams).sort((a,b)=>a.localeCompare(b));
     leagueSel.innerHTML='<option value="">— Selecciona liga —</option>'+leagues.map(l=>`<option>${escapeHtml(l)}</option>`).join('');
-    leagueSel.disabled = leagues.length===0;
+    leagueSel.disabled = leagues.length===0 ? true : false;
+
     function setTeams(lig){
       const list=lig&&teams[lig]? Object.keys(teams[lig]).sort((a,b)=>a.localeCompare(b)):[];
       const opts='<option value="">— Equipo —</option>'+list.map(t=>`<option>${escapeHtml(t)}</option>`).join('');
       homeSel.innerHTML=opts; awaySel.innerHTML=opts;
-      const enabled = list.length>0;
-      homeSel.disabled=!enabled; awaySel.disabled=!enabled;
-      btnCalc.disabled=!enabled; btnAI.disabled=!enabled;
-      if(autoselect && list.length>=2){ homeSel.value=list[0]; awaySel.value=list[1]; }
+      const enable = list.length>0;
+      homeSel.disabled=!enable; awaySel.disabled=!enable; btnCalc.disabled=!enable;
+      if(autoselect && enable && list.length>=2){ homeSel.value=list[0]; awaySel.value=list[1]; }
     }
-    setTeams(leagues[0]||"");
-    leagueSel.addEventListener('change',()=>setTeams(leagueSel.value));
+
+    // set default
+    if(leagues.length>0){
+      leagueSel.value = leagues[0];
+      setTeams(leagues[0]);
+    }else{
+      setTeams("");
+    }
+
+    // asegura listener (solo una vez)
+    if(!leagueSel._hasChangeListener){
+      leagueSel.addEventListener('change',()=>setTeams(leagueSel.value));
+      leagueSel._hasChangeListener = true;
+    }
   }
 
-  // ---------- Poisson ----------
+  // ------- Poisson -------
   const factMemo=[1]; function fact(n){ for(let i=factMemo.length;i<=n;i++) factMemo[i]=factMemo[i-1]*i; return factMemo[n]; }
   const poisPMF=(k,λ)=> Math.exp(-λ)*Math.pow(λ,k)/fact(k);
   function poisCDF(k,λ){ let s=0; for(let i=0;i<=k;i++) s+=poisPMF(i,λ); return s; }
   const clamp=(x,min,max)=> Math.max(min,Math.min(max,x));
-
   function setProb(id, p){
     const el = $(id); if(!el) return;
     el.textContent = (p*100).toFixed(1)+'%';
@@ -445,22 +481,8 @@
     if(!items.length) return; items.forEach(x=>x.k.classList.remove('hot')); items.sort((a,b)=>b.p-a.p); items[0].k.classList.add('hot');
   }
 
-  // Mezcla bayesiana simple hacia la media de liga según # de partidos
-  function shrink(value, leagueMean, matches, k){
-    const w = matches / (matches + k); // k = fuerza del prior
-    return w*value + (1-w)*leagueMean;
-  }
-
-  // Aplica o remueve marca visual de “IA”
-  function toggleReinforcedMarks(on){
-    const cards = document.querySelectorAll('[data-group], #card_scores_ft, #card_scores_ht');
-    cards.forEach(c=>{
-      if(on) c.classList.add('reinforced'); else c.classList.remove('reinforced');
-    });
-  }
-
-  // ---------- Compute ----------
-  function compute(reinforce=false){
+  // ------- Compute -------
+  function compute(){
     status && (status.textContent='');
 
     const lig=leagueSel.value, home=homeSel.value, away=awaySel.value;
@@ -487,7 +509,7 @@
     const muSH  = sumM>0 ? (sumSH /Math.max(1,sumM)) : 12.0;
 
     // Promedios por equipo (fallback a medias)
-    const h_raw = {
+    const h = {
       gfpm: tH.matches? tH.gf/tH.matches : mu,
       gapm: tH.matches? tH.ga/tH.matches : mu,
       cfpm: tH.matches? tH.cf/tH.matches : muC,
@@ -499,10 +521,9 @@
       sotpm:tH.matches? tH.sotF/tH.matches: muSOT,
       sota: tH.matches? tH.sotA/tH.matches: muSOT,
       shpm: tH.matches? tH.shF/tH.matches : muSH,
-      sha:  tH.matches? tH.shA/tH.matches : muSH,
-      m: tH.matches||1
+      sha:  tH.matches? tH.shA/tH.matches : muSH
     };
-    const a_raw = {
+    const a = {
       gfpm: tA.matches? tA.gf/tA.matches : mu,
       gapm: tA.matches? tA.ga/tA.matches : mu,
       cfpm: tA.matches? tA.cf/tA.matches : muC,
@@ -514,49 +535,16 @@
       sotpm:tA.matches? tA.sotF/tA.matches: muSOT,
       sota: tA.matches? tA.sotA/tA.matches: muSOT,
       shpm: tA.matches? tA.shF/tA.matches : muSH,
-      sha:  tA.matches? tA.shA/tA.matches : muSH,
-      m: tA.matches||1
+      sha:  tA.matches? tA.shA/tA.matches : muSH
     };
-
-    // Si reforzamos, aplicamos suavizado bayesiano
-    const kGoals=6, kCorners=8, kY=10, kR=25, kSOT=8, kSH=8;
-    const h = reinforce ? {
-      gfpm: shrink(h_raw.gfpm, mu, h_raw.m, kGoals),
-      gapm: shrink(h_raw.gapm, mu, h_raw.m, kGoals),
-      cfpm: shrink(h_raw.cfpm, muC, h_raw.m, kCorners),
-      capm: shrink(h_raw.capm, muC, h_raw.m, kCorners),
-      ypm:  shrink(h_raw.ypm,  muY, h_raw.m, kY),
-      yapm: shrink(h_raw.yapm, muY, h_raw.m, kY),
-      rpm:  shrink(h_raw.rpm,  muR, h_raw.m, kR),
-      rapm: shrink(h_raw.rapm, muR, h_raw.m, kR),
-      sotpm:shrink(h_raw.sotpm,muSOT,h_raw.m,kSOT),
-      sota: shrink(h_raw.sota, muSOT,h_raw.m,kSOT),
-      shpm: shrink(h_raw.shpm, muSH, h_raw.m, kSH),
-      sha:  shrink(h_raw.sha,  muSH, h_raw.m, kSH)
-    } : h_raw;
-
-    const a = reinforce ? {
-      gfpm: shrink(a_raw.gfpm, mu, a_raw.m, kGoals),
-      gapm: shrink(a_raw.gapm, mu, a_raw.m, kGoals),
-      cfpm: shrink(a_raw.cfpm, muC, a_raw.m, kCorners),
-      capm: shrink(a_raw.capm, muC, a_raw.m, kCorners),
-      ypm:  shrink(a_raw.ypm,  muY, a_raw.m, kY),
-      yapm: shrink(a_raw.yapm, muY, a_raw.m, kY),
-      rpm:  shrink(a_raw.rpm,  muR, a_raw.m, kR),
-      rapm: shrink(a_raw.rapm, muR, a_raw.m, kR),
-      sotpm:shrink(a_raw.sotpm,muSOT,a_raw.m,kSOT),
-      sota: shrink(a_raw.sota, muSOT,a_raw.m,kSOT),
-      shpm: shrink(a_raw.shpm, muSH, a_raw.m, kSH),
-      sha:  shrink(a_raw.sha,  muSH, a_raw.m, kSH)
-    } : a_raw;
 
     // Fuerzas GOLES
     const attH=h.gfpm/Math.max(mu,1e-9), defH=h.gapm/Math.max(mu,1e-9);
     const attA=a.gfpm/Math.max(mu,1e-9), defA=a.gapm/Math.max(mu,1e-9);
-    let λH = attH*defA*mu*HA;
-    let λA = attA*defH*mu;
+    const λH = attH*defA*mu*HA;
+    const λA = attA*defH*mu;
 
-    // KPIs (se llenan aunque estén ocultos)
+    // KPIs (ocultas pero activas)
     $('k_mu').textContent=mu.toFixed(3);
     $('k_att_h').textContent=attH.toFixed(3);
     $('k_def_h').textContent=defH.toFixed(3);
@@ -564,18 +552,6 @@
     $('k_def_a').textContent=defA.toFixed(3);
     $('k_lh').textContent=λH.toFixed(3);
     $('k_la').textContent=λA.toFixed(3);
-
-    // Si reforzado, capear extremos leves
-    if(reinforce){
-      const cap = (x, lo, hi)=> Math.min(hi, Math.max(lo, x));
-      const tot = λH+λA;
-      λH = cap(λH, 0.2, 3.5);
-      λA = cap(λA, 0.2, 3.5);
-      const newTot = λH+λA;
-      // Reescalar para no alterar demasiado el total (10% de tolerancia)
-      const ratio = tot>0 ? cap(tot/newTot, 0.9, 1.1) : 1;
-      λH *= ratio; λA *= ratio;
-    }
 
     // FT distribution + 1X2 + O/U + BTTS
     const MAXG_FT=10;
@@ -602,11 +578,7 @@
     markGroupTop('[data-group="g_ft_btts"]');
 
     rows.sort((a,b)=>b.p-a.p);
-    // Mostrar TOP 3 FT con estrella en el #1
-    scoreFT.innerHTML = rows.slice(0,3).map((x,i)=>{
-      const star = i===0 ? ' ⭐' : '';
-      return `<tr><td><span class="pill">${x.score}${star}</span></td><td>${(x.p*100).toFixed(3)}%</td></tr>`;
-    }).join('');
+    scoreFT.innerHTML=rows.slice(0,50).map(x=>`<tr><td><span class="pill">${x.score}</span></td><td>${(x.p*100).toFixed(3)}%</td></tr>`).join('');
 
     // HT
     const λH_HT = λH * factorHT * ( (clamp(Number(haHTInput.value)||1,0.5,1.6)) / HA );
@@ -633,16 +605,9 @@
     // Córners
     const attC_H = h.cfpm/Math.max(muC,1e-9), defC_A = a.capm/Math.max(muC,1e-9);
     const attC_A = a.cfpm/Math.max(muC,1e-9), defC_H = h.capm/Math.max(muC,1e-9);
-    let λC_H = attC_H * defC_A * muC * HA_COR;
-    let λC_A = attC_A * defC_H * muC;
-    let λC_T = λC_H + λC_A;
-    if(reinforce){
-      // suavizar extremos totales de córners
-      const capT = (x)=> Math.min(16, Math.max(4, x));
-      λC_T = capT(λC_T);
-      const ratio = (λC_H+λC_A)>0 ? λC_T/(λC_H+λC_A) : 1;
-      λC_H*=ratio; λC_A*=ratio;
-    }
+    const λC_H = attC_H * defC_A * muC * HA_COR;
+    const λC_A = attC_A * defC_H * muC;
+    const λC_T = λC_H + λC_A;
     $('c_mu').textContent=muC.toFixed(3);
     $('c_lh').textContent=λC_H.toFixed(3);
     $('c_la').textContent=λC_A.toFixed(3);
@@ -657,9 +622,9 @@
     // Tarjetas (Amarillas)
     const attY_H = h.ypm/Math.max(muY,1e-9), defY_A = a.yapm/Math.max(muY,1e-9);
     const attY_A = a.ypm/Math.max(muY,1e-9), defY_H = h.yapm/Math.max(muY,1e-9);
-    let λY_H = attY_H * defY_A * muY * HA_CAR;
-    let λY_A = attY_A * defY_H * muY;
-    let λY_T = λY_H + λY_A;
+    const λY_H = attY_H * defY_A * muY * HA_CAR;
+    const λY_A = attY_A * defY_H * muY;
+    const λY_T = λY_H + λY_A;
     $('y_mu').textContent=muY.toFixed(3);
     $('y_lh').textContent=λY_H.toFixed(3);
     $('y_la').textContent=λY_A.toFixed(3);
@@ -672,9 +637,9 @@
     // Tarjetas (Rojas)
     const attR_H = h.rpm/Math.max(muR,1e-9), defR_A = a.rapm/Math.max(muR,1e-9);
     const attR_A = a.rpm/Math.max(muR,1e-9), defR_H = h.rapm/Math.max(muR,1e-9);
-    let λR_H = attR_H * defR_A * muR * HA_CAR;
-    let λR_A = attR_A * defR_H * muR;
-    let λR_T = λR_H + λR_A;
+    const λR_H = attR_H * defR_A * muR * HA_CAR;
+    const λR_A = attR_A * defR_H * muR;
+    const λR_T = λR_H + λR_A;
     $('r_mu').textContent=muR.toFixed(3);
     $('r_lh').textContent=λR_H.toFixed(3);
     $('r_la').textContent=λR_A.toFixed(3);
@@ -688,16 +653,9 @@
     // Disparos a puerta (SoT)
     const attSOT_H = h.sotpm/Math.max(muSOT,1e-9), defSOT_A = a.sota/Math.max(muSOT,1e-9);
     const attSOT_A = a.sotpm/Math.max(muSOT,1e-9), defSOT_H = h.sota/Math.max(muSOT,1e-9);
-    let λSOT_H = attSOT_H * defSOT_A * muSOT * HA;
-    let λSOT_A = attSOT_A * defSOT_H * muSOT;
-    let λSOT_T = λSOT_H + λSOT_A;
-    if(reinforce){
-      // evitar totales irrealistas
-      const capT = (x)=> Math.min(20, Math.max(4, x));
-      const targetT = capT(λSOT_T);
-      const ratio = λSOT_T>0 ? targetT/λSOT_T : 1;
-      λSOT_H*=ratio; λSOT_A*=ratio; λSOT_T=targetT;
-    }
+    const λSOT_H = attSOT_H * defSOT_A * muSOT * HA;
+    const λSOT_A = attSOT_A * defSOT_H * muSOT;
+    const λSOT_T = λSOT_H + λSOT_A;
     $('sot_mu').textContent=muSOT.toFixed(3);
     $('sot_lh').textContent=λSOT_H.toFixed(3);
     $('sot_la').textContent=λSOT_A.toFixed(3);
@@ -712,15 +670,9 @@
     // Disparos totales (Shots)
     const attSH_H = h.shpm/Math.max(muSH,1e-9), defSH_A = a.sha/Math.max(muSH,1e-9);
     const attSH_A = a.shpm/Math.max(muSH,1e-9), defSH_H = h.sha/Math.max(muSH,1e-9);
-    let λSH_H = attSH_H * defSH_A * muSH * HA;
-    let λSH_A = attSH_A * defSH_H * muSH;
-    let λSH_T = λSH_H + λSH_A;
-    if(reinforce){
-      const capT = (x)=> Math.min(40, Math.max(10, x));
-      const targetT = capT(λSH_T);
-      const ratio = λSH_T>0 ? targetT/λSH_T : 1;
-      λSH_H*=ratio; λSH_A*=ratio; λSH_T=targetT;
-    }
+    const λSH_H = attSH_H * defSH_A * muSH * HA;
+    const λSH_A = attSH_A * defSH_H * muSH;
+    const λSH_T = λSH_H + λSH_A;
     $('sh_mu').textContent=muSH.toFixed(3);
     $('sh_lh').textContent=λSH_H.toFixed(3);
     $('sh_la').textContent=λSH_A.toFixed(3);
@@ -731,33 +683,43 @@
     setProb('sh_o205', sh_o205); setProb('sh_u205', sh_u205); markGroupTop('[data-group="g_sh_205"]');
     setProb('sh_o225', sh_o225); setProb('sh_u225', sh_u225); markGroupTop('[data-group="g_sh_225"]');
     setProb('sh_o245', sh_o245); setProb('sh_u245', sh_u245); markGroupTop('[data-group="g_sh_245"]');
-
-    // Marcas visuales y status
-    toggleReinforcedMarks(reinforce);
-    if(reinforce){
-      status.textContent = 'Pronósticos reforzados con IA (suavizado bayesiano activado).';
-    }else{
-      status.textContent = 'Cálculo Poisson puro completado.';
-    }
   }
 
-  // Eventos
-  btnCalc.addEventListener('click', ()=>compute(false));
-  btnAI.addEventListener('click', ()=>compute(true));
+  // ------- Eventos -------
+  btnCalc.addEventListener('click', compute);
 
   document.getElementById('file').addEventListener('change', async (e)=>{
     const f=e.target.files?.[0]; if(!f) return;
+    // reset UI
+    status.textContent='Cargando…';
+    leagueSel.disabled = true; homeSel.disabled = true; awaySel.disabled = true; btnCalc.disabled = true;
+    leagueSel.innerHTML=''; homeSel.innerHTML=''; awaySel.innerHTML='';
+
     try{
       const text=await f.text();
-      const arr=parsePotentialJSON(text);
+      const arr=parsePotential(text);
       if(!arr.length) throw new Error("El archivo está vacío.");
+
       buildFromArray(arr);
+
+      const haveLeagues = Object.keys(teams).length>0;
+      if(!haveLeagues) throw new Error("No se detectaron ligas/equipos en el archivo.");
+
       fillSelectors(true);
-      status && (status.textContent='Datos cargados ✔ Elige (o usa los preseleccionados) y pulsa Calcular o IA Asistida.');
+
+      // si hay al menos una liga, habilitar selector
+      leagueSel.disabled = false;
+
+      status.textContent='Datos cargados ✔ Selecciona liga y equipos, luego pulsa Calcular.';
+      // habilitar si ya hay equipos cargados para la liga por defecto
+      const lig = leagueSel.value;
+      const enable = lig && teams[lig] && Object.keys(teams[lig]).length>0;
+      homeSel.disabled = !enable; awaySel.disabled = !enable; btnCalc.disabled = !enable;
     }catch(err){
-      leagueSel.disabled=true; homeSel.disabled=true; awaySel.disabled=true; btnCalc.disabled=true; btnAI.disabled=true;
+      teams={};
+      leagueSel.disabled=true; homeSel.disabled=true; awaySel.disabled=true; btnCalc.disabled=true;
       leagueSel.innerHTML=''; homeSel.innerHTML=''; awaySel.innerHTML='';
-      status && (status.textContent=err.message||'Error al leer el JSON.');
+      status.textContent = (err && err.message) ? err.message : 'Error al leer el archivo.';
     }
   });
 })();
