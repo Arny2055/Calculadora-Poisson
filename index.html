@@ -50,8 +50,6 @@
   .badge-hot{ position:absolute; top:8px; right:8px; font-size:11px; font-weight:700; letter-spacing:.2px;
     background:linear-gradient(180deg,#54e3b2,#3bc48f); color:#0e1a14; border:0; border-radius:999px; padding:4px 8px; display:none; }
   .kpi.hot .badge-hot{ display:inline-block; }
-
-  /* Ocultar métricas (μ, λ) pero mantener cálculo */
   .metrics{ display:none; }
 </style>
 </head>
@@ -60,7 +58,7 @@
 <div class="wrap grid">
   <div class="card">
     <h2>1) Cargar JSON & elegir</h2>
-    <label>JSON (array/objeto/NDJSON) o CSV (encabezados). Reconoce: <code>Match + Result FT</code>, <code>HomeTeam/AwayTeam + FTHG/FTAG</code>, agregados por equipo (<code>Team, GF, GA, Matches</code>) y, si existen, <i>OnGoal/Total Shots</i>, Córners, Amarillas, Rojas.</label>
+    <label>JSON (array/objeto/NDJSON). Reconoce: <code>Match + Result FT</code>, <code>HomeTeam/AwayTeam + FTHG/FTAG</code>, agregados por equipo (<code>Team, GF, GA, Matches</code>) y, si existen, <i>OnGoal/Total Shots</i>, Córners, Amarillas, Rojas.</label>
     <input id="file" type="file" accept=".json,.txt,.ndjson,.csv" />
     <div class="row">
       <div><label> Liga </label><select id="league" disabled></select></div>
@@ -80,11 +78,12 @@
     </div>
     <div style="margin-top:12px">
       <button id="calc" class="btn accent" disabled>Calcular</button>
+      <button id="assist" class="btn" disabled style="margin-left:8px">IA asistida (reforzar JSON)</button>
       <span id="status" class="muted" style="margin-left:10px"></span>
     </div>
   </div>
 
-  <!-- Métricas ocultas -->
+  <!-- 2) Métricas FT — Goles (OCULTA) -->
   <div class="card metrics" id="card_metrics_goals">
     <h2>2) Métricas FT — Goles</h2>
     <div class="kpis">
@@ -253,7 +252,7 @@
   </div>
 
   <div class="card">
-    <h2>11) Marcadores FT (0–10)</h2>
+    <h2>11) Marcadores FT (Top 3)</h2>
     <div style="overflow:auto; max-height:280px">
       <table id="scoretab_ft"><thead><tr><th>Marcador</th><th>Prob.</th></tr></thead><tbody></tbody></table>
     </div>
@@ -275,11 +274,15 @@
   const leagueSel=$('league'), homeSel=$('home'), awaySel=$('away');
   const btnCalc=$('calc'), haInput=$('ha'), htFactorInput=$('htFactor'), haHTInput=$('ha_ht');
   const haCornersInput=$('ha_corners'), haCardsInput=$('ha_cards'), status=$('status');
+  const assistBtn=$('assist');
   const scoreFT = document.querySelector('#scoretab_ft tbody');
   const scoreHT = document.querySelector('#scoretab_ht tbody');
 
-  let teams = {}; // teams[league][team] = {aggregados}
+  // Guardamos el último dataset crudo para poder reforzarlo
+  let rawRows = [];
 
+  // teams[league][team] = {...}
+  let teams = {};
   function ensureTeam(league, team){
     teams[league]=teams[league]||{};
     teams[league][team]=teams[league][team]||{
@@ -290,53 +293,22 @@
     return teams[league][team];
   }
 
-  // ------- Parsers -------
-  function stripBOM(s){ return s.charCodeAt(0)===0xFEFF ? s.slice(1) : s; }
-
-  function tryParseJSONorNDJSON(text){
-    const t=stripBOM(text);
-    try{ const j=JSON.parse(t); return Array.isArray(j)? j:[j]; }
+  // ---------- Parseo ----------
+  function parsePotentialJSON(text){
+    try{ const j=JSON.parse(text); return Array.isArray(j)? j:[j]; }
     catch(e){
-      const lines=t.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
+      const lines=text.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
       const arr=[]; for(const ln of lines){ try{arr.push(JSON.parse(ln));}catch(_){}} 
-      return arr.length? arr : null;
+      if(arr.length) return arr;
+      throw new Error("No se pudo leer el JSON. Verifica formato (array/objeto/NDJSON).");
     }
   }
-
-  function parseCSV(text){
-    // Soporta separador , o ; (detecta por la línea de cabecera)
-    const raw = stripBOM(text).replace(/\r/g,'');
-    const firstLine = raw.split('\n')[0] || '';
-    const sep = (firstLine.match(/;/g)||[]).length > (firstLine.match(/,/g)||[]).length ? ';' : ',';
-    const lines = raw.split('\n').filter(x=>x.trim().length>0);
-    if(lines.length<2) return [];
-    const headers = lines[0].split(sep).map(h=>h.trim());
-    const rows = [];
-    for(let i=1;i<lines.length;i++){
-      const cols = lines[i].split(sep).map(c=>c.trim());
-      const o={};
-      headers.forEach((h,idx)=>{ o[h]=cols[idx]??''; });
-      rows.push(o);
-    }
-    return rows;
-  }
-
-  function parsePotential(text){
-    // intenta JSON / NDJSON; si falla, prueba CSV
-    const js = tryParseJSONorNDJSON(text);
-    if(js && js.length) return js;
-    // CSV
-    const csv = parseCSV(text);
-    if(csv && csv.length) return csv;
-    throw new Error("No se pudo leer el archivo. Usa JSON (array/objeto/NDJSON) o CSV con encabezados.");
-  }
-
   const num = x => {
     if (x==null || x==='') return 0;
     const s = String(x).replace(/,/g,'.').replace(/[^\d.\-+eE]/g,'');
     const n = Number(s); return Number.isFinite(n)? n:0;
   };
-
+  // Claves
   const keyMap = {
     league:/^(league|liga)$/i, team:/^(team|equipo|name|nombre)$/i,
     matches:/^(matches|mp|pj|games|partidos)$/i,
@@ -388,8 +360,12 @@
       const kLeague=findKey(row,keyMap.league);
       const league= kLeague? String(row[kLeague]).trim() :"—";
 
-      const kTeam=findKey(row,keyMap.team), kGF=findKey(row,keyMap.gf), kGA=findKey(row,keyMap.ga), kM=findKey(row,keyMap.matches);
-      const kHT=findKey(row,keyMap.homeTeam), kAT=findKey(row,keyMap.awayTeam), kFTHG=findKey(row,keyMap.fthg), kFTAG=findKey(row,keyMap.ftag);
+      const kTeam=findKey(row,keyMap.team),
+            kGF=findKey(row,keyMap.gf),
+            kGA=findKey(row,keyMap.ga),
+            kM =findKey(row,keyMap.matches);
+      const kHT=findKey(row,keyMap.homeTeam), kAT=findKey(row,keyMap.awayTeam),
+            kFTHG=findKey(row,keyMap.fthg),    kFTAG=findKey(row,keyMap.ftag);
       const kMatch=findKey(row,keyMap.matchStr), kResFT=findKey(row,keyMap.resultFT);
       const kHC=findKey(row,keyMap.hc), kAC=findKey(row,keyMap.ac);
       const kHY=findKey(row,keyMap.hy), kAY=findKey(row,keyMap.ay);
@@ -433,39 +409,24 @@
     }
   }
 
-  // ------- UI helpers -------
+  // ---------- UI ----------
   function escapeHtml(s){ return String(s).replace(/[&<>"']/g, m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m])); }
-
   function fillSelectors(autoselect=true){
     const leagues=Object.keys(teams).sort((a,b)=>a.localeCompare(b));
     leagueSel.innerHTML='<option value="">— Selecciona liga —</option>'+leagues.map(l=>`<option>${escapeHtml(l)}</option>`).join('');
-    leagueSel.disabled = leagues.length===0 ? true : false;
-
+    leagueSel.disabled = leagues.length===0;
     function setTeams(lig){
       const list=lig&&teams[lig]? Object.keys(teams[lig]).sort((a,b)=>a.localeCompare(b)):[];
       const opts='<option value="">— Equipo —</option>'+list.map(t=>`<option>${escapeHtml(t)}</option>`).join('');
       homeSel.innerHTML=opts; awaySel.innerHTML=opts;
-      const enable = list.length>0;
-      homeSel.disabled=!enable; awaySel.disabled=!enable; btnCalc.disabled=!enable;
-      if(autoselect && enable && list.length>=2){ homeSel.value=list[0]; awaySel.value=list[1]; }
+      homeSel.disabled=!list.length; awaySel.disabled=!list.length; btnCalc.disabled=!list.length;
+      if(autoselect && list.length>=2){ homeSel.value=list[0]; awaySel.value=list[1]; }
     }
-
-    // set default
-    if(leagues.length>0){
-      leagueSel.value = leagues[0];
-      setTeams(leagues[0]);
-    }else{
-      setTeams("");
-    }
-
-    // asegura listener (solo una vez)
-    if(!leagueSel._hasChangeListener){
-      leagueSel.addEventListener('change',()=>setTeams(leagueSel.value));
-      leagueSel._hasChangeListener = true;
-    }
+    setTeams(leagues[0]||"");
+    leagueSel.addEventListener('change',()=>setTeams(leagueSel.value));
   }
 
-  // ------- Poisson -------
+  // ---------- Poisson util ----------
   const factMemo=[1]; function fact(n){ for(let i=factMemo.length;i<=n;i++) factMemo[i]=factMemo[i-1]*i; return factMemo[n]; }
   const poisPMF=(k,λ)=> Math.exp(-λ)*Math.pow(λ,k)/fact(k);
   function poisCDF(k,λ){ let s=0; for(let i=0;i<=k;i++) s+=poisPMF(i,λ); return s; }
@@ -481,14 +442,67 @@
     if(!items.length) return; items.forEach(x=>x.k.classList.remove('hot')); items.sort((a,b)=>b.p-a.p); items[0].k.classList.add('hot');
   }
 
-  // ------- Compute -------
+  // ---------- IA asistida: reforzar JSON ----------
+  function normalizeTeamName(s){
+    if(!s) return s;
+    return String(s).replace(/\s+/g,' ').trim();
+  }
+  function reinforceRows(rows){
+    let fixed = 0, added = 0;
+    const out = rows.map(r=>{
+      if(!r || typeof r!=='object') return r;
+      const o = {...r};
+
+      // Detectar y convertir "Match" + "Result FT" -> HomeTeam/AwayTeam + FTHG/FTAG
+      const kMatch = findKey(o, keyMap.matchStr);
+      const kRes   = findKey(o, keyMap.resultFT);
+      if(kMatch && kRes){
+        const [ht,at] = parseMatchTeams(o[kMatch]);
+        const [gh,ga] = parseScoreFT(o[kRes]);
+        if(ht && at){ o.HomeTeam = normalizeTeamName(ht); o.AwayTeam = normalizeTeamName(at); fixed++; }
+        if(Number.isFinite(gh) && Number.isFinite(ga)){ o.FTHG = gh; o.FTAG = ga; fixed++; }
+      }
+
+      // Normalizar nombres de equipo (si existen)
+      const kHT=findKey(o,keyMap.homeTeam), kAT=findKey(o,keyMap.awayTeam);
+      if(kHT){ o[kHT] = normalizeTeamName(o[kHT]); }
+      if(kAT){ o[kAT] = normalizeTeamName(o[kAT]); }
+
+      // Forzar numéricos en campos típicos si existen
+      const numericKeys = [
+        keyMap.fthg, keyMap.ftag, keyMap.gf, keyMap.ga, keyMap.matches,
+        keyMap.hc, keyMap.ac, keyMap.hy, keyMap.ay, keyMap.hr, keyMap.ar,
+        keyMap.hSOT, keyMap.aSOT, keyMap.hSH, keyMap.aSH
+      ];
+      for(const rx of numericKeys){
+        const k = findKey(o, rx);
+        if(k && o[k]!=null){ const before=o[k]; o[k]=num(o[k]); if(o[k]!==before) fixed++; }
+      }
+
+      // Si falta "league", poner la seleccionada (si hay) o "—"
+      const kLeague=findKey(o,keyMap.league);
+      if(!kLeague){
+        const ligVal = leagueSel.value || '—';
+        o.League = ligVal; added++;
+      }
+
+      return o;
+    });
+    return {rows:out, fixed, added};
+  }
+
+  function rebuildFromRaw(rows){
+    buildFromArray(rows);
+    fillSelectors(true);
+  }
+
+  // ---------- Compute principal ----------
   function compute(){
     status && (status.textContent='');
 
     const lig=leagueSel.value, home=homeSel.value, away=awaySel.value;
     const HA=clamp(Number(haInput.value)||1.00,0.5,1.6);
     const factorHT=clamp(Number(htFactorInput.value)||0.45,0.2,0.8);
-    const HA_HT=clamp(Number(haHTInput.value)||1.00,0.5,1.6);
     const HA_COR=clamp(Number(haCornersInput.value)||1.05,0.8,1.4);
     const HA_CAR=clamp(Number(haCardsInput.value)||1.00,0.8,1.4);
 
@@ -508,7 +522,7 @@
     const muSOT = sumM>0 ? (sumSOT/Math.max(1,sumM)) : 4.2;
     const muSH  = sumM>0 ? (sumSH /Math.max(1,sumM)) : 12.0;
 
-    // Promedios por equipo (fallback a medias)
+    // Promedios por equipo
     const h = {
       gfpm: tH.matches? tH.gf/tH.matches : mu,
       gapm: tH.matches? tH.ga/tH.matches : mu,
@@ -544,7 +558,7 @@
     const λH = attH*defA*mu*HA;
     const λA = attA*defH*mu;
 
-    // KPIs (ocultas pero activas)
+    // KPIs
     $('k_mu').textContent=mu.toFixed(3);
     $('k_att_h').textContent=attH.toFixed(3);
     $('k_def_h').textContent=defH.toFixed(3);
@@ -578,7 +592,11 @@
     markGroupTop('[data-group="g_ft_btts"]');
 
     rows.sort((a,b)=>b.p-a.p);
-    scoreFT.innerHTML=rows.slice(0,50).map(x=>`<tr><td><span class="pill">${x.score}</span></td><td>${(x.p*100).toFixed(3)}%</td></tr>`).join('');
+    const top3 = rows.slice(0,3);
+    scoreFT.innerHTML = top3.map((x,i)=>{
+      const star = i===0 ? ' ⭐' : '';
+      return `<tr><td><span class="pill">${x.score}${star}</span></td><td>${(x.p*100).toFixed(3)}%</td></tr>`;
+    }).join('');
 
     // HT
     const λH_HT = λH * factorHT * ( (clamp(Number(haHTInput.value)||1,0.5,1.6)) / HA );
@@ -685,41 +703,34 @@
     setProb('sh_o245', sh_o245); setProb('sh_u245', sh_u245); markGroupTop('[data-group="g_sh_245"]');
   }
 
-  // ------- Eventos -------
+  // Eventos
   btnCalc.addEventListener('click', compute);
+
+  assistBtn.addEventListener('click', ()=>{
+    if(!rawRows.length){ status.textContent='Primero carga un archivo.'; return; }
+    const {rows, fixed, added} = reinforceRows(rawRows);
+    buildFromArray(rows);
+    fillSelectors(true);
+    status.textContent = `JSON reforzado ✔ (${fixed} campos normalizados, ${added} ligas completadas). Vuelve a elegir equipos si es necesario y pulsa Calcular.`;
+  });
 
   document.getElementById('file').addEventListener('change', async (e)=>{
     const f=e.target.files?.[0]; if(!f) return;
-    // reset UI
-    status.textContent='Cargando…';
-    leagueSel.disabled = true; homeSel.disabled = true; awaySel.disabled = true; btnCalc.disabled = true;
-    leagueSel.innerHTML=''; homeSel.innerHTML=''; awaySel.innerHTML='';
-
     try{
       const text=await f.text();
-      const arr=parsePotential(text);
+      const arr=parsePotentialJSON(text);
       if(!arr.length) throw new Error("El archivo está vacío.");
-
+      rawRows = arr.slice(); // guardamos
       buildFromArray(arr);
-
-      const haveLeagues = Object.keys(teams).length>0;
-      if(!haveLeagues) throw new Error("No se detectaron ligas/equipos en el archivo.");
-
       fillSelectors(true);
-
-      // si hay al menos una liga, habilitar selector
-      leagueSel.disabled = false;
-
-      status.textContent='Datos cargados ✔ Selecciona liga y equipos, luego pulsa Calcular.';
-      // habilitar si ya hay equipos cargados para la liga por defecto
-      const lig = leagueSel.value;
-      const enable = lig && teams[lig] && Object.keys(teams[lig]).length>0;
-      homeSel.disabled = !enable; awaySel.disabled = !enable; btnCalc.disabled = !enable;
+      status && (status.textContent='Datos cargados ✔ Elige (o usa los preseleccionados) y pulsa Calcular. Puedes usar “IA asistida” para reforzar el JSON.');
+      btnCalc.disabled=false;
+      assistBtn.disabled=false;
     }catch(err){
-      teams={};
-      leagueSel.disabled=true; homeSel.disabled=true; awaySel.disabled=true; btnCalc.disabled=true;
+      rawRows = [];
+      leagueSel.disabled=true; homeSel.disabled=true; awaySel.disabled=true; btnCalc.disabled=true; assistBtn.disabled=true;
       leagueSel.innerHTML=''; homeSel.innerHTML=''; awaySel.innerHTML='';
-      status.textContent = (err && err.message) ? err.message : 'Error al leer el archivo.';
+      status && (status.textContent=err.message||'Error al leer el JSON.');
     }
   });
 })();
