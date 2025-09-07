@@ -54,8 +54,11 @@
   /* Ocultar métricas (μ, λ) pero mantener cálculo */
   .metrics{ display:none; }
 
-  /* Indicador para el marcador más probable */
   .best{ border-color: rgba(122,162,255,0.9); box-shadow: 0 0 0 1px rgba(122,162,255,0.9), 0 0 0 8px rgba(122,162,255,0.12); }
+  .live-row{display:grid; gap:10px}
+  @media(min-width:760px){ .live-row{grid-template-columns: 1fr 1fr 1fr 1fr 1fr} }
+  .switch{display:flex; align-items:center; gap:8px; user-select:none}
+  .switch input{width:auto}
 </style>
 </head>
 <body>
@@ -73,14 +76,16 @@
       <div><label> Local </label><select id="home" disabled></select></div>
       <div><label> Visitante </label><select id="away" disabled></select></div>
     </div>
-    <div class="row">
-      <div><label> Factor HT (goles 1T / partido) </label><input id="htFactor" type="number" step="0.01" min="0.2" max="0.8" value="0.45" /></div>
-      <div><label> Ventaja local HT (HA_HT) </label><input id="ha_ht" type="number" step="0.01" min="0.5" max="1.6" value="1.05" /></div>
+
+    <!-- NUEVO: Modo en vivo -->
+    <div class="live-row" style="margin-top:10px">
+      <label class="switch"><input type="checkbox" id="live_on" disabled /> Modo en vivo</label>
+      <div><label> Minuto </label><input id="live_min" type="number" step="1" min="0" max="120" value="0" disabled /></div>
+      <div><label> Goles L (actual) </label><input id="live_hg" type="number" step="1" min="0" max="20" value="0" disabled /></div>
+      <div><label> Goles V (actual) </label><input id="live_ag" type="number" step="1" min="0" max="20" value="0" disabled /></div>
+      <div style="align-self:end"><button id="reset_live" class="btn" disabled>Reiniciar en vivo</button></div>
     </div>
-    <div class="row">
-      <div><label> HA Córners (solo local) </label><input id="ha_corners" type="number" step="0.01" min="0.8" max="1.4" value="1.05" /></div>
-      <div><label> HA Tarjetas (solo local) </label><input id="ha_cards" type="number" step="0.01" min="0.8" max="1.4" value="1.00" /></div>
-    </div>
+
     <div style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap">
       <button id="calc" class="btn accent" disabled>Calcular</button>
       <button id="ai" class="btn" disabled>IA asistida (refuerzo)</button>
@@ -283,7 +288,11 @@
   const scoreFT = document.querySelector('#scoretab_ft tbody');
   const scoreHT = document.querySelector('#scoretab_ht tbody');
 
-  let teams = {}; // teams[league][team] = {aggregados}
+  // Live controls
+  const liveOn=$('live_on'), liveMin=$('live_min'), liveHG=$('live_hg'), liveAG=$('live_ag'), btnResetLive=$('reset_live');
+  let lastUseAI=false;
+
+  let teams = {}; // teams[league][team] = agregados
 
   function ensureTeam(league, team){
     teams[league]=teams[league]||{};
@@ -350,16 +359,16 @@
     ftag:/^(ftag|away\s*(goals?|score)|goles\s*visitante|gf\s*visitante)$/i,
     matchStr:/^(match|partido)$/i,
     resultFT:/^(result\s*ft|resultado\s*ft|ft\s*result|final\s*score|resultado)$/i,
-    hc:/^(home\s*corners(?:\s*at\s*ft)?|corners?\s*local|saques\s*de\s*esquina\s*local)$/i,
-    ac:/^(away\s*corners(?:\s*at\s*ft)?|corners?\s*visitante|saques\s*de\s*esquina\s*visitante)$/i,
-    hy:/^(home\s*yellow(?:\s*cards?)?(?:\s*at\s*ft)?|amarillas\s*local|tarjetas\s*amarillas\s*local)$/i,
-    ay:/^(away\s*yellow(?:\s*cards?)?(?:\s*at\s*ft)?|amarillas\s*visitante|tarjetas\s*amarillas\s*visitante)$/i,
-    hr:/^(home\s*red(?:\s*cards?)?(?:\s*at\s*ft)?|rojas\s*local|tarjetas\s*rojas\s*local)$/i,
-    ar:/^(away\s*red(?:\s*cards?)?(?:\s*at\s*ft)?|rojas\s*visitante|tarjetas\s*rojas\s*visitante)$/i,
-    hSOT:/^(home\s*(on\s*goal|on\-?target)\s*shots(?:\s*at\s*ft)?|tiros\s*a\s*puerta?\s*local|disparos\s*a\s*puerta?\s*local)$/i,
-    aSOT:/^(away\s*(on\s*goal|on\-?target)\s*shots(?:\s*at\s*ft)?|tiros\s*a\s*puerta?\s*visitante|disparos\s*a\s*puerta?\s*visitante)$/i,
-    hSH:/^(home\s*total\s*shots(?:\s*at\s*ft)?|total\s*shots\s*home|tiros\s*totales?\s*local|disparos\s*totales?\s*local)$/i,
-    aSH:/^(away\s*total\s*shots(?:\s*at\s*ft)?|total\s*shots\s*away|tiros\s*totales?\s*visitante|disparos\s*totales?\s*visitante)$/i
+    hc:/^(home\s*corners|corners?\s*local)/i,
+    ac:/^(away\s*corners|corners?\s*visitante)/i,
+    hy:/^(home\s*yellow|amarillas\s*local)/i,
+    ay:/^(away\s*yellow|amarillas\s*visitante)/i,
+    hr:/^(home\s*red|rojas\s*local)/i,
+    ar:/^(away\s*red|rojas\s*visitante)/i,
+    hSOT:/^(home\s*(on\s*goal|on\-?target)\s*shots|tiros\s*a\s*puerta?\s*local|disparos\s*a\s*puerta?\s*local)/i,
+    aSOT:/^(away\s*(on\s*goal|on\-?target)\s*shots|tiros\s*a\s*puerta?\s*visitante|disparos\s*a\s*puerta?\s*visitante)/i,
+    hSH:/^(home\s*total\s*shots|tiros\s*totales?\s*local|disparos\s*totales?\s*local)/i,
+    aSH:/^(away\s*total\s*shots|tiros\s*totales?\s*visitante|disparos\s*totales?\s*visitante)/i
   };
   function findKey(o, rx){ for(const k of Object.keys(o)){ if(rx.test(k)) return k; } return null; }
 
@@ -446,6 +455,10 @@
       homeSel.innerHTML=opts; awaySel.innerHTML=opts;
       const enable = list.length>0;
       homeSel.disabled=!enable; awaySel.disabled=!enable; btnCalc.disabled=!enable; btnAI.disabled=!enable;
+
+      // live controls habilitados junto con equipos
+      liveOn.disabled=!enable; liveMin.disabled=!enable; liveHG.disabled=!enable; liveAG.disabled=!enable; btnResetLive.disabled=!enable;
+
       if(autoselect && enable && list.length>=2){ homeSel.value=list[0]; awaySel.value=list[1]; }
     }
 
@@ -467,6 +480,7 @@
   const poisPMF=(k,λ)=> Math.exp(-λ)*Math.pow(λ,k)/fact(k);
   function poisCDF(k,λ){ let s=0; for(let i=0;i<=k;i++) s+=poisPMF(i,λ); return s; }
   const clamp=(x,min,max)=> Math.max(min,Math.min(max,x));
+
   function setProb(id, p){
     const el = $(id); if(!el) return;
     el.textContent = (p*100).toFixed(1)+'%';
@@ -478,9 +492,20 @@
     if(!items.length) return; items.forEach(x=>x.k.classList.remove('hot')); items.sort((a,b)=>b.p-a.p); items[0].k.classList.add('hot');
   }
 
-  // ------- Compute (con o sin IA) -------
+  // Fracción de tiempo transcurrido con perfil 45/55
+  function fracElapsed(minute){
+    const m = clamp(Number(minute)||0, 0, 120);
+    if(m<=45) return 0.45*(m/45);
+    if(m<=90) return 0.45 + 0.55*((m-45)/45);
+    // prórroga: saturamos en 1
+    return 1;
+  }
+
+  // ------- Compute (con o sin IA y con o sin LIVE) -------
   function compute(useAI=false){
-    status && (status.textContent= useAI ? 'Calculando con IA asistida…' : 'Calculando…');
+    lastUseAI = useAI;
+    const live = !!liveOn.checked;
+    status && (status.textContent= useAI ? (live?'IA asistida + EN VIVO…':'IA asistida…') : (live?'Calculando EN VIVO…':'Calculando…'));
 
     const lig=leagueSel.value, home=homeSel.value, away=awaySel.value;
     const HA=clamp(Number(haInput.value)||1.00,0.5,1.6);
@@ -541,15 +566,14 @@
     let λH = attH*defA*mu*HA;
     let λA = attA*defH*mu;
 
-    // ==== IA asistida: refuerzo a λ usando señales auxiliares ====
+    // IA asistida (opcional)
     if(useAI){
-      // ratios ataque propio vs media liga
       const r_h_sot = h.sotpm/Math.max(muSOT,1e-9);
       const r_h_sh  = h.shpm /Math.max(muSH ,1e-9);
       const r_h_cor = h.cfpm /Math.max(muC  ,1e-9);
-      const r_h_y   = h.ypm  /Math.max(muY  ,1e-9); // penaliza si >1
+      const r_h_y   = h.ypm  /Math.max(muY  ,1e-9);
 
-      const r_a_sot_allow = a.sota/Math.max(muSOT,1e-9); // lo que concede el rival
+      const r_a_sot_allow = a.sota/Math.max(muSOT,1e-9);
       const r_a_sh_allow  = a.sha /Math.max(muSH ,1e-9);
       const r_a_cor_allow = a.capm/Math.max(muC  ,1e-9);
 
@@ -562,13 +586,10 @@
       const r_h_sh_allow  = h.sha /Math.max(muSH ,1e-9);
       const r_h_cor_allow = h.capm/Math.max(muC  ,1e-9);
 
-      // pesos (suaves, para no romper Poisson): suma típica |adj| <= 0.25
       const wsot=0.25, wsh=0.10, wcor=0.08, wcard=0.06;
-      // home: ataque propio + concesiones del rival - tarjetas propias
       let adjH = wsot*(r_h_sot-1) + wsh*(r_h_sh-1) + wcor*(r_h_cor-1)
                + wsot*(r_a_sot_allow-1) + wsh*(r_a_sh_allow-1) + wcor*(r_a_cor_allow-1)
                - wcard*(r_h_y-1);
-      // away simétrico
       let adjA = wsot*(r_a_sot-1) + wsh*(r_a_sh-1) + wcor*(r_a_cor-1)
                + wsot*(r_h_sot_allow-1) + wsh*(r_h_sh_allow-1) + wcor*(r_h_cor_allow-1)
                - wcard*(r_a_y-1);
@@ -579,7 +600,23 @@
       λA = λA * multA;
     }
 
-    // KPIs (ocultas pero activas)
+    // ===== EN VIVO: reescalar λ por tiempo restante y desplazar por goles actuales =====
+    let baseHG=0, baseAG=0;
+    if(live){
+      const m = clamp(Number(liveMin.value)||0,0,120);
+      baseHG = clamp(Number(liveHG.value)||0,0,20);
+      baseAG = clamp(Number(liveAG.value)||0,0,20);
+
+      const fElapsed = fracElapsed(m);   // 0..1
+      const rem = clamp(1 - fElapsed, 0, 1); // fracción restante
+      // Ajuste suave: ligero “boost” en los últimos minutos (más goles al final)
+      const endgameBoost = (m>=75 && m<=90) ? 1.08 : 1.00;
+
+      λH = λH * rem * endgameBoost;
+      λA = λA * rem * endgameBoost;
+    }
+
+    // KPIs (ocultas)
     $('k_mu').textContent=mu.toFixed(3);
     $('k_att_h').textContent=(h.gfpm/Math.max(mu,1e-9)).toFixed(3);
     $('k_def_h').textContent=(h.gapm/Math.max(mu,1e-9)).toFixed(3);
@@ -588,37 +625,49 @@
     $('k_lh').textContent=λH.toFixed(3);
     $('k_la').textContent=λA.toFixed(3);
 
-    // FT distribution + 1X2 + O/U + BTTS
+    // FT distribution (con desplazamiento si live)
     const MAXG_FT=10;
     const pH = Array.from({length:MAXG_FT+1},(_,k)=>poisPMF(k,λH));
     const pA = Array.from({length:MAXG_FT+1},(_,k)=>poisPMF(k,λA));
     let p1=0,px=0,p2=0,pUnder25=0; let rows=[];
     for(let hg=0; hg<=MAXG_FT; hg++){
       for(let ag=0; ag<=MAXG_FT; ag++){
+        // si es live, el marcador final será (baseHG+hg, baseAG+ag)
+        const finalHG = baseHG + hg;
+        const finalAG = baseAG + ag;
         const p=pH[hg]*pA[ag];
-        rows.push({score:`${hg}-${ag}`,p});
-        if(hg>ag) p1+=p; else if(hg===ag) px+=p; else p2+=p;
-        if(hg+ag<=2) pUnder25+=p;
+        rows.push({score:`${finalHG}-${finalAG}`,p});
+        if(finalHG>finalAG) p1+=p; else if(finalHG===finalAG) px+=p; else p2+=p;
+        if(finalHG+finalAG<=2) pUnder25+=p;
       }
     }
     const pOver25=1-pUnder25;
     setProb('ft_1', p1); setProb('ft_x', px); setProb('ft_2', p2); markGroupTop('[data-group="g_ft_1x2"]');
     setProb('m_o25', pOver25); setProb('m_u25', pUnder25); markGroupTop('[data-group="g_ft_ou25"]');
 
-    // BTTS
-    const pNoHome = pH[0], pNoAway = pA[0];
-    const pBTTS = 1 - pNoHome - pNoAway + pNoHome*pNoAway;
+    // BTTS en vivo: ya hay BTTS si ambos han anotado
+    let pBTTS;
+    if(live){
+      const haveH = baseHG>0, haveA = baseAG>0;
+      const pNoH = pH[0], pNoA = pA[0];
+      // Prob. final BTTS = 1 - P(H=0 al final) - P(A=0 al final) + P(H=0 y A=0), pero considerando lo ya marcado
+      const pHzeroFinal = haveH ? 0 : pNoH;
+      const pAzeroFinal = haveA ? 0 : pNoA;
+      pBTTS = 1 - pHzeroFinal - pAzeroFinal + (pHzeroFinal*pAzeroFinal);
+    }else{
+      const pNoHome = pH[0], pNoAway = pA[0];
+      pBTTS = 1 - pNoHome - pNoAway + pNoHome*pNoAway;
+    }
     setProb('m_btts_yes', pBTTS);
     setProb('m_btts_no', 1 - pBTTS);
     markGroupTop('[data-group="g_ft_btts"]');
 
-    // Top correct scores (mantenemos 50 como en tu versión actual)
     rows.sort((a,b)=>b.p-a.p);
     scoreFT.innerHTML=rows.slice(0,50).map((x,i)=>`<tr><td><span class="pill ${i===0?'best':''}">${x.score}${i===0?' ⭐':''}</span></td><td>${(x.p*100).toFixed(3)}%</td></tr>`).join('');
 
-    // HT
-    const λH_HT = λH * factorHT * ( (clamp(Number(haHTInput.value)||1,0.5,1.6)) / HA );
-    const λA_HT = λA * factorHT;
+    // HT (nota: en live con m>=45 ya no tiene sentido “futuro”; mantenemos base)
+    const λH_HT = (useAI? (λH/(clamp(1 - fracElapsed(live?liveMin.value:0),0.0001,1))) : (attH*defA*mu*HA)) * factorHT * ((clamp(Number(haHTInput.value)||1,0.5,1.6)) / HA);
+    const λA_HT = (useAI? (λA/(clamp(1 - fracElapsed(live?liveMin.value:0),0.0001,1))) : (attA*defH*mu)) * factorHT;
     const MAXG_HT=5;
     const pH_ht = Array.from({length:MAXG_HT+1},(_,k)=>poisPMF(k,λH_HT));
     const pA_ht = Array.from({length:MAXG_HT+1},(_,k)=>poisPMF(k,λA_HT));
@@ -642,8 +691,12 @@
     // Córners
     const attC_H = h.cfpm/Math.max(muC,1e-9), defC_A = a.capm/Math.max(muC,1e-9);
     const attC_A = a.cfpm/Math.max(muC,1e-9), defC_H = h.capm/Math.max(muC,1e-9);
-    const λC_H = attC_H * defC_A * muC * (useAI? 1 : 1) * (clamp(Number(haCornersInput.value)||1.05,0.8,1.4));
-    const λC_A = attC_A * defC_H * muC;
+    let λC_H = attC_H * defC_A * muC * (clamp(Number(haCornersInput.value)||1.05,0.8,1.4));
+    let λC_A = attC_A * defC_H * muC;
+    if(live){
+      const rem = clamp(1 - fracElapsed(liveMin.value), 0, 1);
+      λC_H *= rem; λC_A *= rem;
+    }
     const λC_T = λC_H + λC_A;
     $('c_mu').textContent=muC.toFixed(3);
     $('c_lh').textContent=λC_H.toFixed(3);
@@ -656,11 +709,22 @@
     setProb('c_o95', c_o95); setProb('c_u95', c_u95); markGroupTop('[data-group="g_c_95"]');
     setProb('c_o105',c_o105); setProb('c_u105',c_u105); markGroupTop('[data-group="g_c_105"]');
 
-    // Tarjetas (Amarillas)
+    // Tarjetas (Amarillas y Rojas) — escalar por tiempo restante en vivo
     const attY_H = h.ypm/Math.max(muY,1e-9), defY_A = a.yapm/Math.max(muY,1e-9);
     const attY_A = a.ypm/Math.max(muY,1e-9), defY_H = h.yapm/Math.max(muY,1e-9);
-    const λY_H = attY_H * defY_A * muY * (clamp(Number(haCardsInput.value)||1.00,0.8,1.4));
-    const λY_A = attY_A * defY_H * muY;
+    const attR_H = h.rpm/Math.max(muR,1e-9), defR_A = a.rapm/Math.max(muR,1e-9);
+    const attR_A = a.rpm/Math.max(muR,1e-9), defR_H = h.rapm/Math.max(muR,1e-9);
+
+    let λY_H = attY_H * defY_A * muY * (clamp(Number(haCardsInput.value)||1.00,0.8,1.4));
+    let λY_A = attY_A * defY_H * muY;
+    let λR_H = attR_H * defR_A * muR * (clamp(Number(haCardsInput.value)||1.00,0.8,1.4));
+    let λR_A = attR_A * defR_H * muR;
+
+    if(live){
+      const rem = clamp(1 - fracElapsed(liveMin.value), 0, 1);
+      λY_H *= rem; λY_A *= rem; λR_H *= rem; λR_A *= rem;
+    }
+
     const λY_T = λY_H + λY_A;
     $('y_mu').textContent=muY.toFixed(3);
     $('y_lh').textContent=λY_H.toFixed(3);
@@ -671,11 +735,6 @@
     setProb('y_o35', y_o35); setProb('y_u35', y_u35); markGroupTop('[data-group="g_y_35"]');
     setProb('y_o45', y_o45); setProb('y_u45', y_u45); markGroupTop('[data-group="g_y_45"]');
 
-    // Tarjetas (Rojas)
-    const attR_H = h.rpm/Math.max(muR,1e-9), defR_A = a.rapm/Math.max(muR,1e-9);
-    const attR_A = a.rpm/Math.max(muR,1e-9), defR_H = h.rapm/Math.max(muR,1e-9);
-    const λR_H = attR_H * defR_A * muR * (clamp(Number(haCardsInput.value)||1.00,0.8,1.4));
-    const λR_A = attR_A * defR_H * muR;
     const λR_T = λR_H + λR_A;
     $('r_mu').textContent=muR.toFixed(3);
     $('r_lh').textContent=λR_H.toFixed(3);
@@ -687,51 +746,38 @@
     setProb('r_o05', r_o05); setProb('r_u05', r_u05); markGroupTop('[data-group="g_r_05"]');
     setProb('r_o15', r_o15); setProb('r_u15', r_u15); markGroupTop('[data-group="g_r_15"]');
 
-    // Disparos a puerta (SoT) totales
-    const attSOT_H = h.sotpm/Math.max(muSOT,1e-9), defSOT_A = a.sota/Math.max(muSOT,1e-9);
-    const attSOT_A = a.sotpm/Math.max(muSOT,1e-9), defSOT_H = h.sota/Math.max(muSOT,1e-9);
-    const λSOT_H = attSOT_H * defSOT_A * muSOT * (useAI? clamp(HA,0.95,1.2): HA);
-    const λSOT_A = attSOT_A * defSOT_H * muSOT;
-    const λSOT_T = λSOT_H + λSOT_A;
-    $('sot_mu').textContent=muSOT.toFixed(3);
-    $('sot_lh').textContent=λSOT_H.toFixed(3);
-    $('sot_la').textContent=λSOT_A.toFixed(3);
-    $('sot_tot').textContent=λSOT_T.toFixed(3);
-    const sot_o75 = 1 - poisCDF(7, λSOT_T), sot_u75 = 1 - sot_o75;
-    const sot_o85 = 1 - poisCDF(8, λSOT_T), sot_u85 = 1 - sot_o85;
-    const sot_o95 = 1 - poisCDF(9, λSOT_T), sot_u95 = 1 - sot_o95;
-    setProb('sot_o75', sot_o75); setProb('sot_u75', sot_u75); markGroupTop('[data-group="g_sot_75"]');
-    setProb('sot_o85', sot_o85); setProb('sot_u85', sot_u85); markGroupTop('[data-group="g_sot_85"]');
-    setProb('sot_o95', sot_o95); setProb('sot_u95', sot_u95); markGroupTop('[data-group="g_sot_95"]');
-
-    // Disparos totales (Shots)
-    const attSH_H = h.shpm/Math.max(muSH,1e-9), defSH_A = a.sha/Math.max(muSH,1e-9);
-    const attSH_A = a.shpm/Math.max(muSH,1e-9), defSH_H = h.sha/Math.max(muSH,1e-9);
-    const λSH_H = attSH_H * defSH_A * muSH * (useAI? clamp(HA,0.95,1.2): HA);
-    const λSH_A = attSH_A * defSH_H * muSH;
-    const λSH_T = λSH_H + λSH_A;
-    $('sh_mu').textContent=muSH.toFixed(3);
-    $('sh_lh').textContent=λSH_H.toFixed(3);
-    $('sh_la').textContent=λSH_A.toFixed(3);
-    $('sh_tot').textContent=λSH_T.toFixed(3);
-    const sh_o205 = 1 - poisCDF(20, λSH_T), sh_u205 = 1 - sh_o205;
-    const sh_o225 = 1 - poisCDF(22, λSH_T), sh_u225 = 1 - sh_o225;
-    const sh_o245 = 1 - poisCDF(24, λSH_T), sh_u245 = 1 - sh_o245;
-    setProb('sh_o205', sh_o205); setProb('sh_u205', sh_u205); markGroupTop('[data-group="g_sh_205"]');
-    setProb('sh_o225', sh_o225); setProb('sh_u225', sh_u225); markGroupTop('[data-group="g_sh_225"]');
-    setProb('sh_o245', sh_o245); setProb('sh_u245', sh_u245); markGroupTop('[data-group="g_sh_245"]');
-
-    status.textContent = useAI ? 'Listo ✔ Pronósticos reforzados con IA.' : 'Listo ✔ Pronósticos base calculados.';
+    status.textContent = useAI
+      ? (live ? 'Listo ✔ En vivo + IA: probabilidades reforzadas según tiempo restante.' : 'Listo ✔ Pronósticos reforzados con IA.')
+      : (live ? 'Listo ✔ En vivo: probabilidades ajustadas al minuto y marcador.' : 'Listo ✔ Pronósticos base calculados.');
   }
 
   // ------- Eventos -------
   btnCalc.addEventListener('click', ()=>compute(false));
   btnAI.addEventListener('click',   ()=>compute(true));
 
+  // Recalcular automáticamente cuando cambien los campos en vivo (si el modo está activo)
+  [liveMin, liveHG, liveAG, liveOn].forEach(el=>{
+    el.addEventListener('input', ()=>{
+      if(!liveOn.checked) return;
+      // Evitar negativos / NaN
+      liveMin.value = String(clamp(Number(liveMin.value)||0,0,120));
+      liveHG.value  = String(clamp(Number(liveHG.value)||0,0,20));
+      liveAG.value  = String(clamp(Number(liveAG.value)||0,0,20));
+      compute(lastUseAI);
+    });
+  });
+
+  btnResetLive.addEventListener('click', ()=>{
+    liveOn.checked=false;
+    liveMin.value=0; liveHG.value=0; liveAG.value=0;
+    compute(lastUseAI);
+  });
+
   document.getElementById('file').addEventListener('change', async (e)=>{
     const f=e.target.files?.[0]; if(!f) return;
     status.textContent='Cargando…';
     leagueSel.disabled = true; homeSel.disabled = true; awaySel.disabled = true; btnCalc.disabled = true; btnAI.disabled = true;
+    liveOn.disabled=true; liveMin.disabled=true; liveHG.disabled=true; liveAG.disabled=true; btnResetLive.disabled=true;
     leagueSel.innerHTML=''; homeSel.innerHTML=''; awaySel.innerHTML='';
 
     try{
@@ -751,10 +797,13 @@
       const enable = lig && teams[lig] && Object.keys(teams[lig]).length>0;
       homeSel.disabled = !enable; awaySel.disabled = !enable; btnCalc.disabled = !enable; btnAI.disabled = !enable;
 
-      status.textContent='Datos cargados ✔ Selecciona liga y equipos. Pulsa Calcular o IA asistida.';
+      liveOn.disabled=!enable; liveMin.disabled=!enable; liveHG.disabled=!enable; liveAG.disabled=!enable; btnResetLive.disabled=!enable;
+
+      status.textContent='Datos cargados ✔ Selecciona liga y equipos. Puedes usar EN VIVO, Calcular o IA asistida.';
     }catch(err){
       teams={};
       leagueSel.disabled=true; homeSel.disabled=true; awaySel.disabled=true; btnCalc.disabled=true; btnAI.disabled=true;
+      liveOn.disabled=true; liveMin.disabled=true; liveHG.disabled=true; liveAG.disabled=true; btnResetLive.disabled=true;
       leagueSel.innerHTML=''; homeSel.innerHTML=''; awaySel.innerHTML='';
       status.textContent = (err && err.message) ? err.message : 'Error al leer el archivo.';
     }
