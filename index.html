@@ -50,7 +50,12 @@
   .badge-hot{ position:absolute; top:8px; right:8px; font-size:11px; font-weight:700; letter-spacing:.2px;
     background:linear-gradient(180deg,#54e3b2,#3bc48f); color:#0e1a14; border:0; border-radius:999px; padding:4px 8px; display:none; }
   .kpi.hot .badge-hot{ display:inline-block; }
+
+  /* Ocultar métricas (μ, λ) pero mantener cálculo */
   .metrics{ display:none; }
+
+  /* Indicador para el marcador más probable */
+  .best{ border-color: rgba(122,162,255,0.9); box-shadow: 0 0 0 1px rgba(122,162,255,0.9), 0 0 0 8px rgba(122,162,255,0.12); }
 </style>
 </head>
 <body>
@@ -58,7 +63,7 @@
 <div class="wrap grid">
   <div class="card">
     <h2>1) Cargar JSON & elegir</h2>
-    <label>JSON (array/objeto/NDJSON). Reconoce: <code>Match + Result FT</code>, <code>HomeTeam/AwayTeam + FTHG/FTAG</code>, agregados por equipo (<code>Team, GF, GA, Matches</code>) y, si existen, <i>OnGoal/Total Shots</i>, Córners, Amarillas, Rojas.</label>
+    <label>JSON (array/objeto/NDJSON) o CSV (encabezados). Reconoce: <code>Match + Result FT</code>, <code>HomeTeam/AwayTeam + FTHG/FTAG</code>, agregados por equipo (<code>Team, GF, GA, Matches</code>) y, si existen, <i>OnGoal/Total Shots</i>, Córners, Amarillas, Rojas.</label>
     <input id="file" type="file" accept=".json,.txt,.ndjson,.csv" />
     <div class="row">
       <div><label> Liga </label><select id="league" disabled></select></div>
@@ -76,14 +81,14 @@
       <div><label> HA Córners (solo local) </label><input id="ha_corners" type="number" step="0.01" min="0.8" max="1.4" value="1.05" /></div>
       <div><label> HA Tarjetas (solo local) </label><input id="ha_cards" type="number" step="0.01" min="0.8" max="1.4" value="1.00" /></div>
     </div>
-    <div style="margin-top:12px">
+    <div style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap">
       <button id="calc" class="btn accent" disabled>Calcular</button>
-      <button id="assist" class="btn" disabled style="margin-left:8px">IA asistida (reforzar JSON)</button>
-      <span id="status" class="muted" style="margin-left:10px"></span>
+      <button id="ai" class="btn" disabled>IA asistida (refuerzo)</button>
+      <span id="status" class="muted" style="margin-left:4px"></span>
     </div>
   </div>
 
-  <!-- 2) Métricas FT — Goles (OCULTA) -->
+  <!-- Métricas ocultas -->
   <div class="card metrics" id="card_metrics_goals">
     <h2>2) Métricas FT — Goles</h2>
     <div class="kpis">
@@ -252,7 +257,7 @@
   </div>
 
   <div class="card">
-    <h2>11) Marcadores FT (Top 3)</h2>
+    <h2>11) Marcadores FT (0–10)</h2>
     <div style="overflow:auto; max-height:280px">
       <table id="scoretab_ft"><thead><tr><th>Marcador</th><th>Prob.</th></tr></thead><tbody></tbody></table>
     </div>
@@ -272,17 +277,14 @@
 (function(){
   const $ = (id)=>document.getElementById(id);
   const leagueSel=$('league'), homeSel=$('home'), awaySel=$('away');
-  const btnCalc=$('calc'), haInput=$('ha'), htFactorInput=$('htFactor'), haHTInput=$('ha_ht');
+  const btnCalc=$('calc'), btnAI=$('ai');
+  const haInput=$('ha'), htFactorInput=$('htFactor'), haHTInput=$('ha_ht');
   const haCornersInput=$('ha_corners'), haCardsInput=$('ha_cards'), status=$('status');
-  const assistBtn=$('assist');
   const scoreFT = document.querySelector('#scoretab_ft tbody');
   const scoreHT = document.querySelector('#scoretab_ht tbody');
 
-  // Guardamos el último dataset crudo para poder reforzarlo
-  let rawRows = [];
+  let teams = {}; // teams[league][team] = {aggregados}
 
-  // teams[league][team] = {...}
-  let teams = {};
   function ensureTeam(league, team){
     teams[league]=teams[league]||{};
     teams[league][team]=teams[league][team]||{
@@ -293,22 +295,50 @@
     return teams[league][team];
   }
 
-  // ---------- Parseo ----------
-  function parsePotentialJSON(text){
-    try{ const j=JSON.parse(text); return Array.isArray(j)? j:[j]; }
+  // ------- Parsers -------
+  function stripBOM(s){ return s.charCodeAt(0)===0xFEFF ? s.slice(1) : s; }
+
+  function tryParseJSONorNDJSON(text){
+    const t=stripBOM(text);
+    try{ const j=JSON.parse(t); return Array.isArray(j)? j:[j]; }
     catch(e){
-      const lines=text.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
+      const lines=t.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
       const arr=[]; for(const ln of lines){ try{arr.push(JSON.parse(ln));}catch(_){}} 
-      if(arr.length) return arr;
-      throw new Error("No se pudo leer el JSON. Verifica formato (array/objeto/NDJSON).");
+      return arr.length? arr : null;
     }
   }
+
+  function parseCSV(text){
+    const raw = stripBOM(text).replace(/\r/g,'');
+    const firstLine = raw.split('\n')[0] || '';
+    const sep = (firstLine.match(/;/g)||[]).length > (firstLine.match(/,/g)||[]).length ? ';' : ',';
+    const lines = raw.split('\n').filter(x=>x.trim().length>0);
+    if(lines.length<2) return [];
+    const headers = lines[0].split(sep).map(h=>h.trim());
+    const rows = [];
+    for(let i=1;i<lines.length;i++){
+      const cols = lines[i].split(sep).map(c=>c.trim());
+      const o={};
+      headers.forEach((h,idx)=>{ o[h]=cols[idx]??''; });
+      rows.push(o);
+    }
+    return rows;
+  }
+
+  function parsePotential(text){
+    const js = tryParseJSONorNDJSON(text);
+    if(js && js.length) return js;
+    const csv = parseCSV(text);
+    if(csv && csv.length) return csv;
+    throw new Error("No se pudo leer el archivo. Usa JSON (array/objeto/NDJSON) o CSV con encabezados.");
+  }
+
   const num = x => {
     if (x==null || x==='') return 0;
     const s = String(x).replace(/,/g,'.').replace(/[^\d.\-+eE]/g,'');
     const n = Number(s); return Number.isFinite(n)? n:0;
   };
-  // Claves
+
   const keyMap = {
     league:/^(league|liga)$/i, team:/^(team|equipo|name|nombre)$/i,
     matches:/^(matches|mp|pj|games|partidos)$/i,
@@ -320,17 +350,14 @@
     ftag:/^(ftag|away\s*(goals?|score)|goles\s*visitante|gf\s*visitante)$/i,
     matchStr:/^(match|partido)$/i,
     resultFT:/^(result\s*ft|resultado\s*ft|ft\s*result|final\s*score|resultado)$/i,
-    // corners/cards
     hc:/^(home\s*corners(?:\s*at\s*ft)?|corners?\s*local|saques\s*de\s*esquina\s*local)$/i,
     ac:/^(away\s*corners(?:\s*at\s*ft)?|corners?\s*visitante|saques\s*de\s*esquina\s*visitante)$/i,
     hy:/^(home\s*yellow(?:\s*cards?)?(?:\s*at\s*ft)?|amarillas\s*local|tarjetas\s*amarillas\s*local)$/i,
     ay:/^(away\s*yellow(?:\s*cards?)?(?:\s*at\s*ft)?|amarillas\s*visitante|tarjetas\s*amarillas\s*visitante)$/i,
     hr:/^(home\s*red(?:\s*cards?)?(?:\s*at\s*ft)?|rojas\s*local|tarjetas\s*rojas\s*local)$/i,
     ar:/^(away\s*red(?:\s*cards?)?(?:\s*at\s*ft)?|rojas\s*visitante|tarjetas\s*rojas\s*visitante)$/i,
-    // shots on target
     hSOT:/^(home\s*(on\s*goal|on\-?target)\s*shots(?:\s*at\s*ft)?|tiros\s*a\s*puerta?\s*local|disparos\s*a\s*puerta?\s*local)$/i,
     aSOT:/^(away\s*(on\s*goal|on\-?target)\s*shots(?:\s*at\s*ft)?|tiros\s*a\s*puerta?\s*visitante|disparos\s*a\s*puerta?\s*visitante)$/i,
-    // total shots
     hSH:/^(home\s*total\s*shots(?:\s*at\s*ft)?|total\s*shots\s*home|tiros\s*totales?\s*local|disparos\s*totales?\s*local)$/i,
     aSH:/^(away\s*total\s*shots(?:\s*at\s*ft)?|total\s*shots\s*away|tiros\s*totales?\s*visitante|disparos\s*totales?\s*visitante)$/i
   };
@@ -360,12 +387,8 @@
       const kLeague=findKey(row,keyMap.league);
       const league= kLeague? String(row[kLeague]).trim() :"—";
 
-      const kTeam=findKey(row,keyMap.team),
-            kGF=findKey(row,keyMap.gf),
-            kGA=findKey(row,keyMap.ga),
-            kM =findKey(row,keyMap.matches);
-      const kHT=findKey(row,keyMap.homeTeam), kAT=findKey(row,keyMap.awayTeam),
-            kFTHG=findKey(row,keyMap.fthg),    kFTAG=findKey(row,keyMap.ftag);
+      const kTeam=findKey(row,keyMap.team), kGF=findKey(row,keyMap.gf), kGA=findKey(row,keyMap.ga), kM=findKey(row,keyMap.matches);
+      const kHT=findKey(row,keyMap.homeTeam), kAT=findKey(row,keyMap.awayTeam), kFTHG=findKey(row,keyMap.fthg), kFTAG=findKey(row,keyMap.ftag);
       const kMatch=findKey(row,keyMap.matchStr), kResFT=findKey(row,keyMap.resultFT);
       const kHC=findKey(row,keyMap.hc), kAC=findKey(row,keyMap.ac);
       const kHY=findKey(row,keyMap.hy), kAY=findKey(row,keyMap.ay);
@@ -409,24 +432,37 @@
     }
   }
 
-  // ---------- UI ----------
+  // ------- UI helpers -------
   function escapeHtml(s){ return String(s).replace(/[&<>"']/g, m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m])); }
+
   function fillSelectors(autoselect=true){
     const leagues=Object.keys(teams).sort((a,b)=>a.localeCompare(b));
     leagueSel.innerHTML='<option value="">— Selecciona liga —</option>'+leagues.map(l=>`<option>${escapeHtml(l)}</option>`).join('');
-    leagueSel.disabled = leagues.length===0;
+    leagueSel.disabled = leagues.length===0 ? true : false;
+
     function setTeams(lig){
       const list=lig&&teams[lig]? Object.keys(teams[lig]).sort((a,b)=>a.localeCompare(b)):[];
       const opts='<option value="">— Equipo —</option>'+list.map(t=>`<option>${escapeHtml(t)}</option>`).join('');
       homeSel.innerHTML=opts; awaySel.innerHTML=opts;
-      homeSel.disabled=!list.length; awaySel.disabled=!list.length; btnCalc.disabled=!list.length;
-      if(autoselect && list.length>=2){ homeSel.value=list[0]; awaySel.value=list[1]; }
+      const enable = list.length>0;
+      homeSel.disabled=!enable; awaySel.disabled=!enable; btnCalc.disabled=!enable; btnAI.disabled=!enable;
+      if(autoselect && enable && list.length>=2){ homeSel.value=list[0]; awaySel.value=list[1]; }
     }
-    setTeams(leagues[0]||"");
-    leagueSel.addEventListener('change',()=>setTeams(leagueSel.value));
+
+    if(leagues.length>0){
+      leagueSel.value = leagues[0];
+      setTeams(leagues[0]);
+    }else{
+      setTeams("");
+    }
+
+    if(!leagueSel._hasChangeListener){
+      leagueSel.addEventListener('change',()=>setTeams(leagueSel.value));
+      leagueSel._hasChangeListener = true;
+    }
   }
 
-  // ---------- Poisson util ----------
+  // ------- Poisson -------
   const factMemo=[1]; function fact(n){ for(let i=factMemo.length;i<=n;i++) factMemo[i]=factMemo[i-1]*i; return factMemo[n]; }
   const poisPMF=(k,λ)=> Math.exp(-λ)*Math.pow(λ,k)/fact(k);
   function poisCDF(k,λ){ let s=0; for(let i=0;i<=k;i++) s+=poisPMF(i,λ); return s; }
@@ -442,67 +478,14 @@
     if(!items.length) return; items.forEach(x=>x.k.classList.remove('hot')); items.sort((a,b)=>b.p-a.p); items[0].k.classList.add('hot');
   }
 
-  // ---------- IA asistida: reforzar JSON ----------
-  function normalizeTeamName(s){
-    if(!s) return s;
-    return String(s).replace(/\s+/g,' ').trim();
-  }
-  function reinforceRows(rows){
-    let fixed = 0, added = 0;
-    const out = rows.map(r=>{
-      if(!r || typeof r!=='object') return r;
-      const o = {...r};
-
-      // Detectar y convertir "Match" + "Result FT" -> HomeTeam/AwayTeam + FTHG/FTAG
-      const kMatch = findKey(o, keyMap.matchStr);
-      const kRes   = findKey(o, keyMap.resultFT);
-      if(kMatch && kRes){
-        const [ht,at] = parseMatchTeams(o[kMatch]);
-        const [gh,ga] = parseScoreFT(o[kRes]);
-        if(ht && at){ o.HomeTeam = normalizeTeamName(ht); o.AwayTeam = normalizeTeamName(at); fixed++; }
-        if(Number.isFinite(gh) && Number.isFinite(ga)){ o.FTHG = gh; o.FTAG = ga; fixed++; }
-      }
-
-      // Normalizar nombres de equipo (si existen)
-      const kHT=findKey(o,keyMap.homeTeam), kAT=findKey(o,keyMap.awayTeam);
-      if(kHT){ o[kHT] = normalizeTeamName(o[kHT]); }
-      if(kAT){ o[kAT] = normalizeTeamName(o[kAT]); }
-
-      // Forzar numéricos en campos típicos si existen
-      const numericKeys = [
-        keyMap.fthg, keyMap.ftag, keyMap.gf, keyMap.ga, keyMap.matches,
-        keyMap.hc, keyMap.ac, keyMap.hy, keyMap.ay, keyMap.hr, keyMap.ar,
-        keyMap.hSOT, keyMap.aSOT, keyMap.hSH, keyMap.aSH
-      ];
-      for(const rx of numericKeys){
-        const k = findKey(o, rx);
-        if(k && o[k]!=null){ const before=o[k]; o[k]=num(o[k]); if(o[k]!==before) fixed++; }
-      }
-
-      // Si falta "league", poner la seleccionada (si hay) o "—"
-      const kLeague=findKey(o,keyMap.league);
-      if(!kLeague){
-        const ligVal = leagueSel.value || '—';
-        o.League = ligVal; added++;
-      }
-
-      return o;
-    });
-    return {rows:out, fixed, added};
-  }
-
-  function rebuildFromRaw(rows){
-    buildFromArray(rows);
-    fillSelectors(true);
-  }
-
-  // ---------- Compute principal ----------
-  function compute(){
-    status && (status.textContent='');
+  // ------- Compute (con o sin IA) -------
+  function compute(useAI=false){
+    status && (status.textContent= useAI ? 'Calculando con IA asistida…' : 'Calculando…');
 
     const lig=leagueSel.value, home=homeSel.value, away=awaySel.value;
     const HA=clamp(Number(haInput.value)||1.00,0.5,1.6);
     const factorHT=clamp(Number(htFactorInput.value)||0.45,0.2,0.8);
+    const HA_HT=clamp(Number(haHTInput.value)||1.00,0.5,1.6);
     const HA_COR=clamp(Number(haCornersInput.value)||1.05,0.8,1.4);
     const HA_CAR=clamp(Number(haCardsInput.value)||1.00,0.8,1.4);
 
@@ -522,7 +505,7 @@
     const muSOT = sumM>0 ? (sumSOT/Math.max(1,sumM)) : 4.2;
     const muSH  = sumM>0 ? (sumSH /Math.max(1,sumM)) : 12.0;
 
-    // Promedios por equipo
+    // Promedios por equipo (fallback a medias)
     const h = {
       gfpm: tH.matches? tH.gf/tH.matches : mu,
       gapm: tH.matches? tH.ga/tH.matches : mu,
@@ -552,18 +535,56 @@
       sha:  tA.matches? tA.shA/tA.matches : muSH
     };
 
-    // Fuerzas GOLES
+    // Fuerzas GOLES base
     const attH=h.gfpm/Math.max(mu,1e-9), defH=h.gapm/Math.max(mu,1e-9);
     const attA=a.gfpm/Math.max(mu,1e-9), defA=a.gapm/Math.max(mu,1e-9);
-    const λH = attH*defA*mu*HA;
-    const λA = attA*defH*mu;
+    let λH = attH*defA*mu*HA;
+    let λA = attA*defH*mu;
 
-    // KPIs
+    // ==== IA asistida: refuerzo a λ usando señales auxiliares ====
+    if(useAI){
+      // ratios ataque propio vs media liga
+      const r_h_sot = h.sotpm/Math.max(muSOT,1e-9);
+      const r_h_sh  = h.shpm /Math.max(muSH ,1e-9);
+      const r_h_cor = h.cfpm /Math.max(muC  ,1e-9);
+      const r_h_y   = h.ypm  /Math.max(muY  ,1e-9); // penaliza si >1
+
+      const r_a_sot_allow = a.sota/Math.max(muSOT,1e-9); // lo que concede el rival
+      const r_a_sh_allow  = a.sha /Math.max(muSH ,1e-9);
+      const r_a_cor_allow = a.capm/Math.max(muC  ,1e-9);
+
+      const r_a_sot = a.sotpm/Math.max(muSOT,1e-9);
+      const r_a_sh  = a.shpm /Math.max(muSH ,1e-9);
+      const r_a_cor = a.cfpm /Math.max(muC  ,1e-9);
+      const r_a_y   = a.ypm  /Math.max(muY  ,1e-9);
+
+      const r_h_sot_allow = h.sota/Math.max(muSOT,1e-9);
+      const r_h_sh_allow  = h.sha /Math.max(muSH ,1e-9);
+      const r_h_cor_allow = h.capm/Math.max(muC  ,1e-9);
+
+      // pesos (suaves, para no romper Poisson): suma típica |adj| <= 0.25
+      const wsot=0.25, wsh=0.10, wcor=0.08, wcard=0.06;
+      // home: ataque propio + concesiones del rival - tarjetas propias
+      let adjH = wsot*(r_h_sot-1) + wsh*(r_h_sh-1) + wcor*(r_h_cor-1)
+               + wsot*(r_a_sot_allow-1) + wsh*(r_a_sh_allow-1) + wcor*(r_a_cor_allow-1)
+               - wcard*(r_h_y-1);
+      // away simétrico
+      let adjA = wsot*(r_a_sot-1) + wsh*(r_a_sh-1) + wcor*(r_a_cor-1)
+               + wsot*(r_h_sot_allow-1) + wsh*(r_h_sh_allow-1) + wcor*(r_h_cor_allow-1)
+               - wcard*(r_a_y-1);
+
+      const multH = clamp(1+adjH, 0.75, 1.35);
+      const multA = clamp(1+adjA, 0.75, 1.35);
+      λH = λH * multH;
+      λA = λA * multA;
+    }
+
+    // KPIs (ocultas pero activas)
     $('k_mu').textContent=mu.toFixed(3);
-    $('k_att_h').textContent=attH.toFixed(3);
-    $('k_def_h').textContent=defH.toFixed(3);
-    $('k_att_a').textContent=attA.toFixed(3);
-    $('k_def_a').textContent=defA.toFixed(3);
+    $('k_att_h').textContent=(h.gfpm/Math.max(mu,1e-9)).toFixed(3);
+    $('k_def_h').textContent=(h.gapm/Math.max(mu,1e-9)).toFixed(3);
+    $('k_att_a').textContent=(a.gfpm/Math.max(mu,1e-9)).toFixed(3);
+    $('k_def_a').textContent=(a.gapm/Math.max(mu,1e-9)).toFixed(3);
     $('k_lh').textContent=λH.toFixed(3);
     $('k_la').textContent=λA.toFixed(3);
 
@@ -591,12 +612,9 @@
     setProb('m_btts_no', 1 - pBTTS);
     markGroupTop('[data-group="g_ft_btts"]');
 
+    // Top correct scores (mantenemos 50 como en tu versión actual)
     rows.sort((a,b)=>b.p-a.p);
-    const top3 = rows.slice(0,3);
-    scoreFT.innerHTML = top3.map((x,i)=>{
-      const star = i===0 ? ' ⭐' : '';
-      return `<tr><td><span class="pill">${x.score}${star}</span></td><td>${(x.p*100).toFixed(3)}%</td></tr>`;
-    }).join('');
+    scoreFT.innerHTML=rows.slice(0,50).map((x,i)=>`<tr><td><span class="pill ${i===0?'best':''}">${x.score}${i===0?' ⭐':''}</span></td><td>${(x.p*100).toFixed(3)}%</td></tr>`).join('');
 
     // HT
     const λH_HT = λH * factorHT * ( (clamp(Number(haHTInput.value)||1,0.5,1.6)) / HA );
@@ -617,13 +635,14 @@
     setProb('ht_1', ht1); setProb('ht_x', htx); setProb('ht_2', ht2); markGroupTop('[data-group="g_ht_1x2"]');
     setProb('ht_o05', o05); setProb('ht_u05', u05); markGroupTop('[data-group="g_ht_ou05"]');
     setProb('ht_o15', o15); setProb('ht_u15', u15); markGroupTop('[data-group="g_ht_ou15"]');
+
     rowsHT.sort((a,b)=>b.p-a.p);
-    scoreHT.innerHTML=rowsHT.slice(0,40).map(x=>`<tr><td><span class="pill">${x.score}</span></td><td>${(x.p*100).toFixed(3)}%</td></tr>`).join('');
+    scoreHT.innerHTML=rowsHT.slice(0,40).map((x,i)=>`<tr><td><span class="pill ${i===0?'best':''}">${x.score}${i===0?' ⭐':''}</span></td><td>${(x.p*100).toFixed(3)}%</td></tr>`).join('');
 
     // Córners
     const attC_H = h.cfpm/Math.max(muC,1e-9), defC_A = a.capm/Math.max(muC,1e-9);
     const attC_A = a.cfpm/Math.max(muC,1e-9), defC_H = h.capm/Math.max(muC,1e-9);
-    const λC_H = attC_H * defC_A * muC * HA_COR;
+    const λC_H = attC_H * defC_A * muC * (useAI? 1 : 1) * (clamp(Number(haCornersInput.value)||1.05,0.8,1.4));
     const λC_A = attC_A * defC_H * muC;
     const λC_T = λC_H + λC_A;
     $('c_mu').textContent=muC.toFixed(3);
@@ -640,7 +659,7 @@
     // Tarjetas (Amarillas)
     const attY_H = h.ypm/Math.max(muY,1e-9), defY_A = a.yapm/Math.max(muY,1e-9);
     const attY_A = a.ypm/Math.max(muY,1e-9), defY_H = h.yapm/Math.max(muY,1e-9);
-    const λY_H = attY_H * defY_A * muY * HA_CAR;
+    const λY_H = attY_H * defY_A * muY * (clamp(Number(haCardsInput.value)||1.00,0.8,1.4));
     const λY_A = attY_A * defY_H * muY;
     const λY_T = λY_H + λY_A;
     $('y_mu').textContent=muY.toFixed(3);
@@ -655,7 +674,7 @@
     // Tarjetas (Rojas)
     const attR_H = h.rpm/Math.max(muR,1e-9), defR_A = a.rapm/Math.max(muR,1e-9);
     const attR_A = a.rpm/Math.max(muR,1e-9), defR_H = h.rapm/Math.max(muR,1e-9);
-    const λR_H = attR_H * defR_A * muR * HA_CAR;
+    const λR_H = attR_H * defR_A * muR * (clamp(Number(haCardsInput.value)||1.00,0.8,1.4));
     const λR_A = attR_A * defR_H * muR;
     const λR_T = λR_H + λR_A;
     $('r_mu').textContent=muR.toFixed(3);
@@ -668,10 +687,10 @@
     setProb('r_o05', r_o05); setProb('r_u05', r_u05); markGroupTop('[data-group="g_r_05"]');
     setProb('r_o15', r_o15); setProb('r_u15', r_u15); markGroupTop('[data-group="g_r_15"]');
 
-    // Disparos a puerta (SoT)
+    // Disparos a puerta (SoT) totales
     const attSOT_H = h.sotpm/Math.max(muSOT,1e-9), defSOT_A = a.sota/Math.max(muSOT,1e-9);
     const attSOT_A = a.sotpm/Math.max(muSOT,1e-9), defSOT_H = h.sota/Math.max(muSOT,1e-9);
-    const λSOT_H = attSOT_H * defSOT_A * muSOT * HA;
+    const λSOT_H = attSOT_H * defSOT_A * muSOT * (useAI? clamp(HA,0.95,1.2): HA);
     const λSOT_A = attSOT_A * defSOT_H * muSOT;
     const λSOT_T = λSOT_H + λSOT_A;
     $('sot_mu').textContent=muSOT.toFixed(3);
@@ -688,7 +707,7 @@
     // Disparos totales (Shots)
     const attSH_H = h.shpm/Math.max(muSH,1e-9), defSH_A = a.sha/Math.max(muSH,1e-9);
     const attSH_A = a.shpm/Math.max(muSH,1e-9), defSH_H = h.sha/Math.max(muSH,1e-9);
-    const λSH_H = attSH_H * defSH_A * muSH * HA;
+    const λSH_H = attSH_H * defSH_A * muSH * (useAI? clamp(HA,0.95,1.2): HA);
     const λSH_A = attSH_A * defSH_H * muSH;
     const λSH_T = λSH_H + λSH_A;
     $('sh_mu').textContent=muSH.toFixed(3);
@@ -701,36 +720,43 @@
     setProb('sh_o205', sh_o205); setProb('sh_u205', sh_u205); markGroupTop('[data-group="g_sh_205"]');
     setProb('sh_o225', sh_o225); setProb('sh_u225', sh_u225); markGroupTop('[data-group="g_sh_225"]');
     setProb('sh_o245', sh_o245); setProb('sh_u245', sh_u245); markGroupTop('[data-group="g_sh_245"]');
+
+    status.textContent = useAI ? 'Listo ✔ Pronósticos reforzados con IA.' : 'Listo ✔ Pronósticos base calculados.';
   }
 
-  // Eventos
-  btnCalc.addEventListener('click', compute);
-
-  assistBtn.addEventListener('click', ()=>{
-    if(!rawRows.length){ status.textContent='Primero carga un archivo.'; return; }
-    const {rows, fixed, added} = reinforceRows(rawRows);
-    buildFromArray(rows);
-    fillSelectors(true);
-    status.textContent = `JSON reforzado ✔ (${fixed} campos normalizados, ${added} ligas completadas). Vuelve a elegir equipos si es necesario y pulsa Calcular.`;
-  });
+  // ------- Eventos -------
+  btnCalc.addEventListener('click', ()=>compute(false));
+  btnAI.addEventListener('click',   ()=>compute(true));
 
   document.getElementById('file').addEventListener('change', async (e)=>{
     const f=e.target.files?.[0]; if(!f) return;
+    status.textContent='Cargando…';
+    leagueSel.disabled = true; homeSel.disabled = true; awaySel.disabled = true; btnCalc.disabled = true; btnAI.disabled = true;
+    leagueSel.innerHTML=''; homeSel.innerHTML=''; awaySel.innerHTML='';
+
     try{
       const text=await f.text();
-      const arr=parsePotentialJSON(text);
+      const arr=parsePotential(text);
       if(!arr.length) throw new Error("El archivo está vacío.");
-      rawRows = arr.slice(); // guardamos
+
       buildFromArray(arr);
+
+      const haveLeagues = Object.keys(teams).length>0;
+      if(!haveLeagues) throw new Error("No se detectaron ligas/equipos en el archivo.");
+
       fillSelectors(true);
-      status && (status.textContent='Datos cargados ✔ Elige (o usa los preseleccionados) y pulsa Calcular. Puedes usar “IA asistida” para reforzar el JSON.');
-      btnCalc.disabled=false;
-      assistBtn.disabled=false;
+
+      leagueSel.disabled = false;
+      const lig = leagueSel.value;
+      const enable = lig && teams[lig] && Object.keys(teams[lig]).length>0;
+      homeSel.disabled = !enable; awaySel.disabled = !enable; btnCalc.disabled = !enable; btnAI.disabled = !enable;
+
+      status.textContent='Datos cargados ✔ Selecciona liga y equipos. Pulsa Calcular o IA asistida.';
     }catch(err){
-      rawRows = [];
-      leagueSel.disabled=true; homeSel.disabled=true; awaySel.disabled=true; btnCalc.disabled=true; assistBtn.disabled=true;
+      teams={};
+      leagueSel.disabled=true; homeSel.disabled=true; awaySel.disabled=true; btnCalc.disabled=true; btnAI.disabled=true;
       leagueSel.innerHTML=''; homeSel.innerHTML=''; awaySel.innerHTML='';
-      status && (status.textContent=err.message||'Error al leer el JSON.');
+      status.textContent = (err && err.message) ? err.message : 'Error al leer el archivo.';
     }
   });
 })();
