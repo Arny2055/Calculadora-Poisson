@@ -50,12 +50,12 @@
   .badge-hot{ position:absolute; top:8px; right:8px; font-size:11px; font-weight:700; letter-spacing:.2px;
     background:linear-gradient(180deg,#54e3b2,#3bc48f); color:#0e1a14; border:0; border-radius:999px; padding:4px 8px; display:none; }
   .kpi.hot .badge-hot{ display:inline-block; }
+
+  /* Ocultar métricas (μ, λ) pero mantener cálculo */
   .metrics{ display:none; }
+
+  /* Indicador para el marcador más probable */
   .best{ border-color: rgba(122,162,255,0.9); box-shadow: 0 0 0 1px rgba(122,162,255,0.9), 0 0 0 8px rgba(122,162,255,0.12); }
-  .live-row{display:grid; gap:10px}
-  @media(min-width:760px){ .live-row{grid-template-columns: 1fr 1fr 1fr 1fr 1fr} }
-  .switch{display:flex; align-items:center; gap:8px; user-select:none}
-  .switch input{width:auto}
 </style>
 </head>
 <body>
@@ -73,15 +73,14 @@
       <div><label> Local </label><select id="home" disabled></select></div>
       <div><label> Visitante </label><select id="away" disabled></select></div>
     </div>
-
-    <div class="live-row" style="margin-top:10px">
-      <label class="switch"><input type="checkbox" id="live_on" disabled /> Modo en vivo</label>
-      <div><label> Minuto </label><input id="live_min" type="number" step="1" min="0" max="120" value="0" disabled /></div>
-      <div><label> Goles L (actual) </label><input id="live_hg" type="number" step="1" min="0" max="20" value="0" disabled /></div>
-      <div><label> Goles V (actual) </label><input id="live_ag" type="number" step="1" min="0" max="20" value="0" disabled /></div>
-      <div style="align-self:end"><button id="reset_live" class="btn" disabled>Reiniciar en vivo</button></div>
+    <div class="row">
+      <div><label> Factor HT (goles 1T / partido) </label><input id="htFactor" type="number" step="0.01" min="0.2" max="0.8" value="0.45" /></div>
+      <div><label> Ventaja local HT (HA_HT) </label><input id="ha_ht" type="number" step="0.01" min="0.5" max="1.6" value="1.05" /></div>
     </div>
-
+    <div class="row">
+      <div><label> HA Córners (solo local) </label><input id="ha_corners" type="number" step="0.01" min="0.8" max="1.4" value="1.05" /></div>
+      <div><label> HA Tarjetas (solo local) </label><input id="ha_cards" type="number" step="0.01" min="0.8" max="1.4" value="1.00" /></div>
+    </div>
     <div style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap">
       <button id="calc" class="btn accent" disabled>Calcular</button>
       <button id="ai" class="btn" disabled>IA asistida (refuerzo)</button>
@@ -89,6 +88,7 @@
     </div>
   </div>
 
+  <!-- Métricas ocultas -->
   <div class="card metrics" id="card_metrics_goals">
     <h2>2) Métricas FT — Goles</h2>
     <div class="kpis">
@@ -102,6 +102,7 @@
     </div>
   </div>
 
+  <!-- 1X2 FT -->
   <div class="card" data-group="g_ft_1x2">
     <h2>3) 1X2 — FT</h2>
     <div class="grid3">
@@ -111,6 +112,7 @@
     </div>
   </div>
 
+  <!-- O/U FT -->
   <div class="card" data-group="g_ft_ou25">
     <h2>4) FT — Over/Under 2.5</h2>
     <div class="kpis">
@@ -119,6 +121,7 @@
     </div>
   </div>
 
+  <!-- BTTS FT -->
   <div class="card" data-group="g_ft_btts">
     <h2>4.1) BTTS (FT)</h2>
     <div class="kpis">
@@ -127,6 +130,7 @@
     </div>
   </div>
 
+  <!-- 1X2 HT -->
   <div class="card" data-group="g_ht_1x2">
     <h2>5) 1X2 — HT</h2>
     <div class="grid3">
@@ -136,6 +140,7 @@
     </div>
   </div>
 
+  <!-- O/U HT -->
   <div class="card">
     <h2>6) HT — Over/Under</h2>
     <div class="kpis" data-group="g_ht_ou05">
@@ -148,6 +153,7 @@
     </div>
   </div>
 
+  <!-- CÓRNERS -->
   <div class="card">
     <h2>7) Córners (FT) — con destacados</h2>
     <div class="kpis metrics" id="metrics_corners">
@@ -170,6 +176,7 @@
     </div>
   </div>
 
+  <!-- TARJETAS -->
   <div class="card">
     <h2>8) Tarjetas (FT) — con destacados</h2>
     <div class="kpis metrics" id="metrics_cards">
@@ -203,6 +210,7 @@
     </div>
   </div>
 
+  <!-- DISPAROS A PUERTA -->
   <div class="card">
     <h2>9) Disparos a puerta (SoT) — FT</h2>
     <div class="kpis metrics" id="metrics_sot">
@@ -225,6 +233,7 @@
     </div>
   </div>
 
+  <!-- DISPAROS TOTALES -->
   <div class="card">
     <h2>10) Disparos totales — FT</h2>
     <div class="kpis metrics" id="metrics_shots">
@@ -274,11 +283,7 @@
   const scoreFT = document.querySelector('#scoretab_ft tbody');
   const scoreHT = document.querySelector('#scoretab_ht tbody');
 
-  // Live controls
-  const liveOn=$('live_on'), liveMin=$('live_min'), liveHG=$('live_hg'), liveAG=$('live_ag'), btnResetLive=$('reset_live');
-  let lastUseAI=false;
-
-  let teams = {}; // teams[league][team] = agregados
+  let teams = {}; // teams[league][team] = {aggregados}
 
   function ensureTeam(league, team){
     teams[league]=teams[league]||{};
@@ -291,10 +296,10 @@
   }
 
   // ------- Parsers -------
-  function stripBOM(s){ return s && s.charCodeAt(0)===0xFEFF ? s.slice(1) : s; }
+  function stripBOM(s){ return s.charCodeAt(0)===0xFEFF ? s.slice(1) : s; }
 
   function tryParseJSONorNDJSON(text){
-    const t=stripBOM(text||'');
+    const t=stripBOM(text);
     try{ const j=JSON.parse(t); return Array.isArray(j)? j:[j]; }
     catch(e){
       const lines=t.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
@@ -304,17 +309,17 @@
   }
 
   function parseCSV(text){
-    const raw = stripBOM(text||'').replace(/\r/g,'');
+    const raw = stripBOM(text).replace(/\r/g,'');
+    const firstLine = raw.split('\n')[0] || '';
+    const sep = (firstLine.match(/;/g)||[]).length > (firstLine.match(/,/g)||[]).length ? ';' : ',';
     const lines = raw.split('\n').filter(x=>x.trim().length>0);
     if(lines.length<2) return [];
-    const firstLine = lines[0];
-    const sep = (firstLine.match(/;/g)||[]).length > (firstLine.match(/,/g)||[]).length ? ';' : ',';
-    const headers = firstLine.split(sep).map(h=>h.trim());
+    const headers = lines[0].split(sep).map(h=>h.trim());
     const rows = [];
     for(let i=1;i<lines.length;i++){
-      const cols = lines[i].split(sep);
+      const cols = lines[i].split(sep).map(c=>c.trim());
       const o={};
-      headers.forEach((h,idx)=>{ o[h]= (cols[idx]??'').trim(); });
+      headers.forEach((h,idx)=>{ o[h]=cols[idx]??''; });
       rows.push(o);
     }
     return rows;
@@ -345,16 +350,16 @@
     ftag:/^(ftag|away\s*(goals?|score)|goles\s*visitante|gf\s*visitante)$/i,
     matchStr:/^(match|partido)$/i,
     resultFT:/^(result\s*ft|resultado\s*ft|ft\s*result|final\s*score|resultado)$/i,
-    hc:/^(home\s*corners|corners?\s*local)/i,
-    ac:/^(away\s*corners|corners?\s*visitante)/i,
-    hy:/^(home\s*yellow|amarillas\s*local)/i,
-    ay:/^(away\s*yellow|amarillas\s*visitante)/i,
-    hr:/^(home\s*red|rojas\s*local)/i,
-    ar:/^(away\s*red|rojas\s*visitante)/i,
-    hSOT:/^(home\s*(on\s*goal|on\-?target)\s*shots|tiros\s*a\s*puerta?\s*local|disparos\s*a\s*puerta?\s*local)/i,
-    aSOT:/^(away\s*(on\s*goal|on\-?target)\s*shots|tiros\s*a\s*puerta?\s*visitante|disparos\s*a\s*puerta?\s*visitante)/i,
-    hSH:/^(home\s*total\s*shots|tiros\s*totales?\s*local|disparos\s*totales?\s*local)/i,
-    aSH:/^(away\s*total\s*shots|tiros\s*totales?\s*visitante|disparos\s*totales?\s*visitante)/i
+    hc:/^(home\s*corners(?:\s*at\s*ft)?|corners?\s*local|saques\s*de\s*esquina\s*local)$/i,
+    ac:/^(away\s*corners(?:\s*at\s*ft)?|corners?\s*visitante|saques\s*de\s*esquina\s*visitante)$/i,
+    hy:/^(home\s*yellow(?:\s*cards?)?(?:\s*at\s*ft)?|amarillas\s*local|tarjetas\s*amarillas\s*local)$/i,
+    ay:/^(away\s*yellow(?:\s*cards?)?(?:\s*at\s*ft)?|amarillas\s*visitante|tarjetas\s*amarillas\s*visitante)$/i,
+    hr:/^(home\s*red(?:\s*cards?)?(?:\s*at\s*ft)?|rojas\s*local|tarjetas\s*rojas\s*local)$/i,
+    ar:/^(away\s*red(?:\s*cards?)?(?:\s*at\s*ft)?|rojas\s*visitante|tarjetas\s*rojas\s*visitante)$/i,
+    hSOT:/^(home\s*(on\s*goal|on\-?target)\s*shots(?:\s*at\s*ft)?|tiros\s*a\s*puerta?\s*local|disparos\s*a\s*puerta?\s*local)$/i,
+    aSOT:/^(away\s*(on\s*goal|on\-?target)\s*shots(?:\s*at\s*ft)?|tiros\s*a\s*puerta?\s*visitante|disparos\s*a\s*puerta?\s*visitante)$/i,
+    hSH:/^(home\s*total\s*shots(?:\s*at\s*ft)?|total\s*shots\s*home|tiros\s*totales?\s*local|disparos\s*totales?\s*local)$/i,
+    aSH:/^(away\s*total\s*shots(?:\s*at\s*ft)?|total\s*shots\s*away|tiros\s*totales?\s*visitante|disparos\s*totales?\s*visitante)$/i
   };
   function findKey(o, rx){ for(const k of Object.keys(o)){ if(rx.test(k)) return k; } return null; }
 
@@ -433,16 +438,15 @@
   function fillSelectors(autoselect=true){
     const leagues=Object.keys(teams).sort((a,b)=>a.localeCompare(b));
     leagueSel.innerHTML='<option value="">— Selecciona liga —</option>'+leagues.map(l=>`<option>${escapeHtml(l)}</option>`).join('');
-    leagueSel.disabled = leagues.length===0;
+    leagueSel.disabled = leagues.length===0 ? true : false;
 
     function setTeams(lig){
       const list=lig&&teams[lig]? Object.keys(teams[lig]).sort((a,b)=>a.localeCompare(b)):[];
       const opts='<option value="">— Equipo —</option>'+list.map(t=>`<option>${escapeHtml(t)}</option>`).join('');
       homeSel.innerHTML=opts; awaySel.innerHTML=opts;
-      const enable = list.length>=2;
+      const enable = list.length>0;
       homeSel.disabled=!enable; awaySel.disabled=!enable; btnCalc.disabled=!enable; btnAI.disabled=!enable;
-      liveOn.disabled=!enable; liveMin.disabled=!enable; liveHG.disabled=!enable; liveAG.disabled=!enable; btnResetLive.disabled=!enable;
-      if(autoselect && enable){ homeSel.value=list[0]; awaySel.value=list[1]; }
+      if(autoselect && enable && list.length>=2){ homeSel.value=list[0]; awaySel.value=list[1]; }
     }
 
     if(leagues.length>0){
@@ -463,7 +467,6 @@
   const poisPMF=(k,λ)=> Math.exp(-λ)*Math.pow(λ,k)/fact(k);
   function poisCDF(k,λ){ let s=0; for(let i=0;i<=k;i++) s+=poisPMF(i,λ); return s; }
   const clamp=(x,min,max)=> Math.max(min,Math.min(max,x));
-
   function setProb(id, p){
     const el = $(id); if(!el) return;
     el.textContent = (p*100).toFixed(1)+'%';
@@ -475,290 +478,283 @@
     if(!items.length) return; items.forEach(x=>x.k.classList.remove('hot')); items.sort((a,b)=>b.p-a.p); items[0].k.classList.add('hot');
   }
 
-  function fracElapsed(minute){
-    const m = clamp(Number(minute)||0, 0, 120);
-    if(m<=45) return 0.45*(m/45);
-    if(m<=90) return 0.45 + 0.55*((m-45)/45);
-    return 1;
-  }
-
+  // ------- Compute (con o sin IA) -------
   function compute(useAI=false){
-    try{
-      lastUseAI = useAI;
-      const live = !!liveOn.checked;
-      status.textContent = useAI ? (live?'IA asistida + EN VIVO…':'IA asistida…') : (live?'Calculando EN VIVO…':'Calculando…');
+    status && (status.textContent= useAI ? 'Calculando con IA asistida…' : 'Calculando…');
 
-      const lig=leagueSel.value, home=homeSel.value, away=awaySel.value;
-      const HA=clamp(Number(haInput.value)||1.00,0.5,1.6);
-      const factorHT=clamp(Number(htFactorInput.value)||0.45,0.2,0.8);
-      const HA_COR=clamp(Number(haCornersInput.value)||1.05,0.8,1.4);
-      const HA_CAR=clamp(Number(haCardsInput.value)||1.00,0.8,1.4);
+    const lig=leagueSel.value, home=homeSel.value, away=awaySel.value;
+    const HA=clamp(Number(haInput.value)||1.00,0.5,1.6);
+    const factorHT=clamp(Number(htFactorInput.value)||0.45,0.2,0.8);
+    const HA_HT=clamp(Number(haHTInput.value)||1.00,0.5,1.6);
+    const HA_COR=clamp(Number(haCornersInput.value)||1.05,0.8,1.4);
+    const HA_CAR=clamp(Number(haCardsInput.value)||1.00,0.8,1.4);
 
-      if(!lig||!teams[lig]){ status.textContent='Elige una liga.'; return; }
-      if(!home||!away||home===away){ status.textContent='Elige dos equipos distintos.'; return; }
+    if(!lig||!teams[lig]){ status.textContent='Elige una liga.'; return; }
+    if(!home||!away||home===away){ status.textContent='Elige dos equipos distintos.'; return; }
 
-      const tH=teams[lig][home], tA=teams[lig][away];
-      if(!tH||!tA){ status.textContent='Faltan datos para esos equipos.'; return; }
+    const tH=teams[lig][home], tA=teams[lig][away];
+    if(!tH||!tA){ status.textContent='Faltan datos para esos equipos.'; return; }
 
-      // Medias liga
-      let sumGF=0,sumM=0,sumCF=0,sumY=0,sumR=0,sumSOT=0,sumSH=0;
-      for(const t of Object.values(teams[lig])){ sumGF+=t.gf; sumM+=t.matches; sumCF+=t.cf; sumY+=t.yF; sumR+=t.rF; sumSOT+=t.sotF; sumSH+=t.shF; }
-      const mu  = sumM>0 ? (sumGF/Math.max(1,sumM)) : 1.25;
-      const muC = sumM>0 ? (sumCF/Math.max(1,sumM)) : 4.8;
-      const muY = sumM>0 ? (sumY /Math.max(1,sumM)) : 2.4;
-      const muR = sumM>0 ? (sumR /Math.max(1,sumM)) : 0.18;
-      const muSOT = sumM>0 ? (sumSOT/Math.max(1,sumM)) : 4.2;
-      const muSH  = sumM>0 ? (sumSH /Math.max(1,sumM)) : 12.0;
+    // Medias de liga (por equipo/partido)
+    let sumGF=0,sumM=0,sumCF=0,sumY=0,sumR=0,sumSOT=0,sumSH=0;
+    for(const t of Object.values(teams[lig])){ sumGF+=t.gf; sumM+=t.matches; sumCF+=t.cf; sumY+=t.yF; sumR+=t.rF; sumSOT+=t.sotF; sumSH+=t.shF; }
+    const mu  = sumM>0 ? (sumGF/Math.max(1,sumM)) : 1.25;
+    const muC = sumM>0 ? (sumCF/Math.max(1,sumM)) : 4.8;
+    const muY = sumM>0 ? (sumY /Math.max(1,sumM)) : 2.4;
+    const muR = sumM>0 ? (sumR /Math.max(1,sumM)) : 0.18;
+    const muSOT = sumM>0 ? (sumSOT/Math.max(1,sumM)) : 4.2;
+    const muSH  = sumM>0 ? (sumSH /Math.max(1,sumM)) : 12.0;
 
-      const h = {
-        gfpm: tH.matches? tH.gf/tH.matches : mu,
-        gapm: tH.matches? tH.ga/tH.matches : mu,
-        cfpm: tH.matches? tH.cf/tH.matches : muC,
-        capm: tH.matches? tH.ca/tH.matches : muC,
-        ypm:  tH.matches? tH.yF/tH.matches : muY,
-        yapm: tH.matches? tH.yA/tH.matches : muY,
-        rpm:  tH.matches? tH.rF/tH.matches : muR,
-        rapm: tH.matches? tH.rA/tH.matches : muR,
-        sotpm:tH.matches? tH.sotF/tH.matches: muSOT,
-        sota: tH.matches? tH.sotA/tH.matches: muSOT,
-        shpm: tH.matches? tH.shF/tH.matches : muSH,
-        sha:  tH.matches? tH.shA/tH.matches : muSH
-      };
-      const a = {
-        gfpm: tA.matches? tA.gf/tA.matches : mu,
-        gapm: tA.matches? tA.ga/tA.matches : mu,
-        cfpm: tA.matches? tA.cf/tA.matches : muC,
-        capm: tA.matches? tA.ca/tA.matches : muC,
-        ypm:  tA.matches? tA.yF/tA.matches : muY,
-        yapm: tA.matches? tA.yA/tA.matches : muY,
-        rpm:  tA.matches? tA.rF/tA.matches : muR,
-        rapm: tA.matches? tA.rA/tA.matches : muR,
-        sotpm:tA.matches? tA.sotF/tA.matches: muSOT,
-        sota: tA.matches? tA.sotA/tA.matches: muSOT,
-        shpm: tA.matches? tA.shF/tA.matches : muSH,
-        sha:  tA.matches? tA.shA/tA.matches : muSH
-      };
+    // Promedios por equipo (fallback a medias)
+    const h = {
+      gfpm: tH.matches? tH.gf/tH.matches : mu,
+      gapm: tH.matches? tH.ga/tH.matches : mu,
+      cfpm: tH.matches? tH.cf/tH.matches : muC,
+      capm: tH.matches? tH.ca/tH.matches : muC,
+      ypm:  tH.matches? tH.yF/tH.matches : muY,
+      yapm: tH.matches? tH.yA/tH.matches : muY,
+      rpm:  tH.matches? tH.rF/tH.matches : muR,
+      rapm: tH.matches? tH.rA/tH.matches : muR,
+      sotpm:tH.matches? tH.sotF/tH.matches: muSOT,
+      sota: tH.matches? tH.sotA/tH.matches: muSOT,
+      shpm: tH.matches? tH.shF/tH.matches : muSH,
+      sha:  tH.matches? tH.shA/tH.matches : muSH
+    };
+    const a = {
+      gfpm: tA.matches? tA.gf/tA.matches : mu,
+      gapm: tA.matches? tA.ga/tA.matches : mu,
+      cfpm: tA.matches? tA.cf/tA.matches : muC,
+      capm: tA.matches? tA.ca/tA.matches : muC,
+      ypm:  tA.matches? tA.yF/tA.matches : muY,
+      yapm: tA.matches? tA.yA/tA.matches : muY,
+      rpm:  tA.matches? tA.rF/tA.matches : muR,
+      rapm: tA.matches? tA.rA/tA.matches : muR,
+      sotpm:tA.matches? tA.sotF/tA.matches: muSOT,
+      sota: tA.matches? tA.sotA/tA.matches: muSOT,
+      shpm: tA.matches? tA.shF/tA.matches : muSH,
+      sha:  tA.matches? tA.shA/tA.matches : muSH
+    };
 
-      // λ base
-      const attH=h.gfpm/Math.max(mu,1e-9), defH=h.gapm/Math.max(mu,1e-9);
-      const attA=a.gfpm/Math.max(mu,1e-9), defA=a.gapm/Math.max(mu,1e-9);
-      let λH = attH*defA*mu*HA;
-      let λA = attA*defH*mu;
+    // Fuerzas GOLES base
+    const attH=h.gfpm/Math.max(mu,1e-9), defH=h.gapm/Math.max(mu,1e-9);
+    const attA=a.gfpm/Math.max(mu,1e-9), defA=a.gapm/Math.max(mu,1e-9);
+    let λH = attH*defA*mu*HA;
+    let λA = attA*defH*mu;
 
-      // IA (opcional)
-      if(useAI){
-        const r_h_sot = h.sotpm/Math.max(muSOT,1e-9);
-        const r_h_sh  = h.shpm /Math.max(muSH ,1e-9);
-        const r_h_cor = h.cfpm /Math.max(muC  ,1e-9);
-        const r_h_y   = h.ypm  /Math.max(muY  ,1e-9);
-        const r_a_sot_allow = a.sota/Math.max(muSOT,1e-9);
-        const r_a_sh_allow  = a.sha /Math.max(muSH ,1e-9);
-        const r_a_cor_allow = a.capm/Math.max(muC  ,1e-9);
-        const r_a_sot = a.sotpm/Math.max(muSOT,1e-9);
-        const r_a_sh  = a.shpm /Math.max(muSH ,1e-9);
-        const r_a_cor = a.cfpm /Math.max(muC  ,1e-9);
-        const r_a_y   = a.ypm  /Math.max(muY  ,1e-9);
-        const r_h_sot_allow = h.sota/Math.max(muSOT,1e-9);
-        const r_h_sh_allow  = h.sha /Math.max(muSH ,1e-9);
-        const r_h_cor_allow = h.capm/Math.max(muC  ,1e-9);
-        const wsot=0.25, wsh=0.10, wcor=0.08, wcard=0.06;
-        let adjH = wsot*(r_h_sot-1) + wsh*(r_h_sh-1) + wcor*(r_h_cor-1)
-                 + wsot*(r_a_sot_allow-1) + wsh*(r_a_sh_allow-1) + wcor*(r_a_cor_allow-1)
-                 - wcard*(r_h_y-1);
-        let adjA = wsot*(r_a_sot-1) + wsh*(r_a_sh-1) + wcor*(r_a_cor-1)
-                 + wsot*(r_h_sot_allow-1) + wsh*(r_h_sh_allow-1) + wcor*(r_h_cor_allow-1)
-                 - wcard*(r_a_y-1);
-        const multH = clamp(1+adjH, 0.75, 1.35);
-        const multA = clamp(1+adjA, 0.75, 1.35);
-        λH = λH * multH;
-        λA = λA * multA;
-      }
+    // ==== IA asistida: refuerzo a λ usando señales auxiliares ====
+    if(useAI){
+      // ratios ataque propio vs media liga
+      const r_h_sot = h.sotpm/Math.max(muSOT,1e-9);
+      const r_h_sh  = h.shpm /Math.max(muSH ,1e-9);
+      const r_h_cor = h.cfpm /Math.max(muC  ,1e-9);
+      const r_h_y   = h.ypm  /Math.max(muY  ,1e-9); // penaliza si >1
 
-      // En vivo
-      let baseHG=0, baseAG=0;
-      if(liveOn.checked){
-        const m = clamp(Number(liveMin.value)||0,0,120);
-        baseHG = clamp(Number(liveHG.value)||0,0,20);
-        baseAG = clamp(Number(liveAG.value)||0,0,20);
-        const fElapsed = fracElapsed(m);
-        const rem = clamp(1 - fElapsed, 0, 1);
-        const endgameBoost = (m>=75 && m<=90) ? 1.08 : 1.00;
-        λH = λH * rem * endgameBoost;
-        λA = λA * rem * endgameBoost;
-      }
+      const r_a_sot_allow = a.sota/Math.max(muSOT,1e-9); // lo que concede el rival
+      const r_a_sh_allow  = a.sha /Math.max(muSH ,1e-9);
+      const r_a_cor_allow = a.capm/Math.max(muC  ,1e-9);
 
-      // KPIs ocultas
-      $('k_mu').textContent=mu.toFixed(3);
-      $('k_att_h').textContent=(h.gfpm/Math.max(mu,1e-9)).toFixed(3);
-      $('k_def_h').textContent=(h.gapm/Math.max(mu,1e-9)).toFixed(3);
-      $('k_att_a').textContent=(a.gfpm/Math.max(mu,1e-9)).toFixed(3);
-      $('k_def_a').textContent=(a.gapm/Math.max(mu,1e-9)).toFixed(3);
-      $('k_lh').textContent=λH.toFixed(3);
-      $('k_la').textContent=λA.toFixed(3);
+      const r_a_sot = a.sotpm/Math.max(muSOT,1e-9);
+      const r_a_sh  = a.shpm /Math.max(muSH ,1e-9);
+      const r_a_cor = a.cfpm /Math.max(muC  ,1e-9);
+      const r_a_y   = a.ypm  /Math.max(muY  ,1e-9);
 
-      // FT grid
-      const MAXG_FT=10;
-      const pH = Array.from({length:MAXG_FT+1},(_,k)=>poisPMF(k,λH));
-      const pA = Array.from({length:MAXG_FT+1},(_,k)=>poisPMF(k,λA));
-      let p1=0,px=0,p2=0,pUnder25=0; let rows=[];
-      for(let hg=0; hg<=MAXG_FT; hg++){
-        for(let ag=0; ag<=MAXG_FT; ag++){
-          const finalHG = baseHG + hg;
-          const finalAG = baseAG + ag;
-          const p=pH[hg]*pA[ag];
-          rows.push({score:`${finalHG}-${finalAG}`,p});
-          if(finalHG>finalAG) p1+=p; else if(finalHG===finalAG) px+=p; else p2+=p;
-          if(finalHG+finalAG<=2) pUnder25+=p;
-        }
-      }
-      const pOver25=1-pUnder25;
-      setProb('ft_1', p1); setProb('ft_x', px); setProb('ft_2', p2); markGroupTop('[data-group="g_ft_1x2"]');
-      setProb('m_o25', pOver25); setProb('m_u25', pUnder25); markGroupTop('[data-group="g_ft_ou25"]');
+      const r_h_sot_allow = h.sota/Math.max(muSOT,1e-9);
+      const r_h_sh_allow  = h.sha /Math.max(muSH ,1e-9);
+      const r_h_cor_allow = h.capm/Math.max(muC  ,1e-9);
 
-      // BTTS
-      let pBTTS;
-      if(liveOn.checked){
-        const haveH = baseHG>0, haveA = baseAG>0;
-        const pNoH = pH[0], pNoA = pA[0];
-        const pHzeroFinal = haveH ? 0 : pNoH;
-        const pAzeroFinal = haveA ? 0 : pNoA;
-        pBTTS = 1 - pHzeroFinal - pAzeroFinal + (pHzeroFinal*pAzeroFinal);
-      }else{
-        const pNoHome = pH[0], pNoAway = pA[0];
-        pBTTS = 1 - pNoHome - pNoAway + pNoHome*pNoAway;
-      }
-      setProb('m_btts_yes', pBTTS);
-      setProb('m_btts_no', 1 - pBTTS);
-      markGroupTop('[data-group="g_ft_btts"]');
+      // pesos (suaves, para no romper Poisson): suma típica |adj| <= 0.25
+      const wsot=0.25, wsh=0.10, wcor=0.08, wcard=0.06;
+      // home: ataque propio + concesiones del rival - tarjetas propias
+      let adjH = wsot*(r_h_sot-1) + wsh*(r_h_sh-1) + wcor*(r_h_cor-1)
+               + wsot*(r_a_sot_allow-1) + wsh*(r_a_sh_allow-1) + wcor*(r_a_cor_allow-1)
+               - wcard*(r_h_y-1);
+      // away simétrico
+      let adjA = wsot*(r_a_sot-1) + wsh*(r_a_sh-1) + wcor*(r_a_cor-1)
+               + wsot*(r_h_sot_allow-1) + wsh*(r_h_sh_allow-1) + wcor*(r_h_cor_allow-1)
+               - wcard*(r_a_y-1);
 
-      rows.sort((a,b)=>b.p-a.p);
-      scoreFT.innerHTML=rows.slice(0,50).map((x,i)=>`<tr><td><span class="pill ${i===0?'best':''}">${x.score}${i===0?' ⭐':''}</span></td><td>${(x.p*100).toFixed(3)}%</td></tr>`).join('');
-
-      // HT
-      const λH_base = attH*defA*mu;
-      const λA_base = attA*defH*mu;
-      const λH_HT = λH_base * (clamp(Number(haHTInput.value)||1,0.5,1.6)) * (clamp(Number(htFactorInput.value)||0.45,0.2,0.8));
-      const λA_HT = λA_base * (clamp(Number(htFactorInput.value)||0.45,0.2,0.8));
-      const MAXG_HT=5;
-      const pH_ht = Array.from({length:MAXG_HT+1},(_,k)=>poisPMF(k,λH_HT));
-      const pA_ht = Array.from({length:MAXG_HT+1},(_,k)=>poisPMF(k,λA_HT));
-      let ht1=0,htx=0,ht2=0, u05=0, u15=0; let rowsHT=[];
-      for(let hg=0; hg<=MAXG_HT; hg++){
-        for(let ag=0; ag<=MAXG_HT; ag++){
-          const p=pH_ht[hg]*pA_ht[ag];
-          rowsHT.push({score:`${hg}-${ag}`,p});
-          if(hg>ag) ht1+=p; else if(hg===ag) htx+=p; else ht2+=p;
-          if(hg+ag<=0) u05+=p; if(hg+ag<=1) u15+=p;
-        }
-      }
-      const o05=1-u05, o15=1-u15;
-      setProb('ht_1', ht1); setProb('ht_x', htx); setProb('ht_2', ht2); markGroupTop('[data-group="g_ht_1x2"]');
-      setProb('ht_o05', o05); setProb('ht_u05', u05); markGroupTop('[data-group="g_ht_ou05"]');
-      setProb('ht_o15', o15); setProb('ht_u15', u15); markGroupTop('[data-group="g_ht_ou15"]');
-
-      rowsHT.sort((a,b)=>b.p-a.p);
-      scoreHT.innerHTML=rowsHT.slice(0,40).map((x,i)=>`<tr><td><span class="pill ${i===0?'best':''}">${x.score}${i===0?' ⭐':''}</span></td><td>${(x.p*100).toFixed(3)}%</td></tr>`).join('');
-
-      // Córners
-      const attC_H = h.cfpm/Math.max(muC,1e-9), defC_A = a.capm/Math.max(muC,1e-9);
-      const attC_A = a.cfpm/Math.max(muC,1e-9), defC_H = h.capm/Math.max(muC,1e-9);
-      let λC_H = attC_H * defC_A * muC * HA_COR;
-      let λC_A = attC_A * defC_H * muC;
-      if(liveOn.checked){
-        const rem = clamp(1 - fracElapsed(liveMin.value), 0, 1);
-        λC_H *= rem; λC_A *= rem;
-      }
-      const λC_T = λC_H + λC_A;
-      const c_o85 = 1 - poisCDF(8, λC_T), c_u85 = 1-c_o85;
-      const c_o95 = 1 - poisCDF(9, λC_T), c_u95 = 1-c_o95;
-      const c_o105= 1 - poisCDF(10,λC_T), c_u105= 1-c_o105;
-      setProb('c_o85', c_o85); setProb('c_u85', c_u85); markGroupTop('[data-group="g_c_85"]');
-      setProb('c_o95', c_o95); setProb('c_u95', c_u95); markGroupTop('[data-group="g_c_95"]');
-      setProb('c_o105',c_o105); setProb('c_u105',c_u105); markGroupTop('[data-group="g_c_105"]');
-
-      // Tarjetas
-      const attY_H = h.ypm/Math.max(muY,1e-9), defY_A = a.yapm/Math.max(muY,1e-9);
-      const attY_A = a.ypm/Math.max(muY,1e-9), defY_H = h.yapm/Math.max(muY,1e-9);
-      const attR_H = h.rpm/Math.max(muR,1e-9), defR_A = a.rapm/Math.max(muR,1e-9);
-      const attR_A = a.rpm/Math.max(muR,1e-9), defR_H = h.rapm/Math.max(muR,1e-9);
-      let λY_H = attY_H * defY_A * muY * HA_CAR;
-      let λY_A = attY_A * defY_H * muY;
-      let λR_H = attR_H * defR_A * muR * HA_CAR;
-      let λR_A = attR_A * defR_H * muR;
-      if(liveOn.checked){
-        const rem = clamp(1 - fracElapsed(liveMin.value), 0, 1);
-        λY_H *= rem; λY_A *= rem; λR_H *= rem; λR_A *= rem;
-      }
-      const λY_T = λY_H + λY_A;
-      const y_o35 = 1 - poisCDF(3, λY_T), y_u35 = 1 - y_o35;
-      const y_o45 = 1 - poisCDF(4, λY_T), y_u45 = 1 - y_o45;
-      setProb('y_o35', y_o35); setProb('y_u35', y_u35); markGroupTop('[data-group="g_y_35"]');
-      setProb('y_o45', y_o45); setProb('y_u45', y_u45); markGroupTop('[data-group="g_y_45"]');
-
-      const λR_T = λR_H + λR_A;
-      const r_o05 = 1 - poisCDF(0, λR_T), r_u05 = 1 - r_o05;
-      const r_o15 = 1 - poisCDF(1, λR_T), r_u15 = 1 - r_o15;
-      $('r_any').textContent=(r_o05*100).toFixed(1)+'%';
-      setProb('r_o05', r_o05); setProb('r_u05', r_u05); markGroupTop('[data-group="g_r_05"]');
-      setProb('r_o15', r_o15); setProb('r_u15', r_u15); markGroupTop('[data-group="g_r_15"]');
-
-      status.textContent = useAI
-        ? (liveOn.checked ? 'Listo ✔ En vivo + IA.' : 'Listo ✔ IA asistida.')
-        : (liveOn.checked ? 'Listo ✔ En vivo.' : 'Listo ✔ Calculado.');
-    }catch(err){
-      console.error(err);
-      status.textContent = 'Error durante el cálculo: ' + (err && err.message ? err.message : 'desconocido');
+      const multH = clamp(1+adjH, 0.75, 1.35);
+      const multA = clamp(1+adjA, 0.75, 1.35);
+      λH = λH * multH;
+      λA = λA * multA;
     }
+
+    // KPIs (ocultas pero activas)
+    $('k_mu').textContent=mu.toFixed(3);
+    $('k_att_h').textContent=(h.gfpm/Math.max(mu,1e-9)).toFixed(3);
+    $('k_def_h').textContent=(h.gapm/Math.max(mu,1e-9)).toFixed(3);
+    $('k_att_a').textContent=(a.gfpm/Math.max(mu,1e-9)).toFixed(3);
+    $('k_def_a').textContent=(a.gapm/Math.max(mu,1e-9)).toFixed(3);
+    $('k_lh').textContent=λH.toFixed(3);
+    $('k_la').textContent=λA.toFixed(3);
+
+    // FT distribution + 1X2 + O/U + BTTS
+    const MAXG_FT=10;
+    const pH = Array.from({length:MAXG_FT+1},(_,k)=>poisPMF(k,λH));
+    const pA = Array.from({length:MAXG_FT+1},(_,k)=>poisPMF(k,λA));
+    let p1=0,px=0,p2=0,pUnder25=0; let rows=[];
+    for(let hg=0; hg<=MAXG_FT; hg++){
+      for(let ag=0; ag<=MAXG_FT; ag++){
+        const p=pH[hg]*pA[ag];
+        rows.push({score:`${hg}-${ag}`,p});
+        if(hg>ag) p1+=p; else if(hg===ag) px+=p; else p2+=p;
+        if(hg+ag<=2) pUnder25+=p;
+      }
+    }
+    const pOver25=1-pUnder25;
+    setProb('ft_1', p1); setProb('ft_x', px); setProb('ft_2', p2); markGroupTop('[data-group="g_ft_1x2"]');
+    setProb('m_o25', pOver25); setProb('m_u25', pUnder25); markGroupTop('[data-group="g_ft_ou25"]');
+
+    // BTTS
+    const pNoHome = pH[0], pNoAway = pA[0];
+    const pBTTS = 1 - pNoHome - pNoAway + pNoHome*pNoAway;
+    setProb('m_btts_yes', pBTTS);
+    setProb('m_btts_no', 1 - pBTTS);
+    markGroupTop('[data-group="g_ft_btts"]');
+
+    // Top correct scores (mantenemos 50 como en tu versión actual)
+    rows.sort((a,b)=>b.p-a.p);
+    scoreFT.innerHTML=rows.slice(0,50).map((x,i)=>`<tr><td><span class="pill ${i===0?'best':''}">${x.score}${i===0?' ⭐':''}</span></td><td>${(x.p*100).toFixed(3)}%</td></tr>`).join('');
+
+    // HT
+    const λH_HT = λH * factorHT * ( (clamp(Number(haHTInput.value)||1,0.5,1.6)) / HA );
+    const λA_HT = λA * factorHT;
+    const MAXG_HT=5;
+    const pH_ht = Array.from({length:MAXG_HT+1},(_,k)=>poisPMF(k,λH_HT));
+    const pA_ht = Array.from({length:MAXG_HT+1},(_,k)=>poisPMF(k,λA_HT));
+    let ht1=0,htx=0,ht2=0, u05=0, u15=0; let rowsHT=[];
+    for(let hg=0; hg<=MAXG_HT; hg++){
+      for(let ag=0; ag<=MAXG_HT; ag++){
+        const p=pH_ht[hg]*pA_ht[ag];
+        rowsHT.push({score:`${hg}-${ag}`,p});
+        if(hg>ag) ht1+=p; else if(hg===ag) htx+=p; else ht2+=p;
+        if(hg+ag<=0) u05+=p; if(hg+ag<=1) u15+=p;
+      }
+    }
+    const o05=1-u05, o15=1-u15;
+    setProb('ht_1', ht1); setProb('ht_x', htx); setProb('ht_2', ht2); markGroupTop('[data-group="g_ht_1x2"]');
+    setProb('ht_o05', o05); setProb('ht_u05', u05); markGroupTop('[data-group="g_ht_ou05"]');
+    setProb('ht_o15', o15); setProb('ht_u15', u15); markGroupTop('[data-group="g_ht_ou15"]');
+
+    rowsHT.sort((a,b)=>b.p-a.p);
+    scoreHT.innerHTML=rowsHT.slice(0,40).map((x,i)=>`<tr><td><span class="pill ${i===0?'best':''}">${x.score}${i===0?' ⭐':''}</span></td><td>${(x.p*100).toFixed(3)}%</td></tr>`).join('');
+
+    // Córners
+    const attC_H = h.cfpm/Math.max(muC,1e-9), defC_A = a.capm/Math.max(muC,1e-9);
+    const attC_A = a.cfpm/Math.max(muC,1e-9), defC_H = h.capm/Math.max(muC,1e-9);
+    const λC_H = attC_H * defC_A * muC * (useAI? 1 : 1) * (clamp(Number(haCornersInput.value)||1.05,0.8,1.4));
+    const λC_A = attC_A * defC_H * muC;
+    const λC_T = λC_H + λC_A;
+    $('c_mu').textContent=muC.toFixed(3);
+    $('c_lh').textContent=λC_H.toFixed(3);
+    $('c_la').textContent=λC_A.toFixed(3);
+    $('c_tot').textContent=λC_T.toFixed(3);
+    const c_o85 = 1 - poisCDF(8, λC_T), c_u85 = 1-c_o85;
+    const c_o95 = 1 - poisCDF(9, λC_T), c_u95 = 1-c_o95;
+    const c_o105= 1 - poisCDF(10,λC_T), c_u105= 1-c_o105;
+    setProb('c_o85', c_o85); setProb('c_u85', c_u85); markGroupTop('[data-group="g_c_85"]');
+    setProb('c_o95', c_o95); setProb('c_u95', c_u95); markGroupTop('[data-group="g_c_95"]');
+    setProb('c_o105',c_o105); setProb('c_u105',c_u105); markGroupTop('[data-group="g_c_105"]');
+
+    // Tarjetas (Amarillas)
+    const attY_H = h.ypm/Math.max(muY,1e-9), defY_A = a.yapm/Math.max(muY,1e-9);
+    const attY_A = a.ypm/Math.max(muY,1e-9), defY_H = h.yapm/Math.max(muY,1e-9);
+    const λY_H = attY_H * defY_A * muY * (clamp(Number(haCardsInput.value)||1.00,0.8,1.4));
+    const λY_A = attY_A * defY_H * muY;
+    const λY_T = λY_H + λY_A;
+    $('y_mu').textContent=muY.toFixed(3);
+    $('y_lh').textContent=λY_H.toFixed(3);
+    $('y_la').textContent=λY_A.toFixed(3);
+    $('y_tot').textContent=λY_T.toFixed(3);
+    const y_o35 = 1 - poisCDF(3, λY_T), y_u35 = 1 - y_o35;
+    const y_o45 = 1 - poisCDF(4, λY_T), y_u45 = 1 - y_o45;
+    setProb('y_o35', y_o35); setProb('y_u35', y_u35); markGroupTop('[data-group="g_y_35"]');
+    setProb('y_o45', y_o45); setProb('y_u45', y_u45); markGroupTop('[data-group="g_y_45"]');
+
+    // Tarjetas (Rojas)
+    const attR_H = h.rpm/Math.max(muR,1e-9), defR_A = a.rapm/Math.max(muR,1e-9);
+    const attR_A = a.rpm/Math.max(muR,1e-9), defR_H = h.rapm/Math.max(muR,1e-9);
+    const λR_H = attR_H * defR_A * muR * (clamp(Number(haCardsInput.value)||1.00,0.8,1.4));
+    const λR_A = attR_A * defR_H * muR;
+    const λR_T = λR_H + λR_A;
+    $('r_mu').textContent=muR.toFixed(3);
+    $('r_lh').textContent=λR_H.toFixed(3);
+    $('r_la').textContent=λR_A.toFixed(3);
+    $('r_tot').textContent=λR_T.toFixed(3);
+    const r_o05 = 1 - poisCDF(0, λR_T), r_u05 = 1 - r_o05;
+    const r_o15 = 1 - poisCDF(1, λR_T), r_u15 = 1 - r_o15;
+    $('r_any').textContent=(r_o05*100).toFixed(1)+'%';
+    setProb('r_o05', r_o05); setProb('r_u05', r_u05); markGroupTop('[data-group="g_r_05"]');
+    setProb('r_o15', r_o15); setProb('r_u15', r_u15); markGroupTop('[data-group="g_r_15"]');
+
+    // Disparos a puerta (SoT) totales
+    const attSOT_H = h.sotpm/Math.max(muSOT,1e-9), defSOT_A = a.sota/Math.max(muSOT,1e-9);
+    const attSOT_A = a.sotpm/Math.max(muSOT,1e-9), defSOT_H = h.sota/Math.max(muSOT,1e-9);
+    const λSOT_H = attSOT_H * defSOT_A * muSOT * (useAI? clamp(HA,0.95,1.2): HA);
+    const λSOT_A = attSOT_A * defSOT_H * muSOT;
+    const λSOT_T = λSOT_H + λSOT_A;
+    $('sot_mu').textContent=muSOT.toFixed(3);
+    $('sot_lh').textContent=λSOT_H.toFixed(3);
+    $('sot_la').textContent=λSOT_A.toFixed(3);
+    $('sot_tot').textContent=λSOT_T.toFixed(3);
+    const sot_o75 = 1 - poisCDF(7, λSOT_T), sot_u75 = 1 - sot_o75;
+    const sot_o85 = 1 - poisCDF(8, λSOT_T), sot_u85 = 1 - sot_o85;
+    const sot_o95 = 1 - poisCDF(9, λSOT_T), sot_u95 = 1 - sot_o95;
+    setProb('sot_o75', sot_o75); setProb('sot_u75', sot_u75); markGroupTop('[data-group="g_sot_75"]');
+    setProb('sot_o85', sot_o85); setProb('sot_u85', sot_u85); markGroupTop('[data-group="g_sot_85"]');
+    setProb('sot_o95', sot_o95); setProb('sot_u95', sot_u95); markGroupTop('[data-group="g_sot_95"]');
+
+    // Disparos totales (Shots)
+    const attSH_H = h.shpm/Math.max(muSH,1e-9), defSH_A = a.sha/Math.max(muSH,1e-9);
+    const attSH_A = a.shpm/Math.max(muSH,1e-9), defSH_H = h.sha/Math.max(muSH,1e-9);
+    const λSH_H = attSH_H * defSH_A * muSH * (useAI? clamp(HA,0.95,1.2): HA);
+    const λSH_A = attSH_A * defSH_H * muSH;
+    const λSH_T = λSH_H + λSH_A;
+    $('sh_mu').textContent=muSH.toFixed(3);
+    $('sh_lh').textContent=λSH_H.toFixed(3);
+    $('sh_la').textContent=λSH_A.toFixed(3);
+    $('sh_tot').textContent=λSH_T.toFixed(3);
+    const sh_o205 = 1 - poisCDF(20, λSH_T), sh_u205 = 1 - sh_o205;
+    const sh_o225 = 1 - poisCDF(22, λSH_T), sh_u225 = 1 - sh_o225;
+    const sh_o245 = 1 - poisCDF(24, λSH_T), sh_u245 = 1 - sh_o245;
+    setProb('sh_o205', sh_o205); setProb('sh_u205', sh_u205); markGroupTop('[data-group="g_sh_205"]');
+    setProb('sh_o225', sh_o225); setProb('sh_u225', sh_u225); markGroupTop('[data-group="g_sh_225"]');
+    setProb('sh_o245', sh_o245); setProb('sh_u245', sh_u245); markGroupTop('[data-group="g_sh_245"]');
+
+    status.textContent = useAI ? 'Listo ✔ Pronósticos reforzados con IA.' : 'Listo ✔ Pronósticos base calculados.';
   }
 
   // ------- Eventos -------
   btnCalc.addEventListener('click', ()=>compute(false));
   btnAI.addEventListener('click',   ()=>compute(true));
 
-  [liveMin, liveHG, liveAG, liveOn].forEach(el=>{
-    el.addEventListener('input', ()=>{
-      if(!liveOn.checked) return;
-      liveMin.value = String(clamp(Number(liveMin.value)||0,0,120));
-      liveHG.value  = String(clamp(Number(liveHG.value)||0,0,20));
-      liveAG.value  = String(clamp(Number(liveAG.value)||0,0,20));
-      compute(lastUseAI);
-    });
-  });
-
-  btnResetLive.addEventListener('click', ()=>{
-    liveOn.checked=false;
-    liveMin.value=0; liveHG.value=0; liveAG.value=0;
-    compute(lastUseAI);
-  });
-
   document.getElementById('file').addEventListener('change', async (e)=>{
     const f=e.target.files?.[0]; if(!f) return;
     status.textContent='Cargando…';
-    // deshabilitar UI mientras carga
-    [leagueSel,homeSel,awaySel,btnCalc,btnAI,liveOn,liveMin,liveHG,liveAG,btnResetLive].forEach(el=>{el.disabled=true;});
+    leagueSel.disabled = true; homeSel.disabled = true; awaySel.disabled = true; btnCalc.disabled = true; btnAI.disabled = true;
     leagueSel.innerHTML=''; homeSel.innerHTML=''; awaySel.innerHTML='';
 
     try{
       const text=await f.text();
       const arr=parsePotential(text);
       if(!arr.length) throw new Error("El archivo está vacío.");
+
       buildFromArray(arr);
 
-      if(Object.keys(teams).length===0) throw new Error("No se detectaron ligas/equipos en el archivo.");
+      const haveLeagues = Object.keys(teams).length>0;
+      if(!haveLeagues) throw new Error("No se detectaron ligas/equipos en el archivo.");
 
       fillSelectors(true);
 
+      leagueSel.disabled = false;
       const lig = leagueSel.value;
-      const enable = lig && teams[lig] && Object.keys(teams[lig]).length>=2;
-      [homeSel,awaySel,btnCalc,btnAI,liveOn,liveMin,liveHG,liveAG,btnResetLive].forEach(el=>{el.disabled=!enable;});
+      const enable = lig && teams[lig] && Object.keys(teams[lig]).length>0;
+      homeSel.disabled = !enable; awaySel.disabled = !enable; btnCalc.disabled = !enable; btnAI.disabled = !enable;
 
-      status.textContent= enable
-        ? 'Datos cargados ✔ Selecciona liga/equipos y pulsa Calcular.'
-        : 'Datos cargados, pero faltan equipos. Revisa el archivo.';
+      status.textContent='Datos cargados ✔ Selecciona liga y equipos. Pulsa Calcular o IA asistida.';
     }catch(err){
-      console.error(err);
       teams={};
-      [leagueSel,homeSel,awaySel,btnCalc,btnAI,liveOn,liveMin,liveHG,liveAG,btnResetLive].forEach(el=>{el.disabled=true;});
+      leagueSel.disabled=true; homeSel.disabled=true; awaySel.disabled=true; btnCalc.disabled=true; btnAI.disabled=true;
       leagueSel.innerHTML=''; homeSel.innerHTML=''; awaySel.innerHTML='';
       status.textContent = (err && err.message) ? err.message : 'Error al leer el archivo.';
     }
