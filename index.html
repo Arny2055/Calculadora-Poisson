@@ -157,7 +157,7 @@
       <div class="kpi" data-market="u25"><span class="badge-hot">🔥 Más probable</span><div class="t">Under 2.5</div><div class="v pv" id="m_u25">—</div></div>
     </div>
 
-    <!-- Upset Risk OU -->
+    <!-- Upset Risk OU (FT 2.5) -->
     <div class="upset" id="upou">
       <div class="row">
         <span class="pill" id="fav-ou">Favorito: —</span>
@@ -210,9 +210,32 @@
       <div class="kpi" data-market="ht_o05"><span class="badge-hot">🔥 Más probable</span><div class="t">Over 0.5 HT</div><div class="v pv" id="ht_o05">—</div></div>
       <div class="kpi" data-market="ht_u05"><span class="badge-hot">🔥 Más probable</span><div class="t">Under 0.5 HT</div><div class="v pv" id="ht_u05">—</div></div>
     </div>
+
+    <!-- Upset Risk HT O/U 0.5 -->
+    <div class="upset" id="upht05">
+      <div class="row">
+        <span class="pill" id="fav-ht05">Favorito: —</span>
+        <span class="pill" id="riskLabel-ht05">Riesgo: —</span>
+        <span class="pill" id="riskPct-ht05">—%</span>
+      </div>
+      <div class="bar"><div class="fill" id="fill-ht05"></div></div>
+      <div class="updet" id="det-ht05">—</div>
+    </div>
+
     <div class="kpis" data-group="g_ht_ou15" style="margin-top:10px">
       <div class="kpi" data-market="ht_o15"><span class="badge-hot">🔥 Más probable</span><div class="t">Over 1.5 HT</div><div class="v pv" id="ht_o15">—</div></div>
       <div class="kpi" data-market="ht_u15"><span class="badge-hot">🔥 Más probable</span><div class="t">Under 1.5 HT</div><div class="v pv" id="ht_u15">—</div></div>
+    </div>
+
+    <!-- Upset Risk HT O/U 1.5 -->
+    <div class="upset" id="upht15">
+      <div class="row">
+        <span class="pill" id="fav-ht15">Favorito: —</span>
+        <span class="pill" id="riskLabel-ht15">Riesgo: —</span>
+        <span class="pill" id="riskPct-ht15">—%</span>
+      </div>
+      <div class="bar"><div class="fill" id="fill-ht15"></div></div>
+      <div class="updet" id="det-ht15">—</div>
     </div>
   </div>
 
@@ -805,7 +828,7 @@
     setProb('sh_o225', sh_o225); setProb('sh_u225', sh_u225); markGroupTop('[data-group="g_sh_225"]');
     setProb('sh_o245', sh_o245); setProb('sh_u245', sh_u245); markGroupTop('[data-group="g_sh_245"]');
 
-    /* ====== Render Upset Risk (1X2, OU, BTTS) ====== */
+    /* ====== Render Upset Risk (FT: 1X2, OU, BTTS) ====== */
     if (window.UPSET && typeof window.UPSET.renderAllUpsetRisks === 'function'){
       window.UPSET.renderAllUpsetRisks({
         // 1X2
@@ -816,7 +839,18 @@
         pYes: pBTTS, pNo: 1-pBTTS,
         // Lambdas para volatilidad
         lambdaH: λH, lambdaA: λA
-        // Si en el futuro pasas odds1/oddX/odd2, también las acepta
+      });
+    }
+
+    /* ====== Render Upset Risk (HT: O/U 0.5 y 1.5) ====== */
+    if (window.UPSET && typeof window.UPSET.renderOUInto === 'function'){
+      window.UPSET.renderOUInto('ht05', {
+        pOver: o05, pUnder: u05, lineOU: 'HT 0.5',
+        lambdaH: λH_HT, lambdaA: λA_HT
+      });
+      window.UPSET.renderOUInto('ht15', {
+        pOver: o15, pUnder: u15, lineOU: 'HT 1.5',
+        lambdaH: λH_HT, lambdaA: λA_HT
       });
     }
 
@@ -861,7 +895,7 @@
 })();
 </script>
 
-<!-- ===== Módulo Upset Risk (independiente, sin tocar tu lógica) ===== -->
+<!-- ===== Módulo Upset Risk (independiente, extendido para HT) ===== -->
 <script>
 (function(){
   const clamp = (x,a,b)=>Math.max(a,Math.min(b,x));
@@ -904,6 +938,25 @@
   function setText(id,txt){ const el=document.getElementById(id); if(el) el.textContent=txt; }
   function setFill(id,p){ const el=document.getElementById(id); if(el) el.style.width=Math.round(clamp(p,0,1)*100)+'%'; }
 
+  // Render fijo para FT OU (compatibilidad)
+  function renderOU({pOver,pUnder,lineOU,lambdaH,lambdaA}){
+    renderOUInto('ou', {pOver,pUnder,lineOU,lambdaH,lambdaA});
+  }
+
+  // Render parametrizable: ids construidos con prefijo
+  // Espera que existan: fav-<prefix>, riskLabel-<prefix>, riskPct-<prefix>, fill-<prefix>, det-<prefix>
+  function renderOUInto(prefix, {pOver,pUnder,lineOU,lambdaH,lambdaA,marketPs=null}){
+    if([pOver,pUnder].some(v=>typeof v!=='number')) return;
+    const rk=riskBinary(pOver,pUnder,{lambdaH,lambdaA,marketPs});
+    const favLbl=(pOver>=pUnder)?'Over':'Under';
+    setText(`fav-${prefix}`,'Favorito: '+favLbl);
+    setText(`riskLabel-${prefix}`,'Riesgo: '+rk.label);
+    setText(`riskPct-${prefix}`,Math.round(rk.score*100)+'%');
+    setFill(`fill-${prefix}`,rk.score);
+    setText(`det-${prefix}`,`Línea: ${lineOU??'—'} · Parejo: ${Math.round(rk.tight*100)}% · Favorito débil: ${Math.round(rk.favRisk*100)}%`
+      + (lambdaH!=null?` · VarGoles: ${Math.round(rk.vol*100)}%`:``));
+  }
+
   function render1x2({p1,pX,p2,lambdaH,lambdaA,odds1,oddsX,odds2}){
     if([p1,pX,p2].some(v=>typeof v!=='number')) return;
     const mkt=probsFromOdds(odds1,oddsX,odds2);
@@ -918,17 +971,7 @@
       + (lambdaH!=null?` · VarGoles: ${Math.round(rk.vol*100)}%`:``)
       + (mkt?` · Desacuerdo mercado: ${Math.round(rk.mkt*100)}%`:``));
   }
-  function renderOU({pOver,pUnder,lineOU,lambdaH,lambdaA}){
-    if([pOver,pUnder].some(v=>typeof v!=='number')) return;
-    const rk=riskBinary(pOver,pUnder,{lambdaH,lambdaA});
-    const favLbl=(pOver>=pUnder)?'Over':'Under';
-    setText('fav-ou','Favorito: '+favLbl);
-    setText('riskLabel-ou','Riesgo: '+rk.label);
-    setText('riskPct-ou',Math.round(rk.score*100)+'%');
-    setFill('fill-ou',rk.score);
-    setText('det-ou',`Línea: ${lineOU??'—'} · Parejo: ${Math.round(rk.tight*100)}% · Favorito débil: ${Math.round(rk.favRisk*100)}%`
-      + (lambdaH!=null?` · VarGoles: ${Math.round(rk.vol*100)}%`:``));
-  }
+
   function renderBTTS({pYes,pNo,lambdaH,lambdaA}){
     if([pYes,pNo].some(v=>typeof v!=='number')) return;
     const rk=riskBinary(pYes,pNo,{lambdaH,lambdaA});
@@ -947,14 +990,14 @@
       render1x2(opts);
     }
     if(typeof opts.pOver==='number' && typeof opts.pUnder==='number'){
-      renderOU(opts);
+      renderOU(opts); // FT OU 2.5 en tu página
     }
     if(typeof opts.pYes==='number' && typeof opts.pNo==='number'){
       renderBTTS(opts);
     }
   }
 
-  window.UPSET=Object.freeze({renderAllUpsetRisks});
+  window.UPSET=Object.freeze({renderAllUpsetRisks, renderOUInto});
 })();
 </script>
 </body>
