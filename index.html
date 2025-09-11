@@ -56,6 +56,13 @@
 
   /* Indicador para el marcador más probable */
   .best{ border-color: rgba(122,162,255,0.9); box-shadow: 0 0 0 1px rgba(122,162,255,0.9), 0 0 0 8px rgba(122,162,255,0.12); }
+
+  /* ==== Estilos Upset Risk ==== */
+  .upset{margin-top:12px; border:1px solid var(--border); border-radius:10px; padding:10px; background:var(--panel2)}
+  .upset .row{display:flex; gap:8px; align-items:center; flex-wrap:wrap}
+  .upset .bar{height:8px; width:100%; border-radius:999px; background:#1a1f2b; overflow:hidden; border:1px solid var(--border); margin-top:8px}
+  .upset .fill{height:100%; width:0%; background:linear-gradient(90deg,#79e2a6,#ffb84d,#ff6b6b)}
+  .updet{color:var(--muted); font-size:12px; margin-top:6px}
 </style>
 </head>
 <body>
@@ -110,6 +117,17 @@
       <div class="kpi" data-market="ft_x"><span class="badge-hot">🔥 Más probable</span><div class="t">Draw (X)</div><div class="v pv" id="ft_x">—</div></div>
       <div class="kpi" data-market="ft_2"><span class="badge-hot">🔥 Más probable</span><div class="t">Away Win (2)</div><div class="v pv" id="ft_2">—</div></div>
     </div>
+
+    <!-- Upset Risk 1X2 -->
+    <div class="upset" id="up1x2">
+      <div class="row">
+        <span class="pill" id="fav-1x2">Favorito: —</span>
+        <span class="pill" id="riskLabel-1x2">Riesgo: —</span>
+        <span class="pill" id="riskPct-1x2">—%</span>
+      </div>
+      <div class="bar"><div class="fill" id="fill-1x2"></div></div>
+      <div class="updet" id="det-1x2">—</div>
+    </div>
   </div>
 
   <!-- Doble Oportunidad -->
@@ -138,6 +156,17 @@
       <div class="kpi" data-market="o25"><span class="badge-hot">🔥 Más probable</span><div class="t">Over 2.5</div><div class="v pv" id="m_o25">—</div></div>
       <div class="kpi" data-market="u25"><span class="badge-hot">🔥 Más probable</span><div class="t">Under 2.5</div><div class="v pv" id="m_u25">—</div></div>
     </div>
+
+    <!-- Upset Risk OU -->
+    <div class="upset" id="upou">
+      <div class="row">
+        <span class="pill" id="fav-ou">Favorito: —</span>
+        <span class="pill" id="riskLabel-ou">Riesgo: —</span>
+        <span class="pill" id="riskPct-ou">—%</span>
+      </div>
+      <div class="bar"><div class="fill" id="fill-ou"></div></div>
+      <div class="updet" id="det-ou">—</div>
+    </div>
   </div>
 
   <!-- BTTS FT + Prob. de anotar -->
@@ -150,6 +179,17 @@
     <div class="kpis" style="margin-top:10px" data-group="g_ft_scores_any">
       <div class="kpi" data-market="home_scores_any"><div class="t">Prob. que anote el Local (≥1 gol)</div><div class="v pv" id="m_home_scores">—</div></div>
       <div class="kpi" data-market="away_scores_any"><div class="t">Prob. que anote el Visitante (≥1 gol)</div><div class="v pv" id="m_away_scores">—</div></div>
+    </div>
+
+    <!-- Upset Risk BTTS -->
+    <div class="upset" id="upbtts">
+      <div class="row">
+        <span class="pill" id="fav-btts">Favorito: —</span>
+        <span class="pill" id="riskLabel-btts">Riesgo: —</span>
+        <span class="pill" id="riskPct-btts">—%</span>
+      </div>
+      <div class="bar"><div class="fill" id="fill-btts"></div></div>
+      <div class="updet" id="det-btts">—</div>
     </div>
   </div>
 
@@ -765,6 +805,21 @@
     setProb('sh_o225', sh_o225); setProb('sh_u225', sh_u225); markGroupTop('[data-group="g_sh_225"]');
     setProb('sh_o245', sh_o245); setProb('sh_u245', sh_u245); markGroupTop('[data-group="g_sh_245"]');
 
+    /* ====== Render Upset Risk (1X2, OU, BTTS) ====== */
+    if (window.UPSET && typeof window.UPSET.renderAllUpsetRisks === 'function'){
+      window.UPSET.renderAllUpsetRisks({
+        // 1X2
+        p1: p1, pX: px, p2: p2,
+        // OU (línea 2.5)
+        pOver: pOver25, pUnder: pUnder25, lineOU: 2.5,
+        // BTTS
+        pYes: pBTTS, pNo: 1-pBTTS,
+        // Lambdas para volatilidad
+        lambdaH: λH, lambdaA: λA
+        // Si en el futuro pasas odds1/oddX/odd2, también las acepta
+      });
+    }
+
     status.textContent = useAI ? 'Listo ✔ Pronósticos reforzados con IA.' : 'Listo ✔ Pronósticos base calculados.';
   }
 
@@ -803,6 +858,103 @@
       status.textContent = (err && err.message) ? err.message : 'Error al leer el archivo.';
     }
   });
+})();
+</script>
+
+<!-- ===== Módulo Upset Risk (independiente, sin tocar tu lógica) ===== -->
+<script>
+(function(){
+  const clamp = (x,a,b)=>Math.max(a,Math.min(b,x));
+  function entropyN(ps){
+    const eps=1e-12, clean=ps.map(p=>clamp(p,eps,1-eps));
+    const H=-clean.reduce((s,p)=>s+p*Math.log(p),0);
+    return H/Math.log(ps.length); // 0..1
+  }
+  function binaryTight(p){
+    const eps=1e-12; p=clamp(p,eps,1-eps);
+    const H=-(p*Math.log(p)+(1-p)*Math.log(1-p));
+    return H/Math.log(2);
+  }
+  function norm01(x,min,max){ return (max<=min)?0:clamp((x-min)/(max-min),0,1); }
+  function probsFromOdds(o1,oX,o2){
+    if(!(o1&&oX&&o2)) return null;
+    const inv=[1/o1,1/oX,1/o2], s=inv[0]+inv[1]+inv[2];
+    return {p1:inv[0]/s,pX:inv[1]/s,p2:inv[2]/s};
+  }
+
+  function riskMulti(ps,{lambdaH=null,lambdaA=null,marketPs=null}={}){
+    const tight=entropyN(ps);
+    const favRisk=1-Math.max(...ps);
+    let vol=0; if(lambdaH!=null && lambdaA!=null){ vol=norm01(lambdaH+lambdaA,0.5,4.0); }
+    let mkt=0; if(marketPs){ const L1=ps.reduce((s,p,i)=>s+Math.abs(p-marketPs[i]),0); mkt=norm01(L1,0.00,0.60); }
+    const score=0.35*tight+0.35*favRisk+0.15*vol+0.15*mkt;
+    const label = score>=0.66?'Alto':(score>=0.33?'Medio':'Bajo');
+    return {score,label,tight,favRisk,vol,mkt};
+  }
+  function riskBinary(pA,pB,{lambdaH=null,lambdaA=null,marketPs=null}={}){
+    const tight=binaryTight(pA);
+    const favRisk=1-Math.max(pA,pB);
+    let vol=0; if(lambdaH!=null && lambdaA!=null){ vol=norm01(lambdaH+lambdaA,0.5,4.0); }
+    let mkt=0; if(marketPs){ const L1=Math.abs(pA-marketPs[0])+Math.abs(pB-marketPs[1]); mkt=norm01(L1,0.00,0.60); }
+    const score=0.45*tight+0.35*favRisk+0.10*vol+0.10*mkt;
+    const label = score>=0.66?'Alto':(score>=0.33?'Medio':'Bajo');
+    return {score,label,tight,favRisk,vol,mkt};
+  }
+
+  function setText(id,txt){ const el=document.getElementById(id); if(el) el.textContent=txt; }
+  function setFill(id,p){ const el=document.getElementById(id); if(el) el.style.width=Math.round(clamp(p,0,1)*100)+'%'; }
+
+  function render1x2({p1,pX,p2,lambdaH,lambdaA,odds1,oddsX,odds2}){
+    if([p1,pX,p2].some(v=>typeof v!=='number')) return;
+    const mkt=probsFromOdds(odds1,oddsX,odds2);
+    const rk=riskMulti([p1,pX,p2],{lambdaH,lambdaA,marketPs:mkt?[mkt.p1,mkt.pX,mkt.p2]:null});
+    const favIdx=[p1,pX,p2].indexOf(Math.max(p1,pX,p2));
+    const favLbl=['1 (Local)','X (Empate)','2 (Visita)'][favIdx];
+    setText('fav-1x2','Favorito: '+favLbl);
+    setText('riskLabel-1x2','Riesgo: '+rk.label);
+    setText('riskPct-1x2',Math.round(rk.score*100)+'%');
+    setFill('fill-1x2',rk.score);
+    setText('det-1x2',`Parejo: ${Math.round(rk.tight*100)}% · Favorito débil: ${Math.round(rk.favRisk*100)}%`
+      + (lambdaH!=null?` · VarGoles: ${Math.round(rk.vol*100)}%`:``)
+      + (mkt?` · Desacuerdo mercado: ${Math.round(rk.mkt*100)}%`:``));
+  }
+  function renderOU({pOver,pUnder,lineOU,lambdaH,lambdaA}){
+    if([pOver,pUnder].some(v=>typeof v!=='number')) return;
+    const rk=riskBinary(pOver,pUnder,{lambdaH,lambdaA});
+    const favLbl=(pOver>=pUnder)?'Over':'Under';
+    setText('fav-ou','Favorito: '+favLbl);
+    setText('riskLabel-ou','Riesgo: '+rk.label);
+    setText('riskPct-ou',Math.round(rk.score*100)+'%');
+    setFill('fill-ou',rk.score);
+    setText('det-ou',`Línea: ${lineOU??'—'} · Parejo: ${Math.round(rk.tight*100)}% · Favorito débil: ${Math.round(rk.favRisk*100)}%`
+      + (lambdaH!=null?` · VarGoles: ${Math.round(rk.vol*100)}%`:``));
+  }
+  function renderBTTS({pYes,pNo,lambdaH,lambdaA}){
+    if([pYes,pNo].some(v=>typeof v!=='number')) return;
+    const rk=riskBinary(pYes,pNo,{lambdaH,lambdaA});
+    const favLbl=(pYes>=pNo)?'BTTS: Sí':'BTTS: No';
+    setText('fav-btts','Favorito: '+favLbl);
+    setText('riskLabel-btts','Riesgo: '+rk.label);
+    setText('riskPct-btts',Math.round(rk.score*100)+'%');
+    setFill('fill-btts',rk.score);
+    setText('det-btts',`Parejo: ${Math.round(rk.tight*100)}% · Favorito débil: ${Math.round(rk.favRisk*100)}%`
+      + (lambdaH!=null?` · VarGoles: ${Math.round(rk.vol*100)}%`:``));
+  }
+
+  function renderAllUpsetRisks(opts){
+    if(!opts||typeof opts!=='object') return;
+    if(typeof opts.p1==='number' && typeof opts.pX==='number' && typeof opts.p2==='number'){
+      render1x2(opts);
+    }
+    if(typeof opts.pOver==='number' && typeof opts.pUnder==='number'){
+      renderOU(opts);
+    }
+    if(typeof opts.pYes==='number' && typeof opts.pNo==='number'){
+      renderBTTS(opts);
+    }
+  }
+
+  window.UPSET=Object.freeze({renderAllUpsetRisks});
 })();
 </script>
 </body>
