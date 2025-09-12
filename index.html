@@ -3,16 +3,15 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>Poisson — Solo GF (1X2, DNB, OU, BTTS)</title>
+<title>Poisson — OU con línea seleccionable + BTTS</title>
 <style>
   :root{--bg:#0f1115;--panel:#171a21;--text:#e8ecf3;--muted:#9aa3b2;--accent:#7aa2ff;--border:#2a3140}
   *{box-sizing:border-box}
   body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,system-ui,Segoe UI,Roboto,Arial,sans-serif}
   header{padding:16px 20px;border-bottom:1px solid var(--border);background:#0c0e13}
   h1{font-size:18px;margin:0}
-  .wrap{max-width:980px;margin:0 auto;padding:20px}
-  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px}
-  .card{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:16px}
+  .wrap{max-width:820px;margin:0 auto;padding:20px}
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:18px}
   label{font-size:13px;color:var(--muted);display:block;margin:8px 0 4px}
   input{width:100%;padding:10px;border:1px solid var(--border);border-radius:10px;background:#12151c;color:var(--text)}
   .btn{margin-top:14px;background:var(--accent);border:0;border-radius:10px;padding:12px 14px;color:#0b0f18;font-weight:700;cursor:pointer;width:100%}
@@ -26,29 +25,53 @@
 </style>
 </head>
 <body>
-<header><h1>Calculadora Poisson — Solo Goles a Favor (GF)</h1></header>
+<header><h1>Poisson — Over/Under (línea libre) + BTTS</h1></header>
 
 <div class="wrap">
-  <div class="grid">
-    <div class="card">
-      <h3>Entradas</h3>
-      <label>GF Local (λ<sub>H</sub>)</label>
-      <input id="gfH" type="number" step="0.01" min="0" value="1.40">
-      <label>GF Visitante (λ<sub>A</sub>)</label>
-      <input id="gfA" type="number" step="0.01" min="0" value="1.60">
-      <label>Máx. goles por lado (para la matriz 1X2)</label>
-      <input id="maxGoals" type="number" step="1" min="8" max="20" value="12">
-      <button class="btn" id="calc">Calcular</button>
-      <div class="kpi" id="kpi"></div>
-      <small>Modelo: X~Pois(λ<sub>H</sub>=GF Local), Y~Pois(λ<sub>A</sub>=GF Visitante). Totales: N=X+Y~Pois(λ<sub>T</sub>=λ<sub>H</sub>+λ<sub>A</sub>).</small>
-    </div>
+  <div class="card">
+    <h3>Entradas</h3>
+    <label>GF Local (λ<sub>H</sub>)</label>
+    <input id="gfH" type="number" step="0.01" min="0" value="1.40">
+    <label>GF Visitante (λ<sub>A</sub>)</label>
+    <input id="gfA" type="number" step="0.01" min="0" value="1.60">
 
-    <div class="card">
-      <h3>Resultados</h3>
-      <table id="tbl1"><thead><tr><th>Mercado</th><th class="mono">Prob.</th><th class="mono">Cuota justa</th></tr></thead><tbody></tbody></table>
-      <table id="tbl2"><thead><tr><th>Over/Under</th><th class="mono">Prob.</th><th class="mono">Cuota justa</th></tr></thead><tbody></tbody></table>
-      <table id="tbl3"><thead><tr><th>BTTS</th><th class="mono">Prob.</th><th class="mono">Cuota justa</th></tr></thead><tbody></tbody></table>
-    </div>
+    <label>Línea OU del partido (ej. 0.5, 1.5, 2.5, 3, 2.25, 2.75)</label>
+    <input id="line" type="number" step="0.25" min="0" value="2.5">
+
+    <button class="btn" id="calc">Calcular</button>
+    <div class="kpi" id="kpi"></div>
+    <small>
+      Modelo: X~Pois(λ<sub>H</sub>), Y~Pois(λ<sub>A</sub>), N=X+Y~Pois(λ<sub>T</sub>=λ<sub>H</sub>+λ<sub>A</sub>).<br>
+      La línea acepta .0 / .5 / .25 / .75 (Asian Goal Line). Se muestra el desglose de resultados (win, half-win, push, half-loss, loss).
+    </small>
+  </div>
+
+  <div class="card">
+    <h3>Over/Under en la línea seleccionada</h3>
+    <table id="tblOU">
+      <thead>
+        <tr>
+          <th>Resultado</th><th class="mono">Over</th><th class="mono">Under</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+    <table id="tblOU2">
+      <thead>
+        <tr>
+          <th>Métrica</th><th class="mono">Over</th><th class="mono">Under</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <h3>BTTS</h3>
+    <table id="tblBTTS">
+      <thead><tr><th>BTTS</th><th class="mono">Prob.</th><th class="mono">Cuota justa</th></tr></thead>
+      <tbody></tbody>
+    </table>
   </div>
 </div>
 
@@ -69,81 +92,129 @@
   function toOdds(p){return (p<=0)?Infinity:(1/p)}
   function fmtP(p){return (100*p).toFixed(2)+'%'}
   function fmtO(o){return (o===Infinity)?'—':o.toFixed(2)}
+  function clamp(x,lo,hi){return Math.max(lo,Math.min(hi,x))}
 
-  // ---------- núcleo ----------
-  function probs1X2(lH,lA,maxGoals){
-    const maxG=Math.max(8,Math.min(20,Math.floor(maxGoals)||12));
-    let p1=0,px=0,p2=0;
-    for(let i=0;i<=maxG;i++){
-      const pHi=poisPMF(i,lH);
-      for(let j=0;j<=maxG;j++){
-        const pAj=poisPMF(j,lA);
-        const pij=pHi*pAj;
-        if(i>j)p1+=pij; else if(i===j)px+=pij; else p2+=pij;
-      }
+  // ----- Probabilidades para un componente Over(Lc) con Lc entero o .5 -----
+  function compOverOutcome(lambdaT, Lc){
+    // Lc puede ser k (entero) o k+0.5
+    const k = Math.floor(Lc + 1e-9);
+    const isHalf = Math.abs(Lc - (k+0.5)) < 1e-9;
+    const Fk = poisCDF(k, lambdaT);
+    const Fk_1 = poisCDF(k-1, lambdaT);
+    const pk = Fk - Fk_1; // P(N=k)
+
+    if(isHalf){
+      // Over k+0.5: win si N>=k+1; lose si N<=k
+      return {win: 1 - Fk, halfwin: 0, push: 0, halfloss: 0, loss: Fk};
+    }else{
+      // Over k: win si N>=k+1; push si N=k; lose si N<=k-1
+      return {win: 1 - Fk, halfwin: 0, push: pk, halfloss: 0, loss: Fk_1};
     }
-    const s=p1+px+p2; if(s>0){p1/=s;px/=s;p2/=s}
-    return {p1,px,p2,maxG:maxG};
+  }
+
+  // Mezcla para líneas .25 / .75 (Asian): promedio de dos componentes
+  function asianOver(lambdaT, L){
+    const k = Math.floor(L);
+    const frac = +(L - k).toFixed(2);
+    if(frac===0 || frac===0.5){
+      return compOverOutcome(lambdaT, L);
+    }
+    if(frac===0.25){
+      // Over k+0.25 = 0.5*Over(k) + 0.5*Over(k+0.5)
+      const a = compOverOutcome(lambdaT, k);
+      const b = compOverOutcome(lambdaT, k+0.5);
+      return {
+        win: 0.5*(a.win + b.win),
+        halfwin: 0.5*(a.halfwin + b.halfwin), // ambos 0
+        push: 0.5*(a.push + b.push),          // b.push=0
+        halfloss: 0.5*(a.halfloss + b.halfloss), // 0
+        loss: 0.5*(a.loss + b.loss)
+      };
+    }
+    if(frac===0.75){
+      // Over k+0.75 = 0.5*Over(k+0.5) + 0.5*Over(k+1.0)
+      const a = compOverOutcome(lambdaT, k+0.5);
+      const b = compOverOutcome(lambdaT, k+1.0);
+      return {
+        win: 0.5*(a.win + b.win),
+        halfwin: 0.5*(a.halfwin + b.halfwin), // 0
+        push: 0.5*(a.push + b.push),
+        halfloss: 0.5*(a.halfloss + b.halfloss),
+        loss: 0.5*(a.loss + b.loss)
+      };
+    }
+    // Si ponen otra fracción rara, se redondea al .0/.5 más cercano
+    const nearest = Math.abs(frac-0.5)<Math.abs(frac-0) ? (k+0.5) : k;
+    return compOverOutcome(lambdaT, nearest);
+  }
+
+  // Under es complementario al Over respecto a la misma línea
+  function asianUnder(lambdaT, L){
+    const o = asianOver(lambdaT, L);
+    // Intercambia win<->loss, halfwin<->halfloss, push igual
+    return {
+      win: o.loss,
+      halfwin: o.halfloss,
+      push: o.push,
+      halfloss: o.halfwin,
+      loss: o.win
+    };
   }
 
   function calc(){
-    const lamH = Math.max(0,+$('#gfH').value||0);
-    const lamA = Math.max(0,+$('#gfA').value||0);
-    const maxGoals = +$('#maxGoals').value||12;
+    const lamH = Math.max(0, +$('#gfH').value||0);
+    const lamA = Math.max(0, +$('#gfA').value||0);
+    const L = clamp(+$('#line').value||0, 0, 20);
     const lamT = lamH + lamA;
 
-    // 1X2
-    const m = probs1X2(lamH,lamA,maxGoals);
-    const p1=m.p1, px=m.px, p2=m.p2;
+    // OU (línea seleccionada)
+    const over = asianOver(lamT, L);
+    const under = asianUnder(lamT, L);
 
-    // DNB (cuotas justas)
-    const pNotDraw=1-px;
-    const dnb1=toOdds(p1/(pNotDraw>0?pNotDraw:1));
-    const dnb2=toOdds(p2/(pNotDraw>0?pNotDraw:1));
-
-    // Over/Under con N ~ Pois(lamT)
-    const over15 = 1 - poisCDF(1, lamT);
-    const over25 = 1 - poisCDF(2, lamT);
-    const over35 = 1 - poisCDF(3, lamT);
+    // “Probabilidad de cobrar” (pondera half-win como 0.5; push = devolución)
+    const pCashOver = over.win + 0.5*over.halfwin;
+    const pCashUnder = under.win + 0.5*under.halfwin;
 
     // BTTS
     const pBTTS = 1 - Math.exp(-lamH) - Math.exp(-lamA) + Math.exp(-(lamT));
-    const pNo   = 1 - pBTTS;
+    const pNo = 1 - pBTTS;
 
     // KPIs
     $('#kpi').innerHTML = `
       <span class="pill">λ<sub>H</sub>=<b class="mono">${lamH.toFixed(3)}</b></span>
       <span class="pill">λ<sub>A</sub>=<b class="mono">${lamA.toFixed(3)}</b></span>
       <span class="pill">λ<sub>T</sub>=<b class="mono">${lamT.toFixed(3)}</b></span>
-      <span class="pill">P(empate)=<b class="mono">${fmtP(px)}</b></span>
-      <span class="pill">maxG=<b class="mono">${m.maxG}</b></span>
+      <span class="pill">Línea OU=<b class="mono">${L.toFixed(2)}</b></span>
     `;
 
-    // Tablas
-    $('#tbl1 tbody').innerHTML=`
-      <tr><td>1 (Local)</td><td class="mono">${fmtP(p1)}</td><td class="mono">${fmtO(toOdds(p1))}</td></tr>
-      <tr><td>X (Empate)</td><td class="mono">${fmtP(px)}</td><td class="mono">${fmtO(toOdds(px))}</td></tr>
-      <tr><td>2 (Visita)</td><td class="mono">${fmtP(p2)}</td><td class="mono">${fmtO(toOdds(p2))}</td></tr>
-      <tr><td>1 DNB</td><td class="mono"><small>—</small></td><td class="mono">${fmtO(dnb1)}</td></tr>
-      <tr><td>2 DNB</td><td class="mono"><small>—</small></td><td class="mono">${fmtO(dnb2)}</td></tr>
+    // Tabla OU (desglose)
+    $('#tblOU tbody').innerHTML = `
+      <tr><td>Win</td><td class="mono">${fmtP(over.win)}</td><td class="mono">${fmtP(under.win)}</td></tr>
+      <tr><td>Half-Win</td><td class="mono">${fmtP(over.halfwin)}</td><td class="mono">${fmtP(under.halfwin)}</td></tr>
+      <tr><td>Push</td><td class="mono">${fmtP(over.push)}</td><td class="mono">${fmtP(under.push)}</td></tr>
+      <tr><td>Half-Loss</td><td class="mono">${fmtP(over.halfloss)}</td><td class="mono">${fmtP(under.halfloss)}</td></tr>
+      <tr><td>Loss</td><td class="mono">${fmtP(over.loss)}</td><td class="mono">${fmtP(under.loss)}</td></tr>
     `;
-    $('#tbl2 tbody').innerHTML=`
-      <tr><td>Over 1.5</td><td class="mono">${fmtP(over15)}</td><td class="mono">${fmtO(toOdds(over15))}</td></tr>
-      <tr><td>Under 1.5</td><td class="mono">${fmtP(1-over15)}</td><td class="mono">${fmtO(toOdds(1-over15))}</td></tr>
-      <tr><td>Over 2.5</td><td class="mono">${fmtP(over25)}</td><td class="mono">${fmtO(toOdds(over25))}</td></tr>
-      <tr><td>Under 2.5</td><td class="mono">${fmtP(1-over25)}</td><td class="mono">${fmtO(toOdds(1-over25))}</td></tr>
-      <tr><td>Over 3.5</td><td class="mono">${fmtP(over35)}</td><td class="mono">${fmtO(toOdds(over35))}</td></tr>
-      <tr><td>Under 3.5</td><td class="mono">${fmtP(1-over35)}</td><td class="mono">${fmtO(toOdds(1-over35))}</td></tr>
+
+    // Tabla OU (resumen de “prob. de cobrar” y cuotas justas)
+    $('#tblOU2 tbody').innerHTML = `
+      <tr><td>Prob. de cobrar (win + 0.5·half-win)</td>
+          <td class="mono">${fmtP(pCashOver)}</td>
+          <td class="mono">${fmtP(pCashUnder)}</td></tr>
+      <tr><td>Cuota justa aprox. (2-way, sin margen)*</td>
+          <td class="mono">${fmtO(1/Math.max(1e-12,pCashOver))}</td>
+          <td class="mono">${fmtO(1/Math.max(1e-12,pCashUnder))}</td></tr>
     `;
-    $('#tbl3 tbody').innerHTML=`
+
+    // BTTS
+    $('#tblBTTS tbody').innerHTML = `
       <tr><td>BTTS Sí</td><td class="mono">${fmtP(pBTTS)}</td><td class="mono">${fmtO(toOdds(pBTTS))}</td></tr>
       <tr><td>BTTS No</td><td class="mono">${fmtP(pNo)}</td><td class="mono">${fmtO(toOdds(pNo))}</td></tr>
     `;
   }
 
   $('#calc').addEventListener('click', calc);
-  // cálculo inicial
-  calc();
+  calc(); // inicial
 })();
 </script>
 </body>
