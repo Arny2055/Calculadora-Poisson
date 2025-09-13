@@ -37,7 +37,7 @@
   .range{display:flex;align-items:center;gap:12px}
   input[type="range"]{-webkit-appearance:none;width:100%;height:12px;border-radius:999px;background:linear-gradient(90deg,#1a3a66,#2b84ff);box-shadow:inset 0 0 0 1px #21304a}
   input[type="range"]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;height:20px;border-radius:50%;background:#fff;border:3px solid #2b84ff;box-shadow:0 0 0 6px rgba(43,132,255,.18),0 10px 28px rgba(43,132,255,.35)}
-  .actions{display:flex;gap:10px;justify-content:flex-end;margin-top:10px}
+  .actions{display:flex;gap:10px;flex-wrap:wrap;justify-content:flex-end;margin-top:10px}
   .btn-ghost{padding:10px 14px;border-radius:999px;border:1px solid #2a3a55;background:transparent;color:#cfe1ff;font-weight:700;font-size:13px;cursor:pointer}
   .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-top:10px}
   .kpi{background:linear-gradient(180deg,rgba(20,28,44,.85),rgba(14,20,35,.85));border:1px solid var(--border);border-radius:14px;padding:14px}
@@ -63,6 +63,9 @@
   .badge-bad{border-color:#d66262;background:rgba(214,98,98,.10)}
   .muted{font-size:12px;color:#9aa7ba;margin-top:10px}
   .note{width:100%;padding:10px;border-radius:10px;border:1px solid var(--border);background:#0e1523;color:#cfe1ff}
+  /* Coloración por CLV */
+  tr.goodCLV td{ background:rgba(47,158,109,.08); }
+  tr.badCLV  td{ background:rgba(214,98,98,.06); }
 </style>
 </head>
 <body>
@@ -113,6 +116,7 @@
         <button id="calcBtn" class="btn-ghost"><span>Calcular</span></button>
       </div>
 
+      <!-- KPIs λ -->
       <div class="kpis">
         <div class="kpi"><div class="k">λ<sub>H</sub></div><div class="v" id="kLamH">—</div></div>
         <div class="kpi"><div class="k">λ<sub>A</sub></div><div class="v" id="kLamA">—</div></div>
@@ -134,6 +138,7 @@
       <div id="fixtureOU" class="muted" style="margin-top:-4px;margin-bottom:8px">—</div>
 
       <div id="bestBar" class="bestbar"></div>
+      <div id="edgeBar" class="badges"></div>
       <div class="pillbar" id="summary"></div>
 
       <table>
@@ -146,6 +151,11 @@
         <tbody id="tbodyOUEV"></tbody>
       </table>
       <div id="ouBadges" class="badges"></div>
+
+      <!-- Explorador de líneas -->
+      <h2 style="margin-top:18px">Explorador de líneas (modelo)</h2>
+      <table><thead><tr><th>OU</th><th>p Over</th><th>Fair Over</th><th>p Under</th><th>Fair Under</th></tr></thead>
+      <tbody id="tbodySweep"></tbody></table>
     </div>
   </section>
 
@@ -192,10 +202,24 @@
         <div><label>Nota (opcional)</label><input id="note" class="note" placeholder="motivo, book, límites…"/></div>
       </div>
 
+      <!-- Bankroll y sugerencia -->
+      <div class="grid" style="margin-top:10px">
+        <div><label>Bankroll</label><input id="bankroll" type="number" step="0.01" value="1000"/></div>
+        <div><label>Stake máx. (cap %)</label><input id="capPct" type="number" step="0.5" value="2.5"/></div>
+        <div><label>EV mínimo (%)</label><input id="minEdge" type="number" step="0.5" value="3"/></div>
+      </div>
+      <div id="stakeSugg" class="muted"></div>
+
       <div class="actions">
         <button id="addBtn" class="btn-ghost">Registrar apuesta</button>
         <button id="csvBtn" class="btn-ghost">Exportar CSV</button>
+        <button id="jsonSave" class="btn-ghost">Guardar JSON</button>
+        <button id="jsonLoad" class="btn-ghost">Cargar JSON</button>
+        <button id="copyBtn" class="btn-ghost">Copiar pick</button>
       </div>
+
+      <!-- KPIs del log -->
+      <div class="kpis" id="kpisLog" style="margin-top:14px"></div>
 
       <table>
         <thead>
@@ -214,17 +238,22 @@
 <script>
 (function(){
   const $=s=>document.querySelector(s);
+
+  // ---------- Utils matemáticos Poisson ----------
   const fact=[1];
   function factorial(n){for(let i=fact.length;i<=n;i++)fact[i]=fact[i-1]*i;return fact[n]}
   function logFactorial(n){if(n<100)return Math.log(factorial(n));const x=n;return x*Math.log(x)-x+0.5*Math.log(2*Math.PI*x)}
   function pmf(k,l){if(l<=0)return (k===0)?1:0;if(k<100){return Math.exp(-l)*Math.pow(l,k)/factorial(k)}return Math.exp(-l + k*Math.log(l) - logFactorial(k))}
   function cdf(k,l){let s=0;for(let i=0;i<=k;i++)s+=pmf(i,l);return s}
+
+  // ---------- Formatos ----------
   const fmtP=p=> (100*p).toFixed(2)+'%';
   const fmtO=o=> (o===Infinity)?'—':o.toFixed(2);
   const toOdds=p=> (p<=0)?Infinity:(1/p);
   const clamp=(x,lo,hi)=>Math.max(lo,Math.min(hi,x));
   const pct=x=> isFinite(x)?(100*x).toFixed(2)+'%':'—';
 
+  // ---------- OU/Asian ----------
   function compOver(lamT,Lc){
     const k=Math.floor(Lc+1e-9), isHalf=Math.abs(Lc-(k+0.5))<1e-9;
     const Fk=cdf(k,lamT), Fk_1=cdf(k-1,lamT), pk=Fk-Fk_1;
@@ -242,10 +271,12 @@
   }
   function asianUnder(lamT,L){const o=asianOver(lamT,L); return {win:o.loss,push:o.push,loss:o.win}}
 
+  // ---------- Kelly/EV ----------
   const KELLY_FRAC=0.25;
   const evDecimal=(p,odds)=> !odds||odds<=1||!isFinite(odds)?null:(p*odds-1);
   const kellyStake=(p,odds,frac=KELLY_FRAC)=>{if(!odds||odds<=1)return null;const b=odds-1;const EV=p*odds-1;const f=Math.max(0,EV/b);const fAdj=f*frac;return isFinite(fAdj)?fAdj:null};
 
+  // ---------- Badges ----------
   function badgeEV(name, EV){
     if(EV==null) return '';
     const cls = EV>=0.08?'badge-good':(EV>=0.05?'badge-warn':'');
@@ -257,12 +288,29 @@
     return `<span class="badge ${cls}">${name} Overround: <b class="mono">${pct(or)}</b></span>`;
   }
 
+  // ---------- Interfaz ----------
   function teamNames(){
     const h=($('#homeTeam').value||'Local').trim()||'Local';
     const a=($('#awayTeam').value||'Visita').trim()||'Visita';
     return {h,a, vs:`${h} vs ${a}`};
   }
+  function safeOdd(x){ return (isFinite(x)&&x>1)?x:NaN; }
 
+  // λT intervalo 68%
+  function lambdaCI68(lamT){ const s=Math.sqrt(lamT); return [Math.max(0,lamT-s), lamT+s]; }
+
+  // Explorador líneas
+  function sweepLines(lamT){
+    const lines=[]; for(let L=1.5; L<=4.0001; L+=0.25){
+      const Lr=+L.toFixed(2);
+      const over=asianOver(lamT, Lr);
+      const under=asianUnder(lamT, Lr);
+      const pO=over.win+0.5*over.push, pU=under.win+0.5*under.push;
+      lines.push({L:Lr, pO, pU});
+    } return lines;
+  }
+
+  // ---------- Cálculo principal ----------
   function calc(){
     const {h,a,vs} = teamNames();
 
@@ -271,10 +319,10 @@
     let L=+($('#line').value||0); L=clamp(L,0,15);
     const lamT=lamH+lamA;
 
-    const oOver=parseFloat($('#oddsOver').value);
-    const oUnder=parseFloat($('#oddsUnder').value);
-    const oYes=parseFloat($('#oddsBTTSYes').value);
-    const oNo=parseFloat($('#oddsBTTSNo').value);
+    const oOver=safeOdd(parseFloat($('#oddsOver').value));
+    const oUnder=safeOdd(parseFloat($('#oddsUnder').value));
+    const oYes =safeOdd(parseFloat($('#oddsBTTSYes').value));
+    const oNo  =safeOdd(parseFloat($('#oddsBTTSNo').value));
 
     $('#kLamH').textContent=lamH.toFixed(2);
     $('#kLamA').textContent=lamA.toFixed(2);
@@ -283,7 +331,7 @@
     $('#lineLbl').textContent=L.toFixed(2);
     $('#fixtureOU').textContent = vs;
     $('#fixtureBTTS').textContent = vs;
-    document.querySelectorAll('.chip').forEach(ch=>{ch.classList.toggle('active',Math.abs(parseFloat(ch.textContent)-L)<1e-9)});
+    document.querySelectorAll('.chip').forEach(ch=>{const v=parseFloat(ch.textContent); if(!isNaN(v)) ch.classList.toggle('active',Math.abs(v-L)<1e-9)});
 
     const over=asianOver(lamT,L), under=asianUnder(lamT,L);
     const pCashOver=over.win+0.5*over.push, pCashUnder=under.win+0.5*under.push;
@@ -293,10 +341,18 @@
     const ouFair = 1/Math.max(1e-12,ouProb);
     $('#bestBar').innerHTML=`<div class="best ${ouIsOver?'over':'under'}"><span class="tag">Más probable</span><h3>${vs}</h3><div class="vbig mono">OU ${L.toFixed(2)} · ${ouLabel} · ${fmtP(ouProb)} · cuota ${fmtO(ouFair)}</div></div>`;
 
+    // Intervalo 68% λT + confianza
+    const [lo,hi] = lambdaCI68(lamT);
+    const confGap = Math.abs(pCashOver - pCashUnder);
+    const confLbl = confGap>0.20?'Alta':(confGap>0.10?'Media':'Baja');
+
     $('#summary').innerHTML=`
       <span class="pill">Over <b class="mono">${fmtP(pCashOver)}</b> · cuota ${fmtO(1/Math.max(1e-12,pCashOver))}</span>
       <span class="pill">Under <b class="mono">${fmtP(pCashUnder)}</b> · cuota ${fmtO(1/Math.max(1e-12,pCashUnder))}</span>
-      <span class="pill">Push <b class="mono">${fmtP(over.push)}</b></span>`;
+      <span class="pill">Push <b class="mono">${fmtP(over.push)}</b></span>
+      <span class="pill">λT 68% ≈ <b class="mono">${lo.toFixed(2)}–${hi.toFixed(2)}</b></span>
+      <span class="pill">Confianza: <b>${confLbl}</b></span>`;
+
     $('#tbodyOU').innerHTML=`
       <tr><td>Win</td><td class="mono">${fmtP(over.win)}</td><td class="mono">${fmtP(under.win)}</td></tr>
       <tr><td>Push</td><td class="mono">${fmtP(over.push)}</td><td class="mono">${fmtP(under.push)}</td></tr>
@@ -307,15 +363,19 @@
     $('#tbodyOUEV').innerHTML=`
       <tr><td>Over ${L.toFixed(2)}</td><td class="mono">${fmtP(pCashOver)}</td><td class="mono">${isFinite(oOver)?oOver.toFixed(2):'—'}</td><td class="mono">${EV_over==null?'—':pct(EV_over)}</td><td class="mono">${K_over==null?'—':pct(K_over)}</td></tr>
       <tr><td>Under ${L.toFixed(2)}</td><td class="mono">${fmtP(pCashUnder)}</td><td class="mono">${isFinite(oUnder)?oUnder.toFixed(2):'—'}</td><td class="mono">${EV_under==null?'—':pct(EV_under)}</td><td class="mono">${K_under==null?'—':pct(K_under)}</td></tr>`;
+
     let ouBadges=[];
     if(isFinite(oOver)&&oOver>1&&isFinite(oUnder)&&oUnder>1){
       const overround=(1/oOver+1/oUnder)-1;
       ouBadges.push(badgeOverround('OU',overround));
+    }else{
+      ouBadges.push('<span class="badge badge-warn">Introduce cuotas OU para EV/Overround</span>');
     }
     if(EV_over!=null) ouBadges.push(badgeEV('Over',EV_over));
     if(EV_under!=null) ouBadges.push(badgeEV('Under',EV_under));
     $('#ouBadges').innerHTML=ouBadges.join(' ');
 
+    // BTTS
     const pBTTS=1-Math.exp(-lamH)-Math.exp(-lamA)+Math.exp(-(lamT)), pNo=1-pBTTS;
     const bttsIsYes=pBTTS>=pNo, bttsLabel=bttsIsYes?'BTTS Sí':'BTTS No', bttsProb=bttsIsYes?pBTTS:pNo, bttsFair=1/Math.max(1e-12,bttsProb);
     $('#bestBTTS').innerHTML=`<div class="best btts"><span class="tag">Más probable</span><h3>${vs}</h3><div class="vbig mono">${bttsLabel} · ${fmtP(bttsProb)} · cuota ${fmtO(bttsFair)}</div></div>`;
@@ -331,30 +391,71 @@
     if(isFinite(oYes)&&oYes>1&&isFinite(oNo)&&oNo>1){
       const orBTTS=(1/oYes+1/oNo)-1;
       bttsBadges.push(badgeOverround('BTTS',orBTTS));
+    }else{
+      bttsBadges.push('<span class="badge badge-warn">Introduce cuotas BTTS para EV/Overround</span>');
     }
     if(EV_yes!=null) bttsBadges.push(badgeEV('BTTS Sí',EV_yes));
     if(EV_no!=null) bttsBadges.push(badgeEV('BTTS No',EV_no));
     $('#bttsBadges').innerHTML=bttsBadges.join(' ');
 
-    // guardar última evaluación para registro + sugerencia
+    // Resumen de edge
+    const edgeItems=[];
+    if(EV_over!=null) edgeItems.push(`<span class="badge ${EV_over>0?'badge-good':'badge-bad'}">OU Over · Edge ${pct(EV_over)}</span>`);
+    if(EV_under!=null) edgeItems.push(`<span class="badge ${EV_under>0?'badge-good':'badge-bad'}">OU Under · Edge ${pct(EV_under)}</span>`);
+    if(EV_yes!=null)   edgeItems.push(`<span class="badge ${EV_yes>0?'badge-good':'badge-bad'}">BTTS Sí · Edge ${pct(EV_yes)}</span>`);
+    if(EV_no!=null)    edgeItems.push(`<span class="badge ${EV_no>0?'badge-good':'badge-bad'}">BTTS No · Edge ${pct(EV_no)}</span>`);
+    $('#edgeBar').innerHTML = edgeItems.join(' ');
+
+    // Explorador líneas
+    const rows = sweepLines(lamT).map(r=>`
+      <tr>
+        <td class="mono">${r.L.toFixed(2)}</td>
+        <td class="mono">${fmtP(r.pO)}</td>
+        <td class="mono">${fmtO(1/Math.max(1e-12,r.pO))}</td>
+        <td class="mono">${fmtP(r.pU)}</td>
+        <td class="mono">${fmtO(1/Math.max(1e-12,r.pU))}</td>
+      </tr>`).join('');
+    $('#tbodySweep').innerHTML = rows;
+
+    // Sugerencia de stake (Kelly¼ con cap y EV mínimo)
+    const bk = parseFloat($('#bankroll').value)||0;
+    const cap= parseFloat($('#capPct').value)||0;
+    const minEdge = (parseFloat($('#minEdge').value)||0)/100;
     const evPairs = [
-      {market:'OU', sel:'OU Over', line:L, p:pCashOver, odds:oOver, EV:EV_over, Kelly:K_over, overround: (isFinite(oOver)&&isFinite(oUnder)&&oOver>1&&oUnder>1)?(1/oOver+1/oUnder-1):null},
-      {market:'OU', sel:'OU Under', line:L, p:pCashUnder, odds:oUnder, EV:EV_under, Kelly:K_under, overround: (isFinite(oOver)&&isFinite(oUnder)&&oOver>1&&oUnder>1)?(1/oOver+1/oUnder-1):null},
-      {market:'BTTS', sel:'BTTS Sí', line:null, p:pBTTS, odds:oYes, EV:EV_yes, Kelly:K_yes, overround: (isFinite(oYes)&&isFinite(oNo)&&oYes>1&&oNo>1)?(1/oYes+1/oNo-1):null},
-      {market:'BTTS', sel:'BTTS No', line:null, p:pNo, odds:oNo, EV:EV_no, Kelly:K_no, overround: (isFinite(oYes)&&isFinite(oNo)&&oYes>1&&oNo>1)?(1/oYes+1/oNo-1):null},
+      {market:'OU', sel:'OU Over', line:L, p:pCashOver, odds:oOver, EV:EV_over, Kelly:K_over, overround: (isFinite(oOver)&&isFinite(oUnder)&&oOver>1&&oUnder>1)?(1/oOver+1/oUnder-1):null, wpl:over},
+      {market:'OU', sel:'OU Under', line:L, p:pCashUnder, odds:oUnder, EV:EV_under, Kelly:K_under, overround: (isFinite(oOver)&&isFinite(oUnder)&&oOver>1&&oUnder>1)?(1/oOver+1/oUnder-1):null, wpl:under},
+      {market:'BTTS', sel:'BTTS Sí', line:null, p:pBTTS, odds:oYes, EV:EV_yes, Kelly:K_yes, overround: (isFinite(oYes)&&isFinite(oNo)&&oYes>1&&oNo>1)?(1/oYes+1/oNo-1):null, wpl:null},
+      {market:'BTTS', sel:'BTTS No', line:null, p:pNo, odds:oNo, EV:EV_no, Kelly:K_no, overround: (isFinite(oYes)&&isFinite(oNo)&&oYes>1&&oNo>1)?(1/oYes+1/oNo-1):null, wpl:null},
     ];
     evPairs.sort((a,b)=> (b.EV??-1)-(a.EV??-1));
     document.querySelectorAll('#pickOptions .chip').forEach(ch=> ch.classList.toggle('active', ch.dataset.pick===evPairs[0].sel));
     if(isFinite(evPairs[0].odds)) $('#stakeOdds').value = evPairs[0].odds || '';
 
-    window.__lastCalc = {pairs:evPairs, context:{home:h,away:a}};
+    function stakeFromKelly(kFrac, bankroll, capPct){
+      const capVal = (capPct/100)*bankroll;
+      return Math.max(0, Math.min(bankroll*kFrac, capVal));
+    }
+    const best = evPairs.find(p=> (p.EV??-1) >= minEdge);
+    if(best && isFinite(best.Kelly??0) && bk>0){
+      const stake = stakeFromKelly(best.Kelly, bk, cap);
+      $('#stakeSugg').innerHTML = `Sugerencia: <b>${best.sel}${best.line!=null?(' '+best.line.toFixed(2)):''
+        }</b> · EV ${pct(best.EV)} · Kelly¼ ${pct(best.Kelly)} → <b>Stake: ${stake.toFixed(2)}</b>`;
+    }else{
+      $('#stakeSugg').textContent='Sin sugerencia (EV por debajo del umbral).';
+    }
+
+    // Guardar última evaluación p/registro y copiar pick
+    window.__lastCalc = {pairs:evPairs, context:{home:h,away:a, lamT, L}};
   }
 
-  // Registro
-  const log=[];
+  // ---------- Registro con persistencia ----------
+  const SAVEK="ou_btts_registro_v1";
+  const saved = JSON.parse(localStorage.getItem(SAVEK)||"[]");
+  const log = Array.isArray(saved)? saved: [];
+
   function addLog(){
     if(!window.__lastCalc){alert('Primero pulsa Calcular.');return;}
-    const {home,away} = window.__lastCalc.context || {home:($('#homeTeam').value||'Local'), away:($('#awayTeam').value||'Visita')};
+    const {home,away, lamT, L} = window.__lastCalc.context || {home:($('#homeTeam').value||'Local'), away:($('#awayTeam').value||'Visita'), lamT: null, L:null};
     const pickChip = document.querySelector('#pickOptions .chip.active');
     if(!pickChip){alert('Selecciona una apuesta.');return;}
     const selection = pickChip.dataset.pick;
@@ -366,6 +467,13 @@
     const rowData = window.__lastCalc.pairs.find(p=>p.sel===selection);
     if(!rowData){alert('Recalcula primero.');return;}
     const CLV = (isFinite(closing)&&closing>0)? (oddsTaken/closing) : null;
+
+    // win/push/loss si es OU (metadatos)
+    let win=null,push=null,loss=null;
+    if(rowData.market==='OU' && lamT!=null && L!=null){
+      const wpl = selection.includes('Over') ? asianOver(lamT,L) : asianUnder(lamT,L);
+      win = wpl.win; push=wpl.push; loss=wpl.loss;
+    }
 
     const now = new Date();
     const item = {
@@ -381,39 +489,46 @@
       overround: rowData.overround,
       cierre: isFinite(closing)?closing:null,
       clv: CLV,
-      nota: note
+      nota: note,
+      win, push, loss
     };
-    log.push(item); renderLog();
+    log.push(item);
+    localStorage.setItem(SAVEK, JSON.stringify(log));
+    renderLog();
     $('#closingOdds').value=''; $('#note').value='';
   }
 
   function renderLog(){
     const tb=$('#logBody');
-    if(log.length===0){tb.innerHTML='<tr><td colspan="14" style="text-align:center;color:#9aa7ba;padding:16px">Sin registros</td></tr>';return;}
-    tb.innerHTML = log.map(it=>`
-      <tr>
+    if(log.length===0){tb.innerHTML='<tr><td colspan="14" style="text-align:center;color:#9aa7ba;padding:16px">Sin registros</td></tr>'; renderKPIsLog(); return;}
+    tb.innerHTML = log.map(it=>{
+      const clv = (it.clv??1)-1;
+      const cls = clv>0.02?'goodCLV':(clv<-0.02?'badCLV':'');
+      return `<tr class="${cls}">
         <td>${it.fecha}</td>
         <td>${it.local}</td>
         <td>${it.visita}</td>
         <td>${it.mercado}</td>
-        <td class="mono">${it.linea!==null?it.linea.toFixed(2):'—'}</td>
+        <td class="mono">${it.linea!==null&&it.linea!==undefined?Number(it.linea).toFixed(2):'—'}</td>
         <td>${it.seleccion}</td>
         <td class="mono">${fmtP(it.p)}</td>
-        <td class="mono">${it.odds.toFixed(2)}</td>
+        <td class="mono">${Number(it.odds).toFixed(2)}</td>
         <td class="mono">${pct(it.EV)}</td>
         <td class="mono">${it.Kelly==null?'—':pct(it.Kelly)}</td>
         <td class="mono">${it.overround==null?'—':pct(it.overround)}</td>
-        <td class="mono">${it.cierre==null?'—':it.cierre.toFixed(2)}</td>
+        <td class="mono">${it.cierre==null?'—':Number(it.cierre).toFixed(2)}</td>
         <td class="mono">${it.clv==null?'—':((it.clv-1)*100).toFixed(2)+'%'}</td>
         <td style="max-width:260px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${it.nota||'—'}</td>
-      </tr>`).join('');
+      </tr>`;
+    }).join('');
+    renderKPIsLog();
   }
 
   function exportCSV(){
     if(log.length===0){alert('No hay registros.');return;}
     const header = ['fecha','local','visita','mercado','linea','seleccion','p_modelo','cuota','EV','Kelly_1_4','overround','cierre','CLV','nota'];
     const rows = log.map(it=>[
-      it.fecha,it.local,it.visita,it.mercado,it.linea??'',it.seleccion,it.p,it.odds,it.EV,it.Kelly??'',it.overround??'',it.cierre??'',it.clv??'',(it.nota||'').replace(/[\n\r]+/g,' ')
+      it.fecha,it.local,it.visita,it.mercado,(it.linea??''),it.seleccion,it.p,it.odds,it.EV,(it.Kelly??''),(it.overround??''),(it.cierre??''),(it.clv??''),(it.nota||'').replace(/[\n\r]+/g,' ')
     ]);
     const csv = [header].concat(rows).map(r=>r.join(',')).join('\n');
     const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
@@ -421,14 +536,60 @@
     const a=document.createElement('a'); a.href=url; a.download='registro_apuestas.csv'; a.click(); URL.revokeObjectURL(url);
   }
 
-  // Eventos UI
+  // KPIs del log
+  function renderKPIsLog(){
+    if(!log.length){ $('#kpisLog').innerHTML=''; return; }
+    const n=log.length;
+    const evAvg = log.reduce((a,b)=>a+(b.EV??0),0)/n;
+    const kAvg  = log.reduce((a,b)=>a+(b.Kelly??0),0)/n;
+    const clvAvg= log.reduce((a,b)=>a+((b.clv??1)-1),0)/n;
+    const roi = log.reduce((a,b)=>a + ((b.p*b.odds)-1),0)/n;
+    $('#kpisLog').innerHTML=`
+      <div class="kpi"><div class="k">Bets</div><div class="v">${n}</div></div>
+      <div class="kpi"><div class="k">EV medio</div><div class="v">${pct(evAvg)}</div></div>
+      <div class="kpi"><div class="k">Kelly¼ medio</div><div class="v">${pct(kAvg)}</div></div>
+      <div class="kpi"><div class="k">CLV medio</div><div class="v">${pct(clvAvg)}</div></div>
+      <div class="kpi"><div class="k">ROI (modelo)</div><div class="v">${pct(roi)}</div></div>`;
+  }
+
+  // Guardar/Cargar JSON del registro
+  $('#jsonSave').addEventListener('click', ()=>{
+    if(!log.length){alert('No hay registros.');return;}
+    const blob = new Blob([JSON.stringify(log,null,2)],{type:'application/json'});
+    const url = URL.createObjectURL(blob); const a=document.createElement('a');
+    a.href=url; a.download='registro_apuestas.json'; a.click(); URL.revokeObjectURL(url);
+  });
+  $('#jsonLoad').addEventListener('click', ()=>{
+    const inp=document.createElement('input'); inp.type='file'; inp.accept='application/json';
+    inp.onchange=()=>{ const f=inp.files[0]; if(!f) return; const r=new FileReader();
+      r.onload=()=>{ try{
+        const arr=JSON.parse(r.result); if(!Array.isArray(arr)) throw 0;
+        log.length=0; arr.forEach(x=>log.push(x));
+        localStorage.setItem(SAVEK, JSON.stringify(log)); renderLog();
+      }catch{ alert('JSON inválido'); } };
+      r.readAsText(f);
+    }; inp.click();
+  });
+
+  // Copiar mejor pick
+  function copyBest(){
+    const p=window.__lastCalc?.pairs?.[0]; if(!p) return;
+    const {home,away}=window.__lastCalc.context||{};
+    const text = `${home} vs ${away} | ${p.sel}${p.line!=null?(' '+p.line.toFixed(2)):''
+     } | p=${(p.p*100).toFixed(1)}% | EV=${p.EV!=null?(p.EV*100).toFixed(1)+'%':'—'} | Kelly¼=${p.Kelly!=null?(p.Kelly*100).toFixed(1)+'%':'—'}`;
+    navigator.clipboard.writeText(text);
+  }
+
+  // ---------- Eventos UI ----------
   $('#calcBtn').addEventListener('click', calc);
   $('#addBtn').addEventListener('click', addLog);
   $('#csvBtn').addEventListener('click', exportCSV);
+  $('#copyBtn').addEventListener('click', copyBest);
 
   $('#presets').addEventListener('click', e=>{
     const chip=e.target.closest('.chip'); if(!chip) return;
-    const v=parseFloat(chip.textContent); $('#line').value=v; $('#lineRange').value=v; $('#lineLbl').textContent=v.toFixed(2);
+    const v=parseFloat(chip.textContent); if(isNaN(v)) return;
+    $('#line').value=v; $('#lineRange').value=v; $('#lineLbl').textContent=v.toFixed(2);
     document.querySelectorAll('.chip').forEach(c=>c.classList.toggle('active', c===chip));
   });
   $('#lineRange').addEventListener('input', e=>{const v=parseFloat(e.target.value); $('#line').value=v; $('#lineLbl').textContent=v.toFixed(2)});
@@ -441,9 +602,16 @@
   });
 
   // Enter para recalcular rápido
-  ['homeTeam','awayTeam','gfH','gfA','line','oddsOver','oddsUnder','oddsBTTSYes','oddsBTTSNo','stakeOdds','closingOdds','note']
+  ['homeTeam','awayTeam','gfH','gfA','line','oddsOver','oddsUnder','oddsBTTSYes','oddsBTTSNo','stakeOdds','closingOdds','note','bankroll','capPct','minEdge']
     .forEach(id=>{ const el=document.getElementById(id); if(el) el.addEventListener('keydown', ev=>{ if(ev.key==='Enter'){ calc(); }}); });
 
+  // Atajos de teclado
+  document.addEventListener('keydown', (e)=>{
+    if(e.key==='c' && (e.ctrlKey||e.metaKey)){ calc(); }
+    if(e.key==='s' && (e.ctrlKey||e.metaKey)){ e.preventDefault(); exportCSV(); }
+  });
+
+  // Render inicial
   renderLog();
 })();
 </script>
