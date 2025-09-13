@@ -39,6 +39,10 @@
   .pill.ok{border-color:#234d3b; background:rgba(121,226,166,.08); color:var(--accent2)}
   .pill.warn{border-color:#554224; background:rgba(255,184,77,.1); color:var(--warn)}
   .pill.bad{border-color:#5a2b2b; background:rgba(255,107,107,.1); color:var(--danger)}
+  .badge{display:inline-block; padding:3px 8px; border-radius:999px; font-size:12px; border:1px solid var(--border)}
+  .badge.accept{background:rgba(121,226,166,.1); color:var(--accent2); border-color:#2a5747}
+  .badge.medium{background:rgba(255,184,77,.1); color:var(--warn); border-color:#5a4b2b}
+  .badge.bad{background:rgba(255,107,107,.1); color:var(--danger); border-color:#5a2b2b}
   table{width:100%; border-collapse:separate; border-spacing:0}
   th,td{padding:10px 12px; border-bottom:1px solid var(--border); text-align:left}
   th{color:var(--muted); font-weight:600; font-size:12px}
@@ -60,7 +64,6 @@
     <div class="wrap">
       <div class="topbar">
         <h1>Poisson • OU + BTTS + 1X2 — EV, Overround y Kelly 1/4 (con historial)</h1>
-        <!-- NUEVO: botón para abrir historial sin redirigir al guardar -->
         <a href="historial.html" class="btn">Abrir historial</a>
       </div>
     </div>
@@ -176,6 +179,15 @@
         <button class="btn" id="btnOdds">Calcular EV / Kelly</button>
         <span class="hint">Primero ejecuta Poisson (sección 2).</span>
       </div>
+
+      <!-- Leyenda de Overround -->
+      <div class="sep"></div>
+      <div class="hint tiny">
+        <b>Leyenda Overround:</b>
+        <span class="badge accept">Aceptable ≤ 3%</span>
+        <span class="badge medium">Medio 3%–6%</span>
+        <span class="badge bad">No aceptable &gt; 6%</span>
+      </div>
     </section>
 
     <!-- Resultados Poisson -->
@@ -231,6 +243,9 @@
 (() => {
   "use strict";
 
+  // ====== Parámetros (puedes ajustar umbrales aquí) ======
+  const OVERROUND_THRESHOLDS = { warn: 0.03, bad: 0.06 }; // 3% y 6%
+
   // ====== Estado ======
   let DATA = []; // array de objetos normalizados
   let CURRENT = { league:null, home:null, away:null, lambdas:null, probs:null, samples:{nH:0,nA:0} };
@@ -272,7 +287,6 @@
   }
 
   function cdf1X2(lambdaH, lambdaA, kMax){
-    // P(1) = Σ_{h>a} P(h)*P(a) ; P(X) = Σ_{h=a}; P(2) = Σ_{h<a}
     let p1=0, px=0, p2=0;
     const pH = Array.from({length:kMax+1}, (_,h)=>pois(lambdaH,h));
     const pA = Array.from({length:kMax+1}, (_,a)=>pois(lambdaA,a));
@@ -317,7 +331,6 @@
 
   // ====== Ingesta ======
   function normalize(obj){
-    // Nos quedamos con campos clave; tolera variantes
     const {League, Match, "Result FT":RFT, Date, "Home Team":HTX, "Away Team":ATX} = obj;
     const mTeams = splitTeams(Match || "");
     const ft = parseFT(RFT);
@@ -337,13 +350,11 @@
     const txt = $("#jsonText").value.trim();
 
     let rows = [];
-    // 1) Archivo
     const file = $("#file").files[0];
     if(file){
       const content = await file.text();
       rows = rows.concat(readFlexJSON(content));
     }
-    // 2) Textarea
     if(txt){
       rows = rows.concat(readFlexJSON(txt));
     }
@@ -353,7 +364,6 @@
       return;
     }
 
-    // Normalizar
     DATA = rows.map(normalize).filter(r=>r.Match && (r.Home||"") && (r.Away||""));
 
     if(!DATA.length){
@@ -361,7 +371,6 @@
       return;
     }
 
-    // Poblar ligas
     const leagues = [...new Set(DATA.map(r=>r.League))].sort((a,b)=>a.localeCompare(b));
     fillSelect($("#selLeague"), leagues, "— Selecciona liga —");
     fillSelect($("#selHome"), [], "— Local —");
@@ -371,7 +380,6 @@
   }
 
   function readFlexJSON(text){
-    // Admite: JSON array / JSON objeto / NDJSON
     text = text.trim();
     if(!text) return [];
     try{
@@ -379,7 +387,6 @@
       if(Array.isArray(parsed)) return parsed;
       return [parsed];
     }catch(e){
-      // Intento NDJSON
       const lines = text.split(/\r?\n/).map(x=>x.trim()).filter(Boolean);
       const arr = [];
       for(const line of lines){
@@ -410,8 +417,6 @@
   }
 
   function lastMatchesTeam(league, team, side, limit=10){
-    // side: "home" => partidos del team como local en esa liga
-    //       "away" => partidos del team como visitante en esa liga
     const arr = [];
     for(const r of DATA){
       if(r.League!==league) continue;
@@ -456,11 +461,11 @@
     const isHalf = Math.abs(ouLine - thr) > 1e-9;
     let pOver, pUnder;
     if(isHalf){
-      pOver = 1 - pLE;         // P(total > thr)
-      pUnder = pLE;            // P(total <= thr)
+      pOver = 1 - pLE;         // > thr
+      pUnder = pLE;            // <= thr
     }else{
-      pOver = 1 - pLE;         // > N
-      pUnder = pLE;            // <= N
+      pOver = 1 - pLE;
+      pUnder = pLE;
     }
 
     const b = btss(lambdaH, lambdaA);
@@ -477,6 +482,13 @@
   function fmtPct(x){ return isFinite(x) ? (100*x).toFixed(1)+"%" : "—"; }
   function fmtDec(x){ return isFinite(x) ? x.toFixed(3) : "—"; }
   function fmtMoney(x){ return isFinite(x) ? x.toFixed(2) : "—"; }
+
+  function orClass(or){
+    if(!isFinite(or)) return {cls:"", label:"—"};
+    if(or > OVERROUND_THRESHOLDS.bad) return {cls:"badge bad", label:"No aceptable"};
+    if(or > OVERROUND_THRESHOLDS.warn) return {cls:"badge medium", label:"Medio"};
+    return {cls:"badge accept", label:"Aceptable"};
+  }
 
   function renderModel(){
     const { lambdas, probs, samples } = CURRENT;
@@ -518,45 +530,13 @@
 
     // OU
     const orOU = overroundFromOdds([odds.over, odds.under]);
-    rows.push(buildRow(
-      "Over/Under",
-      `Over ${line}`,
-      CURRENT.probs.ou.over,
-      odds.over,
-      orOU,
-      bk,
-      {market:"OU_OVER", meta:{line}}
-    ));
-    rows.push(buildRow(
-      "Over/Under",
-      `Under ${line}`,
-      CURRENT.probs.ou.under,
-      odds.under,
-      orOU,
-      bk,
-      {market:"OU_UNDER", meta:{line}}
-    ));
+    rows.push(buildRow("Over/Under", `Over ${line}`, CURRENT.probs.ou.over, odds.over, orOU, bk, {market:"OU_OVER", meta:{line}}));
+    rows.push(buildRow("Over/Under", `Under ${line}`, CURRENT.probs.ou.under, odds.under, orOU, bk, {market:"OU_UNDER", meta:{line}}));
 
     // BTTS
     const orBT = overroundFromOdds([odds.bttsy, odds.bttsn]);
-    rows.push(buildRow(
-      "BTTS",
-      "BTTS Sí",
-      CURRENT.probs.btts.yes,
-      odds.bttsy,
-      orBT,
-      bk,
-      {market:"BTTS_YES"}
-    ));
-    rows.push(buildRow(
-      "BTTS",
-      "BTTS No",
-      CURRENT.probs.btts.no,
-      odds.bttsn,
-      orBT,
-      bk,
-      {market:"BTTS_NO"}
-    ));
+    rows.push(buildRow("BTTS", "BTTS Sí", CURRENT.probs.btts.yes, odds.bttsy, orBT, bk, {market:"BTTS_YES"}));
+    rows.push(buildRow("BTTS", "BTTS No", CURRENT.probs.btts.no, odds.bttsn, orBT, bk, {market:"BTTS_NO"}));
 
     // 1X2
     const or1X2 = overroundFromOdds([odds.o1, odds.ox, odds.o2]);
@@ -580,7 +560,10 @@
     const tdO = document.createElement("td"); tdO.className="right"; tdO.textContent = odd>1? odd.toFixed(2) : "—"; tr.appendChild(tdO);
 
     const tdR = document.createElement("td"); tdR.className="right";
-    tdR.innerHTML = `<span class="${overround>0.06?'bad':(overround>0.03?'warn':'success')}">${(100*overround).toFixed(2)}%</span>`;
+    const occ = orClass(overround);
+    tdR.innerHTML = isFinite(overround)
+      ? `<span class="${occ.cls}" title="${occ.label} — ${(100*overround).toFixed(2)}%">${(100*overround).toFixed(2)}%</span>`
+      : "—";
     tr.appendChild(tdR);
 
     const evv = ev(p, odd);
@@ -629,7 +612,6 @@
       const arr = JSON.parse(localStorage.getItem(key)||"[]");
       arr.push(pick);
       localStorage.setItem(key, JSON.stringify(arr));
-      // Ya no redirigimos: solo avisamos
       alert("✅ Pick guardado en historial (localStorage). Puedes seguir guardando más o abrir el historial cuando quieras.");
     }catch(e){
       alert("No se pudo guardar el pick: " + e.message);
