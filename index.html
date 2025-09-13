@@ -63,7 +63,6 @@
   .badge-bad{border-color:#d66262;background:rgba(214,98,98,.10)}
   .muted{font-size:12px;color:#9aa7ba;margin-top:10px}
   .note{width:100%;padding:10px;border-radius:10px;border:1px solid var(--border);background:#0e1523;color:#cfe1ff}
-  /* Coloración por CLV */
   tr.goodCLV td{ background:rgba(47,158,109,.08); }
   tr.badCLV  td{ background:rgba(214,98,98,.06); }
 </style>
@@ -123,7 +122,6 @@
         <div class="kpi"><div class="k">λ<sub>T</sub></div><div class="v" id="kLamT">—</div></div>
       </div>
 
-      <!-- Oculto pero presente -->
       <div class="muted" style="display:none">
         Modelo: X~Pois(λ<sub>H</sub>), Y~Pois(λ<sub>A</sub>), N=X+Y~Pois(λ<sub>T</sub>=λ<sub>H</sub>+λ<sub>A</sub>).
       </div>
@@ -150,12 +148,28 @@
         <thead><tr><th>OU</th><th>p modelo</th><th>Cuota</th><th>EV%</th><th>Kelly¼ %</th></tr></thead>
         <tbody id="tbodyOUEV"></tbody>
       </table>
+
+      <!-- (2) EV objetivo: cuotas necesarias -->
+      <div class="grid" style="margin-top:10px">
+        <div>
+          <label>EV objetivo (%)</label>
+          <input id="evTarget" type="number" step="0.5" value="3"/>
+        </div>
+        <div>
+          <label>Cuotas necesarias (modelo)</label>
+          <div id="needOdds" class="muted">—</div>
+        </div>
+      </div>
+
       <div id="ouBadges" class="badges"></div>
 
       <!-- Explorador de líneas -->
       <h2 style="margin-top:18px">Explorador de líneas (modelo)</h2>
       <table><thead><tr><th>OU</th><th>p Over</th><th>Fair Over</th><th>p Under</th><th>Fair Under</th></tr></thead>
       <tbody id="tbodySweep"></tbody></table>
+
+      <!-- (3) Línea justa + sensibilidad -->
+      <div class="pillbar" id="lineInsights"></div>
     </div>
   </section>
 
@@ -202,7 +216,6 @@
         <div><label>Nota (opcional)</label><input id="note" class="note" placeholder="motivo, book, límites…"/></div>
       </div>
 
-      <!-- Bankroll y sugerencia -->
       <div class="grid" style="margin-top:10px">
         <div><label>Bankroll</label><input id="bankroll" type="number" step="0.01" value="1000"/></div>
         <div><label>Stake máx. (cap %)</label><input id="capPct" type="number" step="0.5" value="2.5"/></div>
@@ -218,7 +231,6 @@
         <button id="copyBtn" class="btn-ghost">Copiar pick</button>
       </div>
 
-      <!-- KPIs del log -->
       <div class="kpis" id="kpisLog" style="margin-top:14px"></div>
 
       <table>
@@ -296,9 +308,6 @@
   }
   function safeOdd(x){ return (isFinite(x)&&x>1)?x:NaN; }
 
-  // λT intervalo 68%
-  function lambdaCI68(lamT){ const s=Math.sqrt(lamT); return [Math.max(0,lamT-s), lamT+s]; }
-
   // Explorador líneas
   function sweepLines(lamT){
     const lines=[]; for(let L=1.5; L<=4.0001; L+=0.25){
@@ -308,6 +317,33 @@
       const pO=over.win+0.5*over.push, pU=under.win+0.5*under.push;
       lines.push({L:Lr, pO, pU});
     } return lines;
+  }
+
+  // (2) EV objetivo → cuota requerida
+  function targetOddsForEV(p, evPct){
+    const ev = (evPct||0)/100;
+    if(p<=0) return Infinity;
+    return (1+ev)/p;
+  }
+
+  // (3) Línea justa y sensibilidad
+  function pOver_at(lamT,L){
+    const o = asianOver(lamT,L); return o.win + 0.5*o.push;
+  }
+  function fairLine(lamT){
+    let lo=0, hi=6, mid;
+    for(let i=0;i<30;i++){
+      mid=(lo+hi)/2;
+      const pO=pOver_at(lamT, mid);
+      if(pO>0.5) lo=mid; else hi=mid;
+    }
+    return (lo+hi)/2;
+  }
+  function dpdL(lamT, L){
+    const h=0.05;
+    const p1=pOver_at(lamT, L+h);
+    const p0=pOver_at(lamT, L-h);
+    return (p1-p0)/(2*h);
   }
 
   // ---------- Cálculo principal ----------
@@ -341,17 +377,11 @@
     const ouFair = 1/Math.max(1e-12,ouProb);
     $('#bestBar').innerHTML=`<div class="best ${ouIsOver?'over':'under'}"><span class="tag">Más probable</span><h3>${vs}</h3><div class="vbig mono">OU ${L.toFixed(2)} · ${ouLabel} · ${fmtP(ouProb)} · cuota ${fmtO(ouFair)}</div></div>`;
 
-    // Intervalo 68% λT + confianza
-    const [lo,hi] = lambdaCI68(lamT);
-    const confGap = Math.abs(pCashOver - pCashUnder);
-    const confLbl = confGap>0.20?'Alta':(confGap>0.10?'Media':'Baja');
-
+    // Resumen
     $('#summary').innerHTML=`
       <span class="pill">Over <b class="mono">${fmtP(pCashOver)}</b> · cuota ${fmtO(1/Math.max(1e-12,pCashOver))}</span>
       <span class="pill">Under <b class="mono">${fmtP(pCashUnder)}</b> · cuota ${fmtO(1/Math.max(1e-12,pCashUnder))}</span>
-      <span class="pill">Push <b class="mono">${fmtP(over.push)}</b></span>
-      <span class="pill">λT 68% ≈ <b class="mono">${lo.toFixed(2)}–${hi.toFixed(2)}</b></span>
-      <span class="pill">Confianza: <b>${confLbl}</b></span>`;
+      <span class="pill">Push <b class="mono">${fmtP(over.push)}</b></span>`;
 
     $('#tbodyOU').innerHTML=`
       <tr><td>Win</td><td class="mono">${fmtP(over.win)}</td><td class="mono">${fmtP(under.win)}</td></tr>
@@ -364,6 +394,19 @@
       <tr><td>Over ${L.toFixed(2)}</td><td class="mono">${fmtP(pCashOver)}</td><td class="mono">${isFinite(oOver)?oOver.toFixed(2):'—'}</td><td class="mono">${EV_over==null?'—':pct(EV_over)}</td><td class="mono">${K_over==null?'—':pct(K_over)}</td></tr>
       <tr><td>Under ${L.toFixed(2)}</td><td class="mono">${fmtP(pCashUnder)}</td><td class="mono">${isFinite(oUnder)?oUnder.toFixed(2):'—'}</td><td class="mono">${EV_under==null?'—':pct(EV_under)}</td><td class="mono">${K_under==null?'—':pct(K_under)}</td></tr>`;
 
+    // (2) Cuotas necesarias para EV objetivo
+    const evGoal = parseFloat($('#evTarget').value)||0;
+    const needOver = targetOddsForEV(pCashOver, evGoal);
+    const needUnder= targetOddsForEV(pCashUnder, evGoal);
+    // BTTS
+    const pBTTS=1-Math.exp(-lamH)-Math.exp(-lamA)+Math.exp(-(lamT)), pNo=1-pBTTS;
+    const needYes  = targetOddsForEV(pBTTS, evGoal);
+    const needNo   = targetOddsForEV(pNo, evGoal);
+    $('#needOdds').innerHTML =
+      `Over: <b class="mono">${fmtO(needOver)}</b> · Under: <b class="mono">${fmtO(needUnder)}</b> · ` +
+      `BTTS Sí: <b class="mono">${fmtO(needYes)}</b> · BTTS No: <b class="mono">${fmtO(needNo)}</b>`;
+
+    // Badges OU
     let ouBadges=[];
     if(isFinite(oOver)&&oOver>1&&isFinite(oUnder)&&oUnder>1){
       const overround=(1/oOver+1/oUnder)-1;
@@ -375,8 +418,7 @@
     if(EV_under!=null) ouBadges.push(badgeEV('Under',EV_under));
     $('#ouBadges').innerHTML=ouBadges.join(' ');
 
-    // BTTS
-    const pBTTS=1-Math.exp(-lamH)-Math.exp(-lamA)+Math.exp(-(lamT)), pNo=1-pBTTS;
+    // BTTS panel
     const bttsIsYes=pBTTS>=pNo, bttsLabel=bttsIsYes?'BTTS Sí':'BTTS No', bttsProb=bttsIsYes?pBTTS:pNo, bttsFair=1/Math.max(1e-12,bttsProb);
     $('#bestBTTS').innerHTML=`<div class="best btts"><span class="tag">Más probable</span><h3>${vs}</h3><div class="vbig mono">${bttsLabel} · ${fmtP(bttsProb)} · cuota ${fmtO(bttsFair)}</div></div>`;
     $('#tbodyBTTS').innerHTML=`
@@ -398,7 +440,7 @@
     if(EV_no!=null) bttsBadges.push(badgeEV('BTTS No',EV_no));
     $('#bttsBadges').innerHTML=bttsBadges.join(' ');
 
-    // Resumen de edge
+    // Resumen edge
     const edgeItems=[];
     if(EV_over!=null) edgeItems.push(`<span class="badge ${EV_over>0?'badge-good':'badge-bad'}">OU Over · Edge ${pct(EV_over)}</span>`);
     if(EV_under!=null) edgeItems.push(`<span class="badge ${EV_under>0?'badge-good':'badge-bad'}">OU Under · Edge ${pct(EV_under)}</span>`);
@@ -416,6 +458,13 @@
         <td class="mono">${fmtO(1/Math.max(1e-12,r.pU))}</td>
       </tr>`).join('');
     $('#tbodySweep').innerHTML = rows;
+
+    // (3) OU* (50/50) y sensibilidad
+    const Lstar = fairLine(lamT);
+    const sens  = dpdL(lamT, L);
+    $('#lineInsights').innerHTML =
+      `<span class="pill">OU* (50/50): <b class="mono">${Lstar.toFixed(2)}</b></span>` +
+      `<span class="pill">Sensibilidad ∂p/∂L: <b class="mono">${(sens*100).toFixed(1)} pp por gol</b></span>`;
 
     // Sugerencia de stake (Kelly¼ con cap y EV mínimo)
     const bk = parseFloat($('#bankroll').value)||0;
@@ -468,7 +517,6 @@
     if(!rowData){alert('Recalcula primero.');return;}
     const CLV = (isFinite(closing)&&closing>0)? (oddsTaken/closing) : null;
 
-    // win/push/loss si es OU (metadatos)
     let win=null,push=null,loss=null;
     if(rowData.market==='OU' && lamT!=null && L!=null){
       const wpl = selection.includes('Over') ? asianOver(lamT,L) : asianUnder(lamT,L);
@@ -536,7 +584,6 @@
     const a=document.createElement('a'); a.href=url; a.download='registro_apuestas.csv'; a.click(); URL.revokeObjectURL(url);
   }
 
-  // KPIs del log
   function renderKPIsLog(){
     if(!log.length){ $('#kpisLog').innerHTML=''; return; }
     const n=log.length;
@@ -601,15 +648,10 @@
     chip.classList.add('active');
   });
 
-  // Enter para recalcular rápido
-  ['homeTeam','awayTeam','gfH','gfA','line','oddsOver','oddsUnder','oddsBTTSYes','oddsBTTSNo','stakeOdds','closingOdds','note','bankroll','capPct','minEdge']
+  // Enter para recalcular rápido (+ que evTarget también dispare)
+  ;['homeTeam','awayTeam','gfH','gfA','line','oddsOver','oddsUnder','oddsBTTSYes','oddsBTTSNo','stakeOdds','closingOdds','note','bankroll','capPct','minEdge','evTarget']
     .forEach(id=>{ const el=document.getElementById(id); if(el) el.addEventListener('keydown', ev=>{ if(ev.key==='Enter'){ calc(); }}); });
-
-  // Atajos de teclado
-  document.addEventListener('keydown', (e)=>{
-    if(e.key==='c' && (e.ctrlKey||e.metaKey)){ calc(); }
-    if(e.key==='s' && (e.ctrlKey||e.metaKey)){ e.preventDefault(); exportCSV(); }
-  });
+  document.getElementById('evTarget').addEventListener('input', ()=>{ /* recalc suaves cuotas objetivo */ calc(); });
 
   // Render inicial
   renderLog();
