@@ -151,7 +151,7 @@
       </div>
 
       <div class="tiny muted" style="margin-top:8px">
-        <b>Nota:</b> Stake Kelly = bankroll × Kelly(pleno) ÷ divisor (p.ej., 1/8). P/L por pick: <i>Ganó</i> ⇒ <code>stake × (odd − 1)</code>; <i>Perdió</i> ⇒ <code>−stake</code>; <i>Push</i> ⇒ <code>0</code>.
+        <b>Nota:</b> Stake Kelly = bankroll × Kelly(¼). P/L por pick: <i>Ganó</i> ⇒ <code>stake × (odd − 1)</code>; <i>Perdió</i> ⇒ <code>−stake</code>; <i>Push</i> ⇒ <code>0</code>.
       </div>
     </section>
   </div>
@@ -173,8 +173,14 @@
   render();
 
   // Eventos de filtros
-  $("#fLeague").addEventListener("change", () => { view = computeView(); render(); });
-  $("#fMarket").addEventListener("change", () => { view = computeView(); render(); });
+  $("#fLeague").addEventListener("change", () => {
+    view = computeView();
+    render();
+  });
+  $("#fMarket").addEventListener("change", () => {
+    view = computeView();
+    render();
+  });
 
   // Botones
   $("#btnClear").addEventListener("click", () => {
@@ -211,75 +217,7 @@
     download("historial_picks.csv", csv, "text/csv;charset=utf-8");
   });
 
-  // ==== Helpers numéricos generales ====
-  function num(x){ const n = Number(x); return isFinite(n)?n:NaN; }
-
-  // ==== KELLY: fracción plena y divisor aplicable ====
-  function kellyFraction(prob, odd){
-    const p = Number(prob), o = Number(odd);
-    if(!isFinite(p) || !isFinite(o) || o<=1 || p<=0 || p>=1) return 0;
-    const b = o - 1, q = 1 - p;
-    const f = ((b * p) - q) / b;  // Kelly pleno
-    return Math.max(0, f);
-  }
-
-  function parseKellyText(s){
-    // Admite: "1/8", "1.8", "1,8", "8", "1:8", "1-8"
-    const t = String(s||"").trim();
-    if(!t) return NaN;
-    if(/^1\s*[/:\-]\s*(\d+)$/i.test(t)) return Number(t.split(/[/:\-]/)[1]); // 1/8
-    if(/^1\s*[.,]\s*8$/i.test(t)) return 8; // "1.8" ó "1,8" => 1/8
-    if(/^\d+$/i.test(t)) return Number(t); // "8" => divisor 8
-    return NaN;
-  }
-
-  function kellyDivisorFromPick(p){
-    // Prioridad:
-    // 1) p.kelly -> "1/8", "1.8", "8"
-    // 2) p.kelly_div -> número de divisor
-    // 3) p.kelly_q -> fracción final ya aplicada (respaldo)
-    if(p && typeof p.kelly === "string"){
-      const d = parseKellyText(p.kelly);
-      if(isFinite(d) && d>0) return d;
-    }
-    if(isFinite(Number(p?.kelly_div)) && Number(p.kelly_div) > 0){
-      return Number(p.kelly_div);
-    }
-    // Si viene kelly_q como fracción (ej. 0.125), lo convertimos a divisor equivalente
-    if(isFinite(Number(p?.kelly_q)) && Number(p.kelly_q) > 0 && Number(p.kelly_q) <= 1){
-      return 1 / Number(p.kelly_q);
-    }
-    // Por defecto, si no se especificó, asumimos 1/4 como práctica común
-    return 4;
-  }
-
-  function stakeKelly(p){
-    const bk = Number(p?.bankroll||0);
-    const prob = Number(p?.prob);
-    const odd  = Number(p?.odd);
-    if(!isFinite(bk) || bk<=0) return NaN;
-    if(!isFinite(prob) || !isFinite(odd) || odd<=1 || prob<=0 || prob>=1) return NaN;
-
-    const kFull = kellyFraction(prob, odd); // Kelly pleno (0..1)
-    const divisor = kellyDivisorFromPick(p); // p.ej., 8 para 1/8
-    const fracApplied = kFull / (isFinite(divisor)&&divisor>0 ? divisor : 1);
-    const stake = bk * Math.max(0, fracApplied);
-    return isFinite(stake) ? stake : NaN;
-  }
-
-  // ==== P/L de cada pick ====
-  function pickPL(p){
-    const stake = stakeKelly(p);
-    const odd = Number(p?.odd||0);
-    if(!isFinite(stake) || !isFinite(odd) || odd<=1) return NaN;
-    const r = p?.result || "";
-    if(r === "Ganó") return stake * (odd - 1);
-    if(r === "Perdió") return -stake;
-    if(r === "Push") return 0;
-    return NaN; // sin calificar
-  }
-
-  // ==== Render / filtros / almacenamiento ====
+  // ==== Funciones ====
   function loadPicks(){
     try{
       const arr = JSON.parse(localStorage.getItem("picks") || "[]");
@@ -287,6 +225,26 @@
     }catch(_){ return []; }
   }
   function savePicks(){ localStorage.setItem("picks", JSON.stringify(picks)); }
+
+  function num(x){ const n = Number(x); return isFinite(n)?n:NaN; }
+
+  function stakeKelly(p){
+    const bk = Number(p.bankroll||0);
+    const kq = Number(p.kelly_q||0); // fracción guardada (p.ej., 0.125 si usaste Kelly 1/8)
+    if(!isFinite(bk) || !isFinite(kq)) return NaN;
+    return Math.max(0, bk * kq);
+  }
+
+  function pickPL(p){
+    const stake = stakeKelly(p);
+    const odd = Number(p.odd||0);
+    if(!isFinite(stake) || !isFinite(odd) || odd<=1) return NaN;
+    const r = p.result || "";
+    if(r === "Ganó") return stake * (odd - 1);
+    if(r === "Perdió") return -stake;
+    if(r === "Push") return 0;
+    return NaN; // sin calificar
+  }
 
   function computeView(){
     const lg = $("#fLeague").value;
@@ -320,6 +278,7 @@
     opt0.value = ""; opt0.textContent = "Todos los mercados";
     sel.appendChild(opt0);
 
+    // Orden sugerido (si existen), luego el resto
     const preferred = ["1X2","OU","Over/Under","BTTS","GG/NG","Corners","Tarjetas","Shots","HT 1X2","HT OU","HT BTTS"];
     const has = new Set(set);
     preferred.filter(m=>has.has(m)).forEach(m=>{
@@ -327,6 +286,7 @@
       o.value = o.textContent = m; sel.appendChild(o);
       has.delete(m);
     });
+    // Añadir mercados restantes en orden alfabético
     [...has].sort((a,b)=>a.localeCompare(b)).forEach(m=>{
       const o = document.createElement("option");
       o.value = o.textContent = m; sel.appendChild(o);
@@ -359,13 +319,7 @@
       tdEV.innerHTML = isFinite(evv) ? `<b class="${evv>=0?'ok':'bad'}">${(100*evv).toFixed(2)}%</b>` : "—";
 
       const stake = stakeKelly(p);
-      const divisor = kellyDivisorFromPick(p);
-      const tdStake = document.createElement("td");
-      tdStake.className = "right";
-      tdStake.textContent = isFinite(stake) ? "$"+fmtMoney(stake) : "—";
-      if(isFinite(stake)){
-        tdStake.title = `Kelly pleno=${(100*kellyFraction(p.prob,p.odd)).toFixed(2)}% · Divisor=1/${divisor}`;
-      }
+      const tdStake = cellRight( isFinite(stake) ? "$"+fmtMoney(stake) : "—" );
 
       const tdRes = document.createElement("td");
       const sel = document.createElement("select");
@@ -400,6 +354,7 @@
         if(gi !== -1){
           picks.splice(gi,1);
           savePicks();
+          // Si al eliminar cambian los conjuntos, actualizamos combos
           populateLeagueFilter();
           populateMarketFilter();
           view = computeView();
