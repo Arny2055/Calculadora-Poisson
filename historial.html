@@ -60,7 +60,7 @@
     border-radius:10px; -webkit-overflow-scrolling:touch
   }
 
-  /* —— Ajustes para iPhone 14 (390 px) y móviles —— */
+  /* —— Ajustes móviles —— */
   @media(max-width:768px){
     .wrap{padding:12px}
     .btn{padding:8px 10px; font-size:14px}
@@ -74,7 +74,6 @@
     .btn{padding:8px 10px; font-size:13px}
     select,input{padding:8px; font-size:13px}
     th,td{padding:8px 10px}
-    /* compactar columnas largas en pantallas muy pequeñas */
     th:nth-child(7), td:nth-child(7){white-space:nowrap}  /* Prob. Modelo */
     th:nth-child(9), td:nth-child(9){white-space:nowrap}  /* Overround */
     th:nth-child(11), td:nth-child(11){white-space:nowrap}/* Stake Kelly */
@@ -111,9 +110,17 @@
           <span class="pill">Ganancia neta: <b id="profit">$0.00</b></span>
           <span class="pill">ROI: <b id="roi">0.00%</b></span>
         </div>
-        <div class="flex">
-          <label class="tiny muted" for="fLeague">Filtrar por liga</label>
-          <select id="fLeague" aria-label="Filtrar por liga"></select>
+
+        <!-- Filtros -->
+        <div class="flex" style="gap:10px">
+          <div class="flex" style="gap:6px; align-items:center">
+            <label class="tiny muted" for="fLeague">Liga</label>
+            <select id="fLeague" aria-label="Filtrar por liga"></select>
+          </div>
+          <div class="flex" style="gap:6px; align-items:center">
+            <label class="tiny muted" for="fMarket">Mercado</label>
+            <select id="fMarket" aria-label="Filtrar por mercado"></select>
+          </div>
         </div>
       </div>
 
@@ -162,20 +169,27 @@
 
   // Inicialización UI
   populateLeagueFilter();
+  populateMarketFilter();
   render();
 
-  // Eventos
+  // Eventos de filtros
   $("#fLeague").addEventListener("change", () => {
-    const lg = $("#fLeague").value;
-    view = lg ? picks.filter(p => (p.league||"") === lg) : [...picks];
+    view = computeView();
+    render();
+  });
+  $("#fMarket").addEventListener("change", () => {
+    view = computeView();
     render();
   });
 
+  // Botones
   $("#btnClear").addEventListener("click", () => {
     if(!confirm("¿Seguro que deseas borrar TODOS los picks guardados?")) return;
     localStorage.removeItem("picks");
     picks = [];
     view = [];
+    populateLeagueFilter();
+    populateMarketFilter();
     render();
   });
 
@@ -232,6 +246,16 @@
     return NaN; // sin calificar
   }
 
+  function computeView(){
+    const lg = $("#fLeague").value;
+    const mk = $("#fMarket").value;
+    return picks.filter(p=>{
+      const okLg = lg ? (p.league||"") === lg : true;
+      const okMk = mk ? (p.market||"") === mk : true;
+      return okLg && okMk;
+    });
+  }
+
   function populateLeagueFilter(){
     const set = new Set(picks.map(p=>p.league||"").filter(Boolean));
     const sel = $("#fLeague");
@@ -243,6 +267,29 @@
       const o = document.createElement("option");
       o.value = lg; o.textContent = lg;
       sel.appendChild(o);
+    });
+  }
+
+  function populateMarketFilter(){
+    const set = new Set(picks.map(p=>p.market||"").filter(Boolean));
+    const sel = $("#fMarket");
+    sel.innerHTML = "";
+    const opt0 = document.createElement("option");
+    opt0.value = ""; opt0.textContent = "Todos los mercados";
+    sel.appendChild(opt0);
+
+    // Orden sugerido (si existen), luego el resto
+    const preferred = ["1X2","OU","Over/Under","BTTS","GG/NG","Corners","Tarjetas","Shots","HT 1X2","HT OU","HT BTTS"];
+    const has = new Set(set);
+    preferred.filter(m=>has.has(m)).forEach(m=>{
+      const o = document.createElement("option");
+      o.value = o.textContent = m; sel.appendChild(o);
+      has.delete(m);
+    });
+    // Añadir mercados restantes en orden alfabético
+    [...has].sort((a,b)=>a.localeCompare(b)).forEach(m=>{
+      const o = document.createElement("option");
+      o.value = o.textContent = m; sel.appendChild(o);
     });
   }
 
@@ -287,9 +334,7 @@
         if(gi !== -1){
           picks[gi].result = sel.value;
           savePicks();
-          // Re-render para refrescar P/L y totales
-          const flg = $("#fLeague").value;
-          view = flg ? picks.filter(x => (x.league||"")===flg) : [...picks];
+          view = computeView();
           render();
         }
       });
@@ -309,8 +354,10 @@
         if(gi !== -1){
           picks.splice(gi,1);
           savePicks();
-          const flg = $("#fLeague").value;
-          view = flg ? picks.filter(x => (x.league||"")===flg) : [...picks];
+          // Si al eliminar cambian los conjuntos, actualizamos combos
+          populateLeagueFilter();
+          populateMarketFilter();
+          view = computeView();
           render();
         }
       });
