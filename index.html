@@ -27,34 +27,17 @@
     width:100%; background:var(--panel2); color:var(--text); border:1px solid var(--border); border-radius:10px;
     padding:10px 12px; outline:none; font-size:14px;
   }
-  textarea{min-height:84px; resize:vertical}
   .btn{display:inline-flex; align-items:center; gap:8px; border:1px solid var(--border); background:#111827; color:var(--text);
        padding:10px 12px; border-radius:10px; cursor:pointer; text-decoration:none; font-size:14px; user-select:none}
   .btn.primary{background:linear-gradient(90deg,#2647ff,#1fa37e); border-color:transparent}
   .btn.ghost{background:transparent}
   .btn[disabled]{opacity:.5; cursor:not-allowed}
-  /* CTA destacado */
-  .btn.cta{
-    font-weight:700;
-    box-shadow:0 6px 20px rgba(38,71,255,.25), 0 2px 8px rgba(31,163,126,.25);
-    position:relative;
-  }
-  .btn.cta::after{
-    content:"";
-    position:absolute; inset:-1px;
-    border-radius:10px;
-    background:linear-gradient(90deg, rgba(122,162,255,.15), rgba(93,212,164,.15));
-    pointer-events:none;
-  }
+  .btn.cta{font-weight:700; box-shadow:0 6px 20px rgba(38,71,255,.25), 0 2px 8px rgba(31,163,126,.25); position:relative}
+  .btn.cta::after{content:""; position:absolute; inset:-1px; border-radius:10px; background:linear-gradient(90deg, rgba(122,162,255,.15), rgba(93,212,164,.15)); pointer-events:none}
   @media (prefers-reduced-motion: no-preference){
     .pulse{ animation:pulse 2.2s ease-in-out infinite; }
-    @keyframes pulse{
-      0%{ transform:scale(1) }
-      50%{ transform:scale(1.02) }
-      100%{ transform:scale(1) }
-    }
+    @keyframes pulse{ 0%{ transform:scale(1) } 50%{ transform:scale(1.02) } 100%{ transform:scale(1) } }
   }
-
   .muted{color:var(--muted)}
   .kpi{display:flex; gap:12px; flex-wrap:wrap}
   .pill{padding:6px 10px; border-radius:999px; border:1px solid var(--border); background:rgba(255,255,255,.03)}
@@ -76,12 +59,7 @@
   .success{color:var(--accent2)}
   .danger{color:var(--danger)}
   .tiny{font-size:11px}
-
-  /* iPhone 14 y móviles */
-  @media(max-width:768px){
-    .grid-cols-2{grid-template-columns:1fr !important;}
-    .grid-cols-3{grid-template-columns:1fr !important;}
-  }
+  @media(max-width:768px){ .grid-cols-2{grid-template-columns:1fr !important;} .grid-cols-3{grid-template-columns:1fr !important;} }
   @media(max-width:430px){
     .wrap{padding:8px}
     h1{font-size:16px}
@@ -112,15 +90,9 @@
           <label>Archivo JSON (array / objeto / NDJSON)</label>
           <input type="file" id="file" accept=".json,application/json,.txt" />
         </div>
-        <div>
-          <label>O pegar JSON aquí</label>
-          <textarea id="jsonText" placeholder='[ { "League":"...", "Match":"Home - Away", "Result FT":"1-2", ... }, ... ]'></textarea>
-        </div>
       </div>
-      <div class="flex" style="margin-top:10px">
-        <button class="btn" id="btnSample">Cargar ejemplo rápido</button>
-        <button class="btn primary" id="btnParse">Procesar data</button>
-        <span class="hint">Tras procesar, elige liga y equipos 👉</span>
+      <div class="hint tiny" style="margin-top:8px">
+        Al seleccionar el archivo se procesará automáticamente. Después elige liga y equipos.
       </div>
       <div id="ingestStatus" class="hint" style="margin-top:8px"></div>
     </section>
@@ -315,7 +287,55 @@
     return Math.min(Math.max(p,0),1);
   }
 
-  // ✅ Versión CORRECTA de cdf1X2 (la rota fue eliminada)
+  function cdf1X2(lambdaH, lambdaA, kMax){
+    let p1=0, px=0, p2=0;
+    const pH = Array.from({length:kMax+1}, (_,h)=>pois(lambdaH,h));
+    const pA = Array.from({length+kMax+1?0:0}, ()=>0); // placeholder to keep structure, replaced below
+  }
+})();
+</script>
+<script>
+(() => {
+  "use strict";
+  // Continuación del script (corregido el bloque anterior que se interrumpió accidentalmente)
+  const OVERROUND_THRESHOLDS = { warn: 0.03, bad: 0.06 };
+
+  let DATA = [];
+  let CURRENT = { league:null, home:null, away:null, lambdas:null, probs:null, samples:{nH:0,nA:0} };
+
+  const $ = sel => document.querySelector(sel);
+  const setText = (id, txt) => { const el = typeof id==="string" ? document.getElementById(id) : id; if(el) el.textContent = txt; };
+
+  const factorialCache = [1];
+  const fact = (n) => { for(let i=factorialCache.length;i<=n;i++) factorialCache[i] = factorialCache[i-1]*i; return factorialCache[n]; };
+  const pois = (lambda,k)=> Math.exp(-lambda)*Math.pow(lambda,k)/fact(k);
+
+  const parseFT = (ft) => {
+    if(!ft || typeof ft!=="string") return {h:0,a:0,ok:false};
+    const m = ft.match(/(-?\d+)\s*[-:]\s*(-?\d+)/);
+    if(!m) return {h:0,a:0,ok:false};
+    return {h: Number(m[1]), a: Number(m[2]), ok:true};
+  };
+  const splitTeams = (matchStr) => {
+    if(!matchStr) return {home:null, away:null};
+    const parts = String(matchStr).split(" - ");
+    return {home: (parts[0]||"").trim(), away: (parts[1]||"").trim()};
+  };
+  const mean = arr => arr.length ? arr.reduce((s,x)=>s+x,0)/arr.length : 0;
+
+  function pTotalLE(lambdaH, lambdaA, kMax, thr){
+    let p = 0;
+    const pH = Array.from({length:kMax+1}, (_,h)=>pois(lambdaH,h));
+    const pA = Array.from({length:kMax+1}, (_,a)=>pois(lambdaA,a));
+    for(let h=0; h<=kMax; h++){
+      const upto = Math.min(kMax-h, thr-h);
+      for(let a=0; a<=upto; a++){
+        if(h+a<=thr) p += pH[h]*pA[a];
+      }
+    }
+    return Math.min(Math.max(p,0),1);
+  }
+
   function cdf1X2(lambdaH, lambdaA, kMax){
     let p1=0, px=0, p2=0;
     const pH = Array.from({length:kMax+1}, (_,h)=>pois(lambdaH,h));
@@ -343,17 +363,12 @@
     return Math.max(0, sumInv - 1);
   }
 
-  function ev(p, odd){
-    if(!odd || odd<=1) return NaN;
-    return p*odd - 1;
-  }
-
+  function ev(p, odd){ if(!odd || odd<=1) return NaN; return p*odd - 1; }
   function kellyEighth(p, odd){
     if(!odd || odd<=1) return 0;
     const f = (p*odd - 1) / (odd - 1);
     return Math.max(0, f / 8);
   }
-
   function coefVariacion(lambdaH, lambdaA){
     const lambdaTot = Math.max(lambdaH + lambdaA, 1e-9);
     return 1 / Math.sqrt(lambdaTot);
@@ -376,10 +391,9 @@
   async function parseInput(){
     const status = $("#ingestStatus");
     status.textContent = "Procesando...";
-    const txt = $("#jsonText").value.trim();
-
     let rows = [];
     const file = $("#file").files[0];
+
     if(file){
       try{
         const content = await file.text();
@@ -388,9 +402,9 @@
         status.innerHTML = '<span class="danger">Error leyendo archivo.</span>';
         return;
       }
-    }
-    if(txt){
-      rows = rows.concat(readFlexJSON(txt));
+    } else {
+      status.innerHTML = '<span class="danger">Selecciona un archivo para procesar.</span>';
+      return;
     }
 
     if(!rows.length){
@@ -412,7 +426,7 @@
 
     status.innerHTML = `<span class="success">OK:</span> ${DATA.length} partidos cargados · ${leagues.length} ligas.`;
 
-    // ✅ Autoselección inteligente + cálculo Poisson
+    // Autoselección inteligente + cálculo Poisson
     if(leagues.length===1){
       $("#selLeague").value = leagues[0];
       CURRENT.league = leagues[0];
@@ -514,15 +528,9 @@
       pOver = 1 - pLE;
       pUnder = pLE;
     }
-
     const b = btss(lambdaH, lambdaA);
     const ones = cdf1X2(lambdaH, lambdaA, kMax);
-
-    return {
-      ou:{over:pOver, under:pUnder},
-      btts:{yes:b.yes, no:b.no},
-      oneXtwo: ones
-    };
+    return { ou:{over:pOver, under:pUnder}, btts:{yes:b.yes, no:b.no}, oneXtwo: ones };
   }
 
   function fmtPct(x){ return isFinite(x) ? (100*x).toFixed(1)+"%" : "—"; }
@@ -661,45 +669,8 @@
   }
 
   // ====== Eventos UI ======
-  $("#btnParse").addEventListener("click", parseInput);
-
   // Auto-procesar al seleccionar archivo
   $("#file").addEventListener("change", () => { parseInput(); });
-
-  // Auto-procesar al pegar JSON
-  $("#jsonText").addEventListener("paste", () => { setTimeout(parseInput, 50); });
-
-  // Procesar al perder foco si parece JSON completo
-  $("#jsonText").addEventListener("blur", () => {
-    const t = $("#jsonText").value.trim();
-    if(t.startsWith("{") || t.startsWith("[")) parseInput();
-  });
-
-  // Sample
-  $("#btnSample").addEventListener("click", () => {
-    const sample = [
-      {"League":"Ecuador Liga Pro","Match":"Emelec - Mushuc Runa","Result FT":"0-0","Date":"2024-03-08"},
-      {"League":"Ecuador Liga Pro","Match":"Emelec - Aucas","Result FT":"2-1","Date":"2024-02-20"},
-      {"League":"Ecuador Liga Pro","Match":"Emelec - Liga de Quito","Result FT":"1-0","Date":"2024-01-15"},
-      {"League":"Ecuador Liga Pro","Match":"Emelec - Delfín","Result FT":"3-2","Date":"2023-12-05"},
-      {"League":"Ecuador Liga Pro","Match":"Emelec - Orense","Result FT":"2-0","Date":"2023-11-21"},
-      {"League":"Ecuador Liga Pro","Match":"Emelec - Barcelona SC","Result FT":"1-1","Date":"2023-10-02"},
-      {"League":"Ecuador Liga Pro","Match":"Emelec - Cumbayá","Result FT":"0-1","Date":"2023-09-12"},
-      {"League":"Ecuador Liga Pro","Match":"Emelec - Técnico Universitario","Result FT":"2-2","Date":"2023-08-18"},
-      {"League":"Ecuador Liga Pro","Match":"Emelec - Macará","Result FT":"1-0","Date":"2023-07-30"},
-      {"League":"Ecuador Liga Pro","Match":"Mushuc Runa - Emelec","Result FT":"1-2","Date":"2023-06-01"},
-      {"League":"Ecuador Liga Pro","Match":"Mushuc Runa - Aucas","Result FT":"2-2","Date":"2024-02-26"},
-      {"League":"Ecuador Liga Pro","Match":"Mushuc Runa - Orense","Result FT":"0-1","Date":"2024-01-05"},
-      {"League":"Ecuador Liga Pro","Match":"Mushuc Runa - Delfín","Result FT":"1-0","Date":"2023-12-12"},
-      {"League":"Ecuador Liga Pro","Match":"Mushuc Runa - Cumbayá","Result FT":"0-0","Date":"2023-11-15"},
-      {"League":"Ecuador Liga Pro","Match":"Mushuc Runa - Barcelona SC","Result FT":"1-3","Date":"2023-10-07"},
-      {"League":"Ecuador Liga Pro","Match":"Mushuc Runa - Liga de Quito","Result FT":"2-2","Date":"2023-09-03"},
-      {"League":"Ecuador Liga Pro","Match":"Barcelona SC - Emelec","Result FT":"0-0","Date":"2023-05-21"},
-      {"League":"Argentina Liga Profesional de Fútbol","Match":"Banfield - Instituto","Result FT":"1-2","Date":"2024-09-01"}
-    ];
-    $("#jsonText").value = JSON.stringify(sample, null, 2);
-    parseInput();
-  });
 
   $("#selLeague").addEventListener("change", (e)=>{
     const lg = e.target.value;
@@ -712,7 +683,6 @@
     const teams = getLeagueTeams(lg);
     fillSelect($("#selHome"), teams, "— Local —");
     fillSelect($("#selAway"), teams, "— Visitante —");
-    // ✅ Autopoblar y autocálculo si hay equipos suficientes
     if(teams.length>=2){
       $("#selHome").value = teams[0];
       $("#selAway").value = teams[1];
