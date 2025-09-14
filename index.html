@@ -207,7 +207,6 @@
       <div class="sep"></div>
       <div class="kpi">
         <span class="pill" id="cvPill">· CV total: <b id="cvTxt">—</b></span>
-        <span class="pill" id="riskPill">Riesgo (partido): <b id="riskTxt">—</b></span>
         <span class="pill" id="nHAPill">Muestras (H/A): <b id="nHA">—</b></span>
       </div>
       <div class="hint tiny" style="margin-top:6px">
@@ -228,7 +227,6 @@
             <th class="right">Cuota</th>
             <th class="right">Overround</th>
             <th class="right">EV</th>
-            <th class="right">Riesgo</th>
             <th class="right">Stake Kelly 1/4</th>
             <th></th>
           </tr>
@@ -250,7 +248,7 @@
 
   // ====== Estado ======
   let DATA = []; // array de objetos normalizados
-  let CURRENT = { league:null, home:null, away:null, lambdas:null, probs:null, samples:{nH:0,nA:0}, matchRisk:"—" };
+  let CURRENT = { league:null, home:null, away:null, lambdas:null, probs:null, samples:{nH:0,nA:0} };
 
   // ====== Utilidades ======
   const $ = sel => document.querySelector(sel);
@@ -309,9 +307,8 @@
   }
 
   function overroundFromOdds(arrOdds){
-    const valid = arrOdds.filter(o=>o>1.001);
-    const sumInv = valid.reduce((s,o)=>s+1/o,0);
-    if(!valid.length) return NaN;
+    const sumInv = arrOdds.filter(o=>o>1.001).reduce((s,o)=>s+1/o,0);
+    if(!arrOdds.length) return 0;
     return Math.max(0, sumInv - 1);
   }
 
@@ -330,29 +327,6 @@
     const lambdaTot = Math.max(lambdaH + lambdaA, 1e-9);
     const CV = 1 / Math.sqrt(lambdaTot);
     return CV;
-  }
-
-  // ====== Riesgo ======
-  function riskMatchLevel(CV, nH, nA){
-    const nMin = Math.min(nH||0, nA||0);
-    if(CV < 0.50 && nMin >= 8) return "Bajo";
-    if(CV <= 0.80 && nMin >= 6) return "Medio";
-    return "Alto";
-  }
-
-  function riskClass(level){
-    if(level==="Bajo") return {cls:"badge accept", title:"Riesgo bajo"};
-    if(level==="Medio") return {cls:"badge medium", title:"Riesgo medio"};
-    if(level==="Alto") return {cls:"badge bad", title:"Riesgo alto"};
-    return {cls:"badge", title:"—"};
-  }
-
-  function riskPickLevel(matchLevel, edge, overround){
-    // edge en prob. absoluta (p - 1/odd). overround en fracción (0.03 = 3%)
-    if(!(edge>0)) return null; // no aplica si no hay valor
-    if(matchLevel==="Bajo" && edge>=0.05 && overround<=0.03) return "Bajo";
-    if((edge>=0.02 || overround<=0.06) && matchLevel!=="Alto") return "Medio";
-    return "Alto";
   }
 
   // ====== Ingesta ======
@@ -535,16 +509,6 @@
     const CV = coefVariacion(lambdas.lamH, lambdas.lamA);
     setText("cvTxt", `${CV.toFixed(2)} (${CV<0.5?'Bajo':(CV<=0.8?'Medio':'Alto')})`);
     setText("nHA", `${samples.nH}/${samples.nA}`);
-
-    const mRisk = riskMatchLevel(CV, samples.nH, samples.nA);
-    CURRENT.matchRisk = mRisk;
-    setText("riskTxt", mRisk);
-    const riskEl = document.getElementById("riskPill");
-    riskEl.classList.remove("ok","warn","bad");
-    if(mRisk==="Bajo") riskEl.classList.add("ok");
-    else if(mRisk==="Medio") riskEl.classList.add("warn");
-    else if(mRisk==="Alto") riskEl.classList.add("bad");
-    riskEl.title = `CV y muestras => ${mRisk}`;
   }
 
   function calcOdds(){
@@ -608,29 +572,6 @@
     else tdEV.textContent = "—";
     tr.appendChild(tdEV);
 
-    // === Riesgo por pick ===
-    const tdRisk = document.createElement("td"); tdRisk.className="right";
-    let riskHtml = "—";
-    if(isFinite(evv) && evv>0 && isFinite(overround)){
-      const breakeven = 1/(odd||Infinity);
-      const edge = p - breakeven; // en prob. absoluta
-      const level = riskPickLevel(CURRENT.matchRisk, edge, overround);
-      const rc = riskClass(level||"");
-      riskHtml = level
-        ? `<span class="${rc.cls}" title="Match: ${CURRENT.matchRisk} · Edge: ${(100*edge).toFixed(1)} pp · Overround: ${(100*overround).toFixed(1)}%">${level}</span>`
-        : "—";
-    }else if(isFinite(evv) && evv>0 && !isFinite(overround)){
-      // Si no hay overround (faltan cuotas opuestas), usa sólo matchRisk + edge
-      const breakeven = 1/(odd||Infinity);
-      const edge = p - breakeven;
-      const level = (CURRENT.matchRisk==="Bajo" && edge>=0.05) ? "Bajo" :
-                    (CURRENT.matchRisk!=="Alto" && edge>=0.02) ? "Medio" : "Alto";
-      const rc = riskClass(level);
-      riskHtml = `<span class="${rc.cls}" title="Match: ${CURRENT.matchRisk} · Edge: ${(100*edge).toFixed(1)} pp">${level}</span>`;
-    }
-    tdRisk.innerHTML = riskHtml;
-    tr.appendChild(tdRisk);
-
     const kq = kellyQuarter(p, odd);
     const stake = isFinite(kq) ? bankroll * kq : 0;
     const tdK = document.createElement("td"); tdK.className="right";
@@ -655,7 +596,6 @@
       odd,
       overround,
       ev: evv,
-      match_risk: CURRENT.matchRisk,
       kelly_q: kq,
       bankroll: bankroll,
       timestamp: new Date().toISOString()
@@ -741,3 +681,7 @@
 </script>
 </body>
 </html>
+
+
+
+
