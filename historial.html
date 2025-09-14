@@ -30,8 +30,10 @@
   .pill{padding:6px 10px; border-radius:999px; border:1px solid var(--border); background:rgba(255,255,255,.03)}
   .ok{color:var(--accent2)} .warn{color:var(--warn)} .bad{color:var(--danger)}
   .flex{display:flex; gap:10px; align-items:center; flex-wrap:wrap}
+  .grid{display:grid; gap:10px}
   .sep{height:1px; background:var(--border); margin:12px 0}
   .tiny{font-size:11px}
+  .tag{display:inline-block; padding:4px 8px; border-radius:999px; border:1px solid var(--border); font-size:12px}
 </style>
 </head>
 <body>
@@ -50,6 +52,88 @@
   </header>
 
   <div class="wrap">
+    <!-- ===== NUEVO: Formulario para agregar picks (incluye Riesgo) ===== -->
+    <section class="card" style="margin-bottom:16px">
+      <div class="flex" style="justify-content:space-between">
+        <b>Nuevo pick</b>
+        <button id="btnAdd" class="btn">Guardar pick</button>
+      </div>
+      <div class="sep"></div>
+      <div class="grid" style="grid-template-columns:repeat(6,1fr)">
+        <div class="grid">
+          <label class="tiny muted">Fecha/Hora</label>
+          <input id="iDate" type="datetime-local" />
+        </div>
+        <div class="grid">
+          <label class="tiny muted">Liga</label>
+          <input id="iLeague" placeholder="Ej. Argentina LPF" />
+        </div>
+        <div class="grid">
+          <label class="tiny muted">Local</label>
+          <input id="iHome" placeholder="Banfield" />
+        </div>
+        <div class="grid">
+          <label class="tiny muted">Visita</label>
+          <input id="iAway" placeholder="Instituto" />
+        </div>
+        <div class="grid">
+          <label class="tiny muted">Mercado</label>
+          <input id="iMarket" placeholder="OU/BTTS/1X2..." />
+        </div>
+        <div class="grid">
+          <label class="tiny muted">Detalle</label>
+          <input id="iLabel" placeholder="Over 2.5, GG, 1X, etc." />
+        </div>
+
+        <div class="grid">
+          <label class="tiny muted">Prob. modelo (0–1)</label>
+          <input id="iProb" type="number" step="0.0001" min="0" max="1" placeholder="0.56" />
+        </div>
+        <div class="grid">
+          <label class="tiny muted">Cuota (decimal)</label>
+          <input id="iOdd" type="number" step="0.01" min="1.01" placeholder="1.85" />
+        </div>
+        <div class="grid">
+          <label class="tiny muted">Overround (0–1, opcional)</label>
+          <input id="iOverround" type="number" step="0.0001" min="0" placeholder="0.03" />
+        </div>
+        <div class="grid">
+          <label class="tiny muted">EV (auto)</label>
+          <input id="iEV" type="number" step="0.0001" placeholder="auto" disabled />
+        </div>
+        <div class="grid">
+          <label class="tiny muted">Bankroll (opcional)</label>
+          <input id="iBankroll" type="number" step="0.01" min="0" placeholder="1000" />
+        </div>
+        <div class="grid">
+          <label class="tiny muted">Kelly (¼) (auto)</label>
+          <input id="iKellyQ" type="number" step="0.0001" min="0" placeholder="auto" disabled />
+        </div>
+
+        <div class="grid">
+          <label class="tiny muted">Riesgo</label>
+          <select id="iRisk">
+            <option value="">— Selecciona —</option>
+            <option value="Bajo">Bajo</option>
+            <option value="Medio">Medio</option>
+            <option value="Alto">Alto</option>
+          </select>
+        </div>
+        <div class="grid">
+          <label class="tiny muted">Resultado (opcional)</label>
+          <select id="iResult">
+            <option value="">— Sin resultado —</option>
+            <option>Ganó</option>
+            <option>Push</option>
+            <option>Perdió</option>
+          </select>
+        </div>
+      </div>
+      <div class="tiny muted" style="margin-top:8px">
+        EV = <code>p × cuota − 1</code>. Kelly base = <code>(p×o − (1−p)) / (o−1)</code>, Kelly(¼) = <code>max(0, base/4)</code>.
+      </div>
+    </section>
+
     <section class="card">
       <div class="flex" style="justify-content:space-between; gap:10px; flex-wrap:wrap">
         <div class="flex" style="gap:10px; flex-wrap:wrap">
@@ -57,7 +141,7 @@
           <span class="pill">Ganados: <b id="won">0</b></span>
           <span class="pill">Push: <b id="push">0</b></span>
           <span class="pill">Perdidos: <b id="lost">0</b></span>
-          <!-- NUEVOS KPIs de contabilidad -->
+          <!-- KPIs de contabilidad -->
           <span class="pill">Total apostado: <b id="staked">$0.00</b></span>
           <span class="pill">Ganancia neta: <b id="profit">$0.00</b></span>
           <span class="pill">ROI: <b id="roi">0.00%</b></span>
@@ -78,13 +162,14 @@
               <th>Visita</th>
               <th>Mercado</th>
               <th>Detalle</th>
+              <th>Riesgo</th><!-- NUEVO -->
               <th class="right">Prob. Modelo</th>
               <th class="right">Cuota</th>
               <th class="right">Overround</th>
               <th class="right">EV</th>
               <th class="right">Stake Kelly</th>
               <th>Resultado</th>
-              <th class="right">P/L</th> <!-- NUEVO -->
+              <th class="right">P/L</th>
               <th></th>
             </tr>
           </thead>
@@ -105,15 +190,24 @@
   const fmtPct = x => isFinite(x) ? (100*x).toFixed(2)+"%" : "—";
   const fmtMoney = x => isFinite(x) ? x.toFixed(2) : "—";
   const asMoney = x => "$" + fmtMoney(Number(x)||0);
+  const clamp01 = v => Math.min(1, Math.max(0, Number(v)));
 
+  // ===== Estado =====
   let picks = loadPicks();
   let view = [...picks];
 
-  // UI init
+  // ===== Init =====
+  initFormDefaults();
   populateLeagueFilter();
   render();
 
-  // ==== Eventos ====
+  // ===== Eventos de formulario =====
+  ["iProb","iOdd"].forEach(id=>{
+    $("#"+id).addEventListener("input", recalcEVAndKelly);
+  });
+  $("#btnAdd").addEventListener("click", onAddPick);
+
+  // ===== Eventos de filtros/acciones =====
   $("#fLeague").addEventListener("change", () => {
     const lg = $("#fLeague").value;
     view = lg ? picks.filter(p => (p.league||"") === lg) : [...picks];
@@ -129,7 +223,7 @@
   });
 
   $("#btnExport").addEventListener("click", () => {
-    const rows = [["Fecha","Liga","Local","Visita","Mercado","Detalle","ProbModelo","Cuota","Overround","EV","StakeKelly","Resultado","PL"]];
+    const rows = [["Fecha","Liga","Local","Visita","Mercado","Detalle","Riesgo","ProbModelo","Cuota","Overround","EV","StakeKelly","Resultado","PL"]];
     for(const p of view){
       const stake = stakeKelly(p);
       rows.push([
@@ -139,6 +233,7 @@
         p.away || "",
         p.market || "",
         p.label || "",
+        p.risk || "",
         num(p.prob).toFixed(4),
         num(p.odd).toFixed(2),
         num(p.overround).toFixed(4),
@@ -152,7 +247,95 @@
     download("historial_picks.csv", csv, "text/csv;charset=utf-8");
   });
 
-  // ==== Funciones ====
+  // ===== Lógica =====
+  function initFormDefaults(){
+    // Fecha/hora local por defecto ahora (redondeo a minutos)
+    const now = new Date();
+    now.setSeconds(0,0);
+    $("#iDate").value = toLocalDT(now);
+  }
+
+  function recalcEVAndKelly(){
+    const p = clamp01($("#iProb").value || 0);
+    const o = Number($("#iOdd").value || 0);
+    const ev = isFinite(p) && isFinite(o) && o>1 ? (p*o - 1) : NaN;
+    $("#iEV").value = isFinite(ev) ? ev.toFixed(4) : "";
+    // Kelly base
+    const denom = (o - 1);
+    let f = NaN;
+    if(denom>0){
+      f = (p*o - (1 - p)) / denom;
+    }
+    const fq = Math.max(0, f/4);
+    $("#iKellyQ").value = isFinite(fq) ? fq.toFixed(4) : "";
+  }
+
+  function onAddPick(){
+    const ts = $("#iDate").value ? new Date($("#iDate").value) : new Date();
+    const p = clamp01($("#iProb").value || 0);
+    const o = Number($("#iOdd").value || 0);
+    const orr = $("#iOverround").value === "" ? NaN : Number($("#iOverround").value);
+    const evInput = $("#iEV").value;
+    const ev = evInput === "" ? (isFinite(p) && isFinite(o) && o>1 ? (p*o - 1) : NaN) : Number(evInput);
+    const bk = $("#iBankroll").value === "" ? NaN : Number($("#iBankroll").value);
+    const kqInput = $("#iKellyQ").value;
+    const kq = kqInput === "" ? NaN : Number(kqInput);
+    const risk = $("#iRisk").value || "";
+
+    // Validaciones mínimas
+    if(!$("#iLeague").value || !$("#iHome").value || !$("#iAway").value || !$("#iMarket").value || !$("#iLabel").value){
+      alert("Completa Liga, Local, Visita, Mercado y Detalle.");
+      return;
+    }
+    if(!(p>0 && p<=1) || !(o>1)){
+      alert("Revisa Probabilidad (0–1) y Cuota (>1).");
+      return;
+    }
+    if(!risk){
+      alert("Selecciona un nivel de Riesgo.");
+      return;
+    }
+
+    const newPick = {
+      // Identidad / contexto
+      timestamp: toLocalISO(ts), // ISO local (para indexado)
+      league: $("#iLeague").value.trim(),
+      home: $("#iHome").value.trim(),
+      away: $("#iAway").value.trim(),
+      market: $("#iMarket").value.trim(),
+      label: $("#iLabel").value.trim(),
+
+      // Métricas
+      prob: p,
+      odd: o,
+      overround: isFinite(orr) ? orr : NaN,
+      ev: isFinite(ev) ? ev : NaN,
+      bankroll: isFinite(bk) ? bk : NaN,
+      kelly_q: isFinite(kq) ? kq : NaN,
+
+      // NUEVO: Riesgo
+      risk: risk,
+
+      // Resultado opcional (sin asignar por defecto)
+      result: $("#iResult").value || ""
+    };
+
+    // Guardar
+    picks.push(newPick);
+    savePicks();
+
+    // Refrescar vista/ligas/contadores
+    const flg = $("#fLeague").value;
+    populateLeagueFilter(); // por si es una liga nueva
+    view = flg ? picks.filter(x => (x.league||"")===flg) : [...picks];
+    render();
+
+    // Limpiar los campos (menos la fecha)
+    ["iLeague","iHome","iAway","iMarket","iLabel","iProb","iOdd","iOverround","iEV","iBankroll","iKellyQ"].forEach(id=>$("#"+id).value="");
+    $("#iRisk").value = "";
+    $("#iResult").value = "";
+  }
+
   function loadPicks(){
     try{
       const arr = JSON.parse(localStorage.getItem("picks") || "[]");
@@ -211,6 +394,18 @@
       const tdMkt   = cell(p.market||"");
       const tdLbl   = cell(p.label||"");
 
+      // Riesgo (pill)
+      const tdRisk = document.createElement("td");
+      const rk = (p.risk||"").trim();
+      if(rk){
+        const span = document.createElement("span");
+        span.className = "tag " + (rk==="Alto"?"bad": rk==="Medio"?"warn":"ok");
+        span.textContent = rk;
+        tdRisk.appendChild(span);
+      }else{
+        tdRisk.textContent = "—";
+      }
+
       const tdProb  = cellRight(fmtPct(num(p.prob)));
       const tdOdd   = cellRight(isFinite(num(p.odd)) ? Number(p.odd).toFixed(2) : "—");
       const tdOR    = cellRight(isFinite(num(p.overround)) ? (100*Number(p.overround)).toFixed(2)+"%" : "—");
@@ -235,7 +430,6 @@
         if(gi !== -1){
           picks[gi].result = sel.value;
           savePicks();
-          // Re-render completo para refrescar P/L y totales
           const flg = $("#fLeague").value;
           view = flg ? picks.filter(x => (x.league||"")===flg) : [...picks];
           render();
@@ -265,7 +459,7 @@
       tdAcc.appendChild(btn);
 
       // Añadir celdas al tr
-      [tdFecha,tdLiga,tdHome,tdAway,tdMkt,tdLbl,tdProb,tdOdd,tdOR,tdEV,tdStake,tdRes,tdPL,tdAcc].forEach(td=>tr.appendChild(td));
+      [tdFecha,tdLiga,tdHome,tdAway,tdMkt,tdLbl,tdRisk,tdProb,tdOdd,tdOR,tdEV,tdStake,tdRes,tdPL,tdAcc].forEach(td=>tr.appendChild(td));
       body.appendChild(tr);
 
       // contabilidad si el pick tiene resultado asignado
@@ -287,11 +481,12 @@
     $("#roi").textContent = roi.toFixed(2) + "%";
   }
 
+  // ===== Utilidades UI =====
   function cell(txt){ const td = document.createElement("td"); td.textContent = txt; return td; }
   function cellRight(txt){ const td = document.createElement("td"); td.className = "right"; td.textContent = txt; return td; }
 
   function indexInGlobal(p){
-    // Identificador: timestamp+market+label
+    // Identificador: timestamp+market+label (mantiene compatibilidad con tus guardados previos)
     const key = (p.timestamp||"") + "||" + (p.market||"") + "||" + (p.label||"");
     return picks.findIndex(z => ((z.timestamp||"")+"||"+(z.market||"")+"||"+(z.label||"")) === key);
   }
@@ -307,6 +502,22 @@
     const a = document.createElement("a");
     a.href = url; a.download = filename; a.click();
     URL.revokeObjectURL(url);
+  }
+
+  // Fechas
+  function toLocalDT(d){
+    const pad = n => String(n).padStart(2,"0");
+    const yyyy = d.getFullYear();
+    const mm = pad(d.getMonth()+1);
+    const dd = pad(d.getDate());
+    const hh = pad(d.getHours());
+    const mi = pad(d.getMinutes());
+    return `${yyyy}-${mm}-${dd}T${hh}:${mi}`;
+  }
+  function toLocalISO(d){
+    // ISO-like sin zona para mantener consistencia visual
+    const s = toLocalDT(d);
+    return s; // "YYYY-MM-DDTHH:MM"
   }
 
 })();
