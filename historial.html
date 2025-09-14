@@ -164,7 +164,40 @@
   const fmtMoney = x => isFinite(x) ? x.toFixed(2) : "—";
   const asMoney = x => "$" + fmtMoney(Number(x)||0);
 
+  // ====== Compat: mapear códigos de mercado a familia legible ======
+  function marketFamily(mk){
+    switch((mk||"").toUpperCase()){
+      case "OU_OVER":
+      case "OU_UNDER":
+      case "OU":          return "Over/Under";
+      case "BTTS_YES":
+      case "BTTS_NO":
+      case "BTTS":
+      case "GG/NG":       return "BTTS";
+      case "1X2":
+      case "HT 1X2":      return mk; // se muestran tal cual
+      default:            return mk || ""; // corners/tarjetas/etc. o nombres ya legibles
+    }
+  }
+
+  // ====== Compat: calcular fracción Kelly si no viene guardada ======
+  function kellyQuarterFromProbOdd(p, odd){
+    const o = Number(odd);
+    const pr = Number(p);
+    if(!(isFinite(o) && o>1 && isFinite(pr) && pr>=0 && pr<=1)) return NaN;
+    const f = (pr*o - 1) / (o - 1);
+    return Math.max(0, f/4);
+  }
+
+  function parseISO(s){
+    // robusto: si no es ISO válido, devuelve 0 para que quede al final
+    const t = Date.parse(s||"");
+    return isFinite(t) ? t : 0;
+  }
+
   let picks = loadPicks();
+  // Ordenar más recientes primero
+  picks.sort((a,b)=> parseISO(b.timestamp) - parseISO(a.timestamp));
   let view = [...picks];
 
   // Inicialización UI
@@ -202,7 +235,7 @@
         p.league || "",
         p.home || "",
         p.away || "",
-        p.market || "",
+        marketFamily(p.market),
         p.label || "",
         num(p.prob).toFixed(4),
         num(p.odd).toFixed(2),
@@ -230,9 +263,12 @@
 
   function stakeKelly(p){
     const bk = Number(p.bankroll||0);
-    const kq = Number(p.kelly_q||0); // fracción guardada (p.ej., 0.125 si usaste Kelly 1/8)
-    if(!isFinite(bk) || !isFinite(kq)) return NaN;
-    return Math.max(0, bk * kq);
+    // Compat: kelly_frac (nuevo) -> kelly_q (legacy) -> calcular de p,odd
+    const frac = isFinite(Number(p.kelly_frac)) ? Number(p.kelly_frac)
+               : isFinite(Number(p.kelly_q))    ? Number(p.kelly_q)
+               : kellyQuarterFromProbOdd(p.prob, p.odd);
+    if(!(isFinite(bk) && isFinite(frac))) return NaN;
+    return Math.max(0, bk * frac);
   }
 
   function pickPL(p){
@@ -251,19 +287,23 @@
     const mk = $("#fMarket").value;
     return picks.filter(p=>{
       const okLg = lg ? (p.league||"") === lg : true;
-      const okMk = mk ? (p.market||"") === mk : true;
+      const fam = marketFamily(p.market);
+      const okMk = mk ? fam === mk : true;
       return okLg && okMk;
     });
   }
 
+  function uniqueSorted(arr){
+    return [...new Set(arr)].sort((a,b)=> String(a).localeCompare(String(b)));
+  }
+
   function populateLeagueFilter(){
-    const set = new Set(picks.map(p=>p.league||"").filter(Boolean));
     const sel = $("#fLeague");
     sel.innerHTML = "";
     const opt0 = document.createElement("option");
     opt0.value = ""; opt0.textContent = "Todas las ligas";
     sel.appendChild(opt0);
-    [...set].sort((a,b)=>a.localeCompare(b)).forEach(lg=>{
+    uniqueSorted(picks.map(p=>p.league||"").filter(Boolean)).forEach(lg=>{
       const o = document.createElement("option");
       o.value = lg; o.textContent = lg;
       sel.appendChild(o);
@@ -271,23 +311,23 @@
   }
 
   function populateMarketFilter(){
-    const set = new Set(picks.map(p=>p.market||"").filter(Boolean));
     const sel = $("#fMarket");
     sel.innerHTML = "";
     const opt0 = document.createElement("option");
     opt0.value = ""; opt0.textContent = "Todos los mercados";
     sel.appendChild(opt0);
 
-    // Orden sugerido (si existen), luego el resto
-    const preferred = ["1X2","OU","Over/Under","BTTS","GG/NG","Corners","Tarjetas","Shots","HT 1X2","HT OU","HT BTTS"];
-    const has = new Set(set);
-    preferred.filter(m=>has.has(m)).forEach(m=>{
+    // Generar familias legibles (ej. "Over/Under", "BTTS", "1X2", etc.)
+    const fams = picks.map(p=>marketFamily(p.market)).filter(Boolean);
+    const preferred = ["1X2","Over/Under","BTTS","Corners","Tarjetas","Shots","HT 1X2","HT OU","HT BTTS"];
+    const set = new Set(fams);
+    // Añadir preferidos presentes, luego el resto
+    preferred.filter(m=>set.has(m)).forEach(m=>{
       const o = document.createElement("option");
       o.value = o.textContent = m; sel.appendChild(o);
-      has.delete(m);
+      set.delete(m);
     });
-    // Añadir mercados restantes en orden alfabético
-    [...has].sort((a,b)=>a.localeCompare(b)).forEach(m=>{
+    uniqueSorted([...set]).forEach(m=>{
       const o = document.createElement("option");
       o.value = o.textContent = m; sel.appendChild(o);
     });
@@ -307,7 +347,7 @@
       const tdLiga  = cell(p.league||"");
       const tdHome  = cell(p.home||"");
       const tdAway  = cell(p.away||"");
-      const tdMkt   = cell(p.market||"");
+      const tdMkt   = cell(marketFamily(p.market));
       const tdLbl   = cell(p.label||"");
 
       const tdProb  = cellRight(fmtPct(num(p.prob)));
@@ -354,7 +394,6 @@
         if(gi !== -1){
           picks.splice(gi,1);
           savePicks();
-          // Si al eliminar cambian los conjuntos, actualizamos combos
           populateLeagueFilter();
           populateMarketFilter();
           view = computeView();
@@ -366,10 +405,12 @@
       [tdFecha,tdLiga,tdHome,tdAway,tdMkt,tdLbl,tdProb,tdOdd,tdOR,tdEV,tdStake,tdRes,tdPL,tdAcc].forEach(td=>tr.appendChild(td));
       body.appendChild(tr);
 
-      // contabilidad si el pick tiene resultado asignado
-      if((p.result||"")==="Ganó") { won++; if(isFinite(stake)) totalStaked+=stake; if(isFinite(pl)) totalPL+=pl; }
-      else if((p.result||"")==="Push") { push++; }
-      else if((p.result||"")==="Perdió") { lost++; if(isFinite(stake)) totalStaked+=stake; if(isFinite(pl)) totalPL+=pl; }
+      // contabilidad (solo picks con resultado asignado)
+      const hasResult = (p.result||"")==="Ganó" || (p.result||"")==="Perdió";
+      if(hasResult && isFinite(stake)) totalStaked += stake;
+      if((p.result||"")==="Ganó"){ won++; if(isFinite(pl)) totalPL+=pl; }
+      else if((p.result||"")==="Push"){ push++; }
+      else if((p.result||"")==="Perdió"){ lost++; if(isFinite(pl)) totalPL+=pl; }
     });
 
     // Totales
@@ -389,7 +430,7 @@
   function cellRight(txt){ const td = document.createElement("td"); td.className = "right"; td.textContent = txt; return td; }
 
   function indexInGlobal(p){
-    // Identificador: timestamp+market+label
+    // Identificador: timestamp+market+label (suficiente para uso local)
     const key = (p.timestamp||"") + "||" + (p.market||"") + "||" + (p.label||"");
     return picks.findIndex(z => ((z.timestamp||"")+"||"+(z.market||"")+"||"+(z.label||"")) === key);
   }
