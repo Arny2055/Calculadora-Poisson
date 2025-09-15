@@ -151,7 +151,10 @@
       </div>
 
       <div class="tiny muted" style="margin-top:8px">
-        <b>Nota:</b> Stake Kelly = bankroll × Kelly(¼). P/L por pick: <i>Ganó</i> ⇒ <code>stake × (odd − 1)</code>; <i>Perdió</i> ⇒ <code>−stake</code>; <i>Push</i> ⇒ <code>0</code>.
+        <b>Nota:</b> Stake Kelly usa lo guardado por el generador (si existe
+        <code>stake_suggested_abs/frac</code>). Si no, se calcula como Kelly ¼ con
+        límites <b>1%–3%</b> del bankroll y solo si <b>EV &gt; 0</b>.
+        P/L por pick: <i>Ganó</i> ⇒ <code>stake × (odd − 1)</code>; <i>Perdió</i> ⇒ <code>−stake</code>; <i>Push</i> ⇒ <code>0</code>.
       </div>
     </section>
   </div>
@@ -163,6 +166,10 @@
   const fmtPct = x => isFinite(x) ? (100*x).toFixed(2)+"%" : "—";
   const fmtMoney = x => isFinite(x) ? x.toFixed(2) : "—";
   const asMoney = x => "$" + fmtMoney(Number(x)||0);
+
+  // ====== Límites de stake (compat con la app principal) ======
+  const STAKE_MIN = 0.01; // 1%
+  const STAKE_MAX = 0.03; // 3%
 
   // ====== Compat: mapear códigos de mercado a familia legible ======
   function marketFamily(mk){
@@ -180,7 +187,7 @@
     }
   }
 
-  // ====== Compat: calcular fracción Kelly si no viene guardada ======
+  // ====== Compat: Kelly 1/4 básico ======
   function kellyQuarterFromProbOdd(p, odd){
     const o = Number(odd);
     const pr = Number(p);
@@ -189,8 +196,14 @@
     return Math.max(0, f/4);
   }
 
+  function evFromProbOdd(p, odd){
+    const o = Number(odd);
+    const pr = Number(p);
+    if(!(isFinite(o) && o>1 && isFinite(pr))) return NaN;
+    return pr*o - 1;
+  }
+
   function parseISO(s){
-    // robusto: si no es ISO válido, devuelve 0 para que quede al final
     const t = Date.parse(s||"");
     return isFinite(t) ? t : 0;
   }
@@ -229,7 +242,7 @@
   $("#btnExport").addEventListener("click", () => {
     const rows = [["Fecha","Liga","Local","Visita","Mercado","Detalle","ProbModelo","Cuota","Overround","EV","StakeKelly","Resultado","PL"]];
     for(const p of view){
-      const stake = stakeKelly(p);
+      const stakeAmt = stakeKellyAmount(p);
       rows.push([
         p.timestamp || "",
         p.league || "",
@@ -241,7 +254,7 @@
         num(p.odd).toFixed(2),
         num(p.overround).toFixed(4),
         num(p.ev).toFixed(4),
-        isFinite(stake) ? stake.toFixed(2) : "",
+        isFinite(stakeAmt) ? stakeAmt.toFixed(2) : "",
         (p.result||""),
         isFinite(pickPL(p)) ? pickPL(p).toFixed(2) : ""
       ]);
@@ -250,7 +263,7 @@
     download("historial_picks.csv", csv, "text/csv;charset=utf-8");
   });
 
-  // ==== Funciones ====
+  // ==== Carga/guardado ====
   function loadPicks(){
     try{
       const arr = JSON.parse(localStorage.getItem("picks") || "[]");
@@ -259,20 +272,45 @@
   }
   function savePicks(){ localStorage.setItem("picks", JSON.stringify(picks)); }
 
+  // ==== Num utils ====
   function num(x){ const n = Number(x); return isFinite(n)?n:NaN; }
 
-  function stakeKelly(p){
+  // ==== Compatibilidad de stake con límites 1%–3% y EV>0 ====
+  // Devuelve { frac, amount } usando prioridad:
+  // 1) p.stake_suggested_frac / p.stake_suggested_abs si existen (ya vienen cappeados).
+  // 2) Si no existen: calcula Kelly 1/4 y aplica límites [1%, 3%] solo si EV>0; en caso contrario 0.
+  function stakeCompat(p){
     const bk = Number(p.bankroll||0);
-    // Compat: kelly_frac (nuevo) -> kelly_q (legacy) -> calcular de p,odd
-    const frac = isFinite(Number(p.kelly_frac)) ? Number(p.kelly_frac)
-               : isFinite(Number(p.kelly_q))    ? Number(p.kelly_q)
-               : kellyQuarterFromProbOdd(p.prob, p.odd);
-    if(!(isFinite(bk) && isFinite(frac))) return NaN;
-    return Math.max(0, bk * frac);
+    // usar guardados si existen
+    const fracSaved = num(p.stake_suggested_frac);
+    const amtSaved  = num(p.stake_suggested_abs);
+    if(isFinite(fracSaved) && fracSaved>0 && isFinite(bk) && bk>=0){
+      const amount = isFinite(amtSaved) && amtSaved>0 ? amtSaved : bk * fracSaved;
+      return { frac: fracSaved, amount: amount };
+    }
+    // compat picks viejos: recalcular
+    const o = num(p.odd);
+    const pr = num(p.prob);
+    const ev = evFromProbOdd(pr, o);
+    if(!(isFinite(bk) && bk>=0) || !(isFinite(o) && o>1) || !(isFinite(pr)) || !isFinite(ev)){
+      return { frac: NaN, amount: NaN };
+    }
+    if(ev <= 0){
+      return { frac: 0, amount: 0 };
+    }
+    const base = kellyQuarterFromProbOdd(pr, o);
+    if(!isFinite(base)) return { frac: NaN, amount: NaN };
+    const bounded = Math.min(STAKE_MAX, Math.max(STAKE_MIN, base));
+    return { frac: bounded, amount: bk * bounded };
+  }
+
+  function stakeKellyAmount(p){
+    const { amount } = stakeCompat(p);
+    return isFinite(amount) ? amount : NaN;
   }
 
   function pickPL(p){
-    const stake = stakeKelly(p);
+    const stake = stakeKellyAmount(p);
     const odd = Number(p.odd||0);
     if(!isFinite(stake) || !isFinite(odd) || odd<=1) return NaN;
     const r = p.result || "";
@@ -317,11 +355,9 @@
     opt0.value = ""; opt0.textContent = "Todos los mercados";
     sel.appendChild(opt0);
 
-    // Generar familias legibles (ej. "Over/Under", "BTTS", "1X2", etc.)
     const fams = picks.map(p=>marketFamily(p.market)).filter(Boolean);
     const preferred = ["1X2","Over/Under","BTTS","Corners","Tarjetas","Shots","HT 1X2","HT OU","HT BTTS"];
     const set = new Set(fams);
-    // Añadir preferidos presentes, luego el resto
     preferred.filter(m=>set.has(m)).forEach(m=>{
       const o = document.createElement("option");
       o.value = o.textContent = m; sel.appendChild(o);
@@ -358,8 +394,8 @@
       const evv = num(p.ev);
       tdEV.innerHTML = isFinite(evv) ? `<b class="${evv>=0?'ok':'bad'}">${(100*evv).toFixed(2)}%</b>` : "—";
 
-      const stake = stakeKelly(p);
-      const tdStake = cellRight( isFinite(stake) ? "$"+fmtMoney(stake) : "—" );
+      const stakeAmt = stakeKellyAmount(p);
+      const tdStake = cellRight( isFinite(stakeAmt) ? "$"+fmtMoney(stakeAmt) : "—" );
 
       const tdRes = document.createElement("td");
       const sel = document.createElement("select");
@@ -405,9 +441,9 @@
       [tdFecha,tdLiga,tdHome,tdAway,tdMkt,tdLbl,tdProb,tdOdd,tdOR,tdEV,tdStake,tdRes,tdPL,tdAcc].forEach(td=>tr.appendChild(td));
       body.appendChild(tr);
 
-      // contabilidad (solo picks con resultado asignado)
+      // contabilidad (solo picks con resultado asignado Ganó/Perdió)
       const hasResult = (p.result||"")==="Ganó" || (p.result||"")==="Perdió";
-      if(hasResult && isFinite(stake)) totalStaked += stake;
+      if(hasResult && isFinite(stakeAmt)) totalStaked += stakeAmt;
       if((p.result||"")==="Ganó"){ won++; if(isFinite(pl)) totalPL+=pl; }
       else if((p.result||"")==="Push"){ push++; }
       else if((p.result||"")==="Perdió"){ lost++; if(isFinite(pl)) totalPL+=pl; }
@@ -430,7 +466,6 @@
   function cellRight(txt){ const td = document.createElement("td"); td.className = "right"; td.textContent = txt; return td; }
 
   function indexInGlobal(p){
-    // Identificador: timestamp+market+label (suficiente para uso local)
     const key = (p.timestamp||"") + "||" + (p.market||"") + "||" + (p.label||"");
     return picks.findIndex(z => ((z.timestamp||"")+"||"+(z.market||"")+"||"+(z.label||"")) === key);
   }
