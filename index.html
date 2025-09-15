@@ -76,6 +76,7 @@
     content: " ≥60%"; margin-left:6px; font-weight:600; font-size:11px;
     color:var(--accent2); padding:2px 6px; border-radius:999px; border:1px solid #2a5747; background:rgba(121,226,166,.10);
   }
+  .tag{display:inline-block; margin-left:6px; font-size:10px; padding:2px 6px; border-radius:999px; border:1px solid var(--border); color:var(--muted)}
 </style>
 </head>
 <body>
@@ -133,7 +134,7 @@
         <div>
           <label for="bankroll">Bankroll</label>
           <input type="number" id="bankroll" step="1" value="1000" />
-          <div class="hint tiny">Para sugerir staking con Kelly 1/4.</div>
+          <div class="hint tiny">Para sugerir staking con Kelly 1/4 (min 1% y máx 3% cuando EV&gt;0).</div>
         </div>
         <div>
           <label for="maxGoals">Máx. goles sumados (Poisson)</label>
@@ -231,7 +232,9 @@
         <tbody id="evTable"></tbody>
       </table>
       <div class="hint tiny" style="margin-top:6px">
-        EV = p·odd − 1. Kelly fraccional 1/4 = max(0, ((p·odd − 1)/(odd − 1)) / 4). Overround = Σ(1/odd) − 1.
+        EV = p·odd − 1. Kelly fraccional 1/4 = max(0, ((p·odd − 1)/(odd − 1)) / 4).
+        <b>Límites de stake cuando EV&gt;0:</b> mínimo 1% y máximo 3% del bankroll.
+        Overround = Σ(1/odd) − 1.
       </div>
     </section>
   </div>
@@ -241,6 +244,8 @@
   "use strict";
 
   const OVERROUND_THRESHOLDS = { warn: 0.03, bad: 0.06 };
+  const STAKE_MIN = 0.01; // 1%
+  const STAKE_MAX = 0.03; // 3%
 
   let DATA = [];
   let CURRENT = { league:null, home:null, away:null, lambdas:null, probs:null, samples:{nH:0,nA:0} };
@@ -314,6 +319,19 @@
   function coefVariacion(lambdaH, lambdaA){
     const lambdaTot = Math.max(lambdaH + lambdaA, 1e-9);
     return 1 / Math.sqrt(lambdaTot);
+  }
+
+  // === NUEVO: stake sugerido con límites 1%–3% del bankroll (solo si EV>0) ===
+  function stakeSuggestedFrac(p, odd, evv){
+    if(!isFinite(evv) || evv<=0 || !isFinite(p) || !isFinite(odd) || odd<=1) return 0;
+    const base = kellyQuarter(p, odd);
+    return Math.min(STAKE_MAX, Math.max(STAKE_MIN, base));
+  }
+  function stakeTag(base, bounded){
+    if(bounded===0) return "";
+    if(base>bounded && Math.abs(bounded-STAKE_MAX)<1e-12) return '<span class="tag" title="Tope 3%">cap 3%</span>';
+    if(base<bounded && Math.abs(bounded-STAKE_MIN)<1e-12) return '<span class="tag" title="Mínimo 1%">min 1%</span>';
+    return "";
   }
 
   function normalize(obj){
@@ -573,10 +591,15 @@
     tdEV.innerHTML = isFinite(evv) ? `<b class="${evv>=0?'success':'danger'}">${(100*evv).toFixed(2)}%</b>` : "—";
     tr.appendChild(tdEV);
 
-    const kq = kellyQuarter(p, odd);
-    const stake = isFinite(kq) ? bankroll * kq : 0;
+    const baseKQ = kellyQuarter(p, odd);
+    const boundedFrac = stakeSuggestedFrac(p, odd, evv);
+    const stakeAmt = isFinite(boundedFrac) ? bankroll * boundedFrac : 0;
     const tdK = document.createElement("td"); tdK.className="right";
-    tdK.innerHTML = isFinite(kq) ? `${(100*kq).toFixed(2)}% · $${fmtMoney(stake)}` : "—";
+    if(isFinite(evv) && evv>0 && odd>1){
+      tdK.innerHTML = `${(100*boundedFrac).toFixed(2)}% · $${fmtMoney(stakeAmt)} ${stakeTag(baseKQ, boundedFrac)}`;
+    } else {
+      tdK.textContent = "—";
+    }
     tr.appendChild(tdK);
 
     const tdBtn = document.createElement("td");
@@ -598,7 +621,7 @@
         alert("⚠️ No cumple la muestra (H/A debe ser 10/10).");
         return;
       }
-      savePick({
+      const pick = {
         league: CURRENT.league,
         home: CURRENT.home,
         away: CURRENT.away,
@@ -611,10 +634,14 @@
         odd,
         overround,
         ev: evv,
-        kelly_frac: kq,
+        kelly_frac: baseKQ,                 // compatibilidad con historial.html
         bankroll: bankroll,
+        // Nuevos (no rompen historial si no los usas):
+        stake_suggested_frac: boundedFrac,  // fracción tras límites 1%–3%
+        stake_suggested_abs: stakeAmt,      // monto sugerido
         timestamp: new Date().toISOString()
-      });
+      };
+      savePick(pick);
     };
     tdBtn.appendChild(btn);
     tr.appendChild(tdBtn);
