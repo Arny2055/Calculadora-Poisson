@@ -134,7 +134,7 @@
         <div>
           <label for="bankroll">Bankroll</label>
           <input type="number" id="bankroll" step="1" value="1000" />
-          <div class="hint tiny">Para sugerir staking con Kelly 1/4 (min 1% y máx 3% cuando EV&gt;0).</div>
+          <div class="hint tiny">Staking con Kelly 1/4 (mín 1% y máx 3% cuando EV&gt;0).</div>
         </div>
         <div>
           <label for="maxGoals">Máx. goles sumados (Poisson)</label>
@@ -176,7 +176,7 @@
       </div>
       <div class="flex" style="margin-top:10px">
         <button class="btn primary cta pulse" id="btnOdds" aria-label="Calcular EV y Kelly">Calcular EV / Kelly</button>
-        <span class="hint">Selecciona liga y equipos (sección 2) para que Poisson se calcule en automático.</span>
+        <span class="hint">Ahora el cálculo es <b>automático</b> cuando escribes cuotas o cambias bankroll/OU. El botón es opcional.</span>
       </div>
 
       <div class="sep"></div>
@@ -321,7 +321,7 @@
     return 1 / Math.sqrt(lambdaTot);
   }
 
-  // === NUEVO: stake sugerido con límites 1%–3% del bankroll (solo si EV>0) ===
+  // === Stake sugerido con límites 1%–3% del bankroll (solo si EV>0) ===
   function stakeSuggestedFrac(p, odd, evv){
     if(!isFinite(evv) || evv<=0 || !isFinite(p) || !isFinite(odd) || odd<=1) return 0;
     const base = kellyQuarter(p, odd);
@@ -386,7 +386,7 @@
 
     status.innerHTML = `<span class="success">OK:</span> ${DATA.length} partidos cargados · ${leagues.length} ligas.`;
 
-    // Autoselección inteligente + cálculo Poisson
+    // Autoselección + cálculo Poisson
     if(leagues.length===1){
       $("#selLeague").value = leagues[0];
       CURRENT.league = leagues[0];
@@ -398,11 +398,11 @@
         $("#selAway").value = teams[1];
         CURRENT.home = teams[0];
         CURRENT.away = teams[1];
-        autoCalcPoisson();
+        autoCalcPoisson(true); // también refresca EV si hay cuotas
       }
     }
 
-    // limpiar tabla EV cuando se cargan nuevos datos
+    // limpiar tabla EV al cargar nuevos datos
     $("#evTable").innerHTML = "";
   }
 
@@ -506,7 +506,7 @@
     return {cls:"badge accept", label:"Aceptable"};
   }
 
-  // === Helpers para marcar ≥60% de forma segura (sin duplicados) ===
+  // === Helpers para marcar ≥60% sin duplicados ===
   function setProbWithFlag(id, p){
     const el = document.getElementById(id);
     if(!el) return;
@@ -537,10 +537,11 @@
     setText("nHA", `${samples.nH}/${samples.nA}`);
   }
 
+  // === Cálculo EV/Kelly (idempotente y sin alertas) ===
   function calcOdds(){
-    if(!CURRENT.probs){ alert("Primero selecciona liga y equipos para calcular Poisson."); return; }
+    if(!CURRENT.probs){ return; } // no molestes mientras el usuario escribe
     const bk = Number($("#bankroll").value);
-    if(!isFinite(bk) || bk < 0){ alert("Bankroll inválido."); return; }
+    if(!isFinite(bk) || bk < 0){ return; }
     const line = Number($("#ouLine").value || 2.5);
 
     const odds = {
@@ -634,11 +635,10 @@
         odd,
         overround,
         ev: evv,
-        kelly_frac: baseKQ,                 // compatibilidad con historial.html
+        kelly_frac: baseKQ,
         bankroll: bankroll,
-        // Nuevos (no rompen historial si no los usas):
-        stake_suggested_frac: boundedFrac,  // fracción tras límites 1%–3%
-        stake_suggested_abs: stakeAmt,      // monto sugerido
+        stake_suggested_frac: boundedFrac,
+        stake_suggested_abs: stakeAmt,
         timestamp: new Date().toISOString()
       };
       savePick(pick);
@@ -681,19 +681,29 @@
       $("#selAway").value = teams[1];
       CURRENT.home = teams[0];
       CURRENT.away = teams[1];
-      autoCalcPoisson();
+      autoCalcPoisson(true);
     }
     $("#evTable").innerHTML = "";
   });
 
-  $("#selHome").addEventListener("change", (e)=>{ CURRENT.home = e.target.value || null; autoCalcPoisson(); $("#evTable").innerHTML = ""; });
-  $("#selAway").addEventListener("change", (e)=>{ CURRENT.away = e.target.value || null; autoCalcPoisson(); $("#evTable").innerHTML = ""; });
+  $("#selHome").addEventListener("change", (e)=>{ CURRENT.home = e.target.value || null; autoCalcPoisson(true); $("#evTable").innerHTML = ""; });
+  $("#selAway").addEventListener("change", (e)=>{ CURRENT.away = e.target.value || null; autoCalcPoisson(true); $("#evTable").innerHTML = ""; });
 
-  // Recalcular automáticamente al mover OU o Máx. goles
-  $("#ouLine").addEventListener("input", ()=>{ autoCalcPoisson(); $("#evTable").innerHTML = ""; });
-  $("#maxGoals").addEventListener("input", ()=>{ autoCalcPoisson(); $("#evTable").innerHTML = ""; });
+  // Recalcular Poisson al mover OU o Máx. goles y refrescar EV si ya hay cuotas
+  $("#ouLine").addEventListener("input", ()=>{ autoCalcPoisson(true); });
+  $("#maxGoals").addEventListener("input", ()=>{ autoCalcPoisson(true); });
 
-  function autoCalcPoisson(){
+  // === Auto-cálculo EV/Kelly: al escribir cuotas o cambiar bankroll ===
+  const autoFields = ["#oddOver","#oddUnder","#oddBTTSY","#oddBTTSN","#bankroll"];
+  for(const sel of autoFields){
+    const el = $(sel);
+    ["input","change"].forEach(evt => el.addEventListener(evt, ()=> calcOdds()));
+  }
+
+  // Botón opcional (por si el usuario lo prefiere)
+  document.getElementById("btnOdds").addEventListener("click", calcOdds);
+
+  function autoCalcPoisson(alsoRefreshEV=false){
     const league = $("#selLeague").value;
     const home = $("#selHome").value;
     const away = $("#selAway").value;
@@ -705,9 +715,8 @@
     CURRENT.lambdas = {lamH, lamA};
     CURRENT.probs = probs;
     renderModel();
+    if(alsoRefreshEV) calcOdds(); // si hay cuotas, refresca la tabla automáticamente
   }
-
-  document.getElementById("btnOdds").addEventListener("click", calcOdds);
 
 })();
 </script>
