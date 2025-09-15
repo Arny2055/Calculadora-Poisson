@@ -54,6 +54,7 @@
   .right{text-align:right}
   .flex{display:flex; gap:10px; align-items:center; flex-wrap:wrap}
   .topbar{display:flex; align-items:center; gap:12px; justify-content:space-between}
+  .links{display:flex; gap:8px; flex-wrap:wrap}
   .sep{height:1px; background:var(--border); margin:12px 0}
   .hint{font-size:12px; color:var(--muted)}
   .success{color:var(--accent2)}
@@ -70,8 +71,6 @@
     input,select,textarea{padding:8px 10px; font-size:14px}
   }
   .card table{display:block; overflow-x:auto; -webkit-overflow-scrolling:touch}
-
-  /* Marca visual ≥60% */
   #modelBox b[data-flag="1"]::after{
     content: " ≥60%"; margin-left:6px; font-weight:600; font-size:11px;
     color:var(--accent2); padding:2px 6px; border-radius:999px; border:1px solid #2a5747; background:rgba(121,226,166,.10);
@@ -84,7 +83,11 @@
     <div class="wrap">
       <div class="topbar">
         <h1>Poisson • OU + BTTS + 1X2 — EV, Overround y Kelly 1/4 (con historial)</h1>
-        <a href="historial.html" class="btn" aria-label="Abrir historial">Abrir historial</a>
+        <div class="links">
+          <a href="historial.html" class="btn" aria-label="Abrir historial general">Abrir historial</a>
+          <!-- NUEVO: botón para historial prepartido -->
+          <a href="historialpre.html" class="btn" aria-label="Abrir historial prepartido">Abrir historial prepartido</a>
+        </div>
       </div>
     </div>
   </header>
@@ -228,7 +231,7 @@
             <th class="right">Overround</th>
             <th class="right">EV</th>
             <th class="right">Stake Kelly 1/4</th>
-            <th></th>
+            <th class="right">Acción</th>
           </tr>
         </thead>
         <tbody id="evTable"></tbody>
@@ -323,7 +326,6 @@
     return 1 / Math.sqrt(lambdaTot);
   }
 
-  // Stake sugerido con límites 1%–3% del bankroll (solo si EV>0)
   function stakeSuggestedFrac(p, odd, evv){
     if(!isFinite(evv) || evv<=0 || !isFinite(p) || !isFinite(odd) || odd<=1) return 0;
     const base = kellyQuarter(p, odd);
@@ -388,7 +390,6 @@
 
     status.innerHTML = `<span class="success">OK:</span> ${DATA.length} partidos cargados · ${leagues.length} ligas.`;
 
-    // Autoselección + cálculo Poisson
     if(leagues.length===1){
       $("#selLeague").value = leagues[0];
       CURRENT.league = leagues[0];
@@ -403,8 +404,6 @@
         autoCalcPoisson(true);
       }
     }
-
-    // limpiar tabla EV al cargar nuevos datos
     $("#evTable").innerHTML = "";
   }
 
@@ -508,7 +507,6 @@
     return {cls:"badge accept", label:"Aceptable"};
   }
 
-  // Marca ≥60% sin duplicados
   function setProbWithFlag(id, p){
     const el = document.getElementById(id);
     if(!el) return;
@@ -538,7 +536,6 @@
     setText("nHA", `${samples.nH}/${samples.nA}`);
   }
 
-  // Cálculo EV/Kelly idempotente
   function calcOdds(){
     if(!CURRENT.probs){ return; }
     const bk = Number($("#bankroll").value);
@@ -569,6 +566,7 @@
     for(const tr of rows) tbody.appendChild(tr);
   }
 
+  // Construye una fila con dos botones: Guardar Pick normal y Guardar Pre
   function buildRow(grupo, label, p, odd, overround, bankroll, meta){
     const tr = document.createElement("tr");
 
@@ -604,79 +602,92 @@
     }
     tr.appendChild(tdK);
 
-    // ===== Reglas para habilitar Guardar Pick =====
     const samples = CURRENT.samples || {nH:0, nA:0};
     const meetsSample   = (samples.nH === 10 && samples.nA === 10);
     const meetsEV       = (isFinite(evv) && evv > 0);
     const meetsOdd      = (isFinite(odd) && odd > 1);
-    const meetsOver     = (isFinite(overround) && overround < 0.06); // < 6%
-    const meetsProb60   = (isFinite(p) && p >= 0.60);                // ≥ 60%
-
+    const meetsOver     = (isFinite(overround) && overround < 0.06);
+    const meetsProb60   = (isFinite(p) && p >= 0.60);
     const canSave = (meetsSample && meetsEV && meetsOdd && meetsOver && meetsProb60);
 
-    const tdBtn = document.createElement("td");
-    const btn = document.createElement("button");
-    btn.className = "btn " + (canSave ? "primary" : "ghost");
-    btn.textContent = "Guardar Pick";
-    btn.disabled = !canSave;
+    const tdBtn = document.createElement("td"); tdBtn.className="right";
 
-    // Tooltip con la primera razón que impide guardar
-    let reason = "";
-    if(!meetsSample) reason = "Requisito de muestra: H/A debe ser 10/10";
-    else if(!meetsOdd) reason = "Cuota inválida (>1 requerida)";
-    else if(!meetsEV) reason = "EV debe ser > 0";
-    else if(!meetsOver) reason = "Overround debe ser < 6%";
-    else if(!meetsProb60) reason = "Probabilidad del modelo debe ser ≥ 60%";
-    btn.title = reason;
+    // Botón Guardar (historial general)
+    const btnSave = document.createElement("button");
+    btnSave.className = "btn " + (canSave ? "primary" : "ghost");
+    btnSave.textContent = "Guardar Pick";
+    btnSave.disabled = !canSave;
+    btnSave.title = canSave ? "Guardar en historial" : reasonForDisabled();
+    btnSave.onclick = () => trySave(canSave, buildPickPayload(p, odd, overround, evv, baseKQ, boundedFrac, stakeAmt, meta), false);
 
-    btn.onclick = () => {
-      // Rechequeo por seguridad
-      if(!canSave){
-        alert("⚠️ No se puede guardar.\n" + reason);
-        return;
-      }
-      const pick = {
-        league: CURRENT.league,
-        home: CURRENT.home,
-        away: CURRENT.away,
-        lambdaH: CURRENT.lambdas.lamH,
-        lambdaA: CURRENT.lambdas.lamA,
-        line: (meta.meta && meta.meta.line) ? meta.meta.line : null,
-        market: meta.market,
-        label,
-        prob: p,
-        odd,
-        overround,
-        ev: evv,
-        kelly_frac: baseKQ,
-        bankroll: bankroll,
-        stake_suggested_frac: boundedFrac,
-        stake_suggested_abs: stakeAmt,
-        timestamp: new Date().toISOString()
-      };
-      savePick(pick);
-    };
-    tdBtn.appendChild(btn);
+    // NUEVO: Botón Guardar Pre (historial prepartido)
+    const btnSavePre = document.createElement("button");
+    btnSavePre.className = "btn " + (canSave ? "primary" : "ghost");
+    btnSavePre.style.marginLeft = "6px";
+    btnSavePre.textContent = "Guardar Pre";
+    btnSavePre.disabled = !canSave;
+    btnSavePre.title = canSave ? "Guardar en historial prepartido" : reasonForDisabled();
+    btnSavePre.onclick = () => trySave(canSave, buildPickPayload(p, odd, overround, evv, baseKQ, boundedFrac, stakeAmt, meta), true);
+
+    tdBtn.appendChild(btnSave);
+    tdBtn.appendChild(btnSavePre);
     tr.appendChild(tdBtn);
+
+    function reasonForDisabled(){
+      if(!meetsSample) return "Requisito de muestra: H/A debe ser 10/10";
+      if(!meetsOdd) return "Cuota inválida (>1 requerida)";
+      if(!meetsEV) return "EV debe ser > 0";
+      if(!meetsOver) return "Overround debe ser < 6%";
+      if(!meetsProb60) return "Probabilidad del modelo debe ser ≥ 60%";
+      return "No disponible";
+    }
 
     return tr;
   }
 
-  function savePick(pick){
+  function buildPickPayload(p, odd, overround, evv, baseKQ, boundedFrac, stakeAmt, meta){
+    return {
+      league: CURRENT.league,
+      home: CURRENT.home,
+      away: CURRENT.away,
+      lambdaH: CURRENT.lambdas?.lamH ?? null,
+      lambdaA: CURRENT.lambdas?.lamA ?? null,
+      line: (meta.meta && meta.meta.line) ? meta.meta.line : null,
+      market: meta.market,
+      prob: p,
+      odd,
+      overround,
+      ev: evv,
+      kelly_frac: baseKQ,
+      bankroll: Number($("#bankroll").value || 0),
+      stake_suggested_frac: boundedFrac,
+      stake_suggested_abs: stakeAmt,
+      timestamp: new Date().toISOString()
+    };
+  }
+
+  function trySave(canSave, payload, isPre){
+    if(!canSave){
+      alert("⚠️ No se puede guardar con las reglas actuales.");
+      return;
+    }
+    savePick(payload, isPre);
+  }
+
+  function savePick(pick, isPre=false){
     try{
-      const key = "picks";
+      const key = isPre ? "picks_pre" : "picks";
       const arr = JSON.parse(localStorage.getItem(key)||"[]");
       arr.push(pick);
       localStorage.setItem(key, JSON.stringify(arr));
-      alert("✅ Pick guardado en historial (localStorage).");
+      alert(isPre ? "✅ Pick guardado en historial PREPARTIDO." : "✅ Pick guardado en historial.");
     }catch(e){
       alert("No se pudo guardar el pick: " + e.message);
     }
   }
 
   // ====== Eventos UI ======
-  $("#file").addEventListener("change", () => { parseInput(); });
-
+  $("#file").addEventListener("change", parseInput);
   $("#selLeague").addEventListener("change", (e)=>{
     const lg = e.target.value;
     CURRENT.league = lg || null;
@@ -702,18 +713,15 @@
   $("#selHome").addEventListener("change", (e)=>{ CURRENT.home = e.target.value || null; autoCalcPoisson(true); $("#evTable").innerHTML = ""; });
   $("#selAway").addEventListener("change", (e)=>{ CURRENT.away = e.target.value || null; autoCalcPoisson(true); $("#evTable").innerHTML = ""; });
 
-  // Recalcular Poisson al mover OU o Máx. goles y refrescar EV si ya hay cuotas
   $("#ouLine").addEventListener("input", ()=>{ autoCalcPoisson(true); });
   $("#maxGoals").addEventListener("input", ()=>{ autoCalcPoisson(true); });
 
-  // Auto-cálculo EV/Kelly: al escribir cuotas o cambiar bankroll
   const autoFields = ["#oddOver","#oddUnder","#oddBTTSY","#oddBTTSN","#bankroll"];
   for(const sel of autoFields){
     const el = $(sel);
-    ["input","change"].forEach(evt => el.addEventListener(evt, ()=> calcOdds()));
+    ["input","change"].forEach(evt => el.addEventListener(evt, calcOdds));
   }
 
-  // Botón opcional
   document.getElementById("btnOdds").addEventListener("click", calcOdds);
 
   function autoCalcPoisson(alsoRefreshEV=false){
