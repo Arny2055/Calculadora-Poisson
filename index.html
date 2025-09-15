@@ -71,7 +71,7 @@
   }
   .card table{display:block; overflow-x:auto; -webkit-overflow-scrolling:touch}
 
-  /* === Marca visual ≥60% en "Resultados del modelo" sin romper estructura === */
+  /* Marca visual ≥60% */
   #modelBox b[data-flag="1"]::after{
     content: " ≥60%"; margin-left:6px; font-weight:600; font-size:11px;
     color:var(--accent2); padding:2px 6px; border-radius:999px; border:1px solid #2a5747; background:rgba(121,226,166,.10);
@@ -134,7 +134,7 @@
         <div>
           <label for="bankroll">Bankroll</label>
           <input type="number" id="bankroll" step="1" value="1000" />
-          <div class="hint tiny">Staking con Kelly 1/4 (mín 1% y máx 3% cuando EV&gt;0).</div>
+          <div class="hint tiny">Kelly 1/4 (mín 1% y máx 3% cuando EV&gt;0).</div>
         </div>
         <div>
           <label for="maxGoals">Máx. goles sumados (Poisson)</label>
@@ -176,7 +176,7 @@
       </div>
       <div class="flex" style="margin-top:10px">
         <button class="btn primary cta pulse" id="btnOdds" aria-label="Calcular EV y Kelly">Calcular EV / Kelly</button>
-        <span class="hint">Ahora el cálculo es <b>automático</b> cuando escribes cuotas o cambias bankroll/OU. El botón es opcional.</span>
+        <span class="hint">El cálculo es <b>automático</b> al escribir cuotas o cambiar bankroll/OU. El botón es opcional.</span>
       </div>
 
       <div class="sep"></div>
@@ -185,6 +185,8 @@
         <span class="badge accept">Aceptable ≤ 3%</span>
         <span class="badge medium">Medio 3%–6%</span>
         <span class="badge bad">No aceptable &gt; 6%</span>
+        <br>
+        <b>Reglas para guardar:</b> Muestras H/A = 10/10 · EV&gt;0 · Cuota&gt;1 · Overround&lt;6% · Prob modelo ≥60%.
       </div>
     </section>
 
@@ -321,7 +323,7 @@
     return 1 / Math.sqrt(lambdaTot);
   }
 
-  // === Stake sugerido con límites 1%–3% del bankroll (solo si EV>0) ===
+  // Stake sugerido con límites 1%–3% del bankroll (solo si EV>0)
   function stakeSuggestedFrac(p, odd, evv){
     if(!isFinite(evv) || evv<=0 || !isFinite(p) || !isFinite(odd) || odd<=1) return 0;
     const base = kellyQuarter(p, odd);
@@ -398,7 +400,7 @@
         $("#selAway").value = teams[1];
         CURRENT.home = teams[0];
         CURRENT.away = teams[1];
-        autoCalcPoisson(true); // también refresca EV si hay cuotas
+        autoCalcPoisson(true);
       }
     }
 
@@ -506,7 +508,7 @@
     return {cls:"badge accept", label:"Aceptable"};
   }
 
-  // === Helpers para marcar ≥60% sin duplicados ===
+  // Marca ≥60% sin duplicados
   function setProbWithFlag(id, p){
     const el = document.getElementById(id);
     if(!el) return;
@@ -523,7 +525,6 @@
     setText("ouLbl", line);
     setText("ouLbl2", line);
 
-    // Probabilidades con marca ≥60%
     setProbWithFlag('pOver',  probs.ou.over);
     setProbWithFlag('pUnder', probs.ou.under);
     setProbWithFlag('pBTTSY', probs.btts.yes);
@@ -537,9 +538,9 @@
     setText("nHA", `${samples.nH}/${samples.nA}`);
   }
 
-  // === Cálculo EV/Kelly (idempotente y sin alertas) ===
+  // Cálculo EV/Kelly idempotente
   function calcOdds(){
-    if(!CURRENT.probs){ return; } // no molestes mientras el usuario escribe
+    if(!CURRENT.probs){ return; }
     const bk = Number($("#bankroll").value);
     if(!isFinite(bk) || bk < 0){ return; }
     const line = Number($("#ouLine").value || 2.5);
@@ -603,23 +604,35 @@
     }
     tr.appendChild(tdK);
 
+    // ===== Reglas para habilitar Guardar Pick =====
+    const samples = CURRENT.samples || {nH:0, nA:0};
+    const meetsSample   = (samples.nH === 10 && samples.nA === 10);
+    const meetsEV       = (isFinite(evv) && evv > 0);
+    const meetsOdd      = (isFinite(odd) && odd > 1);
+    const meetsOver     = (isFinite(overround) && overround < 0.06); // < 6%
+    const meetsProb60   = (isFinite(p) && p >= 0.60);                // ≥ 60%
+
+    const canSave = (meetsSample && meetsEV && meetsOdd && meetsOver && meetsProb60);
+
     const tdBtn = document.createElement("td");
     const btn = document.createElement("button");
-
-    // Requisito de muestra exacta 10/10 + EV>0 + cuota válida
-    const samples = CURRENT.samples || {nH:0, nA:0};
-    const meetsSample = (samples.nH === 10 && samples.nA === 10);
-    const canSave = (evv > 0 && odd > 1 && meetsSample);
-
     btn.className = "btn " + (canSave ? "primary" : "ghost");
     btn.textContent = "Guardar Pick";
     btn.disabled = !canSave;
-    btn.title = meetsSample ? "" : "Requisito de muestra: H/A debe ser 10/10";
+
+    // Tooltip con la primera razón que impide guardar
+    let reason = "";
+    if(!meetsSample) reason = "Requisito de muestra: H/A debe ser 10/10";
+    else if(!meetsOdd) reason = "Cuota inválida (>1 requerida)";
+    else if(!meetsEV) reason = "EV debe ser > 0";
+    else if(!meetsOver) reason = "Overround debe ser < 6%";
+    else if(!meetsProb60) reason = "Probabilidad del modelo debe ser ≥ 60%";
+    btn.title = reason;
 
     btn.onclick = () => {
-      const s = CURRENT.samples || {nH:0, nA:0};
-      if(s.nH !== 10 || s.nA !== 10){
-        alert("⚠️ No cumple la muestra (H/A debe ser 10/10).");
+      // Rechequeo por seguridad
+      if(!canSave){
+        alert("⚠️ No se puede guardar.\n" + reason);
         return;
       }
       const pick = {
@@ -693,14 +706,14 @@
   $("#ouLine").addEventListener("input", ()=>{ autoCalcPoisson(true); });
   $("#maxGoals").addEventListener("input", ()=>{ autoCalcPoisson(true); });
 
-  // === Auto-cálculo EV/Kelly: al escribir cuotas o cambiar bankroll ===
+  // Auto-cálculo EV/Kelly: al escribir cuotas o cambiar bankroll
   const autoFields = ["#oddOver","#oddUnder","#oddBTTSY","#oddBTTSN","#bankroll"];
   for(const sel of autoFields){
     const el = $(sel);
     ["input","change"].forEach(evt => el.addEventListener(evt, ()=> calcOdds()));
   }
 
-  // Botón opcional (por si el usuario lo prefiere)
+  // Botón opcional
   document.getElementById("btnOdds").addEventListener("click", calcOdds);
 
   function autoCalcPoisson(alsoRefreshEV=false){
@@ -715,7 +728,7 @@
     CURRENT.lambdas = {lamH, lamA};
     CURRENT.probs = probs;
     renderModel();
-    if(alsoRefreshEV) calcOdds(); // si hay cuotas, refresca la tabla automáticamente
+    if(alsoRefreshEV) calcOdds();
   }
 
 })();
