@@ -216,6 +216,22 @@
         λH = 0.6·(promedio GF del local en casa) + 0.4·(promedio GC del visitante fuera) ··
         λA = 0.6·(promedio GF del visitante fuera) + 0.4·(promedio GC del local en casa).
       </div>
+
+      <!-- NUEVO: Rachas -->
+      <div class="sep"></div>
+      <h3 class="tiny" style="margin:6px 0 4px">Rachas (últimos 10 por lado)</h3>
+      <div class="grid grid-cols-2" id="streaksBox">
+        <div>
+          <span class="pill">Local — BTTS: <b id="stHBTTS">—</b></span>
+          <span class="pill">Local — Over <b id="stHOULbl">2.5</b>: <b id="stHOU">—</b></span>
+          <div class="hint tiny" id="seqH">—</div>
+        </div>
+        <div>
+          <span class="pill">Visitante — BTTS: <b id="stABTTS">—</b></span>
+          <span class="pill">Visitante — Over <b id="stAOULbl">2.5</b>: <b id="stAOU">—</b></span>
+          <div class="hint tiny" id="seqA">—</div>
+        </div>
+      </div>
     </section>
 
     <!-- EV / Kelly y Guardado -->
@@ -534,6 +550,9 @@
     const CV = coefVariacion(lambdas.lamH, lambdas.lamA);
     setText("cvTxt", `${CV.toFixed(2)} (${CV<0.5?'Bajo':(CV<=0.8?'Medio':'Alto')})`);
     setText("nHA", `${samples.nH}/${samples.nA}`);
+
+    // NUEVO: rachas
+    renderStreaks();
   }
 
   function calcOdds(){
@@ -686,6 +705,81 @@
     }
   }
 
+  // ====== NUEVO: Utilidades de rachas ======
+  function outcomesFromMatches(matches, ouLine){
+    // Devuelve arrays booleanos (en orden cronológico) para BTTS (true = Sí) y Over (true = Over)
+    const btts = [];
+    const ou = [];
+    for(const m of matches){
+      const h = m.FTHG ?? 0;
+      const a = m.FTAG ?? 0;
+      const total = (Number(h)||0) + (Number(a)||0);
+      btts.push((h>0) && (a>0));
+      // Mercado europeo (sin push) ya está contemplado: Over si total > línea; Under si total <= línea
+      ou.push(total > ouLine);
+    }
+    return { btts, ou };
+  }
+
+  function streakCount(arr, targetTrue){
+    // Cuenta consecutivos desde el final del array
+    let c = 0;
+    for(let i=arr.length-1; i>=0; i--){
+      if(Boolean(arr[i]) === Boolean(targetTrue)) c++; else break;
+    }
+    return c;
+  }
+
+  function seqString(arr, trueChar, falseChar){
+    // Muestra 10 símbolos, último a la derecha (más reciente)
+    if(!arr.length) return "—";
+    return arr.map(v => v ? trueChar : falseChar).join(" ");
+  }
+
+  function renderStreaks(){
+    const league = $("#selLeague").value;
+    const home = $("#selHome").value;
+    const away = $("#selAway").value;
+    const line = Number($("#ouLine").value || 2.5);
+
+    setText("stHOULbl", line);
+    setText("stAOULbl", line);
+
+    if(!league || !home || !away || home===away){
+      setText("stHBTTS","—"); setText("stHOU","—"); setText("seqH","—");
+      setText("stABTTS","—"); setText("stAOU","—"); setText("seqA","—");
+      return;
+    }
+
+    const lastH = lastMatchesTeam(league, home, "home", 10);   // local en casa
+    const lastA = lastMatchesTeam(league, away, "away", 10);   // visitante fuera
+
+    const H = outcomesFromMatches(lastH, line);
+    const A = outcomesFromMatches(lastA, line);
+
+    // Rachas: contamos Sí para BTTS y Over para OU
+    const hBTTSst = streakCount(H.btts, true);
+    const hOUst   = streakCount(H.ou, true);
+    const aBTTSst = streakCount(A.btts, true);
+    const aOUst   = streakCount(A.ou, true);
+
+    setText("stHBTTS", lastH.length ? `${hBTTSst} Sí` : "—");
+    setText("stHOU",   lastH.length ? `${hOUst} Over` : "—");
+    setText("stABTTS", lastA.length ? `${aBTTSst} Sí` : "—");
+    setText("stAOU",   lastA.length ? `${aOUst} Over` : "—");
+
+    // Secuencias (cronológico: izq = más antiguo, der = más reciente)
+    const seqHtxt = lastH.length
+      ? `BTTS: ${seqString(H.btts,'Y','N')} · Over ${line}: ${seqString(H.ou,'O','U')}`
+      : "—";
+    const seqAtxt = lastA.length
+      ? `BTTS: ${seqString(A.btts,'Y','N')} · Over ${line}: ${seqString(A.ou,'O','U')}`
+      : "—";
+
+    setText("seqH", seqHtxt);
+    setText("seqA", seqAtxt);
+  }
+
   // ====== Eventos UI ======
   $("#file").addEventListener("change", parseInput);
   $("#selLeague").addEventListener("change", (e)=>{
@@ -695,6 +789,7 @@
       fillSelect($("#selHome"), [], "— Local —");
       fillSelect($("#selAway"), [], "— Visitante —");
       $("#evTable").innerHTML = "";
+      renderStreaks();
       return;
     }
     const teams = getLeagueTeams(lg);
@@ -728,7 +823,7 @@
     const league = $("#selLeague").value;
     const home = $("#selHome").value;
     const away = $("#selAway").value;
-    if(!league || !home || !away || home===away) return;
+    if(!league || !home || !away || home===away) { renderStreaks(); return; }
     const { lamH, lamA } = computeLambdas(league, home, away);
     const line = Number($("#ouLine").value || 2.5);
     const kMax = Math.max(6, Number($("#maxGoals").value || 10));
