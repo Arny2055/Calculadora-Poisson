@@ -207,37 +207,6 @@
     <section class="card">
       <h2>Resultados</h2>
       <div class="content">
-
-        <!-- === Tarjeta de Línea de Gol Asiático (antes de OU) === -->
-        <div class="card" style="margin-bottom:12px">
-          <div class="content">
-            <div class="row" style="justify-content:space-between; align-items:flex-end">
-              <div style="flex:1; padding-right:14px">
-                <label>Línea de gol asiático (múltiplos de 0.25)
-                  <span class="badge">Λ = <span id="agLam">—</span></span>
-                </label>
-                <input id="agLine" type="text" inputmode="decimal" class="inp" placeholder="2.25" value="2.25">
-                <div class="help">Se ajusta al múltiplo de 0.25 más cercano al calcular.</div>
-              </div>
-              <div class="btns">
-                <button id="agCalcBtn" class="secondary" title="Recalcular AG">Actualizar AG</button>
-              </div>
-            </div>
-
-            <div style="margin-top:12px">
-              <table>
-                <thead><tr><th>Mercado AG</th><th>Prob. (ganar neto)</th><th>Cuota justa</th></tr></thead>
-                <tbody>
-                  <tr><td>Over <span id="agLineTxt1">2.25</span></td><td id="pAGOver">—</td><td id="oAGOver">—</td></tr>
-                  <tr><td>Under <span id="agLineTxt2">2.25</span></td><td id="pAGUnder">—</td><td id="oAGUnder">—</td></tr>
-                </tbody>
-              </table>
-              <div class="note" id="agBreak">—</div>
-            </div>
-          </div>
-        </div>
-        <!-- === Fin tarjeta AG === -->
-
         <div class="grid-1">
           <div>
             <table>
@@ -293,6 +262,7 @@
   function parseDec(str){
     if (typeof str !== 'string') return NaN;
     const cleaned = str.replace(/\s+/g,'').replace(',', '.').replace(/[^0-9.\-eE+]/g,'');
+    // evita múltiples puntos seguidos
     const parts = cleaned.split('.');
     const normalized = parts.length > 2 ? parts.slice(0,2).join('.') : cleaned;
     const n = Number(normalized);
@@ -307,14 +277,12 @@
   const fmtOdd = x => (isFinite(x) && x>0) ? x.toFixed(2) : '—';
   const clamp = (v,min,max)=> Math.max(min, Math.min(max, v));
   const inv = p => (p>0 && isFinite(p)) ? (1/p) : NaN;
-  const roundQuarter = x => Math.round(x*4)/4;
 
   const E = {
     gfH: $('#gfH'), xgH: $('#xgH'),
     gfA: $('#gfA'), xgA: $('#xgA'),
     alpha: $('#alpha'), alphaVal: $('#alphaVal'),
     lambdaTot: $('#lambdaTot'), lambdas: $('#lambdas'),
-    // OU/BTTS/Score
     pO25: $('#pO25'), oO25: $('#oO25'),
     pU25: $('#pU25'), oU25: $('#oU25'),
     pO35: $('#pO35'), oO35: $('#oO35'),
@@ -323,20 +291,12 @@
     pBNo: $('#pBNo'), oBNo: $('#oBNo'),
     pHomeScore: $('#pHomeScore'), oHomeScore: $('#oHomeScore'),
     pAwayScore: $('#pAwayScore'), oAwayScore: $('#oAwayScore'),
-    // AG
-    agLine: $('#agLine'), agCalcBtn: $('#agCalcBtn'),
-    agLineTxt1: $('#agLineTxt1'), agLineTxt2: $('#agLineTxt2'),
-    pAGOver: $('#pAGOver'), oAGOver: $('#oAGOver'),
-    pAGUnder: $('#pAGUnder'), oAGUnder: $('#oAGUnder'),
-    agBreak: $('#agBreak'), agLam: $('#agLam'),
-    // Buttons
     calcBtn: $('#calcBtn'), resetBtn: $('#resetBtn')
   };
 
   // ===== Poisson estable =====
   const factMemo = new Map([[0,0],[1,0]]);
   function logFactorial(n){
-    if (n<=1) return 0;
     if (factMemo.has(n)) return factMemo.get(n);
     let start = 2, acc = 0;
     for (let k=n-1; k>=2; k--){
@@ -346,13 +306,11 @@
     return acc;
   }
   function poissonPMF(k, lambda){
-    if (k<0) return 0;
     if (lambda <= 0) return (k===0)?1:0;
     const logPMF = -lambda + (k===0 ? 0 : k*Math.log(lambda) - logFactorial(k));
     return Math.exp(logPMF);
   }
   function poissonCDF(k, lambda){
-    if (k < 0) return 0;
     let s = 0;
     for (let i=0;i<=k;i++) s += poissonPMF(i, lambda);
     return s;
@@ -378,117 +336,6 @@
       E.pBYes,E.oBYes,E.pBNo,E.oBNo,E.pHomeScore,E.oHomeScore,E.pAwayScore,E.oAwayScore
     ].forEach(el=>{ el.textContent='—'; el.className=''; });
   }
-  function renderAGDashes(){
-    [E.pAGOver,E.oAGOver,E.pAGUnder,E.oAGUnder].forEach(el=>{ el.textContent='—'; el.className=''; });
-    E.agBreak.textContent = '—';
-    E.agLam.textContent = '—';
-  }
-
-  // ===== Asian Goal Line math =====
-  function agOutcomes(L, Lam, side){
-    // side: 'over' | 'under'
-    const n = Math.floor(L + 1e-9);
-    const frac = Math.round((L - n)*4)/4; // 0, .25, .5, .75
-    let p_fw=0, p_hw=0, p_push=0, p_hl=0, p_l=0;
-
-    if (frac === 0){ // entero
-      const pEq = poissonPMF(n, Lam);
-      const pLEn1 = poissonCDF(n-1, Lam);
-      const pGEp1 = 1 - poissonCDF(n, Lam);
-      if (side==='over'){
-        p_fw = pGEp1;
-        p_push = pEq;
-        p_l = pLEn1;
-      }else{
-        p_fw = pLEn1;
-        p_push = pEq;
-        p_l = pGEp1;
-      }
-    }else if (frac === 0.5){ // media
-      const pGE = 1 - poissonCDF(n, Lam);
-      const pLE = poissonCDF(n, Lam);
-      if (side==='over'){
-        p_fw = pGE;
-        p_l = pLE;
-      }else{
-        p_fw = pLE;
-        p_l = pGE;
-      }
-    }else if (frac === 0.25){ // n + 0.25 => split n & n+0.5
-      const pEqN = poissonPMF(n, Lam);
-      const pLEn1 = poissonCDF(n-1, Lam);
-      const pGEp1 = 1 - poissonCDF(n, Lam);
-      if (side==='over'){
-        // Over n (push at n) & Over n+0.5
-        p_fw = pGEp1;      // G >= n+1 => ambas ganan
-        p_hl = pEqN;       // G = n => push + pérdida => media derrota
-        p_l  = pLEn1;      // G <= n-1 => ambas pierden
-      }else{
-        // Under n & Under n+0.5
-        p_fw = pLEn1;      // G <= n-1 => ambas ganan
-        p_hw = pEqN;       // G = n => push + victoria => media victoria
-        p_l  = 1 - poissonCDF(n, Lam); // G >= n+1 => ambas pierden
-      }
-    }else if (frac === 0.75){ // n + 0.75 => split n+0.5 & n+1.0
-      const pEqNp1 = poissonPMF(n+1, Lam);
-      const pLEn = poissonCDF(n, Lam);
-      const pGEp2 = 1 - poissonCDF(n+1, Lam);
-      if (side==='over'){
-        p_fw = pGEp2;      // G >= n+2 => ambas ganan
-        p_hw = pEqNp1;     // G = n+1 => win + push => media victoria
-        p_l  = pLEn;       // G <= n => ambas pierden
-      }else{
-        p_fw = pLEn;       // G <= n => ambas ganan
-        p_hl = pEqNp1;     // G = n+1 => push + pérdida => media derrota
-        p_l  = 1 - poissonCDF(n+1, Lam); // G >= n+2 => ambas pierden
-      }
-    }
-
-    const p_winNet = p_fw + p_hw; // ganar dinero (media o plena)
-    // Cuota justa asiática (EV=0 con stake 1)
-    // EV(o) = p_fw*(o-1) + p_hw*0.5*(o-1) - p_hl*0.5 - p_l
-    // => (o-1) = (0.5*p_hl + p_l)/(p_fw + 0.5*p_hw)
-    const denom = p_fw + 0.5*p_hw;
-    const num = 0.5*p_hl + p_l;
-    const fair = (denom>0) ? 1 + (num/denom) : NaN;
-
-    return {p_fw,p_hw,p_push,p_hl,p_l,p_winNet,fair};
-  }
-
-  function calcAG(Lam){
-    const raw = getNum('agLine');
-    if (!isFinite(Lam)){ renderAGDashes(); return; }
-    E.agLam.textContent = Lam.toFixed(3);
-
-    if (!isFinite(raw)){ // sin línea válida
-      renderAGDashes();
-      E.agLineTxt1.textContent = '—';
-      E.agLineTxt2.textContent = '—';
-      return;
-    }
-    const L = Math.max(0, roundQuarter(raw));
-    E.agLine.value = L.toFixed(2);
-    E.agLineTxt1.textContent = L.toFixed(2);
-    E.agLineTxt2.textContent = L.toFixed(2);
-
-    const over = agOutcomes(L, Lam, 'over');
-    const under = agOutcomes(L, Lam, 'under');
-
-    // Probabilidad de ganar neto (plena + media)
-    E.pAGOver.textContent = fmtPct(over.p_winNet);
-    E.pAGUnder.textContent = fmtPct(under.p_winNet);
-    E.pAGOver.className = colorClass(over.p_winNet);
-    E.pAGUnder.className = colorClass(under.p_winNet);
-
-    // Cuotas justas asiáticas
-    E.oAGOver.textContent = fmtOdd(over.fair);
-    E.oAGUnder.textContent = fmtOdd(under.fair);
-
-    // Desglose compacto
-    const lineTxt = L.toFixed(2);
-    const seg = (o)=>`W:${fmtPct(o.p_fw)} • ½W:${fmtPct(o.p_hw)} • Push:${fmtPct(o.p_push)} • ½L:${fmtPct(o.p_hl)} • L:${fmtPct(o.p_l)}`;
-    E.agBreak.textContent = `Over ${lineTxt} → ${seg(over)}  |  Under ${lineTxt} → ${seg(under)}`;
-  }
 
   function calc(){
     const gfH = getNum('gfH'), xgH = getNum('xgH');
@@ -502,11 +349,7 @@
     E.lambdas.textContent   = (isFinite(lamH)&&isFinite(lamA)) ? `${lamH.toFixed(3)} • ${lamA.toFixed(3)}` : '—';
     E.lambdaTot.textContent = isFinite(Lam) ? Lam.toFixed(3) : '—';
 
-    if (!isFinite(Lam) || Lam<0 || lamH<0 || lamA<0){
-      renderDashes();
-      renderAGDashes();
-      return;
-    }
+    if (!isFinite(Lam) || Lam<0 || lamH<0 || lamA<0){ renderDashes(); return; }
 
     // OU (suma Λ)
     const pUnder25 = poissonCDF(2, Lam), pOver25 = 1 - pUnder25;
@@ -527,47 +370,30 @@
     writeRow(E.pBNo,  E.oBNo,  pBTTSno);
     writeRow(E.pHomeScore, E.oHomeScore, pHomeSc);
     writeRow(E.pAwayScore, E.oAwayScore, pAwaySc);
-
-    // AG
-    calcAG(Lam);
   }
 
   // ===== UX: permitir teclear sin cortarte =====
-  ['gfH','xgH','gfA','xgA','agLine'].forEach(id=>{
+  // Normalizo en blur (no mientras tecleas) para que nunca te “corte”.
+  ['gfH','xgH','gfA','xgA'].forEach(id=>{
     const el = document.getElementById(id);
     el.addEventListener('blur', ()=> {
       const n = getNum(id);
-      if (isFinite(n)){
-        if (id==='agLine'){
-          el.value = (Math.max(0, roundQuarter(n))).toFixed(2);
-          E.agLineTxt1.textContent = el.value;
-          E.agLineTxt2.textContent = el.value;
-        }else{
-          el.value = String(n); // normaliza "1,60" -> "1.6"
-        }
-      }
+      if (isFinite(n)) el.value = String(n); // normaliza "1,60" -> "1.6"
     });
   });
 
   // Eventos
-  E.alpha.addEventListener('input', ()=>{ E.alphaVal.textContent = Number(E.alpha.value).toFixed(2); });
+  E.alpha.addEventListener('input', ()=>{ document.getElementById('alphaVal').textContent = Number(E.alpha.value).toFixed(2); });
   E.calcBtn.addEventListener('click', calc);
-  E.agCalcBtn.addEventListener('click', ()=>{
-    const lamTot = parseDec(E.lambdaTot.textContent);
-    if (isFinite(lamTot)) calcAG(lamTot);
-  });
   E.resetBtn.addEventListener('click', ()=>{
     ['gfH','xgH','gfA','xgA'].forEach(id=> document.getElementById(id).value = '');
-    E.agLine.value = '2.25';
-    E.agLineTxt1.textContent = '2.25';
-    E.agLineTxt2.textContent = '2.25';
-    E.alpha.value = 0.70; E.alphaVal.textContent = '0.70';
+    E.alpha.value = 0.70; document.getElementById('alphaVal').textContent = '0.70';
     E.lambdaTot.textContent = '—'; E.lambdas.textContent = '—';
-    renderDashes(); renderAGDashes();
+    renderDashes();
   });
 
   // Inicial
-  renderDashes(); renderAGDashes();
+  renderDashes();
 })();
 </script>
 </body>
