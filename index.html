@@ -46,12 +46,12 @@
 
   .aurora{position:fixed; inset:-20vmax; z-index:-3; filter:blur(42px) saturate(120%); opacity:.55;
     background:
-      radial-gradient(36vmax 30vmax at 12% 22%, #365cff88 0%, transparent 65%),
-      radial-gradient(42vmax 34vmax at 88% 24%, #00ffd688 0%, transparent 65%),
-      radial-gradient(46vmax 36vmax at 52% 78%, #b47bff66 0%, transparent 65%);
+      radial-gradient(36vmax 30vmax at 12% 22%, #365cff88 0, transparent 65%),
+      radial-gradient(42vmax 34vmax at 88% 24%, #00ffd688 0, transparent 65%),
+      radial-gradient(46vmax 36vmax at 52% 78%, #b47bff66 0, transparent 65%);
     animation:floaty 24s ease-in-out infinite alternate;
   }
-  @keyframes floaty{0%{transform:translate3d(-2%,-1%,0) scale(1)}100%{transform:translate3d(2%,1%,0) scale(1.06)}}
+  @keyframes floaty{0%{transform:translate3d(-2%,-1%,0)}100%{transform:translate3d(2%,1%,0)}}
   .stars{position:fixed; inset:0; z-index:-2; pointer-events:none; opacity:.6;
     background-image:
       radial-gradient(2px 2px at 20% 30%, #8fb4ff99 0, transparent 60%),
@@ -229,8 +229,7 @@
 
   /* Sticky bar (móvil) */
   .sticky-bar{
-    position:fixed; left:0; right:0; bottom:12px; display:none; z-index:20;
-    padding:0 12px;
+    position:fixed; left:0; right:0; bottom:12px; display:none; z-index:20; padding:0 12px;
   }
   .sticky-inner{
     display:flex; gap:10px; justify-content:space-between; align-items:center;
@@ -275,10 +274,10 @@
           <!-- Toggle Pro -->
           <div class="toggle" title="Activar funciones Pro">
             <span style="font-weight:700; letter-spacing:.2px">Pro</span>
-            <div class="switch" aria-label="Activar Pro">
+            <label class="switch" aria-label="Activar Pro">
               <input id="proToggle" type="checkbox" />
-              <div class="knob"></div>
-            </div>
+              <span class="knob"></span>
+            </label>
           </div>
         </div>
       </div>
@@ -339,8 +338,8 @@
                 <input id="alpha" type="range" min="0" max="1" step="0.01" value="0.70" class="slider" aria-label="Peso del xG">
               </div>
               <div class="btns">
-                <button id="calcBtn" title="Calcular" aria-label="Calcular">Calcular</button>
-                <button id="resetBtn" class="secondary" title="Limpiar todo" aria-label="Limpiar">Limpiar</button>
+                <button id="calcBtn" type="button" title="Calcular" aria-label="Calcular">Calcular</button>
+                <button id="resetBtn" type="button" class="secondary" title="Limpiar todo" aria-label="Limpiar">Limpiar</button>
               </div>
             </div>
           </div>
@@ -447,8 +446,8 @@
     <div class="sticky-inner">
       <div class="badge" style="font-weight:700">Acciones</div>
       <div class="buttons">
-        <button id="calcBtnSticky">Calcular</button>
-        <button id="resetBtnSticky" class="secondary">Limpiar</button>
+        <button id="calcBtnSticky" type="button">Calcular</button>
+        <button id="resetBtnSticky" type="button" class="secondary">Limpiar</button>
       </div>
     </div>
   </div>
@@ -467,7 +466,7 @@
     return isFinite(n) ? n : NaN;
   }
   function getNum(id){
-    const v = document.getElementById(id).value;
+    const v = document.getElementById(id)?.value ?? '';
     return parseDec(v);
   }
 
@@ -529,8 +528,10 @@
     alpha = clamp(alpha||0, 0, 1);
     return (1 - alpha)*gf + alpha*xg;
   }
+
   function colorClass(p){ return (p>=0.6)?'ok':(p>=0.4?'warn':'danger'); }
   function writeRow(cellP, cellO, p){
+    if (!cellP || !cellO) return;
     const odd = inv(p);
     cellP.textContent = fmtPct(p);
     cellO.textContent = fmtOdd(odd);
@@ -549,7 +550,7 @@
 
   // ===== Utilidades para 1X2 y Correct Score =====
   function autoKmax(lamH, lamA){
-    // malla razonable: media + ~6*sqrt(media total), acotada a 12 para rendimiento
+    // malla razonable: media + ~6*sqrt(media total), acotada para rendimiento
     const Lam = lamH + lamA;
     const approx = Math.ceil(Lam + 6*Math.sqrt(Lam||1));
     return Math.min(Math.max(8, approx), 12); // entre 8 y 12
@@ -557,7 +558,6 @@
 
   function oneXtwo(lamH, lamA){
     const K = autoKmax(lamH, lamA);
-    // precalcular pmf h y a
     const ph = Array.from({length:K+1}, (_,h)=>poissonPMF(h, lamH));
     const pa = Array.from({length:K+1}, (_,a)=>poissonPMF(a, lamA));
 
@@ -572,16 +572,13 @@
       }
     }
 
-    // Ajuste de cola: prob. fuera de la malla (muy pequeña). Aproximamos añadiendo restito proporcional.
-    const tailH = 1 - ph.reduce((s,x)=>s+x,0);
-    const tailA = 1 - pa.reduce((s,x)=>s+x,0);
-    const tail = Math.max(0, tailH + tailA - tailH*tailA); // unión aprox
-    const scale = 1 - tail;
-    if (scale > 0.999) return {pH, pD, pA};
-    // Normaliza a 1 (conservando proporciones)
+    // Ajuste de cola (pequeñísimo): normaliza por la masa incluida
+    const sumH = ph.reduce((s,x)=>s+x,0);
+    const sumA = pa.reduce((s,x)=>s+x,0);
+    const mass = sumH*sumA;
     const total = pH+pD+pA;
-    if (total > 0) {
-      const k = (1 - tail)/total;
+    if (mass>0 && total>0){
+      const k = 1/mass;
       pH *= k; pD *= k; pA *= k;
     }
     return {pH, pD, pA};
@@ -604,6 +601,7 @@
   }
 
   function fillCS(tableBody, items){
+    if (!tableBody) return;
     if (!items || !items.length){
       tableBody.innerHTML = '<tr><td colspan="3" style="text-align:center;color:#aab3c7">—</td></tr>';
       return;
@@ -623,7 +621,7 @@
   function calcBase(){
     const gfH = getNum('gfH'), xgH = getNum('xgH');
     const gfA = getNum('gfA'), xgA = getNum('xgA');
-    const alpha = Number(E.alpha.value);
+    const alpha = Number(E.alpha?.value ?? 0.7);
 
     const lamH = mixLambda(gfH, xgH, alpha);
     const lamA = mixLambda(gfA, xgA, alpha);
@@ -671,52 +669,59 @@
   }
 
   // ===== UX: normaliza al salir del input =====
-  ['gfH','xgH','gfA','xgA'].forEach(id=>{
+  ;['gfH','xgH','gfA','xgA'].forEach(id=>{
     const el = document.getElementById(id);
+    if (!el) return;
     el.addEventListener('blur', ()=> {
       const n = getNum(id);
       if (isFinite(n)) el.value = String(n);
     });
   });
 
-  // Eventos
+  // Range α
+  if (E.alpha){
+    E.alpha.addEventListener('input', ()=>{ if(E.alphaVal) E.alphaVal.textContent = Number(E.alpha.value).toFixed(2); });
+  }
+
+  // Botones (robustos para iOS)
+  const wire = (el, fn)=>{
+    if (!el) return;
+    el.addEventListener('click', fn, {passive:true});
+    el.addEventListener('pointerup', fn, {passive:true});
+    el.addEventListener('keyup', (e)=>{ if(e.key==='Enter' || e.key===' ') fn(); });
+  };
+
   function runCalc(){
     const base = calcBase();
     if (!base) return;
-    if (E.proToggle.checked) calcPro(base.lamH, base.lamA);
+    if (E.proToggle?.checked) calcPro(base.lamH, base.lamA);
   }
-
-  E.alpha.addEventListener('input', ()=>{ E.alphaVal.textContent = Number(E.alpha.value).toFixed(2); });
-  E.calcBtn && E.calcBtn.addEventListener('click', runCalc);
-  E.calcBtnSticky && E.calcBtnSticky.addEventListener('click', runCalc);
-
   function doReset(){
-    ['gfH','xgH','gfA','xgA'].forEach(id=> document.getElementById(id).value = '');
-    E.alpha.value = 0.70; E.alphaVal.textContent = '0.70';
-    E.lambdaTot.textContent = '—'; E.lambdas.textContent = '—';
+    ['gfH','xgH','gfA','xgA'].forEach(id=>{ const el=document.getElementById(id); if(el) el.value=''; });
+    if (E.alpha){ E.alpha.value = 0.70; }
+    if (E.alphaVal){ E.alphaVal.textContent = '0.70'; }
+    if (E.lambdaTot) E.lambdaTot.textContent = '—';
+    if (E.lambdas) E.lambdas.textContent = '—';
     renderDashes();
   }
-  E.resetBtn && E.resetBtn.addEventListener('click', doReset);
-  E.resetBtnSticky && E.resetBtnSticky.addEventListener('click', doReset);
+
+  wire(E.calcBtn, runCalc);
+  wire(E.resetBtn, doReset);
+  wire(E.calcBtnSticky, runCalc);
+  wire(E.resetBtnSticky, doReset);
 
   // Toggle Pro
-  E.proToggle.addEventListener('change', ()=>{
-    if (E.proToggle.checked){
-      E.proSection.classList.add('on');
-      // recalcula pro si ya hay lambdas válidas
-      const txt = E.lambdaTot.textContent;
-      if (txt && txt !== '—'){
-        const gfH = getNum('gfH'), xgH = getNum('xgH');
-        const gfA = getNum('gfA'), xgA = getNum('xgA');
-        const alpha = Number(E.alpha.value);
-        const lamH = mixLambda(gfH, xgH, alpha);
-        const lamA = mixLambda(gfA, xgA, alpha);
-        if (isFinite(lamH) && isFinite(lamA)) calcPro(lamH, lamA);
+  if (E.proToggle){
+    E.proToggle.addEventListener('change', ()=>{
+      if (E.proToggle.checked){
+        E.proSection?.classList.add('on');
+        const base = calcBase();
+        if (base) calcPro(base.lamH, base.lamA);
+      } else {
+        E.proSection?.classList.remove('on');
       }
-    } else {
-      E.proSection.classList.remove('on');
-    }
-  });
+    });
+  }
 
   // Inicial
   renderDashes();
