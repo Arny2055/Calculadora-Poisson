@@ -265,7 +265,7 @@
       <div class="super">
         <div>
           <h1>Calculadora Poisson — Híbrido <span style="opacity:.7">GF + xG</span></h1>
-          <p class="tagline">Ajusta α (peso del xG) y obtén OU 2.5/3.5, BTTS y prob. de anotar (Local/Visitante). Entradas con coma o punto.</p>
+          <p class="tagline">Ajusta α (peso del xG) y obtén OU 1.5/2.5/3.5, BTTS y prob. de anotar (Local/Visitante). Entradas con coma o punto.</p>
         </div>
 
         <div class="row">
@@ -364,6 +364,17 @@
       <h2 class="section-title">Resultados <span class="beam"></span></h2>
       <div class="content">
         <div class="grid-1">
+          <!-- NUEVO: OU 1.5 -->
+          <div>
+            <table>
+              <thead><tr><th>Mercado</th><th>Prob.</th><th>Cuota justa</th></tr></thead>
+              <tbody>
+                <tr><td>Over 1.5</td><td id="pO15">—</td><td id="oO15">—</td></tr>
+                <tr><td>Under 1.5</td><td id="pU15">—</td><td id="oU15">—</td></tr>
+              </tbody>
+            </table>
+          </div>
+
           <div>
             <table>
               <thead><tr><th>Mercado</th><th>Prob.</th><th>Cuota justa</th></tr></thead>
@@ -459,7 +470,7 @@
   // ===== Normalización de número: permite "1,60" o "1.60" y escritura parcial =====
   function parseDec(str){
     if (typeof str !== 'string') return NaN;
-    const cleaned = str.replace(/\s+/g,'').replace(',', '.').replace(/[^0-9.\\-eE+]/g,'');
+    const cleaned = str.replace(/\s+/g,'').replace(',', '.').replace(/[^0-9.\-eE+]/g,'');
     const parts = cleaned.split('.');
     const normalized = parts.length > 2 ? parts.slice(0,2).join('.') : cleaned;
     const n = Number(normalized);
@@ -480,14 +491,21 @@
     gfA: $('#gfA'), xgA: $('#xgA'),
     alpha: $('#alpha'), alphaVal: $('#alphaVal'),
     lambdaTot: $('#lambdaTot'), lambdas: $('#lambdas'),
+    // OU 1.5
+    pO15: $('#pO15'), oO15: $('#oO15'),
+    pU15: $('#pU15'), oU15: $('#oU15'),
+    // OU 2.5
     pO25: $('#pO25'), oO25: $('#oO25'),
     pU25: $('#pU25'), oU25: $('#oU25'),
+    // OU 3.5
     pO35: $('#pO35'), oO35: $('#oO35'),
     pU35: $('#pU35'), oU35: $('#oU35'),
+    // BTTS y marca
     pBYes: $('#pBYes'), oBYes: $('#oBYes'),
     pBNo: $('#pBNo'), oBNo: $('#oBNo'),
     pHomeScore: $('#pHomeScore'), oHomeScore: $('#oHomeScore'),
     pAwayScore: $('#pAwayScore'), oAwayScore: $('#oAwayScore'),
+    // Botones
     calcBtn: $('#calcBtn'), resetBtn: $('#resetBtn'),
     // Pro
     pH1: $('#pH1'), oH1: $('#oH1'),
@@ -539,8 +557,11 @@
   }
   function renderDashes(){
     [
-      E.pO25,E.oO25,E.pU25,E.oU25,E.pO35,E.oO35,E.pU35,E.oU35,
-      E.pBYes,E.oBYes,E.pBNo,E.oBNo,E.pHomeScore,E.oHomeScore,E.pAwayScore,E.oAwayScore,
+      E.pO15,E.oO15,E.pU15,E.oU15,
+      E.pO25,E.oO25,E.pU25,E.oU25,
+      E.pO35,E.oO35,E.pU35,E.oU35,
+      E.pBYes,E.oBYes,E.pBNo,E.oBNo,
+      E.pHomeScore,E.oHomeScore,E.pAwayScore,E.oAwayScore,
       E.pH1,E.oH1,E.pD,E.oD,E.pA2,E.oA2
     ].forEach(el=>{ if(el){ el.textContent='—'; el.className=''; } });
     if (E.csTable){
@@ -550,10 +571,9 @@
 
   // ===== Utilidades para 1X2 y Correct Score =====
   function autoKmax(lamH, lamA){
-    // malla razonable: media + ~6*sqrt(media total), acotada para rendimiento
     const Lam = lamH + lamA;
     const approx = Math.ceil(Lam + 6*Math.sqrt(Lam||1));
-    return Math.min(Math.max(8, approx), 12); // entre 8 y 12
+    return Math.min(Math.max(8, approx), 12);
   }
 
   function oneXtwo(lamH, lamA){
@@ -572,7 +592,6 @@
       }
     }
 
-    // Ajuste de cola (pequeñísimo): normaliza por la masa incluida
     const sumH = ph.reduce((s,x)=>s+x,0);
     const sumA = pa.reduce((s,x)=>s+x,0);
     const mass = sumH*sumA;
@@ -632,7 +651,8 @@
 
     if (!isFinite(Lam) || Lam<0 || lamH<0 || lamA<0){ renderDashes(); return null; }
 
-    // OU (suma Λ)
+    // OU usando Λ
+    const pUnder15 = poissonCDF(1, Lam), pOver15 = 1 - pUnder15; // NUEVO 1.5
     const pUnder25 = poissonCDF(2, Lam), pOver25 = 1 - pUnder25;
     const pUnder35 = poissonCDF(3, Lam), pOver35 = 1 - pUnder35;
 
@@ -643,12 +663,19 @@
     // Marca (≥1)
     const pHomeSc = 1 - eH, pAwaySc = 1 - eA;
 
+    // Pintado
+    writeRow(E.pO15, E.oO15, pOver15);
+    writeRow(E.pU15, E.oU15, pUnder15);
+
     writeRow(E.pO25, E.oO25, pOver25);
     writeRow(E.pU25, E.oU25, pUnder25);
+
     writeRow(E.pO35, E.oO35, pOver35);
     writeRow(E.pU35, E.oU35, pUnder35);
+
     writeRow(E.pBYes, E.oBYes, pBTTSyes);
     writeRow(E.pBNo,  E.oBNo,  pBTTSno);
+
     writeRow(E.pHomeScore, E.oHomeScore, pHomeSc);
     writeRow(E.pAwayScore, E.oAwayScore, pAwaySc);
 
