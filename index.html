@@ -134,9 +134,31 @@
   .pro{display:none; opacity:0; transform:translateY(6px); transition:opacity .25s ease, transform .25s ease}
   .pro.on{display:block; opacity:1; transform:translateY(0)}
 
+  /* --- Callout de señal O2.5 --- */
+  .callout{
+    display:none; align-items:center; gap:12px; margin:10px 0 6px 0; padding:12px;
+    border:1px solid var(--edge); border-radius:12px;
+    background:linear-gradient(180deg, rgba(42,179,164,.15), rgba(42,179,164,.06));
+    box-shadow:var(--shadow);
+  }
+  .callout.show{ display:flex; }
+  .callout .title{font-weight:700; letter-spacing:.3px}
+  .callout .pill{
+    display:inline-flex; align-items:center; gap:6px; padding:6px 10px; border-radius:999px;
+    border:1px solid var(--edge); background:rgba(255,255,255,.06); font-size:12px;
+  }
+  .callout .cta{
+    margin-left:auto; text-decoration:none; font-weight:800; letter-spacing:.3px;
+    background:linear-gradient(180deg, var(--mustard), #b9963f); color:#2c230e;
+    padding:10px 12px; border-radius:10px; border:1px solid #8d7432;
+    box-shadow:0 8px 18px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.25);
+  }
+
   .sticky-bar{position:fixed; left:0; right:0; bottom:12px; display:none; z-index:20; padding:0 12px}
   .sticky-inner{display:flex; gap:10px; justify-content:space-between; align-items:center; background:#201e26; border:1px solid var(--edge); box-shadow:var(--shadow); border-radius:14px; padding:8px 10px}
   .sticky-inner .buttons{display:flex; gap:10px}
+  .sticky-inner .tag{display:none; align-items:center; gap:8px; font-size:12px; padding:6px 10px; border-radius:999px; border:1px solid var(--edge); background:rgba(42,179,164,.12)}
+  .sticky-inner .tag.show{display:inline-flex}
 
   @media (max-width:390px){
     body{font-size:16px}
@@ -297,6 +319,16 @@
     <section class="card" aria-label="Resultados">
       <h2 class="section-title">Resultados</h2>
       <div class="content">
+
+        <!-- Señal automática para Over 2.5 -->
+        <div id="o25Signal" class="callout" role="alert" aria-live="polite">
+          <span class="title">🔔 Brilla el <strong>Over 2.5</strong></span>
+          <span class="pill">P(O2.5): <strong id="o25SigProb">—</strong></span>
+          <span class="pill">Λ: <strong id="o25SigLambda">—</strong></span>
+          <!-- Reemplaza el href por tu casa de apuestas -->
+          <a id="o25SigBtn" class="cta" href="#" target="_blank" rel="noopener">Apostar Over 2.5</a>
+        </div>
+
         <div class="grid-1">
           <div>
             <table>
@@ -400,12 +432,18 @@
         <button id="calcBtnSticky" type="button">Calcular</button>
         <button id="resetBtnSticky" type="button" class="secondary">Limpiar</button>
       </div>
+      <div id="stickyO25Tag" class="tag">🔥 Over 2.5 listo • <strong>apuesta</strong></div>
     </div>
   </div>
 
 <script>
 (function(){
   const $ = s => document.querySelector(s);
+
+  // ===== CONFIG de señal Over 2.5 =====
+  // Puedes ajustar estos umbrales según tu backtest por liga:
+  const BRILLA_O25_P = 0.61;     // Probabilidad mínima del modelo para Over 2.5
+  const BRILLA_O25_L = 2.70;     // Lambda total mínima (Λ) para considerar ritmo alto
 
   // ===== Normalización de número =====
   function parseDec(str){
@@ -452,8 +490,6 @@
     pBNo: $('#pBNo'), oBNo: $('#oBNo'),
     pHomeScore: $('#pHomeScore'), oHomeScore: $('#oHomeScore'),
     pAwayScore: $('#pAwayScore'), oAwayScore: $('#oAwayScore'),
-    // Botones
-    calcBtn: $('#calcBtn'), resetBtn: $('#resetBtn'),
     // Pro
     pH1: $('#pH1'), oH1: $('#oH1'),
     pD:  $('#pD'),  oD:  $('#oD'),
@@ -461,8 +497,14 @@
     csTable: $('#csTable'),
     proToggle: $('#proToggle'),
     proSection: $('#proSection'),
-    // Sticky
-    calcBtnSticky: $('#calcBtnSticky'), resetBtnSticky: $('#resetBtnSticky')
+    // Botones
+    calcBtn: $('#calcBtn'), resetBtn: $('#resetBtn'),
+    calcBtnSticky: $('#calcBtnSticky'), resetBtnSticky: $('#resetBtnSticky'),
+    // Señal O2.5
+    o25Signal: $('#o25Signal'),
+    o25SigProb: $('#o25SigProb'),
+    o25SigLambda: $('#o25SigLambda'),
+    stickyO25Tag: $('#stickyO25Tag')
   };
 
   // ===== Poisson estable =====
@@ -508,6 +550,7 @@
     if (E.csTable){
       E.csTable.innerHTML = '<tr><td colspan="3" style="text-align:center;color:#9c97a7">—</td></tr>';
     }
+    hideO25Signal();
   }
 
   // ===== 1X2 y Marcador Correcto =====
@@ -559,6 +602,20 @@
         <td>${fmtOdd(odd)}</td>
       </tr>`;
     }).join('');
+  }
+
+  // ===== Señal Over 2.5 (UI) =====
+  function showO25Signal(Lam, pO25){
+    if (!E.o25Signal) return;
+    E.o25SigProb.textContent = fmtPct(pO25);
+    E.o25SigLambda.textContent = isFinite(Lam) ? Lam.toFixed(2) : '—';
+    E.o25Signal.classList.add('show');
+    if (E.stickyO25Tag) E.stickyO25Tag.classList.add('show');
+  }
+  function hideO25Signal(){
+    if (!E.o25Signal) return;
+    E.o25Signal.classList.remove('show');
+    if (E.stickyO25Tag) E.stickyO25Tag.classList.remove('show');
   }
 
   // ===== Cálculo base (con GF/GC + xG/xGC, α, β, γ) =====
@@ -632,7 +689,14 @@
     writeRow(E.pHomeScore, E.oHomeScore, pHomeSc);
     writeRow(E.pAwayScore, E.oAwayScore, pAwaySc);
 
-    return {lamH, lamA};
+    // ---- Señal Over 2.5 ----
+    if (pOver25 >= BRILLA_O25_P && Lam >= BRILLA_O25_L){
+      showO25Signal(Lam, pOver25);
+    } else {
+      hideO25Signal();
+    }
+
+    return {lamH, lamA, Lam, pOver25};
   }
 
   // ===== Cálculo Pro =====
