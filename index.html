@@ -131,6 +131,7 @@
   .pro{display:none; opacity:0; transform:translateY(6px); transition:opacity .25s ease, transform .25s ease}
   .pro.on{display:block; opacity:1; transform:translateY(0)}
 
+  /* Callout O2.5 */
   .callout{
     display:none; align-items:center; gap:12px; margin:10px 0 6px 0; padding:12px;
     border:1px solid var(--edge); border-radius:12px;
@@ -148,6 +149,20 @@
     background:linear-gradient(180deg, var(--mustard), #b9963f); color:#2c230e;
     padding:10px 12px; border-radius:10px; border:1px solid #8d7432;
     box-shadow:0 8px 18px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.25);
+  }
+
+  /* Coherencia Dual */
+  .dualbar{
+    display:none; align-items:center; gap:12px; margin:10px 0 8px 0; padding:10px 12px;
+    border:1px solid var(--edge); border-radius:12px;
+    background:linear-gradient(180deg, rgba(225,195,110,.14), rgba(225,195,110,.06));
+    box-shadow:var(--shadow);
+  }
+  .dualbar.show{ display:flex; }
+  .dualbar .title{font-weight:800; letter-spacing:.3px}
+  .dualbar .pill{
+    display:inline-flex; align-items:center; gap:6px; padding:6px 10px; border-radius:999px;
+    border:1px solid var(--edge); background:rgba(255,255,255,.06); font-size:12px;
   }
 
   .sticky-bar{position:fixed; left:0; right:0; bottom:12px; display:none; z-index:20; padding:0 12px}
@@ -183,7 +198,7 @@
       <div class="mast">
         <div>
           <h1>Calculadora Poisson — Híbrido <span style="color:var(--crimson)">GF/GC</span> + <span style="color:var(--teal)">xG/xGC</span></h1>
-          <p class="tagline">Ajusta α (peso xG), β (ataque vs defensa), γ (localía) y deltas por mercado. OU · BTTS · 1X2 · Marcador.</p>
+        <p class="tagline">Ajusta α (xG), β (ataque/defensa), γ (localía) y deltas/K por mercado. OU · BTTS · 1X2 · Marcador.</p>
         </div>
         <div class="row">
           <div class="badge"><span class="dot"></span> Motor: Poisson bivariante (independencia)</div>
@@ -424,6 +439,14 @@
           <a id="o25SigBtn" class="cta" href="#" target="_blank" rel="noopener">Apostar Over 2.5</a>
         </div>
 
+        <!-- Coherencia dual -->
+        <div id="dualBar" class="dualbar" role="status" aria-live="polite">
+          <span class="title">🧩 Coherencia dual (O2.5 + BTTS)</span>
+          <span class="pill">P(O2.5): <strong id="dualPO25">—</strong></span>
+          <span class="pill">P(BTTS Sí): <strong id="dualPBTTS">—</strong></span>
+          <span class="pill">Λ: <strong id="dualLam">—</strong></span>
+        </div>
+
         <div class="grid-1">
           <!-- OU 2.5 -->
           <div>
@@ -503,9 +526,15 @@
 (function(){
   const $ = s => document.querySelector(s);
 
-  // ===== CONFIG de señal Over 2.5 =====
+  // ===== CONFIG señales =====
   const BRILLA_O25_P = 0.61;     // Prob mínima del modelo para Over 2.5
   const BRILLA_O25_L = 2.70;     // Lambda total mínima
+  const DUAL_THRESH = {          // Coherencia dual (Tier A)
+    alignEps: 0.03,              // |p_híbrido - p_base| < 0.03
+    lambdaMin: 2.70,
+    pO25Min: 0.60,
+    pBTTSMin: 0.52
+  };
 
   // ===== Normalización =====
   function parseDec(str){
@@ -540,14 +569,14 @@
     lambdaTarget: $('#lambdaTarget'),
     lambdaTot: $('#lambdaTot'), lambdas: $('#lambdas'),
 
-    // O2.5 (forma reciente + controles propios)
+    // O2.5
     rO25H: $('#rO25H'), rN_H: $('#rN_H'),
     rO25A: $('#rO25A'), rN_A: $('#rN_A'),
     deltaO25: $('#deltaO25'), deltaO25Val: $('#deltaO25Val'),
     kPriorO25: $('#kPriorO25'), kO25Val: $('#kO25Val'),
     recentSummary: $('#recentSummary'),
 
-    // BTTS (forma reciente + controles propios)
+    // BTTS
     rBYesH: $('#rBYesH'), rBN_H: $('#rBN_H'),
     rBYesA: $('#rBYesA'), rBN_A: $('#rBN_A'),
     deltaBTTS: $('#deltaBTTS'), deltaBTTSVal: $('#deltaBTTSVal'),
@@ -557,9 +586,11 @@
     // Resultados
     pO25: $('#pO25'), oO25: $('#oO25'),
     pO25Hyb: $('#pO25Hyb'), oO25Hyb: $('#oO25Hyb'), consistencyChip: $('#consistencyChip'),
-
     pBYes: $('#pBYes'), oBYes: $('#oBYes'),
     pBYesHyb: $('#pBYesHyb'), oBYesHyb: $('#oBYesHyb'), consistencyChipBTTS: $('#consistencyChipBTTS'),
+
+    // Coherencia dual
+    dualBar: $('#dualBar'), dualPO25: $('#dualPO25'), dualPBTTS: $('#dualPBTTS'), dualLam: $('#dualLam'),
 
     // Pro
     pH1: $('#pH1'), oH1: $('#oH1'),
@@ -579,6 +610,9 @@
     o25SigLambda: $('#o25SigLambda'),
     stickyO25Tag: $('#stickyO25Tag')
   };
+
+  // Estado interno para coherencia
+  const S = { alignedO25:false, alignedBTTS:false };
 
   // ===== Poisson =====
   const factMemo = new Map([[0,0],[1,0]]);
@@ -626,6 +660,8 @@
     hideO25Signal();
     if (E.recentSummary) E.recentSummary.textContent='—';
     if (E.recentBttSummary) E.recentBttSummary.textContent='—';
+    if (E.dualBar) E.dualBar.classList.remove('show');
+    S.alignedO25 = false; S.alignedBTTS = false;
   }
 
   // ===== 1X2 y Marcador Correcto =====
@@ -693,9 +729,8 @@
     if (E.stickyO25Tag) E.stickyO25Tag.classList.remove('show');
   }
 
-  // ===== Forma Reciente con encogimiento (helper) =====
+  // ===== Forma Reciente con encogimiento =====
   function recentWeighted(pairIds, kSlider){
-    // pairIds: {pH, pA, nH, nA}
     const pH = getPct(pairIds.pH);
     const pA = getPct(pairIds.pA);
     const nH = Math.max(0, parseDec(document.getElementById(pairIds.nH)?.value ?? ''));
@@ -714,7 +749,7 @@
     return {pRecent, nTotal:n, shrink, K};
   }
 
-  // ===== Cálculo base (GF/GC + xG/xGC, α, β, γ) =====
+  // ===== Cálculo base =====
   function calcBase(){
     const gfH = Math.max(0, getNum('gfH')), xgH = Math.max(0, getNum('xgH'));
     const gfA = Math.max(0, getNum('gfA')), xgA = Math.max(0, getNum('xgA'));
@@ -764,7 +799,7 @@
     return {lamH, lamA, Lam, pOver25, pBTTSyes};
   }
 
-  // ===== Híbrido O2.5 (usa δ/K propios) =====
+  // ===== Híbrido O2.5 =====
   function calcHybridO25(pPoisson){
     const d = clamp(Number(E.deltaO25?.value ?? 0.25), 0, 0.6);
     const {pRecent, nTotal, shrink} = recentWeighted(
@@ -780,16 +815,18 @@
     if (!isFinite(pRecent)){
       writeRow(E.pO25Hyb, E.oO25Hyb, pPoisson);
       if (E.consistencyChip){ E.consistencyChip.textContent = 'sin forma'; E.consistencyChip.className = 'chip warn'; }
+      S.alignedO25 = false;
       return pPoisson;
     }
 
     const pAdj = (1-d)*pPoisson + d*(shrink*pRecent + (1-shrink)*pPoisson);
-
     writeRow(E.pO25Hyb, E.oO25Hyb, pAdj);
 
     const diff = pAdj - pPoisson;
+    S.alignedO25 = Math.abs(diff) < DUAL_THRESH.alignEps;
+
     if (E.consistencyChip){
-      if (Math.abs(diff) < 0.03){
+      if (S.alignedO25){
         E.consistencyChip.textContent = 'alineado';
         E.consistencyChip.className = 'chip ok';
       } else if (diff > 0){
@@ -804,7 +841,7 @@
     return pAdj;
   }
 
-  // ===== Híbrido BTTS Sí (usa δ/K propios) =====
+  // ===== Híbrido BTTS Sí =====
   function calcHybridBTTS(pPoissonBTTS){
     const d = clamp(Number(E.deltaBTTS?.value ?? 0.30), 0, 0.6);
     const {pRecent, nTotal, shrink} = recentWeighted(
@@ -820,16 +857,18 @@
     if (!isFinite(pRecent)){
       writeRow(E.pBYesHyb, E.oBYesHyb, pPoissonBTTS);
       if (E.consistencyChipBTTS){ E.consistencyChipBTTS.textContent = 'sin forma'; E.consistencyChipBTTS.className = 'chip warn'; }
+      S.alignedBTTS = false;
       return pPoissonBTTS;
     }
 
     const pAdj = (1-d)*pPoissonBTTS + d*(shrink*pRecent + (1-shrink)*pPoissonBTTS);
-
     writeRow(E.pBYesHyb, E.oBYesHyb, pAdj);
 
     const diff = pAdj - pPoissonBTTS;
+    S.alignedBTTS = Math.abs(diff) < DUAL_THRESH.alignEps;
+
     if (E.consistencyChipBTTS){
-      if (Math.abs(diff) < 0.03){
+      if (S.alignedBTTS){
         E.consistencyChipBTTS.textContent = 'alineado';
         E.consistencyChipBTTS.className = 'chip ok';
       } else if (diff > 0){
@@ -842,6 +881,24 @@
     }
 
     return pAdj;
+  }
+
+  // ===== Coherencia dual (UI) =====
+  function updateDualBar(base){
+    if (!E.dualBar || !base) return;
+    const ok = S.alignedO25 && S.alignedBTTS &&
+               base.Lam >= DUAL_THRESH.lambdaMin &&
+               base.pOver25 >= DUAL_THRESH.pO25Min &&
+               base.pBTTSyes >= DUAL_THRESH.pBTTSMin;
+
+    if (ok){
+      E.dualBar.classList.add('show');
+      E.dualPO25.textContent = fmtPct(base.pOver25);
+      E.dualPBTTS.textContent = fmtPct(base.pBTTSyes);
+      E.dualLam.textContent = base.Lam.toFixed(2);
+    } else {
+      E.dualBar.classList.remove('show');
+    }
   }
 
   // ===== PRO =====
@@ -881,8 +938,6 @@
   bindSlider(E.alpha, E.alphaVal, v=>Number(v).toFixed(2));
   bindSlider(E.beta,  E.betaVal,  v=>Number(v).toFixed(2));
   bindSlider(E.gamma, E.gammaVal, v=>Number(v).toFixed(2));
-
-  // Sliders específicos por mercado
   bindSlider(E.deltaO25, E.deltaO25Val, v=>Number(v).toFixed(2));
   bindSlider(E.kPriorO25, E.kO25Val, v=>String(v));
   bindSlider(E.deltaBTTS, E.deltaBTTSVal, v=>Number(v).toFixed(2));
@@ -900,6 +955,7 @@
     if (!base) return;
     const pHybridO25 = calcHybridO25(base.pOver25);
     const pHybridBTTS = calcHybridBTTS(base.pBTTSyes);
+    updateDualBar(base);
     if (E.proToggle?.checked) calcPro(base.lamH, base.lamA);
     return {pHybridO25, pHybridBTTS};
   }
@@ -926,7 +982,6 @@
     // defaults por mercado
     if (E.deltaO25){ E.deltaO25.value = 0.25; E.deltaO25Val.textContent = '0.25'; }
     if (E.kPriorO25){ E.kPriorO25.value = 12; E.kO25Val.textContent = '12'; }
-
     if (E.deltaBTTS){ E.deltaBTTS.value = 0.30; E.deltaBTTSVal.textContent = '0.30'; }
     if (E.kPriorBTTS){ E.kPriorBTTS.value = 8; E.kBTTSVal.textContent = '8'; }
 
