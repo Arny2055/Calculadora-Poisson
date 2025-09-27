@@ -426,10 +426,10 @@
             <div class="val" id="lambdaTot">—</div>
           </div>
 
-          <!-- NUEVO: Tendencia del partido -->
+          <!-- NUEVO: Mercado sugerido -->
           <div class="kpi" id="trendKpi" role="status" aria-live="polite" aria-atomic="true">
             <div>
-              <div class="lbl">Tendencia</div>
+              <div class="lbl">Mercado sugerido</div>
               <div class="val" id="trendLabel">—</div>
               <div id="trendDesc" class="trend-desc" aria-hidden="true"></div>
             </div>
@@ -539,7 +539,7 @@
 (function(){
   const $ = s => document.querySelector(s);
 
-  // ===== CONFIG señales =====
+  // ===== CONFIG señales / umbrales =====
   const BRILLA_O25_P = 0.61;     // Prob mínima del modelo para Over 2.5
   const BRILLA_O25_L = 2.70;     // Lambda total mínima
   const DUAL_THRESH = {          // Coherencia dual (Tier A)
@@ -549,13 +549,20 @@
     pBTTSMin: 0.52
   };
 
+  // Umbrales de decisión (ajustables)
+  const TH = {
+    diffLamFav: 0.35,    // diferencia para considerar favorito claro
+    attWeak: 1.2,        // below => visitante débil ofensivamente
+    attStrong: 1.4,      // ambos >= => partidos abiertos
+    lamHigh: 2.7,
+    lamVeryLow: 1.6
+  };
+
   // ===== Normalización =====
   function parseDec(str){
     if (str==null) return NaN;
     if (typeof str !== 'string') str = String(str);
-    // quita espacios y comas -> punto, permite una sola coma/punto decimal, permite signo y exponentes
     const cleaned = str.trim().replace(/\s+/g,'').replace(',', '.');
-    // extraer el primer token que parezca número (maneja "%", texto extra)
     const match = cleaned.match(/[+\-]?\d*\.?\d+(e[+\-]?\d+)?/i);
     if (!match) return NaN;
     const n = Number(match[0]);
@@ -568,11 +575,9 @@
       const n = parseDec(str.replace('%',''));
       return isFinite(n) ? n/100 : NaN;
     }
-    // if value already in 0..1 treat as fraction
     const n = parseDec(str);
     if (!isFinite(n)) return NaN;
     if (n >= 0 && n <= 1) return n;
-    // otherwise assume percentage like 83.3 -> 0.833
     if (n > 1 && n <= 100) return n/100;
     return NaN;
   }
@@ -637,7 +642,7 @@
     o25SigBtn: $('#o25SigBtn'),
     stickyO25Tag: $('#stickyO25Tag'),
 
-    // Trend
+    // Market / trend
     trendKpi: $('#trendKpi'),
     trendLabel: $('#trendLabel'),
     trendDesc: $('#trendDesc'),
@@ -647,7 +652,7 @@
   // Estado interno para coherencia
   const S = { alignedO25:false, alignedBTTS:false };
 
-  // ===== Poisson =====
+  // ===== Poisson helpers =====
   const factMemo = new Map([[0,0],[1,0]]);
   function logFactorial(n){
     n = Math.max(0, Math.floor(n));
@@ -701,7 +706,7 @@
     S.alignedO25 = false; S.alignedBTTS = false;
     if (E.proSection) { E.proSection.classList.remove('on'); E.proSection.setAttribute('aria-hidden','true'); }
 
-    // limpiar tendencia
+    // limpiar mercado sugerido
     if (E.trendLabel) E.trendLabel.textContent = '—';
     if (E.trendDesc) { E.trendDesc.textContent=''; E.trendDesc.setAttribute('aria-hidden','true'); }
     if (E.trendChip) E.trendChip.innerHTML = '';
@@ -766,7 +771,6 @@
     E.o25Signal.classList.add('show');
     E.o25Signal.setAttribute('aria-hidden','false');
     if (E.stickyO25Tag) E.stickyO25Tag.classList.add('show'), E.stickyO25Tag.setAttribute('aria-hidden','false');
-    // href: leave # by default; user can replace with bookmaker link if wants
     if (E.o25SigBtn) {
       E.o25SigBtn.href = '#';
     }
@@ -778,49 +782,97 @@
     if (E.stickyO25Tag) E.stickyO25Tag.classList.remove('show'), E.stickyO25Tag.setAttribute('aria-hidden','true');
   }
 
-  // ===== Tendencia del partido =====
-  // reglas simples y explicables:
-  // - si diferencia de lambdas >= 0.35 => favorito claro (local/visitante)
-  // - sino, equilibrio
-  // además se añade comentario sobre ofensiva/defensiva comparando att vs def
+  // ===== Tendencia + Sugerencia de mercado =====
   function computeTrend(attH, attA, defH, defA, lamH, lamA){
-    // fallback
     if (![attH,attA,defH,defA,lamH,lamA].every(x=>isFinite(x))) return null;
-
     const diffLam = lamH - lamA;
-    let main = 'Equilibrado';
-    let cls = 'warn';
-    if (diffLam >= 0.35){ main = 'Favorito — Local'; cls = 'ok'; }
-    else if (diffLam <= -0.35){ main = 'Favorito — Visitante'; cls = 'danger'; }
-    else { main = 'Equilibrado'; cls = 'warn'; }
+    let label = 'Equilibrado';
+    if (diffLam >= TH.diffLamFav) label = 'Favorito Local';
+    else if (diffLam <= -TH.diffLamFav) label = 'Favorito Visitante';
+    else label = 'Equilibrado';
 
-    // ofensiva/defensa insights
+    // small insights
     const insights = [];
     if (attH >= Math.max(attA, 1.4)) insights.push('Local con mayor potencial ofensivo');
     if (attA >= Math.max(attH, 1.4)) insights.push('Visitante con mayor potencial ofensivo');
-    if (defH <= Math.min(defA, 1.1)) insights.push('Local bastante sólido defensivamente');
-    if (defA <= Math.min(defH, 1.1)) insights.push('Visitante bastante sólido defensivamente');
-
-    // si ambos atacan fuerte
-    if (attH >= 1.4 && attA >= 1.4) insights.unshift('Ambos equipos con tendencia ofensiva — partidos abiertos');
-
-    // si ambos son débiles ofensivamente
-    if (attH < 1.0 && attA < 1.0) insights.unshift('Baja capacidad ofensiva en ambos — pocos goles esperados');
+    if (defH <= Math.min(defA, 1.1)) insights.push('Local sólido atrás');
+    if (defA <= Math.min(defH, 1.1)) insights.push('Visitante sólido atrás');
+    if (attH >= 1.4 && attA >= 1.4) insights.unshift('Ambos con tendencia ofensiva — partido abierto');
+    if (attH < 1.0 && attA < 1.0) insights.unshift('Baja capacidad ofensiva — pocos goles esperados');
 
     const description = insights.length ? insights.join(' · ') : 'Sin señales ofensivas/defensivas claras';
-    return {label: main, cls, description, diffLam: diffLam.toFixed(2)};
+    return {label, description, diffLam: diffLam.toFixed(2)};
   }
 
-  function renderTrend(t){
-    if (!E.trendLabel) return;
-    if (!t){ E.trendLabel.textContent = '—'; if (E.trendDesc){ E.trendDesc.textContent=''; E.trendDesc.setAttribute('aria-hidden','true'); } if (E.trendChip) E.trendChip.innerHTML=''; return; }
-    E.trendLabel.textContent = t.label + (t.diffLam ? ` (Δλ=${t.diffLam})` : '');
-    if (E.trendDesc){ E.trendDesc.textContent = t.description; E.trendDesc.setAttribute('aria-hidden','false'); }
+  function suggestMarket(trendObj, attH, attA, lamH, lamA, pOver25, pBTTSyes){
+    // returns {marketLabel, explanation, cls}
+    if (!trendObj) return {marketLabel:'—', explanation:'Datos insuficientes', cls:'warn'};
 
-    // chip visual
+    const Lam = (isFinite(lamH) && isFinite(lamA)) ? (lamH + lamA) : NaN;
+    const diffLam = Number(trendObj.diffLam);
+    // Favorito Local
+    if (trendObj.label === 'Favorito Local'){
+      if (!isFinite(attA)) return {marketLabel:'Over 2.5', explanation:'Visitante info insuficiente — preferir Over 2.5 si Λ alto', cls:'warn'};
+      if (attA < TH.attWeak) {
+        // visitante débil → Over2.5 (local anota mucho)
+        return {marketLabel:'Over 2.5', explanation:`Visitante débil ofensivamente (attV ${attA.toFixed(2)}) — local puede cubrir la línea`, cls:'ok'};
+      }
+      // visitante tiene ataque decente
+      if (isFinite(Lam) && Lam >= TH.lamHigh){
+        return {marketLabel:'BTTS + Over 2.5', explanation:`Visitante con ataque (attV ${attA.toFixed(2)}) y Λ=${Lam.toFixed(2)} → combinado`, cls:'ok'};
+      }
+      return {marketLabel:'BTTS', explanation:`Visitante con ataque (attV ${attA.toFixed(2)}) pero Λ=${isFinite(Lam)?Lam.toFixed(2):'—'} moderada → BTTS`, cls:'warn'};
+    }
+
+    // Favorito Visitante (invertir roles)
+    if (trendObj.label === 'Favorito Visitante'){
+      if (!isFinite(attH)) return {marketLabel:'Over 2.5', explanation:'Local info insuficiente — preferir Over 2.5 si Λ alto', cls:'warn'};
+      if (attH < TH.attWeak) {
+        return {marketLabel:'Over 2.5', explanation:`Local débil ofensivamente (attL ${attH.toFixed(2)}) — visitante puede anotar más`, cls:'ok'};
+      }
+      if (isFinite(Lam) && Lam >= TH.lamHigh){
+        return {marketLabel:'BTTS + Over 2.5', explanation:`Local con ataque (attL ${attH.toFixed(2)}) y Λ=${Lam.toFixed(2)} → combinado`, cls:'ok'};
+      }
+      return {marketLabel:'BTTS', explanation:`Local con ataque (attL ${attH.toFixed(2)}) y Λ=${isFinite(Lam)?Lam.toFixed(2):'—'} → BTTS`, cls:'warn'};
+    }
+
+    // Equilibrado
+    if (trendObj.label === 'Equilibrado'){
+      if (!isFinite(attH) || !isFinite(attA) || !isFinite(Lam)){
+        return {marketLabel:'—', explanation:'Datos insuficientes para sugerir', cls:'warn'};
+      }
+      if (attH >= TH.attStrong && attA >= TH.attStrong && Lam >= TH.lamHigh){
+        return {marketLabel:'BTTS + Over 2.5', explanation:`Ambos atacan fuerte (att ${attH.toFixed(2)}/${attA.toFixed(2)}) y Λ=${Lam.toFixed(2)}`, cls:'ok'};
+      }
+      if (attH >= TH.attWeak && attA >= TH.attWeak){
+        return {marketLabel:'BTTS', explanation:`Ambos con capacidad ofensiva (att ${attH.toFixed(2)}/${attA.toFixed(2)})`, cls:'warn'};
+      }
+      if (isFinite(Lam) && Lam >= TH.lamHigh){
+        return {marketLabel:'Over 2.5', explanation:`Λ elevada (${Lam.toFixed(2)}) pese a equilibrio → Over 2.5`, cls:'ok'};
+      }
+      if (isFinite(Lam) && Lam < TH.lamVeryLow){
+        return {marketLabel:'Under 2.5', explanation:`Λ baja (${Lam.toFixed(2)}) → Under 2.5 preferible`, cls:'danger'};
+      }
+      // fallback
+      return {marketLabel:'BTTS', explanation:`Sin ventaja clara; BTTS suele ser buena opción en equilibrio`, cls:'warn'};
+    }
+
+    return {marketLabel:'—', explanation:'No hay sugerencia', cls:'warn'};
+  }
+
+  function renderMarketSuggestion(marketObj){
+    if (!E.trendLabel) return;
+    if (!marketObj || !marketObj.marketLabel){
+      E.trendLabel.textContent = '—';
+      if (E.trendDesc){ E.trendDesc.textContent=''; E.trendDesc.setAttribute('aria-hidden','true'); }
+      if (E.trendChip) E.trendChip.innerHTML = '';
+      return;
+    }
+    E.trendLabel.textContent = marketObj.marketLabel;
+    if (E.trendDesc){ E.trendDesc.textContent = marketObj.explanation; E.trendDesc.setAttribute('aria-hidden','false'); }
     if (E.trendChip){
-      const color = (t.cls === 'ok') ? 'chip ok' : (t.cls === 'warn' ? 'chip warn' : 'chip danger');
-      E.trendChip.innerHTML = `<div class="${color}" style="font-weight:700">${t.label}</div>`;
+      const cls = (marketObj.cls==='ok') ? 'chip ok' : (marketObj.cls==='warn' ? 'chip warn' : 'chip danger');
+      E.trendChip.innerHTML = `<div class="${cls}" style="font-weight:700">${marketObj.marketLabel}</div>`;
     }
   }
 
@@ -875,14 +927,13 @@
     E.lambdas.textContent   = (isFinite(lamH)&&isFinite(lamA)) ? `${lamH.toFixed(3)} • ${lamA.toFixed(3)}` : '—';
     E.lambdaTot.textContent = isFinite(Lam) ? Lam.toFixed(3) : '—';
 
-    // ** NUEVO: renderiza tendencia usando att/def y lambdas **
-    const trend = computeTrend(attH, attA, defH, defA, lamH, lamA);
-    renderTrend(trend);
+    // compute base trend and market suggestion
+    const trendObj = computeTrend(attH, attA, defH, defA, lamH, lamA);
+    const base = (isFinite(Lam) && isFinite(lamH) && isFinite(lamA)) ? {lamH,lamA,Lam} : null;
 
+    // compute Poisson probabilities
     if (!isFinite(Lam) || Lam<0 || lamH<0 || lamA<0){ renderDashes(); return null; }
-
     const pUnder25 = poissonCDF(2, Lam), pOver25 = 1 - pUnder25;
-
     const eH = Math.exp(-lamH), eA = Math.exp(-lamA), eTot = Math.exp(-Lam);
     const pBTTSyes = 1 - eH - eA + eTot;
 
@@ -895,7 +946,11 @@
       hideO25Signal();
     }
 
-    return {lamH, lamA, Lam, pOver25, pBTTSyes, attH, attA, defH, defA};
+    // suggest market
+    const marketObj = suggestMarket(trendObj, attH, attA, lamH, lamA, pOver25, pBTTSyes);
+    renderMarketSuggestion(marketObj);
+
+    return {lamH, lamA, Lam, pOver25, pBTTSyes, attH, attA, defH, defA, trendObj, marketObj};
   }
 
   // ===== Híbrido O2.5 =====
@@ -1020,18 +1075,15 @@
   ].forEach(id=>{
     const el = document.getElementById(id);
     if (!el) return;
-    // on blur sanitize and pretty-format percent fields
     el.addEventListener('blur', ()=> {
       if (percentInputs.includes(id)){
         const p = getPct(id);
         if (isFinite(p)) el.value = (p*100).toFixed(1) + '%';
         return;
       }
-      // for numeric fields normalize
       const n = getNum(id);
       if (isFinite(n)) el.value = String(Number(n));
     });
-    // allow Enter to trigger calc on inputs
     el.addEventListener('keyup', (e)=>{ if (e.key === 'Enter') runCalc(); });
   });
 
@@ -1067,7 +1119,6 @@
       E.proSection?.setAttribute('aria-hidden','false');
       calcPro(base.lamH, base.lamA);
     } else {
-      // hide pro results visually but keep values (or clear if you prefer)
       E.proSection?.classList.remove('on');
       E.proSection?.setAttribute('aria-hidden','true');
     }
@@ -1082,18 +1133,15 @@
       if(el) el.value='';
     });
 
-    // n por defecto = 10
     [['rN_H','10'],['rN_A','10'],['rBN_H','10'],['rBN_A','10']].forEach(([id,val])=>{
       const el=document.getElementById(id);
       if(el) el.value=val;
     });
 
-    // defaults globales
     if (E.alpha){ E.alpha.value = 0.70; E.alphaVal.textContent = '0.70'; }
     if (E.beta){  E.beta.value  = 0.60; E.betaVal.textContent  = '0.60'; }
     if (E.gamma){ E.gamma.value = 0.06; E.gammaVal.textContent = '0.06'; }
 
-    // defaults por mercado
     if (E.deltaO25){ E.deltaO25.value = 0.25; E.deltaO25Val.textContent = '0.25'; }
     if (E.kPriorO25){ E.kPriorO25.value = 12; E.kO25Val.textContent = '12'; }
     if (E.deltaBTTS){ E.deltaBTTS.value = 0.30; E.deltaBTTSVal.textContent = '0.30'; }
