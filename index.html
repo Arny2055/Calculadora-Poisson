@@ -189,6 +189,8 @@
   .chip.ok{background:rgba(79,212,167,.1); color:var(--ok)}
   .chip.warn{background:rgba(227,179,76,.08); color:var(--warn)}
   .chip.danger{background:rgba(255,109,122,.08); color:var(--danger)}
+  /* trend specific small tweaks */
+  .trend-desc{font-size:12px; color:var(--muted); margin-top:6px}
 </style>
 </head>
 <body>
@@ -423,6 +425,16 @@
             <div class="lbl">Λ = λ<sub>L</sub> + λ<sub>V</sub> (Media total de goles)</div>
             <div class="val" id="lambdaTot">—</div>
           </div>
+
+          <!-- NUEVO: Tendencia del partido -->
+          <div class="kpi" id="trendKpi" role="status" aria-live="polite" aria-atomic="true">
+            <div>
+              <div class="lbl">Tendencia</div>
+              <div class="val" id="trendLabel">—</div>
+              <div id="trendDesc" class="trend-desc" aria-hidden="true"></div>
+            </div>
+            <div id="trendChip" style="display:flex; align-items:center"></div>
+          </div>
         </div>
       </div>
     </section>
@@ -623,7 +635,13 @@
     o25SigProb: $('#o25SigProb'),
     o25SigLambda: $('#o25SigLambda'),
     o25SigBtn: $('#o25SigBtn'),
-    stickyO25Tag: $('#stickyO25Tag')
+    stickyO25Tag: $('#stickyO25Tag'),
+
+    // Trend
+    trendKpi: $('#trendKpi'),
+    trendLabel: $('#trendLabel'),
+    trendDesc: $('#trendDesc'),
+    trendChip: $('#trendChip')
   };
 
   // Estado interno para coherencia
@@ -682,6 +700,11 @@
     if (E.dualBar) E.dualBar.classList.remove('show');
     S.alignedO25 = false; S.alignedBTTS = false;
     if (E.proSection) { E.proSection.classList.remove('on'); E.proSection.setAttribute('aria-hidden','true'); }
+
+    // limpiar tendencia
+    if (E.trendLabel) E.trendLabel.textContent = '—';
+    if (E.trendDesc) { E.trendDesc.textContent=''; E.trendDesc.setAttribute('aria-hidden','true'); }
+    if (E.trendChip) E.trendChip.innerHTML = '';
   }
 
   // ===== 1X2 y Marcador Correcto =====
@@ -755,6 +778,52 @@
     if (E.stickyO25Tag) E.stickyO25Tag.classList.remove('show'), E.stickyO25Tag.setAttribute('aria-hidden','true');
   }
 
+  // ===== Tendencia del partido =====
+  // reglas simples y explicables:
+  // - si diferencia de lambdas >= 0.35 => favorito claro (local/visitante)
+  // - sino, equilibrio
+  // además se añade comentario sobre ofensiva/defensiva comparando att vs def
+  function computeTrend(attH, attA, defH, defA, lamH, lamA){
+    // fallback
+    if (![attH,attA,defH,defA,lamH,lamA].every(x=>isFinite(x))) return null;
+
+    const diffLam = lamH - lamA;
+    let main = 'Equilibrado';
+    let cls = 'warn';
+    if (diffLam >= 0.35){ main = 'Favorito — Local'; cls = 'ok'; }
+    else if (diffLam <= -0.35){ main = 'Favorito — Visitante'; cls = 'danger'; }
+    else { main = 'Equilibrado'; cls = 'warn'; }
+
+    // ofensiva/defensa insights
+    const insights = [];
+    if (attH >= Math.max(attA, 1.4)) insights.push('Local con mayor potencial ofensivo');
+    if (attA >= Math.max(attH, 1.4)) insights.push('Visitante con mayor potencial ofensivo');
+    if (defH <= Math.min(defA, 1.1)) insights.push('Local bastante sólido defensivamente');
+    if (defA <= Math.min(defH, 1.1)) insights.push('Visitante bastante sólido defensivamente');
+
+    // si ambos atacan fuerte
+    if (attH >= 1.4 && attA >= 1.4) insights.unshift('Ambos equipos con tendencia ofensiva — partidos abiertos');
+
+    // si ambos son débiles ofensivamente
+    if (attH < 1.0 && attA < 1.0) insights.unshift('Baja capacidad ofensiva en ambos — pocos goles esperados');
+
+    const description = insights.length ? insights.join(' · ') : 'Sin señales ofensivas/defensivas claras';
+    return {label: main, cls, description, diffLam: diffLam.toFixed(2)};
+  }
+
+  function renderTrend(t){
+    if (!E.trendLabel) return;
+    if (!t){ E.trendLabel.textContent = '—'; if (E.trendDesc){ E.trendDesc.textContent=''; E.trendDesc.setAttribute('aria-hidden','true'); } if (E.trendChip) E.trendChip.innerHTML=''; return; }
+    E.trendLabel.textContent = t.label + (t.diffLam ? ` (Δλ=${t.diffLam})` : '');
+    if (E.trendDesc){ E.trendDesc.textContent = t.description; E.trendDesc.setAttribute('aria-hidden','false'); }
+
+    // chip visual
+    if (E.trendChip){
+      const color = (t.cls === 'ok') ? 'chip ok' : (t.cls === 'warn' ? 'chip warn' : 'chip danger');
+      E.trendChip.innerHTML = `<div class="${color}" style="font-weight:700">${t.label}</div>`;
+    }
+  }
+
   // ===== Forma Reciente con encogimiento =====
   function recentWeighted(pairIds, kSlider){
     const pH = getPct(pairIds.pH);
@@ -806,6 +875,10 @@
     E.lambdas.textContent   = (isFinite(lamH)&&isFinite(lamA)) ? `${lamH.toFixed(3)} • ${lamA.toFixed(3)}` : '—';
     E.lambdaTot.textContent = isFinite(Lam) ? Lam.toFixed(3) : '—';
 
+    // ** NUEVO: renderiza tendencia usando att/def y lambdas **
+    const trend = computeTrend(attH, attA, defH, defA, lamH, lamA);
+    renderTrend(trend);
+
     if (!isFinite(Lam) || Lam<0 || lamH<0 || lamA<0){ renderDashes(); return null; }
 
     const pUnder25 = poissonCDF(2, Lam), pOver25 = 1 - pUnder25;
@@ -822,7 +895,7 @@
       hideO25Signal();
     }
 
-    return {lamH, lamA, Lam, pOver25, pBTTSyes};
+    return {lamH, lamA, Lam, pOver25, pBTTSyes, attH, attA, defH, defA};
   }
 
   // ===== Híbrido O2.5 =====
