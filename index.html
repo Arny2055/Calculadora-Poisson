@@ -5,11 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>BetAGS Pro - Calculadora Analítica de Poisson Doble Corregido</title>
     <style>
-        /* [EL CÓDIGO CSS PERMANECE INALTERADO POR CLARIDAD Y EXTENSIÓN] */
         /* ================================================= */
         /* == CSS: Variables Globales y Estilos Base      == */
         /* ================================================= */
         :root {
+            /* Modo Claro */
             --bg-page: #f0f2f5;
             --bg-card: #ffffff;
             --text-primary: #1d3557;
@@ -22,6 +22,7 @@
             --shadow: 0 6px 15px rgba(0, 0, 0, 0.1);
         }
 
+        /* Modo Oscuro */
         .dark-mode {
             --bg-page: #1a1a2e;
             --bg-card: #2c2c4d;
@@ -53,6 +54,9 @@
             border-radius: 15px;
         }
 
+        /* ================================================= */
+        /* == TIPOGRAFÍA Y ENCABEZADOS                    == */
+        /* ================================================= */
         header { text-align: center; margin-bottom: 40px; }
         header h1 {
             color: var(--accent-main);
@@ -82,6 +86,9 @@
             font-weight: 600;
         }
         
+        /* ================================================= */
+        /* == INPUTS Y PARÁMETROS                         == */
+        /* ================================================= */
         .input-grid {
             display: grid;
             grid-template-columns: 1fr 1fr 1fr;
@@ -149,6 +156,9 @@
         }
         button.calculate-btn:hover { background-color: #c72834; transform: translateY(-2px); }
 
+        /* ================================================= */
+        /* == RESULTADOS: Grid y Metadata                 == */
+        /* ================================================= */
         .metadata-grid {
             display: grid;
             grid-template-columns: repeat(4, 1fr);
@@ -173,6 +183,9 @@
         @media (max-width: 900px) { .results-grid { grid-template-columns: 1fr; } }
         @media (max-width: 600px) { .input-grid, .metadata-grid { grid-template-columns: 1fr; } }
 
+        /* ================================================= */
+        /* == TABLAS Y MATRIZ                             == */
+        /* ================================================= */
         table {
             width: 100%;
             border-collapse: collapse;
@@ -209,6 +222,9 @@
             border: 2px solid var(--accent-main) !important;
         }
 
+        /* ================================================= */
+        /* == SUGERENCIAS (Filtro de Probabilidad)        == */
+        /* ================================================= */
         #value-suggestions {
             min-height: 180px;
             padding: 15px;
@@ -231,6 +247,9 @@
         .advice-text { font-size: 0.9em; color: var(--text-secondary); text-align: center; }
         .no-value-msg { text-align: center; font-style: italic; color: var(--text-secondary); padding-top: 20px; }
         
+        /* ================================================= */
+        /* == FOOTER Y MODO TOGGLE                        == */
+        /* ================================================= */
         footer {
             text-align: center;
             margin-top: 40px;
@@ -311,10 +330,10 @@
                 </div>
                 
                 <div>
-                    <h4>3) Panel de Sugerencias de Valor ($\mathbb{E}[Edge]$)</h4>
-                    <p class="advice-text">**Filtro: Solo $\text{P} \in [60\% - 75\%]$**. Se asume valor si la cuota de mercado es significativamente mayor que la cuota implícita ($\text{Cuota} > 1/P + \text{Margen}$). **El margen $\mathbb{E}[Edge]$ es fijado en 0.10**.</p>
+                    <h4>3) Pronósticos Estadísticos Filtrados</h4>
+                    <p class="advice-text">Se muestran mercados cuya **Probabilidad Predicha (P)** está estrictamente en el rango **$60\% \text{ a } 75\%$**.</p>
                     <div id="value-suggestions">
-                        <p class="no-value-msg">Ejecute la simulación para obtener análisis de valor.</p>
+                        <p class="no-value-msg">Ejecute la simulación para obtener pronósticos que cumplan el filtro de probabilidad.</p>
                     </div>
                 </div>
             </div>
@@ -406,7 +425,6 @@
         const prob00_orig = normalizedProbMatrix[0][0];
         const prob11_orig = normalizedProbMatrix[1][1];
         
-        // Evitar división por cero si la suma es 0 (caso irreal con inputs típicos)
         const sumDraws_Orig = prob00_orig + prob11_orig;
         if (sumDraws_Orig > 0) {
             normalizedProbMatrix[0][0] += CORR_FACTOR * (prob00_orig / sumDraws_Orig);
@@ -420,7 +438,6 @@
         let finalProbMatrix = [];
         let finalTotalProbCheck = 0;
 
-        // El factor de reducción solo se aplica si la suma original de no-empates no es cero.
         const reductionFactor = (sumNonDraws_Original > 0) ? sumNonDraws_Required / sumNonDraws_Original : 1.0; 
 
         for (let i = 0; i <= maxGoals; i++) {
@@ -491,17 +508,19 @@
         const tableBody = document.querySelector('#prob-odds-table tbody');
         tableBody.innerHTML = '';
         
-        let valueSuggestionsHTML = '';
-        let hasValue = false;
+        let suggestionsHTML = '';
+        let hasSuggestions = false;
         
         const MIN_PROB = 0.60;
         const MAX_PROB = 0.75;
-        const EDGE_MARGIN = 0.10; 
+        
+        // En la tabla principal, mantenemos la Cuota Mínima de Valor solo como referencia matemática.
+        const REFERENCE_EDGE_MARGIN = 0.10; 
         
         markets.forEach(m => {
             const probPercent = (m.prob * 100).toFixed(2);
             const impliedOdd = (1 / m.prob).toFixed(2);
-            const minOddValue = (1 / m.prob + EDGE_MARGIN).toFixed(2); 
+            const minOddValue = (1 / m.prob + REFERENCE_EDGE_MARGIN).toFixed(2); 
 
             // Mostrar todos los resultados en la tabla principal
             tableBody.innerHTML += `
@@ -513,27 +532,16 @@
                 </tr>
             `;
             
-            // 6.3 Sugerencias de Valor (Filtrado por Probabilidad)
-            
-            // FILTRO CLAVE: Solo si P está en el rango [60%, 75%]
+            // 6.3 Sugerencias (Filtro por Probabilidad Pura)
             if (m.prob >= MIN_PROB && m.prob <= MAX_PROB) {
-                // Simulación de cuota de mercado (Para fines de demostración de "Edge")
-                let simulatedOdd = 0;
-                // Si la cuota implicita es 1.50 (66.6%), simulamos que el mercado ofrece 1.80 (55.5%), indicando valor
-                if (m.prob > 0.65) simulatedOdd = (impliedOdd + 0.25);
-                else if (m.prob >= 0.60) simulatedOdd = (impliedOdd + 0.35);
-
-                // Criterio final de Edge: Cuota simulada > Cuota mínima requerida
-                if (simulatedOdd > 0 && simulatedOdd > parseFloat(minOddValue)) {
-                    valueSuggestionsHTML += `<p class="value-tip">✅ ¡Edge Detectado en **${m.name}**! P: ${probPercent}% (Impl.: $${impliedOdd}). Si el mercado ofrece **$${simulatedOdd.toFixed(2)}**, tiene **valor**.</p>`;
-                    hasValue = true;
-                }
+                suggestionsHTML += `<p class="value-tip">🎯 **${m.name}**: Probabilidad Predicha = ${probPercent}% (Cuota Implícita: $${impliedOdd})</p>`;
+                hasSuggestions = true;
             }
         });
         
-        document.getElementById('value-suggestions').innerHTML = hasValue 
-            ? valueSuggestionsHTML 
-            : `<p class="no-value-msg">No se detectó un Edge significativo ($\text{Cuota} > 1/P + 0.10$) en el rango de probabilidad **$60\% \text{ a } 75\%$**. Ajuste $\rho$ o los parámetros $\lambda$ para encontrar oportunidades.</p>`;
+        document.getElementById('value-suggestions').innerHTML = hasSuggestions 
+            ? suggestionsHTML 
+            : `<p class="no-value-msg">No se detectaron pronósticos cuya probabilidad predicha esté en el rango **$60\% \text{ a } 75\%$**.</p>`;
         
 
         // 6.4 Matriz Visual de Marcadores
