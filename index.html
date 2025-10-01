@@ -22,6 +22,7 @@
             --shadow: 0 6px 15px rgba(0, 0, 0, 0.1);
             --bg-param-group: var(--bg-page);
             --ht-color: #1a759f; /* Color específico para HT (Azul fuerte) */
+            --highlight-range: #fff3cd; /* Color para resaltar mercados 60-75% */
         }
 
         /* ================================================= */
@@ -40,6 +41,7 @@
             --warning-color: #FFC107;       
             --bg-param-group: #282828;      
             --ht-color: #90e0ef;
+            --highlight-range: #4d431c; /* Color oscuro para resaltar */
         }
         
         body {
@@ -65,7 +67,6 @@
         /* == GRIDS DE ENTRADA Y AGRUPACIONES             == */
         /* ================================================= */
 
-        /* Grid principal para todos los parámetros (FT y HT) */
         #parameters-master-grid {
             display: grid;
             grid-template-columns: 1fr 1fr; /* 2 columnas principales */
@@ -73,14 +74,12 @@
             margin-bottom: 30px;
         }
 
-        /* Contenedores para parámetros específicos */
         .parameters-container {
             border: 1px solid var(--border-color);
             border-radius: 10px;
             padding: 20px;
         }
 
-        /* Títulos de sección de parámetros */
         .parameters-container h3 {
             margin-top: 0;
             padding-bottom: 10px;
@@ -89,13 +88,11 @@
             font-size: 1.8em;
         }
 
-        /* Estilos específicos para la sección HT */
         #ht-params-container h3 {
             border-bottom-color: var(--ht-color);
             color: var(--ht-color);
         }
 
-        /* Grid interno para GL y las Fuerzas */
         .input-param-grid {
             display: grid;
             grid-template-columns: 1fr 1fr 1fr;
@@ -125,7 +122,6 @@
             margin-bottom: 8px;
         }
 
-        /* Estilos para el botón principal y correlación */
         .correlation-factor {
             margin-top: 20px;
             padding: 15px;
@@ -153,7 +149,7 @@
         }
 
         /* ================================================= */
-        /* == GRIDS DE RESULTADOS                         == */
+        /* == GRIDS DE RESULTADOS Y RESALTADO             == */
         /* ================================================= */
         
         .results-master-grid {
@@ -162,14 +158,12 @@
             gap: 30px;
         }
         
-        /* Contenedor principal de tablas de resultados (1X2 & OU) */
         .results-tables-container {
             display: grid;
             grid-template-rows: auto auto; /* FT arriba, HT abajo */
             gap: 30px;
         }
 
-        /* Metadatos */
         .metadata-grid {
             display: grid;
             grid-template-columns: repeat(5, 1fr); /* 5 Lambdas */
@@ -203,29 +197,40 @@
             background-color: var(--ht-color);
             color: var(--bg-page);
         }
-        
+
+        /* Resaltado de mercados 60% - 75% */
+        tr.highlighted-market td {
+            background-color: var(--highlight-range);
+            font-weight: 600;
+            border-color: var(--accent-main);
+        }
+        /* Resaltado de mercados 60% - 75% en tabla HT */
+        .table-ht tr.highlighted-market td {
+            border-color: var(--ht-color);
+        }
+
         /* ================================================= */
         /* == MEDIA QUERIES (RESPONSIVE)                  == */
         /* ================================================= */
         @media (max-width: 1024px) {
             #parameters-master-grid {
-                grid-template-columns: 1fr; /* Una columna para FT y HT en pantallas medianas */
+                grid-template-columns: 1fr; 
             }
             .results-master-grid {
-                grid-template-columns: 1fr; /* Matriz debajo de las tablas */
+                grid-template-columns: 1fr; 
             }
             .metadata-grid {
-                grid-template-columns: 1fr 1fr; /* Dos columnas para Lambdas */
+                grid-template-columns: 1fr 1fr; 
             }
         }
 
         @media (max-width: 600px) {
             #calculator-container { padding: 15px; }
             .input-param-grid {
-                grid-template-columns: 1fr; /* Una columna para GL y las Fuerzas en móviles */
+                grid-template-columns: 1fr; 
             }
             .metadata-grid {
-                grid-template-columns: 1fr; /* Una columna para Lambdas en móviles */
+                grid-template-columns: 1fr; 
             }
         }
     </style>
@@ -357,6 +362,7 @@
                             </thead>
                             <tbody></tbody>
                         </table>
+                        <p style="font-size: 0.85em; margin-top: 10px; color: var(--text-primary);">**Mercados en 60%-75% resaltados en amarillo y priorizados.**</p>
                     </div>
                     
                     <div>
@@ -367,7 +373,7 @@
                             </thead>
                             <tbody></tbody>
                         </table>
-                        <p style="font-size: 0.9em; color: var(--text-secondary); margin-top: 10px;">Los mercados HT se calculan con $\lambda$s específicas para la primera mitad.</p>
+                        <p style="font-size: 0.85em; margin-top: 10px; color: var(--text-primary);">**Mercados HT en 60%-75% resaltados y priorizados.**</p>
                     </div>
                 </div>
                 
@@ -405,6 +411,8 @@
     window.leagueData = null; 
     const MATCHES_LIMIT = 10; 
     const DECAY_FACTOR = 0.95; 
+    const PROBABILITY_MIN = 0.60; // 60%
+    const PROBABILITY_MAX = 0.75; // 75%
 
     // --- Funciones de Utilidad y Persistencia ---
     
@@ -443,7 +451,6 @@
 
     // --- Lógica de Carga y Procesamiento de JSON ---
 
-    // Función para leer y parsear el archivo JSON (EXTRAE FT y HT)
     function readJSONFile() {
         const fileInput = document.getElementById('json-file-input');
         const statusElement = document.getElementById('data-status');
@@ -470,12 +477,10 @@
                     const localTeam = matchParts[0] ? matchParts[0].trim() : 'Desconocido L';
                     const visitantTeam = matchParts[1] ? matchParts[1].trim() : 'Desconocido V';
 
-                    // Goles Tiempo Final (FT)
                     const resultParts = match['Result FT'] ? match['Result FT'].split('-') : [];
                     const localGoals = parseInt(resultParts[0]) || 0;
                     const visitantGoals = parseInt(resultParts[1]) || 0;
                     
-                    // Goles Primer Tiempo (HT)
                     const htResultParts = match['Result HT'] ? match['Result HT'].split('-') : [];
                     const localGoalsHT = parseInt(htResultParts[0]) || 0;
                     const visitantGoalsHT = parseInt(htResultParts[1]) || 0;
@@ -587,7 +592,6 @@
         return weightTotal > 0 ? weightedSum / weightTotal : 0;
     }
     
-    // Función de cálculo principal de Parámetros (FT y HT)
     function calculateAndSetParameters() {
         const teamL = document.getElementById('team_local').value;
         const teamV = document.getElementById('team_visitant').value;
@@ -688,7 +692,6 @@
     // --- Lógica del Modelo de Poisson para ambas mitades ---
 
     function calculatePredictions() {
-        // 1. OBTENER PARÁMETROS FT Y HT
         const ids = [
             'gl_l', 'gl_v', 'gf_l', 'gc_l', 'gf_v', 'gc_v', 
             'gl_l_ht', 'gl_v_ht', 'gf_l_ht', 'gc_l_ht', 'gf_v_ht', 'gc_v_ht', 
@@ -703,20 +706,15 @@
             }
         }
         
-        // 2. CÁLCULO DE TASAS ESPERADAS (Lambdas FT y HT)
         const lambdaL_FT = (p.gf_l / p.gl_l) * (p.gc_v / p.gl_v) * p.gl_l; 
         const lambdaV_FT = (p.gf_v / p.gl_v) * (p.gc_l / p.gl_l) * p.gl_v; 
         
         const lambdaL_HT = (p.gf_l_ht / p.gl_l_ht) * (p.gc_v_ht / p.gl_v_ht) * p.gl_l_ht; 
         const lambdaV_HT = (p.gf_v_ht / p.gl_v_ht) * (p.gc_l_ht / p.gl_l_ht) * p.gl_v_ht; 
 
-        // 3. CORRER SIMULACIÓN FT (Con Correlación y Matriz)
         const ft_results = runPoissonSimulation(lambdaL_FT, lambdaV_FT, p.correlation_factor);
-        
-        // 4. CORRER SIMULACIÓN HT (Sin Correlación)
         const ht_results = runPoissonSimulation(lambdaL_HT, lambdaV_HT, 0.0); 
 
-        // 5. ACTUALIZAR INTERFAZ (DOM)
         updateFTUI(ft_results, lambdaL_FT, lambdaV_FT);
         updateHTUI(ht_results, lambdaL_HT, lambdaV_HT);
     }
@@ -795,12 +793,12 @@
         };
     }
 
+    // ACTUALIZADA: Con filtro y ordenamiento 60-75%
     function updateFTUI(results, lambdaL, lambdaV) {
         const metadata = {
             lambdaL: lambdaL.toFixed(3),
             lambdaV: lambdaV.toFixed(3),
             probX: (results.probX * 100).toFixed(2),
-            finalSum: results.matrix.reduce((sum, row) => sum + row.reduce((s, p) => s + p, 0), 0).toFixed(8)
         };
 
         const metaOutput = document.getElementById('metadata-output');
@@ -812,8 +810,7 @@
             <div class="metadata-box ht-lambda"><span>$\lambda_{\text{Visitante, HT}}$</span><p id="lambdaV_HT_display">--</p></div>
         `;
         
-        // Tabla FT
-        const markets = [
+        const rawMarkets = [
             { name: '1 (Local Gana)', prob: results.prob1, type: 'win' },
             { name: 'X (Empate)', prob: results.probX, type: 'draw' },
             { name: '2 (Visitante Gana)', prob: results.prob2, type: 'loss' },
@@ -825,17 +822,37 @@
             { name: 'Under 3.5 Goles', prob: 1 - results.probOU35, type: 'under' }
         ];
 
+        // --- Lógica de Priorización ---
+        const highlightedMarkets = [];
+        const otherMarkets = [];
+
+        rawMarkets.forEach(m => {
+            if (m.prob >= PROBABILITY_MIN && m.prob <= PROBABILITY_MAX) {
+                highlightedMarkets.push(m);
+            } else {
+                otherMarkets.push(m);
+            }
+        });
+
+        // Ordenar ambos grupos de mayor a menor probabilidad
+        highlightedMarkets.sort((a, b) => b.prob - a.prob);
+        otherMarkets.sort((a, b) => b.prob - a.prob);
+        
+        const finalMarkets = [...highlightedMarkets, ...otherMarkets];
+
+        // --- Generación de HTML de la tabla ---
         const tableBody = document.querySelector('#prob-odds-table-ft tbody');
         tableBody.innerHTML = '';
         const REFERENCE_EDGE_MARGIN = 0.10; 
         
-        markets.forEach(m => {
+        finalMarkets.forEach(m => {
             const probPercent = (m.prob * 100).toFixed(2);
             const impliedOdd = (1 / m.prob).toFixed(2);
             const minOddValue = (1 / m.prob + REFERENCE_EDGE_MARGIN).toFixed(2); 
+            const isHighlighted = m.prob >= PROBABILITY_MIN && m.prob <= PROBABILITY_MAX;
 
             tableBody.innerHTML += `
-                <tr>
+                <tr class="${isHighlighted ? 'highlighted-market' : ''}">
                     <td>${m.name}</td>
                     <td>${probPercent}%</td>
                     <td>$${impliedOdd}</td>
@@ -870,12 +887,12 @@
         }
     }
 
+    // ACTUALIZADA: Con filtro y ordenamiento 60-75% para HT
     function updateHTUI(results, lambdaL, lambdaV) {
-        // Actualizar lambdas HT en los metadatos
         document.getElementById('lambdaL_HT_display').textContent = lambdaL.toFixed(3);
         document.getElementById('lambdaV_HT_display').textContent = lambdaV.toFixed(3);
 
-        const marketsHT = [
+        const rawMarketsHT = [
             { name: 'Over 0.5 HT', prob: results.probOU05 },
             { name: 'Under 0.5 HT', prob: 1 - results.probOU05 },
             { name: 'Over 1.5 HT', prob: results.probOU15 },
@@ -884,15 +901,35 @@
             { name: '0-0 HT (Exacto)', prob: results.matrix[0][0] }
         ];
 
+        // --- Lógica de Priorización ---
+        const highlightedMarketsHT = [];
+        const otherMarketsHT = [];
+
+        rawMarketsHT.forEach(m => {
+            if (m.prob >= PROBABILITY_MIN && m.prob <= PROBABILITY_MAX) {
+                highlightedMarketsHT.push(m);
+            } else {
+                otherMarketsHT.push(m);
+            }
+        });
+
+        // Ordenar ambos grupos de mayor a menor probabilidad
+        highlightedMarketsHT.sort((a, b) => b.prob - a.prob);
+        otherMarketsHT.sort((a, b) => b.prob - a.prob);
+        
+        const finalMarketsHT = [...highlightedMarketsHT, ...otherMarketsHT];
+        
+        // --- Generación de HTML de la tabla HT ---
         const tableBodyHT = document.querySelector('#prob-odds-table-ht tbody');
         tableBodyHT.innerHTML = '';
         
-        marketsHT.forEach(m => {
+        finalMarketsHT.forEach(m => {
             const probPercent = (m.prob * 100).toFixed(2);
             const impliedOdd = (1 / m.prob).toFixed(2);
-            
+            const isHighlighted = m.prob >= PROBABILITY_MIN && m.prob <= PROBABILITY_MAX;
+
             tableBodyHT.innerHTML += `
-                <tr>
+                <tr class="${isHighlighted ? 'highlighted-market' : ''}">
                     <td>${m.name}</td>
                     <td>${probPercent}%</td>
                     <td>$${impliedOdd}</td>
