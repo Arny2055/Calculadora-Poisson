@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>BetAGS Pro - Calculadora Analítica de Poisson Simple (FT & HT)</title>
+    <title>BetAGS Pro - Calculadora Analítica de Poisson Simple (Solo Ataque) con Alerta de Muestra</title>
     <style>
         /* ================================================= */
         /* == CSS: Variables Globales y Estilos Base      == */
@@ -18,11 +18,11 @@
             --accent-main: #e63946; /* Rojo */
             --accent-alt: #457b9d;  /* Azul Suave */
             --success-color: #2a9d8f;
-            --warning-color: #ffc300;
+            --warning-color: #ffc300; /* Amarillo/Naranja para advertencias */
             --shadow: 0 6px 15px rgba(0, 0, 0, 0.1);
             --bg-param-group: var(--bg-page);
-            --ht-color: #1a759f; /* Color específico para HT (Azul fuerte) */
-            --highlight-range: #fff3cd; /* Color para resaltar mercados 60-75% */
+            --ht-color: #1a759f; 
+            --highlight-range: #fff3cd;
         }
 
         /* ================================================= */
@@ -41,7 +41,7 @@
             --warning-color: #FFC107;       
             --bg-param-group: #282828;      
             --ht-color: #90e0ef;
-            --highlight-range: #4d431c; /* Color oscuro para resaltar */
+            --highlight-range: #4d431c; 
         }
         
         body {
@@ -64,7 +64,7 @@
         }
         
         /* ================================================= */
-        /* == GRIDS DE ENTRADA Y AGRUPACIONES             == */
+        /* == GRIDS Y BOTONES                             == */
         /* ================================================= */
 
         .input-param-grid {
@@ -74,8 +74,6 @@
             margin-top: 15px;
         }
         
-        /* Botón de Parámetros eliminado. Botón de Simulación oculto al inicio. */
-        #btn-calculate-params { display: none; }
         #btn-calculate-predictions {
             display: none; 
             margin-top: 25px;
@@ -99,7 +97,7 @@
         }
 
         /* ================================================= */
-        /* == GRIDS DE RESULTADOS Y RESALTADO             == */
+        /* == RESULTADOS Y METADATA                       == */
         /* ================================================= */
         
         .results-master-grid {
@@ -127,13 +125,12 @@
             text-align: center;
             border-left: 5px solid var(--accent-alt);
         }
-        /* Estilos LaTeX para el display de Lambdas */
+        
         .metadata-box span { font-size: 0.8em; color: var(--text-secondary); }
         .metadata-box p { margin: 0; font-size: 1.1em; font-weight: 700; color: var(--accent-main); }
         .metadata-box.ht-lambda { border-left-color: var(--ht-color); }
         .metadata-box.ht-lambda p { color: var(--ht-color); }
 
-        /* Tablas */
         table {
             width: 100%;
             border-collapse: collapse;
@@ -149,20 +146,22 @@
             color: var(--bg-page);
         }
 
-        /* Resaltado de mercados 60% - 75% */
         tr.highlighted-market td {
             background-color: var(--highlight-range);
             font-weight: 600;
             border-color: var(--accent-main);
         }
-        /* Resaltado de mercados 60% - 75% en tabla HT */
-        .table-ht tr.highlighted-market td {
-            border-color: var(--ht-color);
-        }
         
         /* Ocultar el contenedor de inputs ocultos */
         #hidden-inputs-container {
             display: none;
+        }
+
+        /* Estilos específicos para la matriz de scores */
+        .max-prob {
+            background-color: var(--accent-main) !important;
+            color: var(--bg-card);
+            font-weight: bold;
         }
 
         /* ================================================= */
@@ -524,7 +523,7 @@
     }
 
 
-    // FUNCIÓN DE CÁLCULO DE PARÁMETROS (SOLO GL y GF)
+    // FUNCIÓN DE CÁLCULO DE PARÁMETROS (SOLO GL y GF) CON VERIFICACIÓN
     function calculateAndSetParameters() {
         const teamL = document.getElementById('team_local').value;
         const teamV = document.getElementById('team_visitant').value;
@@ -548,13 +547,10 @@
         // --- 1. CÁLCULO DE LA MEDIA ESTABLE DE LA LIGA (GL - FT y HT) ---
         let totalLocalGoals = 0; let totalVisitantGoals = 0; let totalLocalGoalsHT = 0; let totalVisitantGoalsHT = 0;
         allMatchesInLeague.forEach(m => {
-            // Usamos el total de Goles Marcados (por Local y Visitante) como la media GL para la corrección.
             totalLocalGoals += m.LocalGoals; totalVisitantGoals += m.VisitantGoals;
             totalLocalGoalsHT += m.LocalGoalsHT; totalVisitantGoalsHT += m.VisitantGoalsHT;
         });
         
-        // **Nota Importante:** Para la corrección simple de ataque, usamos los promedios de Goles Marcados por Locales (GL_L) y Visitantes (GL_V) 
-        // de toda la liga como base para la predicción, tal y como se sugiere en el modelo simple.
         const GL_L_AVG = totalLocalGoals / allMatchesInLeague.length;
         const GL_V_AVG = totalVisitantGoals / allMatchesInLeague.length;
         const GL_L_HT_AVG = totalLocalGoalsHT / allMatchesInLeague.length;
@@ -563,7 +559,17 @@
 
         const teamLHomeMatches = allMatchesInLeague.filter(m => m.LocalTeam === teamL);
         const teamVAwayMatches = allMatchesInLeague.filter(m => m.VisitantTeam === teamV);
+        
+        // --- VERIFICACIÓN DE PARTIDOS JUGADOS ---
+        let warningMessage = "";
 
+        if (teamLHomeMatches.length < MATCHES_LIMIT) {
+             warningMessage += `⚠️ Local (**${teamL}**) solo tiene ${teamLHomeMatches.length} partidos en casa. `;
+        }
+        if (teamVAwayMatches.length < MATCHES_LIMIT) {
+             warningMessage += `⚠️ Visitante (**${teamV}**) solo tiene ${teamVAwayMatches.length} partidos fuera.`;
+        }
+        
         // --- 2. CÁLCULO DE FUERZAS PONDERADAS DE ATAQUE (GF - FT y HT) ---
         const gflGoals = teamLHomeMatches.map(m => m.LocalGoals); 
         const gfvGoals = teamVAwayMatches.map(m => m.VisitantGoals); 
@@ -576,7 +582,6 @@
         const GF_V_HT = calculateWeightedAverage(gfvGoalsHT); 
         
         // 3. Almacenar resultados en Inputs Ocultos
-        // Almacenamos GF y GL de la liga (GL_L_AVG y GL_V_AVG)
         document.getElementById('gl_l').value = GL_L_AVG;
         document.getElementById('gl_v').value = GL_V_AVG;
         document.getElementById('gf_l').value = GF_L;
@@ -587,23 +592,27 @@
         document.getElementById('gf_l_ht').value = GF_L_HT;
         document.getElementById('gf_v_ht').value = GF_V_HT;
         
-        // Los GC se dejan con su cálculo anterior o un valor por defecto, aunque NO SE USARÁN para la lambda
+        // Asignar valores a GC (no se usan en la lambda, pero se mantienen para compatibilidad)
         document.getElementById('gc_v').value = 1.0; 
         document.getElementById('gc_l').value = 1.0; 
         document.getElementById('gc_v_ht').value = 0.5; 
         document.getElementById('gc_l_ht').value = 0.5; 
 
         
-        statusElement.textContent = `✅ Parámetros internos (GF/GL) para ${teamL} vs ${teamV} calculados. Pulsa 'Iniciar Simulación Estocástica'.`;
-        statusElement.style.color = '#2a9d8f';
+        if (warningMessage) {
+            statusElement.textContent = warningMessage + " Los parámetros se calcularon con la muestra disponible. Pulsa 'Iniciar Simulación Estocástica'.";
+            statusElement.style.color = '#e63946'; // Rojo para advertencia
+        } else {
+            statusElement.textContent = `✅ Parámetros internos (GF/GL, Muestra: ${MATCHES_LIMIT} partidos) para ${teamL} vs ${teamV} calculados. Pulsa 'Iniciar Simulación Estocástica'.`;
+            statusElement.style.color = '#2a9d8f';
+        }
         
         document.getElementById('btn-calculate-predictions').style.display = 'block';
     }
 
 
-    // FUNCIÓN DE SIMULACIÓN Y MUESTRA DE RESULTADOS (MODIFICADA PARA USAR SOLO GF/GL)
+    // FUNCIÓN DE SIMULACIÓN Y MUESTRA DE RESULTADOS (Se mantiene igual, solo usa GF/GL)
     function calculatePredictions() {
-        // Leemos solo los GF y GL necesarios
         const p = {
             gl_l: parseFloat(document.getElementById('gl_l').value),
             gl_v: parseFloat(document.getElementById('gl_v').value),
@@ -616,17 +625,13 @@
             correlation_factor: parseFloat(document.getElementById('correlation_factor').value)
         };
         
-        // Verificación básica
         if (p.gl_l <= 0 || p.gl_v <= 0 || p.gl_l_ht <= 0 || p.gl_v_ht <= 0) {
              document.getElementById('data-status').textContent = "Error: Las medias de goles de la liga (GL) no pueden ser cero. Revisa los datos.";
              document.getElementById('data-status').style.color = '#e63946';
              return;
         }
 
-        // 1. CÁLCULO DE LAMBDAS (Poisson Simple Corregido SOLO por Ataque)
-        // FT: Lambda L = (GF_L / GL_L_AVG) * GL_V_AVG 
-        // FT: Lambda V = (GF_V / GL_V_AVG) * GL_L_AVG 
-        // Simplificado:
+        // CÁLCULO DE LAMBDAS (Poisson Simple Corregido SOLO por Ataque)
         const lambdaL_FT = (p.gf_l / p.gl_l) * p.gl_v; 
         const lambdaV_FT = (p.gf_v / p.gl_v) * p.gl_l; 
         
@@ -645,8 +650,10 @@
         updateHTUI(ht_results, lambdaL_HT, lambdaV_HT);
         
         document.getElementById('output-section').style.display = 'block';
-        document.getElementById('data-status').textContent = "✅ Simulación de Poisson Simple completada (Solo Ataque). Resultados en la sección inferior.";
-        document.getElementById('data-status').style.color = '#2a9d8f';
+        if (!document.getElementById('data-status').textContent.includes('Advertencia')) {
+            document.getElementById('data-status').textContent = "✅ Simulación de Poisson Simple completada. Resultados en la sección inferior.";
+            document.getElementById('data-status').style.color = '#2a9d8f';
+        }
     }
 
     // --- FUNCIONES DE SIMULACIÓN Y ACTUALIZACIÓN DE UI (Se mantienen iguales) ---
@@ -741,8 +748,8 @@
             <div class="metadata-box"><span>$\lambda_{\\text{Local, FT}}$</span><p>${lambdaL.toFixed(3)}</p></div>
             <div class="metadata-box"><span>$\lambda_{\\text{Visitante, FT}}$</span><p>${lambdaV.toFixed(3)}</p></div>
             <div class="metadata-box"><span>$\text{P}(\\text{Empate})$ Corregida</span><p>${(results.probX * 100).toFixed(2)}%</p></div>
-            <div class="metadata-box ht-lambda"><span>$\lambda_{\\text{Local, HT}}$</span><p id="lambdaL_HT_display">--</p></div>
-            <div class="metadata-box ht-lambda"><span>$\lambda_{\\text{Visitante, HT}}$</span><p id="lambdaV_HT_display">--</p></div>
+            <div class="metadata-box ht-lambda"><span>$\lambda_{\\text{Local, HT}}$</span><p id="lambdaL_HT_display">${lambdaL.toFixed(3)}</p></div>
+            <div class="metadata-box ht-lambda"><span>$\lambda_{\\text{Visitante, HT}}$</span><p id="lambdaV_HT_display">${lambdaV.toFixed(3)}</p></div>
         `;
         
         const rawMarkets = [
