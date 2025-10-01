@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>BetAGS Pro - Calculadora Analítica de Poisson Doble Corregido</title>
     <style>
+        /* ... (CSS MODO OSCURO Y BASE MANTENIDO) ... */
         /* ================================================= */
         /* == CSS: Variables Globales y Estilos Base      == */
         /* ================================================= */
@@ -130,7 +131,7 @@
             font-size: 0.9em;
         }
 
-        input[type="number"], input[type="text"] {
+        input[type="number"], input[type="text"], select {
             padding: 8px;
             border: 1px solid var(--border-color);
             border-radius: 4px;
@@ -181,7 +182,7 @@
             border: none;
             padding: 0;
         }
-        #team-inputs {
+        #team-selector-container {
             display: grid;
             grid-template-columns: 1fr 1fr;
             gap: 20px;
@@ -310,26 +311,35 @@
 
     <main>
         <section id="data-load-section">
-            <h3>📂 Carga y Configuración de Datos de Liga</h3>
-            <p style="font-size: 0.9em; color: var(--text-secondary);">Cargue un archivo JSON con los datos de partidos para calcular las fuerzas y medias automáticamente.</p>
+            <h3>📂 Carga, Filtro y Selección de Datos de Liga</h3>
+            <p style="font-size: 0.9em; color: var(--text-secondary);">Cargue un archivo JSON para calcular las fuerzas y medias automáticamente. Asegúrese de que el formato coincida con el ejemplo proporcionado.</p>
 
             <div class="input-pair">
                 <label for="json-file-input">Seleccionar archivo JSON de partidos:</label>
-                <input type="file" id="json-file-input" accept=".json">
+                <input type="file" id="json-file-input" accept=".json" onchange="readJSONFile()">
             </div>
 
-            <div id="team-inputs">
+            <hr style="margin-top: 15px; border-color: var(--border-color);">
+
+            <div class="input-pair">
+                <label for="league-select">Seleccionar Liga:</label>
+                <select id="league-select" onchange="populateTeamSelectors()">
+                    <option value="">-- Cargar Archivo Primero --</option>
+                </select>
+            </div>
+
+            <div id="team-selector-container">
                 <div class="input-pair">
                     <label for="team_local">Equipo Local:</label>
-                    <input type="text" id="team_local" value="Equipo A">
+                    <select id="team_local" disabled onchange="updateParametersDisplay()"></select>
                 </div>
                 <div class="input-pair">
                     <label for="team_visitant">Equipo Visitante:</label>
-                    <input type="text" id="team_visitant" value="Equipo B">
+                    <select id="team_visitant" disabled onchange="updateParametersDisplay()"></select>
                 </div>
             </div>
 
-            <button class="load-btn" onclick="loadLeagueData()">⚙️ Calcular Parámetros desde JSON</button>
+            <button class="load-btn" onclick="calculateAndSetParameters()">⚙️ Calcular Parámetros de la Liga y Equipos Seleccionados</button>
             <p id="data-status" style="text-align: center; margin-top: 15px; font-size: 0.9em; color: var(--success-color);">Estatus: Esperando carga de archivo.</p>
         </section>
 
@@ -447,7 +457,7 @@
     window.leagueData = null; 
     const MATCHES_LIMIT = 10; // Límite de partidos a considerar
 
-    // --- Persistencia del Modo Oscuro/Claro ---
+    // --- Funciones de Utilidad y Persistencia ---
     
     function applyMode(mode) {
         const body = document.body;
@@ -467,119 +477,6 @@
         applyMode(isDark ? 'light' : 'dark');
     }
 
-    // --- Procesamiento de Datos y Cálculo de Parámetros ---
-
-    async function loadLeagueData() {
-        const fileInput = document.getElementById('json-file-input');
-        const statusElement = document.getElementById('data-status');
-
-        if (fileInput.files.length === 0) {
-            statusElement.textContent = "Error: Selecciona un archivo JSON primero.";
-            statusElement.style.color = '#e63946'; // Rojo
-            return;
-        }
-
-        const file = fileInput.files[0];
-        const reader = new FileReader();
-
-        statusElement.textContent = "Cargando y procesando archivo...";
-        statusElement.style.color = '#ffc300'; // Amarillo
-
-        reader.onload = async (event) => {
-            try {
-                const data = JSON.parse(event.target.result);
-                if (!Array.isArray(data)) throw new Error("El archivo no es un arreglo de partidos.");
-
-                // 1. Almacenar y ordenar los datos por fecha (del más reciente al más antiguo)
-                window.leagueData = data.sort((a, b) => new Date(b.Date) - new Date(a.Date));
-                
-                // 2. Calcular y cargar los parámetros en los inputs
-                calculateAndSetParameters();
-
-                statusElement.textContent = `¡Éxito! ${data.length} partidos cargados y parámetros calculados.`;
-                statusElement.style.color = '#2a9d8f'; // Verde
-            } catch (e) {
-                statusElement.textContent = `Error al procesar JSON: ${e.message}`;
-                statusElement.style.color = '#e63946'; // Rojo
-                window.leagueData = null;
-            }
-        };
-        reader.readAsText(file);
-    }
-    
-    function calculateAndSetParameters() {
-        if (!window.leagueData || window.leagueData.length === 0) {
-            alert("No hay datos de liga cargados. Usando valores manuales.");
-            return;
-        }
-
-        const teamL = document.getElementById('team_local').value;
-        const teamV = document.getElementById('team_visitant').value;
-        
-        if (!teamL || !teamV) {
-            alert("Introduce los nombres de los equipos local y visitante.");
-            return;
-        }
-
-        const allMatches = window.leagueData;
-        
-        // --- Cálculo de la Media Global de la Liga (Últimos 10 partidos) ---
-        const lastLeagueMatches = allMatches.slice(0, MATCHES_LIMIT);
-        
-        let totalLocalGoals = 0;
-        let totalVisitantGoals = 0;
-        
-        lastLeagueMatches.forEach(m => {
-            totalLocalGoals += m.LocalGoals;
-            totalVisitantGoals += m.VisitantGoals;
-        });
-
-        const GL_L = totalLocalGoals / lastLeagueMatches.length;
-        const GL_V = totalVisitantGoals / lastLeagueMatches.length;
-        
-        // --- Filtrar y sumar para los equipos específicos (Últimos 10 partidos en su rol) ---
-        
-        // Local: Goles a Favor (Local), Goles en Contra (Visitante)
-        const teamLHomeMatches = allMatches.filter(m => m.LocalTeam === teamL).slice(0, MATCHES_LIMIT);
-        const teamVAwayMatches = allMatches.filter(m => m.VisitantTeam === teamV).slice(0, MATCHES_LIMIT);
-
-        // Visitante: Goles a Favor (Visitante), Goles en Contra (Local)
-        const teamLAwayMatches = allMatches.filter(m => m.VisitantTeam === teamL).slice(0, MATCHES_LIMIT);
-        const teamVHomeMatches = allMatches.filter(m => m.LocalTeam === teamV).slice(0, MATCHES_LIMIT);
-        
-        // Sumas
-        const sumGFL = teamLHomeMatches.reduce((sum, m) => sum + m.LocalGoals, 0); // Local Goles Propios (GF_L)
-        const sumGCV = teamVAwayMatches.reduce((sum, m) => sum + m.LocalGoals, 0);  // Rivales vs V (GC_V)
-        
-        const sumGFV = teamVAwayMatches.reduce((sum, m) => sum + m.VisitantGoals, 0); // Visitante Goles Propios (GF_V)
-        const sumGCL = teamLHomeMatches.reduce((sum, m) => sum + m.VisitantGoals, 0); // Rivales vs L (GC_L)
-        
-        // Promedios
-        const countGFL = teamLHomeMatches.length > 0 ? teamLHomeMatches.length : 1;
-        const countGCV = teamVAwayMatches.length > 0 ? teamVAwayMatches.length : 1;
-        const countGFV = teamVAwayMatches.length > 0 ? teamVAwayMatches.length : 1; // Debe ser el mismo que countGCV
-        const countGCL = teamLHomeMatches.length > 0 ? teamLHomeMatches.length : 1; // Debe ser el mismo que countGFL
-
-        // Cálculo Final de Parámetros
-        const GF_L = sumGFL / countGFL;
-        const GC_V = sumGCV / countGCV;
-        const GF_V = sumGFV / countGFV;
-        const GC_L = sumGCL / countGCL;
-
-        // 3. Actualizar Inputs
-        document.getElementById('gl_l').value = GL_L.toFixed(2);
-        document.getElementById('gl_v').value = GL_V.toFixed(2);
-        document.getElementById('gf_l').value = GF_L.toFixed(2);
-        document.getElementById('gc_v').value = GC_V.toFixed(2);
-        document.getElementById('gf_v').value = GF_V.toFixed(2);
-        document.getElementById('gc_l').value = GC_L.toFixed(2);
-        
-        document.getElementById('data-status').textContent += ` | GL_L: ${GL_L.toFixed(2)}, GF_L: ${GF_L.toFixed(2)}, GC_L: ${GC_L.toFixed(2)}, etc.`;
-    }
-
-
-    // --- Lógica del Modelo de Poisson ---
-
     const factorialCache = { 0: 1, 1: 1 };
     function factorial(n) {
         if (n in factorialCache) return factorialCache[n];
@@ -595,12 +492,220 @@
         return (Math.exp(-lambda) * Math.pow(lambda, k)) / factorial(k);
     }
 
-    function calculatePredictions() {
-        // Si el usuario cargó datos pero no ejecutó el cálculo, lo hacemos aquí.
-        if (window.leagueData && (document.getElementById('gl_l').value === "1.50")) {
-            calculateAndSetParameters();
+    // --- Lógica de Carga y Procesamiento de JSON ---
+
+    // Función para leer y parsear el archivo JSON
+    function readJSONFile() {
+        const fileInput = document.getElementById('json-file-input');
+        const statusElement = document.getElementById('data-status');
+
+        if (fileInput.files.length === 0) {
+            statusElement.textContent = "Error: Selecciona un archivo JSON primero.";
+            statusElement.style.color = '#e63946';
+            return;
         }
 
+        const file = fileInput.files[0];
+        const reader = new FileReader();
+
+        statusElement.textContent = "Cargando y procesando archivo...";
+        statusElement.style.color = '#ffc300';
+
+        reader.onload = async (event) => {
+            try {
+                const rawData = JSON.parse(event.target.result);
+                if (!Array.isArray(rawData)) throw new Error("El archivo no es un arreglo de partidos.");
+
+                // 1. Normalizar y extraer datos clave de cada partido
+                const normalizedData = rawData.map(match => {
+                    // Extraer equipos del string "Home - Away"
+                    const matchParts = match.Match ? match.Match.split(' - ') : [];
+                    const localTeam = matchParts[0] ? matchParts[0].trim() : 'Desconocido L';
+                    const visitantTeam = matchParts[1] ? matchParts[1].trim() : 'Desconocido V';
+
+                    // Extraer goles del string "X-Y"
+                    const resultParts = match['Result FT'] ? match['Result FT'].split('-') : [];
+                    const localGoals = parseInt(resultParts[0]) || 0;
+                    const visitantGoals = parseInt(resultParts[1]) || 0;
+                    
+                    // Usar la fecha para ordenar (aunque el formato es complejo, es suficiente para new Date())
+                    const date = new Date(match.Date);
+
+                    return {
+                        League: match.League || 'Sin Liga',
+                        LocalTeam: localTeam,
+                        VisitantTeam: visitantTeam,
+                        LocalGoals: localGoals,
+                        VisitantGoals: visitantGoals,
+                        Date: isNaN(date) ? new Date(0) : date // Usar epoch si la fecha es inválida
+                    };
+                });
+
+                // 2. Almacenar y ordenar los datos por fecha (del más reciente al más antiguo)
+                window.leagueData = normalizedData.sort((a, b) => b.Date.getTime() - a.Date.getTime());
+                
+                statusElement.textContent = `¡Éxito! ${window.leagueData.length} partidos cargados. Selecciona Liga y Equipos.`;
+                statusElement.style.color = '#2a9d8f';
+                
+                // 3. Rellenar el selector de ligas
+                populateLeagueSelector();
+            } catch (e) {
+                statusElement.textContent = `Error al procesar JSON: ${e.message}`;
+                statusElement.style.color = '#e63946';
+                window.leagueData = null;
+                populateLeagueSelector(true); // Limpiar selectores
+            }
+        };
+        reader.readAsText(file);
+    }
+    
+    // Función para rellenar el selector de Ligas
+    function populateLeagueSelector(clear = false) {
+        const leagueSelect = document.getElementById('league-select');
+        leagueSelect.innerHTML = '<option value="">-- Seleccionar Liga --</option>';
+
+        if (clear || !window.leagueData || window.leagueData.length === 0) {
+            document.getElementById('team_local').innerHTML = '';
+            document.getElementById('team_visitant').innerHTML = '';
+            document.getElementById('team_local').disabled = true;
+            document.getElementById('team_visitant').disabled = true;
+            return;
+        }
+
+        const uniqueLeagues = [...new Set(window.leagueData.map(m => m.League))].sort();
+        
+        uniqueLeagues.forEach(league => {
+            const option = document.createElement('option');
+            option.value = league;
+            option.textContent = league;
+            leagueSelect.appendChild(option);
+        });
+
+        populateTeamSelectors(); // Rellenar equipos inmediatamente (podría ser con la primera liga o vacío)
+    }
+
+    // Función para rellenar los selectores de Equipos basado en la Liga seleccionada
+    function populateTeamSelectors() {
+        const leagueSelect = document.getElementById('league-select');
+        const teamLocalSelect = document.getElementById('team_local');
+        const teamVisitantSelect = document.getElementById('team_visitant');
+        const selectedLeague = leagueSelect.value;
+
+        // Limpiar selectores anteriores
+        teamLocalSelect.innerHTML = '<option value="">-- Seleccionar Local --</option>';
+        teamVisitantSelect.innerHTML = '<option value="">-- Seleccionar Visitante --</option>';
+        teamLocalSelect.disabled = true;
+        teamVisitantSelect.disabled = true;
+
+        if (!selectedLeague || !window.leagueData) return;
+        
+        const leagueMatches = window.leagueData.filter(m => m.League === selectedLeague);
+        let allTeams = new Set();
+
+        leagueMatches.forEach(m => {
+            allTeams.add(m.LocalTeam);
+            allTeams.add(m.VisitantTeam);
+        });
+
+        const uniqueTeams = [...allTeams].sort();
+        
+        uniqueTeams.forEach(team => {
+            const localOption = document.createElement('option');
+            localOption.value = localOption.textContent = team;
+            teamLocalSelect.appendChild(localOption);
+            
+            const visitantOption = document.createElement('option');
+            visitantOption.value = visitantOption.textContent = team;
+            teamVisitantSelect.appendChild(visitantOption);
+        });
+
+        teamLocalSelect.disabled = false;
+        teamVisitantSelect.disabled = false;
+    }
+    
+    // Función de cálculo principal de Parámetros (GL, GF, GC)
+    function calculateAndSetParameters() {
+        const teamL = document.getElementById('team_local').value;
+        const teamV = document.getElementById('team_visitant').value;
+        const league = document.getElementById('league-select').value;
+        const statusElement = document.getElementById('data-status');
+
+        if (!window.leagueData || !league || !teamL || !teamV) {
+            statusElement.textContent = "Error: Asegúrate de cargar el archivo, seleccionar la Liga, Equipo Local y Visitante.";
+            statusElement.style.color = '#e63946';
+            return;
+        }
+        
+        const allMatches = window.leagueData.filter(m => m.League === league);
+        
+        // --- Cálculo de la Media Global de la Liga (Últimos 10 partidos de la liga) ---
+        // Tomar los últimos 10 partidos de la liga seleccionada
+        const lastLeagueMatches = allMatches.slice(0, MATCHES_LIMIT);
+        
+        let totalLocalGoals = 0;
+        let totalVisitantGoals = 0;
+        
+        lastLeagueMatches.forEach(m => {
+            totalLocalGoals += m.LocalGoals;
+            totalVisitantGoals += m.VisitantGoals;
+        });
+
+        const GL_L = totalLocalGoals / lastLeagueMatches.length;
+        const GL_V = totalVisitantGoals / lastLeagueMatches.length;
+        
+        // --- Filtrar y sumar para los equipos específicos (Últimos 10 partidos en su rol) ---
+        
+        // Equipo Local: Goles a Favor (Local) y Goles en Contra (Visitante) del RIVAL
+        const teamLHomeMatches = allMatches.filter(m => m.LocalTeam === teamL).slice(0, MATCHES_LIMIT);
+        const teamVAwayMatches = allMatches.filter(m => m.VisitantTeam === teamV).slice(0, MATCHES_LIMIT);
+        
+        // Sumas de Goles para el equipo Local (GF_L)
+        const sumGFL = teamLHomeMatches.reduce((sum, m) => sum + m.LocalGoals, 0); 
+        // Sumas de Goles en Contra del Visitante (GC_V) - Es decir, los goles que anotaron los rivales contra V cuando V era Visitante
+        const sumGCV = teamVAwayMatches.reduce((sum, m) => sum + m.LocalGoals, 0);  
+        
+        // Sumas de Goles para el equipo Visitante (GF_V)
+        const sumGFV = teamVAwayMatches.reduce((sum, m) => sum + m.VisitantGoals, 0); 
+        // Sumas de Goles en Contra del Local (GC_L) - Es decir, los goles que anotaron los rivales contra L cuando L era Local
+        const sumGCL = teamLHomeMatches.reduce((sum, m) => sum + m.VisitantGoals, 0); 
+        
+        // Asegurar que no dividimos por cero
+        const countGFL = teamLHomeMatches.length > 0 ? teamLHomeMatches.length : 1;
+        const countGCV = teamVAwayMatches.length > 0 ? teamVAwayMatches.length : 1;
+
+        // Cálculo Final de Parámetros (Ataque/Defensa)
+        const GF_L = sumGFL / countGFL; // Ataque Local
+        const GC_V = sumGCV / countGCV; // Defensa Visitante
+        const GF_V = sumGFV / countGCV; // Ataque Visitante
+        const GC_L = sumGCL / countGFL; // Defensa Local
+
+        // 3. Actualizar Inputs
+        document.getElementById('gl_l').value = GL_L.toFixed(2);
+        document.getElementById('gl_v').value = GL_V.toFixed(2);
+        document.getElementById('gf_l').value = GF_L.toFixed(2);
+        document.getElementById('gc_v').value = GC_V.toFixed(2);
+        document.getElementById('gf_v').value = GF_V.toFixed(2);
+        document.getElementById('gc_l').value = GC_L.toFixed(2);
+        
+        statusElement.textContent = `✅ Parámetros para ${teamL} vs ${teamV} calculados con éxito.`;
+        statusElement.style.color = '#2a9d8f';
+    }
+    
+    // Función dummy para cuando se selecciona un equipo, solo para mostrar el estatus
+    function updateParametersDisplay() {
+        const teamL = document.getElementById('team_local').value;
+        const teamV = document.getElementById('team_visitant').value;
+        const statusElement = document.getElementById('data-status');
+        if (teamL && teamV) {
+             statusElement.textContent = `Liga y equipos seleccionados: ${teamL} vs ${teamV}. Presiona 'Calcular Parámetros'.`;
+             statusElement.style.color = '#457b9d';
+        }
+    }
+
+
+    // --- Lógica del Modelo de Poisson (Mantenida) ---
+
+    function calculatePredictions() {
         // 1. OBTENER Y VALIDAR PARÁMETROS
         const ids = ['gl_l', 'gl_v', 'gf_l', 'gc_l', 'gf_v', 'gc_v', 'correlation_factor'];
         const p = {};
