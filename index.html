@@ -67,8 +67,6 @@
         /* == GRIDS DE ENTRADA Y AGRUPACIONES             == */
         /* ================================================= */
 
-        /* El input-section ya no está visible */
-        
         .input-param-grid {
             display: grid;
             grid-template-columns: 1fr 1fr 1fr;
@@ -76,7 +74,11 @@
             margin-top: 15px;
         }
         
-        /* Ocultar el botón 2 hasta que se calculen los parámetros */
+        /* Ocultar el botón 1 (ya no se usa) y el botón 2 (hasta que se calculen) */
+        #btn-calculate-params {
+            display: none; /* ELIMINADO en el nuevo flujo */
+        }
+
         #btn-calculate-predictions {
             display: none; 
             margin-top: 25px;
@@ -226,7 +228,6 @@
                 </div>
             </div>
 
-            <button id="btn-calculate-params" class="action-btn" onclick="calculateAndSetParameters()">⚙️ 1. Calcular Parámetros Ponderados</button>
             <button id="btn-calculate-predictions" class="action-btn" onclick="calculatePredictions()">∑ 2. Iniciar Simulación Estocástica</button>
 
             <p id="data-status" style="text-align: center; margin-top: 15px; font-size: 0.9em; color: var(--success-color);">Estatus: Esperando carga de archivo.</p>
@@ -352,12 +353,11 @@
     
     function poisson(k, lambda) {
         if (k < 0) return 0;
-        // Se añade un manejo para evitar errores con lambda=0
         if (lambda <= 0) return k === 0 ? 1 : 0; 
         return (Math.exp(-lambda) * Math.pow(lambda, k)) / factorial(k);
     }
 
-    // --- Lógica de Carga y Procesamiento de JSON ---
+    // --- Lógica de Carga y Procesamiento de JSON (Sin cambios significativos) ---
 
     function readJSONFile() {
         const fileInput = document.getElementById('json-file-input');
@@ -505,8 +505,9 @@
         return weightTotal > 0 ? weightedSum / weightTotal : 0;
     }
     
-    // Al cambiar la selección, asegurarse de que se reinicie el flujo
+    // FUNCIÓN CENTRAL: Dispara el cálculo al seleccionar ambos equipos
     function updateParametersDisplay() {
+        // Ocultar resultados si se cambia la selección de equipos
         document.getElementById('output-section').style.display = 'none';
         document.getElementById('btn-calculate-predictions').style.display = 'none';
 
@@ -515,16 +516,20 @@
         const statusElement = document.getElementById('data-status');
 
         if (teamL && teamV) {
-             statusElement.textContent = `Liga y equipos seleccionados: ${teamL} vs ${teamV}. Presiona 'Calcular Parámetros Ponderados'.`;
-             statusElement.style.color = '#457b9d';
-             document.getElementById('btn-calculate-params').style.display = 'block'; 
+             statusElement.textContent = `Liga y equipos seleccionados: ${teamL} vs ${teamV}. Calculando parámetros...`;
+             statusElement.style.color = '#ffc300';
+             
+             // *** CÁLCULO AUTOMÁTICO AL SELECCIONAR EQUIPOS ***
+             calculateAndSetParameters(); 
+             
         } else {
-             document.getElementById('btn-calculate-params').style.display = 'block'; 
+             statusElement.textContent = "Selecciona Equipo Local y Visitante para iniciar el cálculo automático.";
+             statusElement.style.color = '#457b9d';
         }
     }
 
 
-    // FUNCIÓN DE CÁLCULO DE PARÁMETROS (OCULTA)
+    // FUNCIÓN DE CÁLCULO DE PARÁMETROS (AHORA SIN BOTÓN VISIBLE)
     function calculateAndSetParameters() {
         const teamL = document.getElementById('team_local').value;
         const teamV = document.getElementById('team_visitant').value;
@@ -534,15 +539,18 @@
         if (!window.leagueData || !league || !teamL || !teamV) {
             statusElement.textContent = "Error: Asegúrate de cargar el archivo, seleccionar la Liga, Equipo Local y Visitante.";
             statusElement.style.color = '#e63946';
-            document.getElementById('btn-calculate-predictions').style.display = 'none'; 
             return;
         }
         
         const allMatchesInLeague = window.leagueData.filter(m => m.League === league);
         
-        // CÁLCULOS (OMITIDOS POR ESPACIO, VER CÓDIGO ANTERIOR)
-        // ... CÁLCULO DE GL_L, GL_V, GF_L, GC_L, GF_V, GC_V (FT y HT) ...
+        if (allMatchesInLeague.length === 0) {
+            statusElement.textContent = "Error: No hay partidos registrados para esta liga.";
+            statusElement.style.color = '#e63946';
+            return;
+        }
         
+        // --- 1. CÁLCULO DE LA MEDIA ESTABLE DE LA LIGA (FT y HT) ---
         let totalLocalGoals = 0; let totalVisitantGoals = 0; let totalLocalGoalsHT = 0; let totalVisitantGoalsHT = 0;
         allMatchesInLeague.forEach(m => {
             totalLocalGoals += m.LocalGoals; totalVisitantGoals += m.VisitantGoals;
@@ -557,17 +565,19 @@
         const teamLHomeMatches = allMatchesInLeague.filter(m => m.LocalTeam === teamL);
         const teamVAwayMatches = allMatchesInLeague.filter(m => m.VisitantTeam === teamV);
 
+        // --- 2. CÁLCULO DE FUERZAS PONDERADAS DE ATAQUE/DEFENSA (FT) ---
         const gflGoals = teamLHomeMatches.map(m => m.LocalGoals); const gclGoals = teamLHomeMatches.map(m => m.VisitantGoals);
         const gfvGoals = teamVAwayMatches.map(m => m.VisitantGoals); const gcvGoals = teamVAwayMatches.map(m => m.LocalGoals);
         const GF_L = calculateWeightedAverage(gflGoals); const GC_L = calculateWeightedAverage(gclGoals);
         const GF_V = calculateWeightedAverage(gfvGoals); const GC_V = calculateWeightedAverage(gcvGoals);
 
+        // --- 3. CÁLCULO DE FUERZAS PONDERADAS DE ATAQUE/DEFENSA (HT) ---
         const gflGoalsHT = teamLHomeMatches.map(m => m.LocalGoalsHT); const gclGoalsHT = teamLHomeMatches.map(m => m.VisitantGoalsHT);
         const gfvGoalsHT = teamVAwayMatches.map(m => m.VisitantGoalsHT); const gcvGoalsHT = teamVAwayMatches.map(m => m.LocalGoalsHT);
         const GF_L_HT = calculateWeightedAverage(gflGoalsHT); const GC_L_HT = calculateWeightedAverage(gclGoalsHT);
         const GF_V_HT = calculateWeightedAverage(gfvGoalsHT); const GC_V_HT = calculateWeightedAverage(gcvGoalsHT);
         
-        // 4. Actualizar Inputs Ocultos
+        // 4. Almacenar resultados en Inputs Ocultos
         document.getElementById('gl_l').value = GL_L;
         document.getElementById('gl_v').value = GL_V;
         document.getElementById('gf_l').value = GF_L;
@@ -581,19 +591,17 @@
         document.getElementById('gc_v_ht').value = GC_V_HT;
         document.getElementById('gf_v_ht').value = GF_V_HT;
         document.getElementById('gc_l_ht').value = GC_L_HT;
-        // El factor de correlación se deja en 0.04 por defecto, a menos que el modelo interno de cálculo lo provea.
         
-        statusElement.textContent = `✅ Parámetros internos para ${teamL} vs ${teamV} calculados. Pulsa 'Iniciar Simulación'.`;
+        statusElement.textContent = `✅ Parámetros internos para ${teamL} vs ${teamV} calculados. Pulsa 'Iniciar Simulación Estocástica'.`;
         statusElement.style.color = '#2a9d8f';
         
-        // Mostrar el botón 2
+        // Mostrar el botón 2 para el paso final
         document.getElementById('btn-calculate-predictions').style.display = 'block';
     }
 
 
-    // FUNCIÓN DE SIMULACIÓN Y MUESTRA DE RESULTADOS
+    // FUNCIÓN DE SIMULACIÓN Y MUESTRA DE RESULTADOS (Sin cambios significativos)
     function calculatePredictions() {
-        // La sección de parámetros está oculta, pero leemos los valores de los inputs ocultos
         const ids = [
             'gl_l', 'gl_v', 'gf_l', 'gc_l', 'gf_v', 'gc_v', 
             'gl_l_ht', 'gl_v_ht', 'gf_l_ht', 'gc_l_ht', 'gf_v_ht', 'gc_v_ht', 
@@ -602,12 +610,9 @@
         const p = {};
         for (const id of ids) {
             p[id] = parseFloat(document.getElementById(id).value);
-            if (isNaN(p[id]) || p[id] <= 0) { 
-                // Si algún GL es 0, no se puede calcular. Si los demás son 0, la lambda será 0.
-                if (id.startsWith('gl')) {
-                    alert("Error: Las medias de goles de la liga (GL) no pueden ser cero. Calcula los parámetros primero.");
-                    return;
-                }
+            if (isNaN(p[id])) { 
+                alert("Error: Parámetros no calculados correctamente. Asegúrate de seleccionar equipos válidos.");
+                return;
             }
         }
         
@@ -618,14 +623,13 @@
         const lambdaL_HT = (p.gl_l_ht > 0 && p.gl_v_ht > 0) ? (p.gf_l_ht / p.gl_l_ht) * (p.gc_v_ht / p.gl_v_ht) * p.gl_l_ht : 0; 
         const lambdaV_HT = (p.gl_l_ht > 0 && p.gl_v_ht > 0) ? (p.gf_v_ht / p.gl_v_ht) * (p.gc_l_ht / p.gl_l_ht) * p.gl_v_ht : 0; 
 
-        // Manejo de caso donde las Lambdas resultan cero (por datos deficientes)
         if (lambdaL_FT === 0 || lambdaV_FT === 0 || lambdaL_HT === 0 || lambdaV_HT === 0) {
              document.getElementById('data-status').textContent = "Advertencia: Una o más Lambdas resultaron cero (datos insuficientes o anómalos). Resultados no fiables.";
              document.getElementById('data-status').style.color = '#ffc300';
         }
 
         const ft_results = runPoissonSimulation(lambdaL_FT, lambdaV_FT, p.correlation_factor);
-        const ht_results = runPoissonSimulation(lambdaL_HT, lambdaV_HT, 0.0); // No hay correlación en HT
+        const ht_results = runPoissonSimulation(lambdaL_HT, lambdaV_HT, 0.0); 
 
         updateFTUI(ft_results, lambdaL_FT, lambdaV_FT);
         updateHTUI(ht_results, lambdaL_HT, lambdaV_HT);
@@ -636,6 +640,8 @@
         document.getElementById('data-status').style.color = '#2a9d8f';
     }
 
+    // runPoissonSimulation, updateFTUI, updateHTUI y prioritizeMarkets se mantienen iguales.
+    // ... [ runPoissonSimulation function ] ...
     function runPoissonSimulation(lambdaL, lambdaV, correlationFactor) {
         const maxGoals = 4;
         let probMatrix_initial = [];
@@ -663,7 +669,6 @@
             
             const sumDraws_Orig = prob00_orig + prob11_orig;
             
-            // Corrección de Empates (solo para 0-0 y 1-1 como ejemplo)
             if (sumDraws_Orig > 0) {
                 finalProbMatrix[0][0] += CORR_FACTOR * (prob00_orig / sumDraws_Orig);
                 finalProbMatrix[1][1] += CORR_FACTOR * (prob11_orig / sumDraws_Orig);
@@ -683,7 +688,6 @@
             }
         }
         
-        // Recalcular probabilidades 1X2, O/U, BTTS
         let prob1 = 0, probX = 0, prob2 = 0;
         let probOU05 = 0, probOU15 = 0, probOU25 = 0, probOU35 = 0;
         let probBTTS = 0; 
@@ -695,7 +699,6 @@
                 else if (i === j) { probX += P; }
                 else { prob2 += P; }
                 
-                // Los goles totales se calculan asumiendo que el 4+ se extrapola a 4
                 const totalGoals = i + j;
                 
                 if (totalGoals > 0) { probOU05 += P; } 
@@ -707,7 +710,6 @@
             }
         }
         
-        // Ajuste final para asegurar que 1X2 suma 100%
         const sum1X2 = prob1 + probX + prob2;
         if (sum1X2 > 0) {
             const factor = 1.0 / sum1X2;
@@ -723,10 +725,9 @@
             probBTTS
         };
     }
-
-
+    
+    // ... [ updateFTUI function ] ...
     function updateFTUI(results, lambdaL, lambdaV) {
-        // Actualiza el contenedor de Lambdas con formato LaTeX
         const metaOutput = document.getElementById('metadata-output');
         metaOutput.innerHTML = `
             <div class="metadata-box"><span>$\lambda_{\\text{Local, FT}}$</span><p>${lambdaL.toFixed(3)}</p></div>
@@ -748,10 +749,8 @@
             { name: 'Under 3.5 Goles', prob: 1 - results.probOU35, type: 'under' }
         ];
 
-        // Lógica de Priorización y Resaltado (60-75%)
         const finalMarkets = prioritizeMarkets(rawMarkets);
 
-        // Generación de HTML de la tabla FT
         const tableBody = document.querySelector('#prob-odds-table-ft tbody');
         tableBody.innerHTML = '';
         const REFERENCE_EDGE_MARGIN = 0.10; 
@@ -772,7 +771,6 @@
             `;
         });
         
-        // Matriz Visual de Marcadores
         const matrixTable = document.getElementById('score-matrix');
         const maxGoals = 4;
         let maxProbScore = { i: -1, j: -1, prob: -1 };
@@ -798,6 +796,7 @@
         }
     }
 
+    // ... [ updateHTUI function ] ...
     function updateHTUI(results, lambdaL, lambdaV) {
         document.getElementById('lambdaL_HT_display').textContent = lambdaL.toFixed(3);
         document.getElementById('lambdaV_HT_display').textContent = lambdaV.toFixed(3);
@@ -811,10 +810,8 @@
             { name: '0-0 HT (Exacto)', prob: results.matrix[0][0] }
         ];
 
-        // Lógica de Priorización y Resaltado (60-75%)
         const finalMarketsHT = prioritizeMarkets(rawMarketsHT);
         
-        // Generación de HTML de la tabla HT
         const tableBodyHT = document.querySelector('#prob-odds-table-ht tbody');
         tableBodyHT.innerHTML = '';
         
@@ -865,7 +862,8 @@
         document.getElementById('btn-calculate-predictions').style.display = 'none';
         document.getElementById('output-section').style.display = 'none';
         
-        // Simular un cálculo inicial para precargar los valores por defecto en los inputs ocultos
+        // Inicializar los inputs ocultos con valores por defecto (cálculo inicial que falla intencionalmente para la UI)
+        // Esto solo asegura que los inputs tienen un valor numérico desde el inicio.
         calculateAndSetParameters(); 
     });
 </script>
