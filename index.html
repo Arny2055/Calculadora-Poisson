@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>BetAGS Pro - Calculadora Analítica de Poisson Doble (FT & HT)</title>
+    <title>BetAGS Pro - Calculadora Analítica de Poisson Simple (FT & HT)</title>
     <style>
         /* ================================================= */
         /* == CSS: Variables Globales y Estilos Base      == */
@@ -74,11 +74,8 @@
             margin-top: 15px;
         }
         
-        /* Ocultar el botón 1 (ya no se usa) y el botón 2 (hasta que se calculen) */
-        #btn-calculate-params {
-            display: none; /* ELIMINADO en el nuevo flujo */
-        }
-
+        /* Botón de Parámetros eliminado. Botón de Simulación oculto al inicio. */
+        #btn-calculate-params { display: none; }
         #btn-calculate-predictions {
             display: none; 
             margin-top: 25px;
@@ -196,13 +193,13 @@
 <div id="calculator-container">
     <header>
         <h1>BetAGS Pro ℒ ($\lambda$)</h1>
-        <h2>Modelo de Poisson Doble Ponderado y Corregido</h2>
+        <h2>Modelo de Poisson Simple Corregido (Solo Fuerza de Ataque)</h2>
     </header>
 
     <main>
         <section id="data-load-section">
             <h3>📂 Carga, Filtro y Selección de Equipos</h3>
-            <p style="font-size: 0.9em; color: var(--text-secondary);">Cargue su JSON, seleccione equipos, y obtenga los resultados de la simulación.</p>
+            <p style="font-size: 0.9em; color: var(--text-secondary);">Cargue su JSON, seleccione equipos. Los parámetros se calculan automáticamente.</p>
 
             <div class="input-pair">
                 <label for="json-file-input">Seleccionar archivo JSON de partidos:</label>
@@ -239,14 +236,14 @@
             <input type="number" id="gl_l" value="1.50" step="0.01">
             <input type="number" id="gl_v" value="1.20" step="0.01">
             <input type="number" id="gf_l" value="1.70" step="0.01">
-            <input type="number" id="gc_v" value="1.30" step="0.01">
+            <input type="number" id="gc_v" value="1.30" step="0.01"> 
             <input type="number" id="gf_v" value="1.40" step="0.01">
-            <input type="number" id="gc_l" value="1.00" step="0.01">
+            <input type="number" id="gc_l" value="1.00" step="0.01"> 
             <input type="number" id="correlation_factor" value="0.04" step="0.005">
             <input type="number" id="gl_l_ht" value="0.65" step="0.01">
             <input type="number" id="gl_v_ht" value="0.45" step="0.01">
             <input type="number" id="gf_l_ht" value="0.80" step="0.01">
-            <input type="number" id="gc_v_ht" value="0.55" step="0.01">
+            <input type="number" id="gc_v_ht" value="0.55" step="0.01"> 
             <input type="number" id="gf_v_ht" value="0.50" step="0.01">
             <input type="number" id="gc_l_ht" value="0.40" step="0.01">
         </div>
@@ -321,7 +318,7 @@
     const PROBABILITY_MIN = 0.60; // 60%
     const PROBABILITY_MAX = 0.75; // 75%
 
-    // --- Funciones de Utilidad ---
+    // --- Funciones de Utilidad (Factorial y Poisson) ---
     
     function applyMode(mode) {
         const body = document.body;
@@ -357,7 +354,7 @@
         return (Math.exp(-lambda) * Math.pow(lambda, k)) / factorial(k);
     }
 
-    // --- Lógica de Carga y Procesamiento de JSON (Sin cambios significativos) ---
+    // --- Lógica de Carga y Procesamiento de JSON ---
 
     function readJSONFile() {
         const fileInput = document.getElementById('json-file-input');
@@ -375,7 +372,6 @@
         statusElement.textContent = "Cargando y procesando archivo...";
         statusElement.style.color = '#ffc300';
         
-        // Ocultar resultados y botón 2 al cargar un nuevo archivo
         document.getElementById('output-section').style.display = 'none';
         document.getElementById('btn-calculate-predictions').style.display = 'none';
 
@@ -507,7 +503,6 @@
     
     // FUNCIÓN CENTRAL: Dispara el cálculo al seleccionar ambos equipos
     function updateParametersDisplay() {
-        // Ocultar resultados si se cambia la selección de equipos
         document.getElementById('output-section').style.display = 'none';
         document.getElementById('btn-calculate-predictions').style.display = 'none';
 
@@ -519,7 +514,7 @@
              statusElement.textContent = `Liga y equipos seleccionados: ${teamL} vs ${teamV}. Calculando parámetros...`;
              statusElement.style.color = '#ffc300';
              
-             // *** CÁLCULO AUTOMÁTICO AL SELECCIONAR EQUIPOS ***
+             // CÁLCULO AUTOMÁTICO AL SELECCIONAR EQUIPOS
              calculateAndSetParameters(); 
              
         } else {
@@ -529,7 +524,7 @@
     }
 
 
-    // FUNCIÓN DE CÁLCULO DE PARÁMETROS (AHORA SIN BOTÓN VISIBLE)
+    // FUNCIÓN DE CÁLCULO DE PARÁMETROS (SOLO GL y GF)
     function calculateAndSetParameters() {
         const teamL = document.getElementById('team_local').value;
         const teamV = document.getElementById('team_visitant').value;
@@ -550,81 +545,96 @@
             return;
         }
         
-        // --- 1. CÁLCULO DE LA MEDIA ESTABLE DE LA LIGA (FT y HT) ---
+        // --- 1. CÁLCULO DE LA MEDIA ESTABLE DE LA LIGA (GL - FT y HT) ---
         let totalLocalGoals = 0; let totalVisitantGoals = 0; let totalLocalGoalsHT = 0; let totalVisitantGoalsHT = 0;
         allMatchesInLeague.forEach(m => {
+            // Usamos el total de Goles Marcados (por Local y Visitante) como la media GL para la corrección.
             totalLocalGoals += m.LocalGoals; totalVisitantGoals += m.VisitantGoals;
             totalLocalGoalsHT += m.LocalGoalsHT; totalVisitantGoalsHT += m.VisitantGoalsHT;
         });
+        
+        // **Nota Importante:** Para la corrección simple de ataque, usamos los promedios de Goles Marcados por Locales (GL_L) y Visitantes (GL_V) 
+        // de toda la liga como base para la predicción, tal y como se sugiere en el modelo simple.
+        const GL_L_AVG = totalLocalGoals / allMatchesInLeague.length;
+        const GL_V_AVG = totalVisitantGoals / allMatchesInLeague.length;
+        const GL_L_HT_AVG = totalLocalGoalsHT / allMatchesInLeague.length;
+        const GL_V_HT_AVG = totalVisitantGoalsHT / allMatchesInLeague.length;
 
-        const GL_L = totalLocalGoals / allMatchesInLeague.length;
-        const GL_V = totalVisitantGoals / allMatchesInLeague.length;
-        const GL_L_HT = totalLocalGoalsHT / allMatchesInLeague.length;
-        const GL_V_HT = totalVisitantGoalsHT / allMatchesInLeague.length;
 
         const teamLHomeMatches = allMatchesInLeague.filter(m => m.LocalTeam === teamL);
         const teamVAwayMatches = allMatchesInLeague.filter(m => m.VisitantTeam === teamV);
 
-        // --- 2. CÁLCULO DE FUERZAS PONDERADAS DE ATAQUE/DEFENSA (FT) ---
-        const gflGoals = teamLHomeMatches.map(m => m.LocalGoals); const gclGoals = teamLHomeMatches.map(m => m.VisitantGoals);
-        const gfvGoals = teamVAwayMatches.map(m => m.VisitantGoals); const gcvGoals = teamVAwayMatches.map(m => m.LocalGoals);
-        const GF_L = calculateWeightedAverage(gflGoals); const GC_L = calculateWeightedAverage(gclGoals);
-        const GF_V = calculateWeightedAverage(gfvGoals); const GC_V = calculateWeightedAverage(gcvGoals);
+        // --- 2. CÁLCULO DE FUERZAS PONDERADAS DE ATAQUE (GF - FT y HT) ---
+        const gflGoals = teamLHomeMatches.map(m => m.LocalGoals); 
+        const gfvGoals = teamVAwayMatches.map(m => m.VisitantGoals); 
+        const GF_L = calculateWeightedAverage(gflGoals); 
+        const GF_V = calculateWeightedAverage(gfvGoals); 
 
-        // --- 3. CÁLCULO DE FUERZAS PONDERADAS DE ATAQUE/DEFENSA (HT) ---
-        const gflGoalsHT = teamLHomeMatches.map(m => m.LocalGoalsHT); const gclGoalsHT = teamLHomeMatches.map(m => m.VisitantGoalsHT);
-        const gfvGoalsHT = teamVAwayMatches.map(m => m.VisitantGoalsHT); const gcvGoalsHT = teamVAwayMatches.map(m => m.LocalGoalsHT);
-        const GF_L_HT = calculateWeightedAverage(gflGoalsHT); const GC_L_HT = calculateWeightedAverage(gclGoalsHT);
-        const GF_V_HT = calculateWeightedAverage(gfvGoalsHT); const GC_V_HT = calculateWeightedAverage(gcvGoalsHT);
+        const gflGoalsHT = teamLHomeMatches.map(m => m.LocalGoalsHT); 
+        const gfvGoalsHT = teamVAwayMatches.map(m => m.VisitantGoalsHT); 
+        const GF_L_HT = calculateWeightedAverage(gflGoalsHT); 
+        const GF_V_HT = calculateWeightedAverage(gfvGoalsHT); 
         
-        // 4. Almacenar resultados en Inputs Ocultos
-        document.getElementById('gl_l').value = GL_L;
-        document.getElementById('gl_v').value = GL_V;
+        // 3. Almacenar resultados en Inputs Ocultos
+        // Almacenamos GF y GL de la liga (GL_L_AVG y GL_V_AVG)
+        document.getElementById('gl_l').value = GL_L_AVG;
+        document.getElementById('gl_v').value = GL_V_AVG;
         document.getElementById('gf_l').value = GF_L;
-        document.getElementById('gc_v').value = GC_V;
         document.getElementById('gf_v').value = GF_V;
-        document.getElementById('gc_l').value = GC_L;
         
-        document.getElementById('gl_l_ht').value = GL_L_HT;
-        document.getElementById('gl_v_ht').value = GL_V_HT;
+        document.getElementById('gl_l_ht').value = GL_L_HT_AVG;
+        document.getElementById('gl_v_ht').value = GL_V_HT_AVG;
         document.getElementById('gf_l_ht').value = GF_L_HT;
-        document.getElementById('gc_v_ht').value = GC_V_HT;
         document.getElementById('gf_v_ht').value = GF_V_HT;
-        document.getElementById('gc_l_ht').value = GC_L_HT;
         
-        statusElement.textContent = `✅ Parámetros internos para ${teamL} vs ${teamV} calculados. Pulsa 'Iniciar Simulación Estocástica'.`;
+        // Los GC se dejan con su cálculo anterior o un valor por defecto, aunque NO SE USARÁN para la lambda
+        document.getElementById('gc_v').value = 1.0; 
+        document.getElementById('gc_l').value = 1.0; 
+        document.getElementById('gc_v_ht').value = 0.5; 
+        document.getElementById('gc_l_ht').value = 0.5; 
+
+        
+        statusElement.textContent = `✅ Parámetros internos (GF/GL) para ${teamL} vs ${teamV} calculados. Pulsa 'Iniciar Simulación Estocástica'.`;
         statusElement.style.color = '#2a9d8f';
         
-        // Mostrar el botón 2 para el paso final
         document.getElementById('btn-calculate-predictions').style.display = 'block';
     }
 
 
-    // FUNCIÓN DE SIMULACIÓN Y MUESTRA DE RESULTADOS (Sin cambios significativos)
+    // FUNCIÓN DE SIMULACIÓN Y MUESTRA DE RESULTADOS (MODIFICADA PARA USAR SOLO GF/GL)
     function calculatePredictions() {
-        const ids = [
-            'gl_l', 'gl_v', 'gf_l', 'gc_l', 'gf_v', 'gc_v', 
-            'gl_l_ht', 'gl_v_ht', 'gf_l_ht', 'gc_l_ht', 'gf_v_ht', 'gc_v_ht', 
-            'correlation_factor'
-        ];
-        const p = {};
-        for (const id of ids) {
-            p[id] = parseFloat(document.getElementById(id).value);
-            if (isNaN(p[id])) { 
-                alert("Error: Parámetros no calculados correctamente. Asegúrate de seleccionar equipos válidos.");
-                return;
-            }
+        // Leemos solo los GF y GL necesarios
+        const p = {
+            gl_l: parseFloat(document.getElementById('gl_l').value),
+            gl_v: parseFloat(document.getElementById('gl_v').value),
+            gf_l: parseFloat(document.getElementById('gf_l').value),
+            gf_v: parseFloat(document.getElementById('gf_v').value),
+            gl_l_ht: parseFloat(document.getElementById('gl_l_ht').value),
+            gl_v_ht: parseFloat(document.getElementById('gl_v_ht').value),
+            gf_l_ht: parseFloat(document.getElementById('gf_l_ht').value),
+            gf_v_ht: parseFloat(document.getElementById('gf_v_ht').value),
+            correlation_factor: parseFloat(document.getElementById('correlation_factor').value)
+        };
+        
+        // Verificación básica
+        if (p.gl_l <= 0 || p.gl_v <= 0 || p.gl_l_ht <= 0 || p.gl_v_ht <= 0) {
+             document.getElementById('data-status').textContent = "Error: Las medias de goles de la liga (GL) no pueden ser cero. Revisa los datos.";
+             document.getElementById('data-status').style.color = '#e63946';
+             return;
         }
+
+        // 1. CÁLCULO DE LAMBDAS (Poisson Simple Corregido SOLO por Ataque)
+        // FT: Lambda L = (GF_L / GL_L_AVG) * GL_V_AVG 
+        // FT: Lambda V = (GF_V / GL_V_AVG) * GL_L_AVG 
+        // Simplificado:
+        const lambdaL_FT = (p.gf_l / p.gl_l) * p.gl_v; 
+        const lambdaV_FT = (p.gf_v / p.gl_v) * p.gl_l; 
         
-        // Cálculo de Lambdas (Variables de Tasa de Poisson)
-        const lambdaL_FT = (p.gl_l > 0 && p.gl_v > 0) ? (p.gf_l / p.gl_l) * (p.gc_v / p.gl_v) * p.gl_l : 0; 
-        const lambdaV_FT = (p.gl_l > 0 && p.gl_v > 0) ? (p.gf_v / p.gl_v) * (p.gc_l / p.gl_l) * p.gl_v : 0; 
-        
-        const lambdaL_HT = (p.gl_l_ht > 0 && p.gl_v_ht > 0) ? (p.gf_l_ht / p.gl_l_ht) * (p.gc_v_ht / p.gl_v_ht) * p.gl_l_ht : 0; 
-        const lambdaV_HT = (p.gl_l_ht > 0 && p.gl_v_ht > 0) ? (p.gf_v_ht / p.gl_v_ht) * (p.gc_l_ht / p.gl_l_ht) * p.gl_v_ht : 0; 
+        const lambdaL_HT = (p.gf_l_ht / p.gl_l_ht) * p.gl_v_ht; 
+        const lambdaV_HT = (p.gf_v_ht / p.gl_v_ht) * p.gl_l_ht; 
 
         if (lambdaL_FT === 0 || lambdaV_FT === 0 || lambdaL_HT === 0 || lambdaV_HT === 0) {
-             document.getElementById('data-status').textContent = "Advertencia: Una o más Lambdas resultaron cero (datos insuficientes o anómalos). Resultados no fiables.";
+             document.getElementById('data-status').textContent = "Advertencia: Una o más Lambdas resultaron cero (GF es cero). Resultados no fiables.";
              document.getElementById('data-status').style.color = '#ffc300';
         }
 
@@ -634,14 +644,13 @@
         updateFTUI(ft_results, lambdaL_FT, lambdaV_FT);
         updateHTUI(ht_results, lambdaL_HT, lambdaV_HT);
         
-        // MOSTRAR la sección de resultados (LA ÚNICA VISIBLE DESPUÉS DEL PROCESO)
         document.getElementById('output-section').style.display = 'block';
-        document.getElementById('data-status').textContent = "✅ Simulación de Poisson Doble completada. Resultados en la sección inferior.";
+        document.getElementById('data-status').textContent = "✅ Simulación de Poisson Simple completada (Solo Ataque). Resultados en la sección inferior.";
         document.getElementById('data-status').style.color = '#2a9d8f';
     }
 
-    // runPoissonSimulation, updateFTUI, updateHTUI y prioritizeMarkets se mantienen iguales.
-    // ... [ runPoissonSimulation function ] ...
+    // --- FUNCIONES DE SIMULACIÓN Y ACTUALIZACIÓN DE UI (Se mantienen iguales) ---
+
     function runPoissonSimulation(lambdaL, lambdaV, correlationFactor) {
         const maxGoals = 4;
         let probMatrix_initial = [];
@@ -726,7 +735,6 @@
         };
     }
     
-    // ... [ updateFTUI function ] ...
     function updateFTUI(results, lambdaL, lambdaV) {
         const metaOutput = document.getElementById('metadata-output');
         metaOutput.innerHTML = `
@@ -796,7 +804,6 @@
         }
     }
 
-    // ... [ updateHTUI function ] ...
     function updateHTUI(results, lambdaL, lambdaV) {
         document.getElementById('lambdaL_HT_display').textContent = lambdaL.toFixed(3);
         document.getElementById('lambdaV_HT_display').textContent = lambdaV.toFixed(3);
@@ -858,12 +865,10 @@
             applyMode('light');
         }
         
-        // Asegurar que el botón de predicciones y resultados estén ocultos al inicio
         document.getElementById('btn-calculate-predictions').style.display = 'none';
         document.getElementById('output-section').style.display = 'none';
         
-        // Inicializar los inputs ocultos con valores por defecto (cálculo inicial que falla intencionalmente para la UI)
-        // Esto solo asegura que los inputs tienen un valor numérico desde el inicio.
+        // Ejecutar un cálculo inicial para poblar los inputs ocultos con valores por defecto (ej: GLs, etc.)
         calculateAndSetParameters(); 
     });
 </script>
