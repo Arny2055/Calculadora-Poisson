@@ -5,7 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>BetAGS Pro - Calculadora Analítica de Poisson Doble Corregido</title>
     <style>
-        /* ... (CSS MODO OSCURO Y BASE MANTENIDO) ... */
         /* ================================================= */
         /* == CSS: Variables Globales y Estilos Base      == */
         /* ================================================= */
@@ -306,13 +305,13 @@
 <div id="calculator-container">
     <header>
         <h1>BetAGS Pro ℒ ($\lambda$)</h1>
-        <h2>Implementación Analítica del Modelo de Poisson Doble Corregido ($\rho$)</h2>
+        <h2>Modelo de Poisson Doble Corregido y Ponderado por Recencia</h2>
     </header>
 
     <main>
         <section id="data-load-section">
             <h3>📂 Carga, Filtro y Selección de Datos de Liga</h3>
-            <p style="font-size: 0.9em; color: var(--text-secondary);">Cargue un archivo JSON para calcular las fuerzas y medias automáticamente. Asegúrese de que el formato coincida con el ejemplo proporcionado.</p>
+            <p style="font-size: 0.9em; color: var(--text-secondary);">Cargue un archivo JSON para calcular las fuerzas. **Mejora:** Los cálculos ahora usan **ponderación por recencia** (forma reciente) y medias de liga más **estables**.</p>
 
             <div class="input-pair">
                 <label for="json-file-input">Seleccionar archivo JSON de partidos:</label>
@@ -339,7 +338,7 @@
                 </div>
             </div>
 
-            <button class="load-btn" onclick="calculateAndSetParameters()">⚙️ Calcular Parámetros de la Liga y Equipos Seleccionados</button>
+            <button class="load-btn" onclick="calculateAndSetParameters()">⚙️ Calcular Parámetros Ponderados</button>
             <p id="data-status" style="text-align: center; margin-top: 15px; font-size: 0.9em; color: var(--success-color);">Estatus: Esperando carga de archivo.</p>
         </section>
 
@@ -350,28 +349,28 @@
             
             <div class="input-grid">
                 <div class="param-group">
-                    <h4>Media Histórica de la Liga</h4>
+                    <h4>Media Histórica de la Liga (Estable)</h4>
                     <div class="input-pair"><label for="gl_l">GL_L (Goles Promedio Local)</label><input type="number" id="gl_l" value="1.50" step="0.01"></div>
                     <div class="input-pair"><label for="gl_v">GL_V (Goles Promedio Visitante)</label><input type="number" id="gl_v" value="1.20" step="0.01"></div>
                 </div>
                 
                 <div class="param-group">
-                    <h4>Fuerza del Equipo Local</h4>
-                    <div class="input-pair"><label for="gf_l">GF_L (Goles a Favor Local)</label><input type="number" id="gf_l" value="1.70" step="0.01"></div>
-                    <div class="input-pair"><label for="gc_v">GC_V (Goles en Contra Visitante)</label><input type="number" id="gc_v" value="1.30" step="0.01"></div>
+                    <h4>Fuerza Ponderada del Equipo Local</h4>
+                    <div class="input-pair"><label for="gf_l">GF_L (Ataque Ponderado Local)</label><input type="number" id="gf_l" value="1.70" step="0.01"></div>
+                    <div class="input-pair"><label for="gc_v">GC_V (Defensa Ponderada Visitante)</label><input type="number" id="gc_v" value="1.30" step="0.01"></div>
                 </div>
                 
                 <div class="param-group">
-                    <h4>Fuerza del Equipo Visitante</h4>
-                    <div class="input-pair"><label for="gf_v">GF_V (Goles a Favor Visitante)</label><input type="number" id="gf_v" value="1.40" step="0.01"></div>
-                    <div class="input-pair"><label for="gc_l">GC_L (Goles en Contra Local)</label><input type="number" id="gc_l" value="1.00" step="0.01"></div>
+                    <h4>Fuerza Ponderada del Equipo Visitante</h4>
+                    <div class="input-pair"><label for="gf_v">GF_V (Ataque Ponderado Visitante)</label><input type="number" id="gf_v" value="1.40" step="0.01"></div>
+                    <div class="input-pair"><label for="gc_l">GC_L (Defensa Ponderada Local)</label><input type="number" id="gc_l" value="1.00" step="0.01"></div>
                 </div>
             </div>
 
             <div class="correlation-factor">
                 <label for="correlation_factor">Factor de Correlación Empírica ($\rho$):</label>
                 <input type="number" id="correlation_factor" value="0.04" step="0.005">
-                <small style="display: block; margin-top: 5px; color: var(--text-secondary);">El factor $\rho$ se redistribuye para aumentar $P(0,0)$ y $P(1,1)$, compensando el déficit de empates del modelo de Poisson independiente.</small>
+                <small style="display: block; margin-top: 5px; color: var(--text-secondary);">El factor $\rho$ compensa el déficit de empates. Un valor entre **0.03** y **0.06** es común.</small>
             </div>
 
             <button class="calculate-btn" onclick="calculatePredictions()">∑ Iniciar Simulación Estocástica</button>
@@ -455,7 +454,8 @@
     const THEME_KEY = 'colorMode';
     // Almacén de datos global para los partidos cargados
     window.leagueData = null; 
-    const MATCHES_LIMIT = 10; // Límite de partidos a considerar
+    const MATCHES_LIMIT = 10; // Límite de partidos a considerar para la FORMA del equipo (ponderación)
+    const DECAY_FACTOR = 0.95; // Factor de decaimiento (alfa) para la ponderación exponencial
 
     // --- Funciones de Utilidad y Persistencia ---
     
@@ -528,7 +528,7 @@
                     const localGoals = parseInt(resultParts[0]) || 0;
                     const visitantGoals = parseInt(resultParts[1]) || 0;
                     
-                    // Usar la fecha para ordenar (aunque el formato es complejo, es suficiente para new Date())
+                    // Usar la fecha para ordenar
                     const date = new Date(match.Date);
 
                     return {
@@ -537,7 +537,7 @@
                         VisitantTeam: visitantTeam,
                         LocalGoals: localGoals,
                         VisitantGoals: visitantGoals,
-                        Date: isNaN(date) ? new Date(0) : date // Usar epoch si la fecha es inválida
+                        Date: isNaN(date.getTime()) ? new Date(0) : date 
                     };
                 });
 
@@ -581,10 +581,10 @@
             leagueSelect.appendChild(option);
         });
 
-        populateTeamSelectors(); // Rellenar equipos inmediatamente (podría ser con la primera liga o vacío)
+        populateTeamSelectors(); 
     }
 
-    // Función para rellenar los selectores de Equipos basado en la Liga seleccionada
+    // Función para rellenar los selectores de Equipos
     function populateTeamSelectors() {
         const leagueSelect = document.getElementById('league-select');
         const teamLocalSelect = document.getElementById('team_local');
@@ -622,6 +622,33 @@
         teamLocalSelect.disabled = false;
         teamVisitantSelect.disabled = false;
     }
+
+    /**
+     * Calcula la media ponderada exponencialmente para una lista de goles.
+     * Los partidos más recientes (al inicio del array) tienen mayor peso.
+     * @param {number[]} goalsArray - Arreglo de goles (ordenado del más reciente al más antiguo).
+     * @returns {number} El promedio ponderado de goles.
+     */
+    function calculateWeightedAverage(goalsArray) {
+        let weightedSum = 0;
+        let weightTotal = 0;
+
+        // Iterar desde el final del array (partidos más antiguos) hacia el principio (más recientes)
+        // Esto simplifica el cálculo de la potencia: el más reciente (índice 0) tiene el peso más alto (DECAY_FACTOR^0 = 1).
+        
+        // Pero primero, nos aseguramos de usar SOLO el límite de forma reciente
+        const recentGoals = goalsArray.slice(0, MATCHES_LIMIT);
+
+        for (let i = 0; i < recentGoals.length; i++) {
+            // Calculamos el peso exponencialmente decreciente. i=0 (más reciente) tiene peso 1.
+            const weight = Math.pow(DECAY_FACTOR, i);
+            
+            weightedSum += recentGoals[i] * weight;
+            weightTotal += weight;
+        }
+
+        return weightTotal > 0 ? weightedSum / weightTotal : 0;
+    }
     
     // Función de cálculo principal de Parámetros (GL, GF, GC)
     function calculateAndSetParameters() {
@@ -636,58 +663,61 @@
             return;
         }
         
-        const allMatches = window.leagueData.filter(m => m.League === league);
+        const allMatchesInLeague = window.leagueData.filter(m => m.League === league);
         
-        // --- Cálculo de la Media Global de la Liga (Últimos 10 partidos de la liga) ---
-        // Tomar los últimos 10 partidos de la liga seleccionada
-        const lastLeagueMatches = allMatches.slice(0, MATCHES_LIMIT);
+        if (allMatchesInLeague.length === 0) {
+            statusElement.textContent = "Error: No hay partidos registrados para esta liga.";
+            statusElement.style.color = '#e63946';
+            return;
+        }
+
+        // --- 1. CÁLCULO DE LA MEDIA ESTABLE DE LA LIGA (GL_L y GL_V) ---
+        // Se usa TODO el historial de la liga para una media más robusta.
         
         let totalLocalGoals = 0;
         let totalVisitantGoals = 0;
         
-        lastLeagueMatches.forEach(m => {
+        allMatchesInLeague.forEach(m => {
             totalLocalGoals += m.LocalGoals;
             totalVisitantGoals += m.VisitantGoals;
         });
 
-        const GL_L = totalLocalGoals / lastLeagueMatches.length;
-        const GL_V = totalVisitantGoals / lastLeagueMatches.length;
+        const GL_L = totalLocalGoals / allMatchesInLeague.length;
+        const GL_V = totalVisitantGoals / allMatchesInLeague.length;
         
-        // --- Filtrar y sumar para los equipos específicos (Últimos 10 partidos en su rol) ---
         
-        // Equipo Local: Goles a Favor (Local) y Goles en Contra (Visitante) del RIVAL
-        const teamLHomeMatches = allMatches.filter(m => m.LocalTeam === teamL).slice(0, MATCHES_LIMIT);
-        const teamVAwayMatches = allMatches.filter(m => m.VisitantTeam === teamV).slice(0, MATCHES_LIMIT);
+        // --- 2. CÁLCULO DE FUERZAS PONDERADAS DE ATAQUE/DEFENSA (GF y GC) ---
         
-        // Sumas de Goles para el equipo Local (GF_L)
-        const sumGFL = teamLHomeMatches.reduce((sum, m) => sum + m.LocalGoals, 0); 
-        // Sumas de Goles en Contra del Visitante (GC_V) - Es decir, los goles que anotaron los rivales contra V cuando V era Visitante
-        const sumGCV = teamVAwayMatches.reduce((sum, m) => sum + m.LocalGoals, 0);  
-        
-        // Sumas de Goles para el equipo Visitante (GF_V)
-        const sumGFV = teamVAwayMatches.reduce((sum, m) => sum + m.VisitantGoals, 0); 
-        // Sumas de Goles en Contra del Local (GC_L) - Es decir, los goles que anotaron los rivales contra L cuando L era Local
-        const sumGCL = teamLHomeMatches.reduce((sum, m) => sum + m.VisitantGoals, 0); 
-        
-        // Asegurar que no dividimos por cero
-        const countGFL = teamLHomeMatches.length > 0 ? teamLHomeMatches.length : 1;
-        const countGCV = teamVAwayMatches.length > 0 ? teamVAwayMatches.length : 1;
+        // Partidos del Local: Jugados en Casa
+        const teamLHomeMatches = allMatchesInLeague.filter(m => m.LocalTeam === teamL);
+        // Partidos del Visitante: Jugados Fuera
+        const teamVAwayMatches = allMatchesInLeague.filter(m => m.VisitantTeam === teamV);
 
-        // Cálculo Final de Parámetros (Ataque/Defensa)
-        const GF_L = sumGFL / countGFL; // Ataque Local
-        const GC_V = sumGCV / countGCV; // Defensa Visitante
-        const GF_V = sumGFV / countGCV; // Ataque Visitante
-        const GC_L = sumGCL / countGFL; // Defensa Local
+        // Goles A Favor Local (GFL) - Goles anotados por L cuando es Local
+        const gflGoals = teamLHomeMatches.map(m => m.LocalGoals);
+        // Goles En Contra Local (GCL) - Goles recibidos por L cuando es Local
+        const gclGoals = teamLHomeMatches.map(m => m.VisitantGoals);
+        
+        // Goles A Favor Visitante (GFV) - Goles anotados por V cuando es Visitante
+        const gfvGoals = teamVAwayMatches.map(m => m.VisitantGoals);
+        // Goles En Contra Visitante (GCV) - Goles recibidos por V cuando es Visitante
+        const gcvGoals = teamVAwayMatches.map(m => m.LocalGoals);
+        
+        // Aplicar la media ponderada (solo a los últimos 10, pero con más peso al reciente)
+        const GF_L = calculateWeightedAverage(gflGoals);
+        const GC_L = calculateWeightedAverage(gclGoals);
+        const GF_V = calculateWeightedAverage(gfvGoals);
+        const GC_V = calculateWeightedAverage(gcvGoals);
 
         // 3. Actualizar Inputs
-        document.getElementById('gl_l').value = GL_L.toFixed(2);
-        document.getElementById('gl_v').value = GL_V.toFixed(2);
-        document.getElementById('gf_l').value = GF_L.toFixed(2);
-        document.getElementById('gc_v').value = GC_V.toFixed(2);
-        document.getElementById('gf_v').value = GF_V.toFixed(2);
-        document.getElementById('gc_l').value = GC_L.toFixed(2);
+        document.getElementById('gl_l').value = GL_L.toFixed(3);
+        document.getElementById('gl_v').value = GL_V.toFixed(3);
+        document.getElementById('gf_l').value = GF_L.toFixed(3);
+        document.getElementById('gc_v').value = GC_V.toFixed(3);
+        document.getElementById('gf_v').value = GF_V.toFixed(3);
+        document.getElementById('gc_l').value = GC_L.toFixed(3);
         
-        statusElement.textContent = `✅ Parámetros para ${teamL} vs ${teamV} calculados con éxito.`;
+        statusElement.textContent = `✅ Parámetros para ${teamL} vs ${teamV} calculados. GL_L/GL_V usan ${allMatchesInLeague.length} partidos.`;
         statusElement.style.color = '#2a9d8f';
     }
     
@@ -697,7 +727,7 @@
         const teamV = document.getElementById('team_visitant').value;
         const statusElement = document.getElementById('data-status');
         if (teamL && teamV) {
-             statusElement.textContent = `Liga y equipos seleccionados: ${teamL} vs ${teamV}. Presiona 'Calcular Parámetros'.`;
+             statusElement.textContent = `Liga y equipos seleccionados: ${teamL} vs ${teamV}. Presiona 'Calcular Parámetros Ponderados'.`;
              statusElement.style.color = '#457b9d';
         }
     }
@@ -718,6 +748,7 @@
         }
 
         // 2. CÁLCULO DE TASAS ESPERADAS (Lambdas)
+        // La fórmula de Poisson Doble permanece igual: (Ataque/GL_L) * (Defensa/GL_V) * GL_L
         const lambdaL = (p.gf_l / p.gl_l) * (p.gc_v / p.gl_v) * p.gl_l; 
         const lambdaV = (p.gf_v / p.gl_v) * (p.gc_l / p.gl_l) * p.gl_v; 
 
@@ -725,6 +756,7 @@
         const maxGoals = 4;
         let probMatrix_initial = [];
         let totalProb_initial = 0;
+        // Probabilidad de marcar maxGoals o más
         const P_plus = (lambda) => 1 - Array.from({ length: maxGoals }, (_, k) => poisson(k, lambda)).reduce((a, b) => a + b, 0);
 
         for (let i = 0; i <= maxGoals; i++) {
@@ -747,6 +779,7 @@
         
         const sumDraws_Orig = prob00_orig + prob11_orig;
         if (sumDraws_Orig > 0) {
+            // Aumentar P(0,0) y P(1,1) proporcionalmente al factor de correlación
             normalizedProbMatrix[0][0] += CORR_FACTOR * (prob00_orig / sumDraws_Orig);
             normalizedProbMatrix[1][1] += CORR_FACTOR * (prob11_orig / sumDraws_Orig);
         }
@@ -758,6 +791,7 @@
         let finalProbMatrix = [];
         let finalTotalProbCheck = 0;
 
+        // Reducir la probabilidad de los marcadores NO-0-0 y NO-1-1 para que la suma final sea 1.0
         const reductionFactor = (sumNonDraws_Original > 0) ? sumNonDraws_Required / sumNonDraws_Original : 1.0; 
 
         for (let i = 0; i <= maxGoals; i++) {
@@ -782,7 +816,7 @@
 
         let prob1 = 0, probX = 0, prob2 = 0;
         let probOU15 = 0, probOU25 = 0, probOU35 = 0;
-        let probBTTS = 0;
+        let probBTTS = 0; // Ambos Anotan (Both Teams To Score)
         
         for (let i = 0; i <= maxGoals; i++) {
             for (let j = 0; j <= maxGoals; j++) {
@@ -838,6 +872,7 @@
         markets.forEach(m => {
             const probPercent = (m.prob * 100).toFixed(2);
             const impliedOdd = (1 / m.prob).toFixed(2);
+            // Cuota Mínima de Valor (asumiendo un Edge del 10%)
             const minOddValue = (1 / m.prob + REFERENCE_EDGE_MARGIN).toFixed(2); 
 
             // Mostrar todos los resultados en la tabla principal
@@ -897,7 +932,7 @@
             applyMode('light');
         }
 
-        // 2. Ejecutar la simulación inicial
+        // 2. Ejecutar la simulación inicial (usa valores por defecto)
         calculatePredictions();
     });
 </script>
