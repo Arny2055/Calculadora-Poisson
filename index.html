@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>BetAGS Pro - Escáner de Valor (Doble JSON con Intersección)</title>
+    <title>BetAGS Pro - Escáner de Valor (Doble JSON con Confiabilidad)</title>
     <style>
         /* ================================================= */
         /* == CSS: Variables Globales y Estilos Base      == */
@@ -80,7 +80,7 @@
 
         .input-param-grid {
             display: grid;
-            grid-template-columns: 1fr 1fr; /* Dos columnas para los inputs de archivo */
+            grid-template-columns: 1fr 1fr; 
             gap: 20px;
             margin-top: 20px;
         }
@@ -197,7 +197,7 @@
     <main>
         <section id="data-load-section">
             <h3>1. Carga de Datos Históricos (Stats) y Partidos del Día (Fixtures)</h3>
-            <p style="font-size: 0.9em; color: var(--text-secondary);">Cargue la data histórica y los partidos a pronosticar. El selector de liga solo mostrará las ligas que existen en **ambos archivos**.</p>
+            <p style="font-size: 0.9em; color: var(--text-secondary);">El selector de liga solo mostrará las ligas que existen en **ambos archivos**. Se requiere un mínimo de **10 partidos** por equipo/condición para pronosticar.</p>
 
             <div class="input-param-grid">
                 <div class="input-pair">
@@ -216,7 +216,7 @@
 
             <div class="input-param-grid" style="grid-template-columns: 1fr;">
                 <div class="input-pair">
-                    <label for="league-select">Seleccionar Liga de los Partidos (Solo Ligas Comunes):</label>
+                    <label for="league-select">Seleccionar Liga (Individual o Todas):</label>
                     <select id="league-select" disabled>
                         <option value="">-- Cargar Ambos Archivos --</option>
                     </select>
@@ -235,7 +235,7 @@
         <section id="output-section" style="display: none;">
             <h3>3. Oportunidades de Valor (Fixtures del Día)</h3>
             <p style="font-size: 1em; color: var(--text-secondary);">
-                Se han analizado <strong id="matches-scanned-count">0</strong> partidos. A continuación, se muestran solo los mercados cuya probabilidad de ocurrencia (según el Modelo Poisson) cae entre el <strong style="color:var(--accent-main);">60% y 75%</strong>, considerándose posibles oportunidades de Valor.
+                Se han analizado <strong id="matches-scanned-count">0</strong> partidos. A continuación, se muestran solo los mercados cuya probabilidad de ocurrencia (según el Modelo Poisson) cae entre el <strong style="color:var(--accent-main);">60% y 75%</strong>, y donde ambos equipos cumplen el requisito mínimo de ${MATCHES\_LIMIT}$ partidos históricos.
             </p>
 
             <h4 style="margin-top: 20px;">Mercados Filtrados por Probabilidad (60% - 75%)</h4>
@@ -254,7 +254,7 @@
                     </tbody>
             </table>
             
-            <p id="no-matches-found" style="text-align: center; margin-top: 20px; font-weight: bold; color: var(--text-secondary); display: none;">No se encontraron mercados de valor (60%-75%) en los partidos cargados.</p>
+            <p id="no-matches-found" style="text-align: center; margin-top: 20px; font-weight: bold; color: var(--text-secondary); display: none;">No se encontraron mercados de valor (60%-75%) que cumplieran los requisitos de confiabilidad.</p>
 
             <hr style="margin: 30px 0; border-color: var(--border-color);">
 
@@ -277,14 +277,15 @@
     // =================================================
 
     const THEME_KEY = 'colorMode';
-    window.statsData = null; // Archivo JSON de stats históricas (incluye resultados)
-    window.fixturesData = null; // Archivo JSON de partidos del día (solo nombres)
-    window.leagueStats = {}; // Almacenará las medias globales (GL)
-    const MATCHES_LIMIT = 10; // Número de partidos recientes a considerar para la media ponderada
-    const DECAY_FACTOR = 0.95; // Factor de ponderación: los más recientes tienen mayor peso
-    const PROBABILITY_MIN = 0.60; // 60%
-    const PROBABILITY_MAX = 0.75; // 75%
-    const REFERENCE_EDGE_MARGIN = 0.10; // Margen de 10% para Cuota Mínima (EV+)
+    window.statsData = null; 
+    window.fixturesData = null; 
+    window.leagueStats = {}; 
+    const MATCHES_LIMIT = 10; // <<-- REQUISITO MÍNIMO DE PARTIDOS HISTÓRICOS
+    const DECAY_FACTOR = 0.95; 
+    const PROBABILITY_MIN = 0.60; 
+    const PROBABILITY_MAX = 0.75; 
+    const REFERENCE_EDGE_MARGIN = 0.10; 
+    const ALL_LEAGUES_VALUE = 'ALL_COMMON_LEAGUES'; 
 
     // --- Funciones de Utilidad (Modo Oscuro, Factorial, Poisson) ---
     function applyMode(mode) {
@@ -367,12 +368,10 @@
                 if (!Array.isArray(rawData)) throw new Error("El archivo no es un arreglo de partidos.");
 
                 const normalizedData = rawData.map(match => {
-                    // Normalizar y extraer equipos y liga
                     const matchParts = match.Match ? match.Match.split(' - ') : [];
                     const localTeam = matchParts[0] ? matchParts[0].trim() : match.LocalTeam || 'Desconocido L';
                     const visitantTeam = matchParts[1] ? matchParts[1].trim() : match.VisitantTeam || 'Desconocido V';
                     
-                    // Solo para stats: necesitamos resultados. Para fixtures, son 0 por defecto.
                     const resultParts = match['Result FT'] ? match['Result FT'].split('-') : [0, 0];
                     const localGoals = parseInt(resultParts[0]) || 0;
                     const visitantGoals = parseInt(resultParts[1]) || 0;
@@ -390,7 +389,6 @@
                 
                 if (type === 'stats') {
                     window.statsData = normalizedData.sort((a, b) => b.Date.getTime() - a.Date.getTime());
-                    calculateLeagueGlobals();
                     statusElement.textContent = `✅ Stats Cargadas. ${window.statsData.length} registros.`;
                 } else {
                     window.fixturesData = normalizedData;
@@ -398,7 +396,6 @@
                 }
                 statusElement.style.color = '#2a9d8f';
                 
-                // Actualizar el selector y el estado de escaneo
                 populateLeagueSelector();
                 checkReadyToScan();
 
@@ -417,41 +414,36 @@
         const button = document.getElementById('btn-scan-fixtures');
         const leagueSelect = document.getElementById('league-select');
         
-        // El escaneo solo es posible si se cargaron ambos archivos Y se seleccionó una liga común
-        if (window.statsData && window.fixturesData && leagueSelect.value && getCommonLeagues().includes(leagueSelect.value)) {
+        if (window.statsData && window.fixturesData && leagueSelect.value) {
             button.style.display = 'block';
         } else {
             button.style.display = 'none';
         }
     }
 
-    function calculateLeagueGlobals() {
-        if (!window.statsData || window.statsData.length === 0) return;
+    function calculateLeagueGlobals(league) {
+        if (!window.statsData || window.statsData.length === 0) return { GL_L: 0, GL_V: 0 };
+        
+        const leagueMatches = window.statsData.filter(m => m.League === league);
 
         let totalLocalGoals = 0; let totalVisitantGoals = 0;
-        window.statsData.forEach(m => {
+        leagueMatches.forEach(m => {
             totalLocalGoals += m.LocalGoals; totalVisitantGoals += m.VisitantGoals;
         });
-        const GL_L_AVG = totalLocalGoals / window.statsData.length;
-        const GL_V_AVG = totalVisitantGoals / window.statsData.length;
+        const GL_L_AVG = totalLocalGoals / leagueMatches.length;
+        const GL_V_AVG = totalVisitantGoals / leagueMatches.length;
         
-        window.leagueStats = { GL_L: GL_L_AVG, GL_V: GL_V_AVG };
-
-        document.getElementById('gl-l-output').textContent = GL_L_AVG.toFixed(3);
-        document.getElementById('gl-v-output').textContent = GL_V_AVG.toFixed(3);
+        return { GL_L: GL_L_AVG, GL_V: GL_V_AVG };
     }
     
-    // --- FUNCIÓN CLAVE: OBTENER LIGAS COMUNES (Intersección) ---
     function getCommonLeagues() {
         if (!window.statsData || !window.fixturesData) {
             return [];
         }
 
-        // Obtener el set de ligas en cada archivo
         const statsLeagues = new Set(window.statsData.map(m => m.League));
         const fixturesLeagues = new Set(window.fixturesData.map(m => m.League));
 
-        // Encontrar la intersección (ligas presentes en ambos sets)
         const commonLeagues = [...statsLeagues].filter(league => fixturesLeagues.has(league));
         
         return commonLeagues.sort();
@@ -461,7 +453,21 @@
         const leagueSelect = document.getElementById('league-select');
         const currentSelected = leagueSelect.value;
         leagueSelect.innerHTML = '<option value="">-- Seleccionar Liga --</option>';
-        leagueSelect.onchange = checkReadyToScan;
+        leagueSelect.onchange = () => {
+             // Actualizar metadatos y estado del botón al cambiar la selección
+             if (leagueSelect.value && leagueSelect.value !== ALL_LEAGUES_VALUE) {
+                const { GL_L, GL_V } = calculateLeagueGlobals(leagueSelect.value);
+                document.getElementById('gl-l-output').textContent = GL_L.toFixed(3);
+                document.getElementById('gl-v-output').textContent = GL_V.toFixed(3);
+             } else if (leagueSelect.value === ALL_LEAGUES_VALUE) {
+                 document.getElementById('gl-l-output').textContent = 'Múltiple';
+                 document.getElementById('gl-v-output').textContent = 'Múltiple';
+             } else {
+                 document.getElementById('gl-l-output').textContent = '0.000';
+                 document.getElementById('gl-v-output').textContent = '0.000';
+             }
+             checkReadyToScan();
+        };
 
         const commonLeagues = getCommonLeagues();
         
@@ -472,6 +478,15 @@
             return;
         }
 
+        leagueSelect.disabled = false;
+        
+        // 1. Agregar la opción "Todas las Ligas"
+        const allOption = document.createElement('option');
+        allOption.value = ALL_LEAGUES_VALUE;
+        allOption.textContent = '🎯 TODAS LAS LIGAS COMUNES';
+        leagueSelect.appendChild(allOption);
+
+        // 2. Agregar las ligas individuales
         commonLeagues.forEach(league => {
             const option = document.createElement('option');
             option.value = league;
@@ -479,103 +494,119 @@
             leagueSelect.appendChild(option);
         });
 
-        leagueSelect.disabled = false;
-        
-        // Intentar restablecer la liga previamente seleccionada si sigue siendo válida
-        if (commonLeagues.includes(currentSelected)) {
+        // 3. Restaurar selección previa si es válida
+        if (commonLeagues.includes(currentSelected) || currentSelected === ALL_LEAGUES_VALUE) {
              leagueSelect.value = currentSelected;
+             // Si se restableció una liga individual, ejecutar la actualización de GL
+             if (currentSelected && currentSelected !== ALL_LEAGUES_VALUE) {
+                 const { GL_L, GL_V } = calculateLeagueGlobals(currentSelected);
+                 document.getElementById('gl-l-output').textContent = GL_L.toFixed(3);
+                 document.getElementById('gl-v-output').textContent = GL_V.toFixed(3);
+             } else if (currentSelected === ALL_LEAGUES_VALUE) {
+                 document.getElementById('gl-l-output').textContent = 'Múltiple';
+                 document.getElementById('gl-v-output').textContent = 'Múltiple';
+             }
         } else {
-             leagueSelect.value = ''; // Limpiar si la liga ya no es común
+             leagueSelect.value = ''; 
         }
         
         checkReadyToScan();
     }
     
-    // --- FUNCIÓN MAESTRA DE ESCANEO DE FIXTURES ---
+    // --- FUNCIÓN MAESTRA DE ESCANEO DE FIXTURES (Validación de 10 partidos) ---
     function scanFixtures() {
-        const league = document.getElementById('league-select').value;
+        const selectedLeague = document.getElementById('league-select').value;
         const statusElement = document.getElementById('fixtures-status');
         
-        if (!window.statsData || !window.fixturesData || !league) {
+        if (!window.statsData || !window.fixturesData || !selectedLeague) {
             statusElement.textContent = "Error: Faltan datos o selección de liga.";
             statusElement.style.color = '#e63946';
             return;
         }
         
-        statusElement.textContent = `Escaneando partidos de ${league}...`;
+        statusElement.textContent = `Escaneando partidos...`;
         statusElement.style.color = '#ffc300';
         document.getElementById('output-section').style.display = 'none';
 
-        const { GL_L, GL_V } = window.leagueStats;
-        if (GL_L <= 0 || GL_V <= 0) {
-            alert("Las medias de goles globales de la liga son cero. Revisar JSON de estadísticas.");
-            return;
-        }
-        
         const allFilteredResults = [];
         const correlationFactor = parseFloat(document.getElementById('correlation_factor').value);
         let matchesProcessed = 0;
-
-        // Filtrar solo los fixtures de la liga seleccionada
-        const fixturesToScan = window.fixturesData.filter(f => f.League === league);
-
-        for (const fixture of fixturesToScan) {
-            matchesProcessed++;
-            const teamL = fixture.LocalTeam;
-            const teamV = fixture.VisitantTeam;
+        
+        const commonLeagues = getCommonLeagues();
+        const leaguesToScan = (selectedLeague === ALL_LEAGUES_VALUE) ? commonLeagues : [selectedLeague];
+        
+        if (leaguesToScan.length === 0) {
+            statusElement.textContent = "Error: No hay ligas comunes para escanear.";
+            statusElement.style.color = '#e63946';
+            return;
+        }
+        
+        // Iterar sobre las ligas seleccionadas
+        for (const league of leaguesToScan) {
+            const { GL_L, GL_V } = calculateLeagueGlobals(league);
             
-            // 1. OBTENER ESTADÍSTICAS DEL EQUIPO DE LA DATA HISTÓRICA
-            const teamLHomeMatches = window.statsData.filter(m => m.League === league && m.LocalTeam === teamL);
-            const teamVAwayMatches = window.statsData.filter(m => m.League === league && m.VisitantTeam === teamV);
-            
-            // Si no hay suficientes datos para un equipo, saltar (o usar una media neutral, pero aquí salimos)
-            if (teamLHomeMatches.length === 0 || teamVAwayMatches.length === 0) {
-                 console.warn(`Saltando ${teamL} vs ${teamV}: No hay suficientes datos históricos para ambos equipos.`);
-                 continue;
+            if (GL_L <= 0 || GL_V <= 0) {
+                console.warn(`Saltando liga ${league}: Medias de goles (GL) insuficientes.`);
+                continue;
             }
 
-            // Goles marcados por el equipo L en casa (ponderado)
-            const gflGoals = teamLHomeMatches.map(m => m.LocalGoals); 
-            const GF_L = calculateWeightedAverage(gflGoals); 
+            const fixturesToScan = window.fixturesData.filter(f => f.League === league);
             
-            // Goles marcados por el equipo V fuera (ponderado)
-            const gfvGoals = teamVAwayMatches.map(m => m.VisitantGoals); 
-            const GF_V = calculateWeightedAverage(gfvGoals); 
-            
-            // 2. CÁLCULO DE LAMBDAS (Tasa de goles esperados)
-            // L_local = (GF_L / GL_L) * GL_V  <- GL_V porque es la media que recibe el V
-            // L_visit = (GF_V / GL_V) * GL_L  <- GL_L porque es la media que recibe el L
-            const lambdaL_FT = (GF_L / GL_L) * GL_V; 
-            const lambdaV_FT = (GF_V / GL_V) * GL_L; 
-            
-            // 3. EJECUTAR SIMULACIÓN
-            const ft_results = runPoissonSimulation(lambdaL_FT, lambdaV_FT, correlationFactor);
-            
-            // 4. FILTRAR Y REGISTRAR RESULTADOS DE VALOR
-            const rawMarkets = [
-                { name: `1 (${teamL} Gana)`, prob: ft_results.prob1 },
-                { name: `X (Empate)`, prob: ft_results.probX },
-                { name: `2 (${teamV} Gana)`, prob: ft_results.prob2 },
-                { name: 'Total Goles Over 2.5', prob: ft_results.probOU25 },
-                { name: 'Total Goles Under 2.5', prob: 1 - ft_results.probOU25 },
-                { name: 'Ambos Equipos Anotan (Sí)', prob: ft_results.probBTTS }
-            ];
-            
-            rawMarkets.forEach(m => {
-                if (m.prob >= PROBABILITY_MIN && m.prob <= PROBABILITY_MAX) {
-                    const impliedOdd = (1 / m.prob);
-                    const minOddValue = (impliedOdd + REFERENCE_EDGE_MARGIN);
-                    
-                    allFilteredResults.push({
-                        League: league,
-                        Match: `${teamL} vs ${teamV}`,
-                        Market: m.name,
-                        Prob: m.prob,
-                        ImpliedOdd: impliedOdd,
-                        MinOdd: minOddValue
-                    });
+            for (const fixture of fixturesToScan) {
+                matchesProcessed++;
+                const teamL = fixture.LocalTeam;
+                const teamV = fixture.VisitantTeam;
+                
+                // 1. OBTENER ESTADÍSTICAS DEL EQUIPO DE LA DATA HISTÓRICA
+                const teamLHomeMatches = window.statsData.filter(m => m.League === league && m.LocalTeam === teamL);
+                const teamVAwayMatches = window.statsData.filter(m => m.League === league && m.VisitantTeam === teamV);
+                
+                // <<< VALIDACIÓN CLAVE: Mínimo de 10 partidos para cada equipo >>>
+                if (teamLHomeMatches.length < MATCHES_LIMIT || teamVAwayMatches.length < MATCHES_LIMIT) {
+                     // Si el partido no cumple el mínimo de historial, simplemente se omite y no se procesa.
+                     continue; 
                 }
-            });
+                
+                // 2. CÁLCULO DE FUERZAS Y LAMBDAS 
+                
+                const gflGoals = teamLHomeMatches.map(m => m.LocalGoals); 
+                const GF_L = calculateWeightedAverage(gflGoals); 
+                
+                const gfvGoals = teamVAwayMatches.map(m => m.VisitantGoals); 
+                const GF_V = calculateWeightedAverage(gfvGoals); 
+                
+                const lambdaL_FT = (GF_L / GL_L) * GL_V; 
+                const lambdaV_FT = (GF_V / GL_V) * GL_L; 
+                
+                // 3. EJECUTAR SIMULACIÓN
+                const ft_results = runPoissonSimulation(lambdaL_FT, lambdaV_FT, correlationFactor);
+                
+                // 4. FILTRAR Y REGISTRAR RESULTADOS DE VALOR
+                const rawMarkets = [
+                    { name: `1 (${teamL} Gana)`, prob: ft_results.prob1 },
+                    { name: `X (Empate)`, prob: ft_results.probX },
+                    { name: `2 (${teamV} Gana)`, prob: ft_results.prob2 },
+                    { name: 'Total Goles Over 2.5', prob: ft_results.probOU25 },
+                    { name: 'Total Goles Under 2.5', prob: 1 - ft_results.probOU25 },
+                    { name: 'Ambos Equipos Anotan (Sí)', prob: ft_results.probBTTS }
+                ];
+                
+                rawMarkets.forEach(m => {
+                    if (m.prob >= PROBABILITY_MIN && m.prob <= PROBABILITY_MAX) {
+                        const impliedOdd = (1 / m.prob);
+                        const minOddValue = (impliedOdd + REFERENCE_EDGE_MARGIN);
+                        
+                        allFilteredResults.push({
+                            League: league,
+                            Match: `${teamL} vs ${teamV}`,
+                            Market: m.name,
+                            Prob: m.prob,
+                            ImpliedOdd: impliedOdd,
+                            MinOdd: minOddValue
+                        });
+                    }
+                });
+            }
         }
         
         // 5. ACTUALIZAR UI CON RESULTADOS FILTRADOS
@@ -606,7 +637,6 @@
         let normalizedProbMatrix = probMatrix_initial.map(row => row.map(p => p * normFactor));
         let finalProbMatrix = JSON.parse(JSON.stringify(normalizedProbMatrix)); 
 
-        // Aplicar Corrección de Correlación (ajuste a empates)
         if (correlationFactor > 0) {
             const CORR_FACTOR = correlationFactor;
             const prob00_orig = normalizedProbMatrix[0][0];
@@ -626,7 +656,6 @@
                 for (let i = 0; i <= maxGoals; i++) {
                     for (let j = 0; j <= maxGoals; j++) {
                         if (!((i === 0 && j === 0) || (i === 1 && j === 1))) {
-                            // Reducir proporcionalmente el resto de las probabilidades
                             finalProbMatrix[i][j] = normalizedProbMatrix[i][j] * reductionFactor;
                         }
                     }
