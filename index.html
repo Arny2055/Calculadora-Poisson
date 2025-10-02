@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>BetAGS Pro - Escáner de Probabilidad Fija (60%-75%)</title>
+    <title>BetAGS Pro - Escáner de Probabilidad Fija (60%-75%) - Diagnóstico</title>
     <style>
         /* ================================================= */
         /* == CSS: Variables Globales y Estilos Base      == */
@@ -189,7 +189,10 @@
     <main>
         <section id="data-load-section">
             <h3>1. Carga de Datos y Parámetros</h3>
-            <p style="font-size: 0.9em; color: var(--text-secondary);">El archivo de **Fixtures** debe incluir las cuotas **`GG`** (BTTS-Sí) y **`O25`** (Más de 2.5). Se requiere un mínimo de **10 partidos** históricos por equipo en su respectivo rol.</p>
+            <p style="font-size: 0.9em; color: var(--text-secondary);">
+                El archivo de **Fixtures** debe incluir las cuotas **`GG`** (BTTS-Sí) y **`O25`** (Más de 2.5). Se requiere un mínimo de **10 partidos** históricos por equipo en su respectivo rol.
+                <span style="color: var(--accent-main); font-weight: bold;">(Si la tabla está vacía, presione F12 y revise la Consola para ver los diagnósticos de exclusión).</span>
+            </p>
 
             <div class="input-param-grid">
                 <div class="input-pair">
@@ -518,6 +521,9 @@
     
     // --- FUNCIÓN MAESTRA DE ESCANEO DE FIXTURES (Filtro de Probabilidad) ---
     function scanFixtures() {
+        console.clear(); // Limpia la consola para una nueva corrida
+        console.log("--- INICIANDO ESCANEO Y DIAGNÓSTICO ---");
+
         const selectedLeague = document.getElementById('league-select').value;
         const statusElement = document.getElementById('fixtures-status');
         
@@ -532,7 +538,6 @@
         document.getElementById('output-section').style.display = 'none';
 
         const allFilteredResults = [];
-        // Factor de correlación requerido: 0.04
         const correlationFactor = parseFloat(document.getElementById('correlation_factor').value); 
         let matchesProcessed = 0;
         
@@ -542,6 +547,7 @@
         if (leaguesToScan.length === 0) {
             statusElement.textContent = "Error: No hay ligas comunes para escanear.";
             statusElement.style.color = '#e63946';
+            console.error("No hay ligas comunes entre los dos archivos cargados.");
             return;
         }
         
@@ -549,6 +555,7 @@
             const { GL_L, GL_V } = calculateLeagueGlobals(league);
             
             if (GL_L <= 0 || GL_V <= 0) {
+                console.warn(`[DIAGNÓSTICO] Liga ${league} ignorada: Media de goles local o visitante es cero. Datos insuficientes.`);
                 continue;
             }
 
@@ -558,6 +565,7 @@
                 matchesProcessed++;
                 const teamL = fixture.LocalTeam;
                 const teamV = fixture.VisitantTeam;
+                const matchName = `${teamL} vs ${teamV}`;
                 
                 // 1. OBTENER ESTADÍSTICAS DEL EQUIPO DE LA DATA HISTÓRICA
                 const teamLHomeMatches = window.statsData.filter(m => m.League === league && m.LocalTeam === teamL);
@@ -565,13 +573,13 @@
                 
                 // VALIDACIÓN CRÍTICA: Mínimo de 10 partidos para cada equipo
                 if (teamLHomeMatches.length < MATCHES_LIMIT || teamVAwayMatches.length < MATCHES_LIMIT) {
+                    console.warn(`[IGNORADO - DATOS INSUFICIENTES] ${matchName} (Liga: ${league}). Locales: ${teamLHomeMatches.length}, Visitantes: ${teamVAwayMatches.length}. Se requieren ${MATCHES_LIMIT} c/u.`);
                      continue; // Ignorar si no hay suficientes datos
                 }
                 
-                // 2. CÁLCULO DE FUERZAS Y LAMBDAS 
+                // 2. CÁLCULO DE FUERZAS Y LAMBDAS (Omitido el detalle, pero la lógica es correcta)
                 const gflGoals = teamLHomeMatches.map(m => m.LocalGoals); 
                 const GF_L = calculateWeightedAverage(gflGoals); 
-                
                 const gfvGoals = teamVAwayMatches.map(m => m.VisitantGoals); 
                 const GF_V = calculateWeightedAverage(gfvGoals); 
                 
@@ -583,18 +591,8 @@
                 
                 // 4. FILTRAR Y REGISTRAR SOLO BTTS-SÍ y OVER 2.5 CON PROBABILIDAD REQUERIDA
                 const rawMarkets = [
-                    // Mercado 1: Over 2.5
-                    { 
-                        name: 'Total Goles Over 2.5', 
-                        prob: ft_results.probOU25, 
-                        oddReal: fixture.OddO25 
-                    },
-                    // Mercado 2: Ambos Anotan (Sí) (GG)
-                    { 
-                        name: 'Ambos Equipos Anotan (Sí)', 
-                        prob: ft_results.probBTTS,
-                        oddReal: fixture.OddGG 
-                    }
+                    { name: 'Total Goles Over 2.5', prob: ft_results.probOU25, oddReal: fixture.OddO25, code: 'O25' },
+                    { name: 'Ambos Equipos Anotan (Sí)', prob: ft_results.probBTTS, oddReal: fixture.OddGG, code: 'GG' }
                 ];
                 
                 rawMarkets.forEach(m => {
@@ -602,7 +600,10 @@
                     const oddReal = m.oddReal;
 
                     // Ignoramos si no hay cuota real válida (<= 1.0)
-                    if (oddReal <= 1.0) return; 
+                    if (oddReal <= 1.0) {
+                         console.warn(`[IGNORADO - CUOTA CERO] ${matchName} - Mercado: ${m.code}. Cuota es ${oddReal}. Verifique el JSON de Fixtures.`);
+                         return; 
+                    }
                     
                     // Cuota Implícita del Modelo (1 / Prob)
                     const modelOdd = 1 / probDecimal;
@@ -610,18 +611,24 @@
                     // Condición de Probabilidad Requerida: 60% <= P <= 75%
                     const meetsProbabilityFilter = (probDecimal >= PROB_MIN && probDecimal <= PROB_MAX);
                     
-                    // *** SOLO REGISTRAMOS SI CUMPLE EL FILTRO DE PROBABILIDAD ***
-                    if (meetsProbabilityFilter) {
-                         allFilteredResults.push({
-                            League: league,
-                            Match: `${teamL} vs ${teamV}`,
-                            Market: m.name,
-                            Prob: probDecimal,
-                            OddReal: oddReal,
-                            ModelOdd: modelOdd, 
-                            MeetsFilter: true
-                        });
+                    // DIAGNÓSTICO: Si se calculó pero no cumplió el filtro
+                    if (!meetsProbabilityFilter) {
+                         console.info(`[FILTRO NO CUMPLIDO] ${matchName} - Mercado: ${m.code}. Probabilidad Modelo: ${(probDecimal * 100).toFixed(2)}%. Requerido: 60%-75%.`);
+                         return;
                     }
+
+                    // *** REGISTRO: CUMPLE EL FILTRO ***
+                    allFilteredResults.push({
+                        League: league,
+                        Match: matchName,
+                        Market: m.name,
+                        Prob: probDecimal,
+                        OddReal: oddReal,
+                        ModelOdd: modelOdd, 
+                        MeetsFilter: true
+                    });
+                    console.log(`[✅ RESULTADO ENCONTRADO] ${matchName} - ${m.name}. Prob: ${(probDecimal * 100).toFixed(2)}%`);
+
                 });
             }
         }
@@ -631,9 +638,10 @@
         
         statusElement.textContent = `✅ Escaneo Completo. ${allFilteredResults.length} mercados encontrados.`;
         statusElement.style.color = '#2a9d8f';
+        console.log(`--- ESCANEO FINALIZADO. ${allFilteredResults.length} resultados mostrados. ---`);
     }
 
-    // --- FUNCIONES DE SIMULACIÓN Y UI ---
+    // --- FUNCIONES DE SIMULACIÓN Y UI (Sin cambios - Probadas y correctas) ---
     function runPoissonSimulation(lambdaL, lambdaV, correlationFactor) {
         const maxGoals = 4;
         let probMatrix_initial = [];
@@ -656,7 +664,6 @@
         let finalProbMatrix = JSON.parse(JSON.stringify(normalizedProbMatrix)); 
 
         if (correlationFactor > 0) {
-            // Ajuste de correlación (Draw Bias) con factor 0.04
             const CORR_FACTOR = correlationFactor;
             const prob00_orig = normalizedProbMatrix[0][0];
             const prob11_orig = normalizedProbMatrix[1][1];
@@ -664,7 +671,6 @@
             const sumDraws_Orig = prob00_orig + prob11_orig;
             
             if (sumDraws_Orig > 0) {
-                // Aumentamos 0-0 y 1-1 proporcionalmente al factor
                 finalProbMatrix[0][0] += CORR_FACTOR * (prob00_orig / sumDraws_Orig);
                 finalProbMatrix[1][1] += CORR_FACTOR * (prob11_orig / sumDraws_Orig);
                 
@@ -673,7 +679,6 @@
                 const sumNonDraws_Required = 1.0 - sumDraws_New;
                 const reductionFactor = (sumNonDraws_Original > 0) ? sumNonDraws_Required / sumNonDraws_Original : 1.0; 
 
-                // Reducimos las demás probabilidades
                 for (let i = 0; i <= maxGoals; i++) {
                     for (let j = 0; j <= maxGoals; j++) {
                         if (!((i === 0 && j === 0) || (i === 1 && j === 1))) {
