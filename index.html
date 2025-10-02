@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>BetAGS Pro - Escáner de Valor (Verificación de Cuotas)</title>
+    <title>BetAGS Pro - Escáner de Valor (EV+ Corregido)</title>
     <style>
         /* ================================================= */
         /* == CSS: Variables Globales y Estilos Base      == */
@@ -181,11 +181,6 @@
             color: white;
             font-weight: 700;
         }
-        .value-no {
-            background-color: var(--no-value-color);
-            color: white;
-            font-weight: 700;
-        }
 
         /* ================================================= */
         /* == MEDIA QUERIES (RESPONSIVE)                  == */
@@ -207,13 +202,13 @@
 <div id="calculator-container">
     <header>
         <h1>Escáner de **Valor Esperado (EV+)** - BTTS Sí & Over 2.5</h1>
-        <h2>Filtrando por Probabilidad (60% - 75%) Y Cuota Mínima</h2>
+        <h2>Filtrando por Probabilidad (60% - 75%) y **Cuota Real > Cuota Modelo**</h2>
     </header>
 
     <main>
         <section id="data-load-section">
             <h3>1. Carga de Datos y Parámetros</h3>
-            <p style="font-size: 0.9em; color: var(--text-secondary);">El archivo de **Fixtures** debe incluir las cuotas `GG` (BTTS-Sí) y `O25` (Más de 2.5) para que el escáner funcione correctamente.</p>
+            <p style="font-size: 0.9em; color: var(--text-secondary);">El archivo de **Fixtures** debe incluir las cuotas `GG` (BTTS-Sí) y `O25` (Más de 2.5). Se requiere un mínimo de **10 partidos** históricos por equipo.</p>
 
             <div class="input-param-grid">
                 <div class="input-pair">
@@ -251,7 +246,7 @@
         <section id="output-section" style="display: none;">
             <h3>3. Oportunidades de Valor Esperado Positivo (EV+)</h3>
             <p style="font-size: 1em; color: var(--text-secondary);">
-                Se han analizado <strong id="matches-scanned-count">0</strong> partidos. A continuación, se muestran **SÓLO** los mercados **Ambos Anotan (Sí)** y **Más de 2.5 Goles** que cumplen con la probabilidad del **60% al 75%** y cuya **Cuota Real (Bookie)** es superior a la **Cuota Mínima (Modelo)**.
+                Se han analizado <strong id="matches-scanned-count">0</strong> partidos. A continuación, se muestran **SÓLO** los mercados **Ambos Anotan (Sí)** y **Más de 2.5 Goles** que cumplen con la probabilidad del **60% al 75%** y cuya **Cuota Real es mayor a la Cuota Implícita del Modelo**.
             </p>
 
             <h4 style="margin-top: 20px;">Mercados con Valor Esperado Positivo (EV+)</h4>
@@ -263,7 +258,7 @@
                         <th>Mercado</th>
                         <th>Prob. Modelo (%)</th>
                         <th>Cuota Real</th>
-                        <th>Cuota Mínima (EV+)</th>
+                        <th>Cuota Implícita (Modelo)</th>
                         <th>Valor</th>
                     </tr>
                 </thead>
@@ -301,7 +296,7 @@
     const DECAY_FACTOR = 0.95; 
     const PROBABILITY_MIN = 0.60; 
     const PROBABILITY_MAX = 0.75; 
-    const REFERENCE_EDGE_MARGIN = 0.00; // Se ajusta a 0.00 ya que el EV+ ya incluye el margen
+    // Se elimina REFERENCE_EDGE_MARGIN ya que el EV+ es Cuota Real > Cuota Modelo
     const ALL_LEAGUES_VALUE = 'ALL_COMMON_LEAGUES'; 
 
     // --- Funciones de Utilidad (Modo Oscuro, Factorial, Poisson) ---
@@ -406,8 +401,9 @@
                     // Si es data de Fixtures, agregar las cuotas
                     if (type === 'fixtures') {
                         // Se asume que 'GG' es Ambos Anotan (Sí) y 'O25' es Más de 2.5
-                        fixtureObject.OddGG = parseFloat(match.GG) || 0; 
-                        fixtureObject.OddO25 = parseFloat(match.O25) || 0;
+                        // Usamos Number() en lugar de parseFloat() para manejar mejor los valores no numéricos
+                        fixtureObject.OddGG = Number(match.GG) || 0; 
+                        fixtureObject.OddO25 = Number(match.O25) || 0;
                     }
                     return fixtureObject;
                 });
@@ -533,7 +529,7 @@
         checkReadyToScan();
     }
     
-    // --- FUNCIÓN MAESTRA DE ESCANEO DE FIXTURES (Verificación de Valor) ---
+    // --- FUNCIÓN MAESTRA DE ESCANEO DE FIXTURES (Verificación de Valor Corregida) ---
     function scanFixtures() {
         const selectedLeague = document.getElementById('league-select').value;
         const statusElement = document.getElementById('fixtures-status');
@@ -597,20 +593,18 @@
                 // 3. EJECUTAR SIMULACIÓN
                 const ft_results = runPoissonSimulation(lambdaL_FT, lambdaV_FT, correlationFactor);
                 
-                // 4. FILTRAR Y REGISTRAR SOLO BTTS-SÍ y OVER 2.5
+                // 4. FILTRAR Y REGISTRAR SOLO BTTS-SÍ y OVER 2.5 CON VALOR
                 const rawMarkets = [
                     // Mercado 1: Over 2.5
                     { 
                         name: 'Total Goles Over 2.5', 
                         prob: ft_results.probOU25, 
-                        oddKey: 'OddO25',
                         oddReal: fixture.OddO25 
                     },
                     // Mercado 2: Ambos Anotan (Sí) (GG)
                     { 
                         name: 'Ambos Equipos Anotan (Sí)', 
                         prob: ft_results.probBTTS,
-                        oddKey: 'OddGG',
                         oddReal: fixture.OddGG 
                     }
                 ];
@@ -622,13 +616,13 @@
                     // Filtro 1: Probabilidad dentro del rango 60% - 75%
                     if (probDecimal >= PROBABILITY_MIN && probDecimal <= PROBABILITY_MAX) {
                         
-                        // Cálculo de Cuota Mínima (Implied Odd + Margen cero)
-                        const impliedOdd = (1 / probDecimal);
-                        const minOddValue = (impliedOdd + REFERENCE_EDGE_MARGIN); 
+                        // Cálculo de Cuota Implícita del Modelo (Cuota Mínima Teórica)
+                        const modelOdd = (1 / probDecimal);
                         
-                        // Filtro 2: Cuota Real debe ser mayor o igual a la Cuota Mínima
-                        const isValue = (oddReal >= minOddValue) && (oddReal > 0);
+                        // Filtro 2: Cuota Real debe ser estrictamente MAYOR a la Cuota Modelo para EV+
+                        const isValue = (oddReal > modelOdd) && (oddReal > 0);
                         
+                        // *** SOLO REGISTRAMOS SI HAY VALOR (EV+) ***
                         if (isValue) {
                              allFilteredResults.push({
                                 League: league,
@@ -636,7 +630,7 @@
                                 Market: m.name,
                                 Prob: probDecimal,
                                 OddReal: oddReal,
-                                MinOdd: minOddValue,
+                                ModelOdd: modelOdd, // Nueva variable más clara
                                 IsValue: true
                             });
                         }
@@ -652,7 +646,7 @@
         statusElement.style.color = '#2a9d8f';
     }
 
-    // --- FUNCIONES DE SIMULACIÓN Y UI (Se mantienen) ---
+    // --- FUNCIONES DE SIMULACIÓN Y UI ---
     function runPoissonSimulation(lambdaL, lambdaV, correlationFactor) {
         const maxGoals = 4;
         let probMatrix_initial = [];
@@ -748,13 +742,11 @@
         results.sort((a, b) => b.Prob - a.Prob);
 
         results.forEach(r => {
-            const minOddStyle = `font-weight: 600;`;
-            const valueClass = r.IsValue ? 'value-yes' : 'value-no';
-            const valueText = r.IsValue ? '✅ SÍ' : '❌ NO';
-
+            const valueClass = 'value-yes'; // Solo se muestran si IsValue es true
+            const valueText = '✅ SÍ'; 
+            
             // Cálculo de Edge/Ventaja
-            const impliedOdd = (1 / r.Prob);
-            const edge = (r.OddReal / impliedOdd) - 1;
+            const edge = (r.OddReal / r.ModelOdd) - 1;
 
             tableBody.innerHTML += `
                 <tr>
@@ -763,7 +755,7 @@
                     <td style="text-align: left;">${r.Market}</td>
                     <td>${(r.Prob * 100).toFixed(2)}%</td>
                     <td style="font-weight: 700;">${r.OddReal.toFixed(2)}</td>
-                    <td style="${minOddStyle}">${r.MinOdd.toFixed(2)}</td>
+                    <td style="font-weight: 600;">${r.ModelOdd.toFixed(2)}</td>
                     <td class="${valueClass}">${valueText} (${(edge * 100).toFixed(1)}%)</td>
                 </tr>
             `;
