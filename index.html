@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>BetAGS Pro - Escáner de Valor (EV+ Corregido)</title>
+    <title>BetAGS Pro - Escáner de Valor (EV+ Global)</title>
     <style>
         /* ================================================= */
         /* == CSS: Variables Globales y Estilos Base      == */
@@ -25,7 +25,7 @@
             --shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
             --bg-param-group: #f0f0f0;
             --value-color: #2a9d8f; /* Color para EV positivo */
-            --no-value-color: #e63946; /* Color para EV negativo */
+            --no-value-color: #e63946; /* Color para EV negativo (No se usa, solo se muestra EV+) */
         }
 
         /* ================================================= */
@@ -202,7 +202,7 @@
 <div id="calculator-container">
     <header>
         <h1>Escáner de **Valor Esperado (EV+)** - BTTS Sí & Over 2.5</h1>
-        <h2>Filtrando por Probabilidad (60% - 75%) y **Cuota Real > Cuota Modelo**</h2>
+        <h2>Filtro: Solamente Mercados con **Cuota Real > Cuota Implícita del Modelo**</h2>
     </header>
 
     <main>
@@ -246,7 +246,7 @@
         <section id="output-section" style="display: none;">
             <h3>3. Oportunidades de Valor Esperado Positivo (EV+)</h3>
             <p style="font-size: 1em; color: var(--text-secondary);">
-                Se han analizado <strong id="matches-scanned-count">0</strong> partidos. A continuación, se muestran **SÓLO** los mercados **Ambos Anotan (Sí)** y **Más de 2.5 Goles** que cumplen con la probabilidad del **60% al 75%** y cuya **Cuota Real es mayor a la Cuota Implícita del Modelo**.
+                Se han analizado <strong id="matches-scanned-count">0</strong> partidos. A continuación, se muestran **SÓLO** los mercados **Ambos Anotan (Sí)** y **Más de 2.5 Goles** que cumplen con la condición de **Valor Esperado Positivo (EV+).**
             </p>
 
             <h4 style="margin-top: 20px;">Mercados con Valor Esperado Positivo (EV+)</h4>
@@ -259,14 +259,14 @@
                         <th>Prob. Modelo (%)</th>
                         <th>Cuota Real</th>
                         <th>Cuota Implícita (Modelo)</th>
-                        <th>Valor</th>
+                        <th>Valor (Edge)</th>
                     </tr>
                 </thead>
                 <tbody>
                     </tbody>
             </table>
             
-            <p id="no-matches-found" style="text-align: center; margin-top: 20px; font-weight: bold; color: var(--text-secondary); display: none;">No se encontraron mercados con Valor Esperado Positivo (EV+) en los filtros aplicados.</p>
+            <p id="no-matches-found" style="text-align: center; margin-top: 20px; font-weight: bold; color: var(--text-secondary); display: none;">No se encontraron mercados con Valor Esperado Positivo (EV+) que cumplieran los requisitos de confiabilidad.</p>
 
             <hr style="margin: 30px 0; border-color: var(--border-color);">
 
@@ -294,9 +294,7 @@
     window.leagueStats = {}; 
     const MATCHES_LIMIT = 10; 
     const DECAY_FACTOR = 0.95; 
-    const PROBABILITY_MIN = 0.60; 
-    const PROBABILITY_MAX = 0.75; 
-    // Se elimina REFERENCE_EDGE_MARGIN ya que el EV+ es Cuota Real > Cuota Modelo
+    // --- ELIMINADOS LOS LÍMITES DE PROBABILIDAD PARA BUSCAR VALOR REAL ---
     const ALL_LEAGUES_VALUE = 'ALL_COMMON_LEAGUES'; 
 
     // --- Funciones de Utilidad (Modo Oscuro, Factorial, Poisson) ---
@@ -401,7 +399,6 @@
                     // Si es data de Fixtures, agregar las cuotas
                     if (type === 'fixtures') {
                         // Se asume que 'GG' es Ambos Anotan (Sí) y 'O25' es Más de 2.5
-                        // Usamos Number() en lugar de parseFloat() para manejar mejor los valores no numéricos
                         fixtureObject.OddGG = Number(match.GG) || 0; 
                         fixtureObject.OddO25 = Number(match.O25) || 0;
                     }
@@ -529,7 +526,7 @@
         checkReadyToScan();
     }
     
-    // --- FUNCIÓN MAESTRA DE ESCANEO DE FIXTURES (Verificación de Valor Corregida) ---
+    // --- FUNCIÓN MAESTRA DE ESCANEO DE FIXTURES (Verificación de Valor - SIN FILTRO DE PROB.) ---
     function scanFixtures() {
         const selectedLeague = document.getElementById('league-select').value;
         const statusElement = document.getElementById('fixtures-status');
@@ -612,28 +609,24 @@
                 rawMarkets.forEach(m => {
                     const probDecimal = m.prob;
                     const oddReal = m.oddReal;
-
-                    // Filtro 1: Probabilidad dentro del rango 60% - 75%
-                    if (probDecimal >= PROBABILITY_MIN && probDecimal <= PROBABILITY_MAX) {
-                        
-                        // Cálculo de Cuota Implícita del Modelo (Cuota Mínima Teórica)
-                        const modelOdd = (1 / probDecimal);
-                        
-                        // Filtro 2: Cuota Real debe ser estrictamente MAYOR a la Cuota Modelo para EV+
-                        const isValue = (oddReal > modelOdd) && (oddReal > 0);
-                        
-                        // *** SOLO REGISTRAMOS SI HAY VALOR (EV+) ***
-                        if (isValue) {
-                             allFilteredResults.push({
-                                League: league,
-                                Match: `${teamL} vs ${teamV}`,
-                                Market: m.name,
-                                Prob: probDecimal,
-                                OddReal: oddReal,
-                                ModelOdd: modelOdd, // Nueva variable más clara
-                                IsValue: true
-                            });
-                        }
+                    
+                    // Cálculo de Cuota Implícita del Modelo (Cuota Mínima Teórica)
+                    const modelOdd = (1 / probDecimal);
+                    
+                    // Condición de EV+: Cuota Real debe ser estrictamente MAYOR a la Cuota Implícita
+                    const isValue = (oddReal > modelOdd) && (oddReal > 0);
+                    
+                    // *** SOLO REGISTRAMOS SI HAY VALOR (EV+) ***
+                    if (isValue) {
+                         allFilteredResults.push({
+                            League: league,
+                            Match: `${teamL} vs ${teamV}`,
+                            Market: m.name,
+                            Prob: probDecimal,
+                            OddReal: oddReal,
+                            ModelOdd: modelOdd, 
+                            IsValue: true
+                        });
                     }
                 });
             }
@@ -739,13 +732,14 @@
              document.getElementById('no-matches-found').style.display = 'none';
         }
         
-        results.sort((a, b) => b.Prob - a.Prob);
+        // Ordenar por Edge/Ventaja (mayor valor primero)
+        results.sort((a, b) => ((b.OddReal / b.ModelOdd) - 1) - ((a.OddReal / a.ModelOdd) - 1));
 
         results.forEach(r => {
-            const valueClass = 'value-yes'; // Solo se muestran si IsValue es true
+            const valueClass = 'value-yes'; 
             const valueText = '✅ SÍ'; 
             
-            // Cálculo de Edge/Ventaja
+            // Cálculo de Edge/Ventaja (EV > 0)
             const edge = (r.OddReal / r.ModelOdd) - 1;
 
             tableBody.innerHTML += `
