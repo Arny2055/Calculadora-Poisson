@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>BetAGS Pro - Escáner de Probabilidad (60%-75%)</title>
+    <title>BetAGS Pro - Escáner de Probabilidad Fija (60%-75%)</title>
     <style>
         /* ================================================= */
         /* == CSS: Variables Globales y Estilos Base      == */
@@ -189,7 +189,7 @@
     <main>
         <section id="data-load-section">
             <h3>1. Carga de Datos y Parámetros</h3>
-            <p style="font-size: 0.9em; color: var(--text-secondary);">El archivo de **Fixtures** debe incluir las cuotas **`GG`** (BTTS-Sí) y **`O25`** (Más de 2.5). Se requiere un mínimo de **10 partidos** históricos por equipo.</p>
+            <p style="font-size: 0.9em; color: var(--text-secondary);">El archivo de **Fixtures** debe incluir las cuotas **`GG`** (BTTS-Sí) y **`O25`** (Más de 2.5). Se requiere un mínimo de **10 partidos** históricos por equipo en su respectivo rol.</p>
 
             <div class="input-param-grid">
                 <div class="input-pair">
@@ -273,8 +273,13 @@
     window.statsData = null; 
     window.fixturesData = null; 
     window.leagueStats = {}; 
-    const MATCHES_LIMIT = 10; // Mínimo de partidos históricos requeridos (Requisito del usuario)
-    const DECAY_FACTOR = 0.95; // Factor de peso para partidos más recientes
+    
+    // REQUISITOS DEL PROMPT
+    const MATCHES_LIMIT = 10; 
+    const DECAY_FACTOR = 0.95; 
+    const PROB_MIN = 0.60; // 60%
+    const PROB_MAX = 0.75; // 75%
+
     const ALL_LEAGUES_VALUE = 'ALL_COMMON_LEAGUES'; 
 
     // --- Funciones de Utilidad (Modo Oscuro, Factorial, Poisson) ---
@@ -309,10 +314,10 @@
     function poisson(k, lambda) {
         if (k < 0) return 0;
         if (lambda <= 0) return k === 0 ? 1 : 0; 
-        // Math.exp(-lambda) * Math.pow(lambda, k) / k!
         return (Math.exp(-lambda) * Math.pow(lambda, k)) / factorial(k);
     }
 
+    // Weighted Average para el factor de decaimiento (0.95)
     function calculateWeightedAverage(goalsArray) {
         let weightedSum = 0;
         let weightTotal = 0;
@@ -320,7 +325,8 @@
         const recentGoals = goalsArray.slice(0, MATCHES_LIMIT);
 
         for (let i = 0; i < recentGoals.length; i++) {
-            const weight = Math.pow(DECAY_FACTOR, i);
+            // Usa el factor de decaimiento 0.95
+            const weight = Math.pow(DECAY_FACTOR, i); 
             weightedSum += recentGoals[i] * weight;
             weightTotal += weight;
         }
@@ -328,7 +334,7 @@
         return weightTotal > 0 ? weightedSum / weightTotal : 0;
     }
 
-    // --- Lógica de Carga de Múltiples JSON (Reforzada para Cuotas) ---
+    // --- Lógica de Carga de Múltiples JSON ---
     function readJSONFile(type) {
         const inputId = (type === 'stats') ? 'json-stats-input' : 'json-fixtures-input';
         const statusId = (type === 'stats') ? 'stats-status' : 'fixtures-status';
@@ -379,7 +385,6 @@
 
                     // Si es data de Fixtures, agregar las cuotas de forma robusta
                     if (type === 'fixtures') {
-                        // Intentar parsear las cuotas. Si falla o es 0 o NaN, se fuerza a 0.
                         const oddGG = Number(match.GG); 
                         const oddO25 = Number(match.O25);
                         
@@ -390,6 +395,7 @@
                 });
                 
                 if (type === 'stats') {
+                    // Ordenamos por fecha descendente para que el decay factor funcione
                     window.statsData = normalizedData.sort((a, b) => b.Date.getTime() - a.Date.getTime());
                     statusElement.textContent = `✅ Stats Cargadas. ${window.statsData.length} registros.`;
                 } else {
@@ -526,7 +532,8 @@
         document.getElementById('output-section').style.display = 'none';
 
         const allFilteredResults = [];
-        const correlationFactor = parseFloat(document.getElementById('correlation_factor').value);
+        // Factor de correlación requerido: 0.04
+        const correlationFactor = parseFloat(document.getElementById('correlation_factor').value); 
         let matchesProcessed = 0;
         
         const commonLeagues = getCommonLeagues();
@@ -556,9 +563,9 @@
                 const teamLHomeMatches = window.statsData.filter(m => m.League === league && m.LocalTeam === teamL);
                 const teamVAwayMatches = window.statsData.filter(m => m.League === league && m.VisitantTeam === teamV);
                 
-                // VALIDACIÓN: Mínimo de 10 partidos para cada equipo (Requisito del usuario)
+                // VALIDACIÓN CRÍTICA: Mínimo de 10 partidos para cada equipo
                 if (teamLHomeMatches.length < MATCHES_LIMIT || teamVAwayMatches.length < MATCHES_LIMIT) {
-                     continue; 
+                     continue; // Ignorar si no hay suficientes datos
                 }
                 
                 // 2. CÁLCULO DE FUERZAS Y LAMBDAS 
@@ -571,7 +578,7 @@
                 const lambdaL_FT = (GF_L / GL_L) * GL_V; 
                 const lambdaV_FT = (GF_V / GL_V) * GL_L; 
                 
-                // 3. EJECUTAR SIMULACIÓN
+                // 3. EJECUTAR SIMULACIÓN (Poisson Bivariado)
                 const ft_results = runPoissonSimulation(lambdaL_FT, lambdaV_FT, correlationFactor);
                 
                 // 4. FILTRAR Y REGISTRAR SOLO BTTS-SÍ y OVER 2.5 CON PROBABILIDAD REQUERIDA
@@ -594,14 +601,14 @@
                     const probDecimal = m.prob;
                     const oddReal = m.oddReal;
 
-                    // Si la cuota real es 0, significa que no se cargó correctamente o no existe. Ignoramos.
+                    // Ignoramos si no hay cuota real válida (<= 1.0)
                     if (oddReal <= 1.0) return; 
                     
-                    // Conversión de Probabilidad a Cuota Implícita del Modelo
+                    // Cuota Implícita del Modelo (1 / Prob)
                     const modelOdd = 1 / probDecimal;
                     
-                    // Condición solicitada: Probabilidad entre 60% (0.60) y 75% (0.75)
-                    const meetsProbabilityFilter = (probDecimal >= 0.60 && probDecimal <= 0.75);
+                    // Condición de Probabilidad Requerida: 60% <= P <= 75%
+                    const meetsProbabilityFilter = (probDecimal >= PROB_MIN && probDecimal <= PROB_MAX);
                     
                     // *** SOLO REGISTRAMOS SI CUMPLE EL FILTRO DE PROBABILIDAD ***
                     if (meetsProbabilityFilter) {
@@ -631,7 +638,7 @@
         const maxGoals = 4;
         let probMatrix_initial = [];
         let totalProb_initial = 0;
-        // P_plus calcula la probabilidad de que haya más goles que el maxGoals (4)
+        
         const P_plus = (lambda) => 1 - Array.from({ length: maxGoals }, (_, k) => poisson(k, lambda)).reduce((a, b) => a + b, 0);
 
         for (let i = 0; i <= maxGoals; i++) {
@@ -649,7 +656,7 @@
         let finalProbMatrix = JSON.parse(JSON.stringify(normalizedProbMatrix)); 
 
         if (correlationFactor > 0) {
-            // Ajuste de correlación (Draw Bias)
+            // Ajuste de correlación (Draw Bias) con factor 0.04
             const CORR_FACTOR = correlationFactor;
             const prob00_orig = normalizedProbMatrix[0][0];
             const prob11_orig = normalizedProbMatrix[1][1];
