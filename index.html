@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>BetAGS Pro - Escáner de Valor (Doble JSON con Intersección)</title>
+    <title>BetAGS Pro - Escáner de Valor (Doble JSON con Confiabilidad)</title>
     <style>
         /* ================================================= */
         /* == CSS: Variables Globales y Estilos Base      == */
@@ -80,7 +80,7 @@
 
         .input-param-grid {
             display: grid;
-            grid-template-columns: 1fr 1fr; /* Dos columnas para los inputs de archivo */
+            grid-template-columns: 1fr 1fr; 
             gap: 20px;
             margin-top: 20px;
         }
@@ -197,7 +197,7 @@
     <main>
         <section id="data-load-section">
             <h3>1. Carga de Datos Históricos (Stats) y Partidos del Día (Fixtures)</h3>
-            <p style="font-size: 0.9em; color: var(--text-secondary);">Cargue la data histórica y los partidos a pronosticar. El selector de liga solo mostrará las ligas que existen en **ambos archivos**.</p>
+            <p style="font-size: 0.9em; color: var(--text-secondary);">El selector de liga solo mostrará las ligas que existen en **ambos archivos**. Se requiere un mínimo de **10 partidos** por equipo/condición para pronosticar.</p>
 
             <div class="input-param-grid">
                 <div class="input-pair">
@@ -235,7 +235,7 @@
         <section id="output-section" style="display: none;">
             <h3>3. Oportunidades de Valor (Fixtures del Día)</h3>
             <p style="font-size: 1em; color: var(--text-secondary);">
-                Se han analizado <strong id="matches-scanned-count">0</strong> partidos. A continuación, se muestran solo los mercados cuya probabilidad de ocurrencia (según el Modelo Poisson) cae entre el <strong style="color:var(--accent-main);">60% y 75%</strong>, considerándose posibles oportunidades de Valor.
+                Se han analizado <strong id="matches-scanned-count">0</strong> partidos. A continuación, se muestran solo los mercados cuya probabilidad de ocurrencia (según el Modelo Poisson) cae entre el <strong style="color:var(--accent-main);">60% y 75%</strong>, y donde ambos equipos cumplen el requisito mínimo de ${MATCHES\_LIMIT}$ partidos históricos.
             </p>
 
             <h4 style="margin-top: 20px;">Mercados Filtrados por Probabilidad (60% - 75%)</h4>
@@ -254,7 +254,7 @@
                     </tbody>
             </table>
             
-            <p id="no-matches-found" style="text-align: center; margin-top: 20px; font-weight: bold; color: var(--text-secondary); display: none;">No se encontraron mercados de valor (60%-75%) en los partidos cargados.</p>
+            <p id="no-matches-found" style="text-align: center; margin-top: 20px; font-weight: bold; color: var(--text-secondary); display: none;">No se encontraron mercados de valor (60%-75%) que cumplieran los requisitos de confiabilidad.</p>
 
             <hr style="margin: 30px 0; border-color: var(--border-color);">
 
@@ -280,12 +280,12 @@
     window.statsData = null; 
     window.fixturesData = null; 
     window.leagueStats = {}; 
-    const MATCHES_LIMIT = 10; 
+    const MATCHES_LIMIT = 10; // <<-- REQUISITO MÍNIMO DE PARTIDOS HISTÓRICOS
     const DECAY_FACTOR = 0.95; 
     const PROBABILITY_MIN = 0.60; 
     const PROBABILITY_MAX = 0.75; 
     const REFERENCE_EDGE_MARGIN = 0.10; 
-    const ALL_LEAGUES_VALUE = 'ALL_COMMON_LEAGUES'; // Valor especial para escanear todas las ligas
+    const ALL_LEAGUES_VALUE = 'ALL_COMMON_LEAGUES'; 
 
     // --- Funciones de Utilidad (Modo Oscuro, Factorial, Poisson) ---
     function applyMode(mode) {
@@ -389,7 +389,6 @@
                 
                 if (type === 'stats') {
                     window.statsData = normalizedData.sort((a, b) => b.Date.getTime() - a.Date.getTime());
-                    // NO calcular GL aquí, ya que necesitamos GL por cada liga al escanear "Todas"
                     statusElement.textContent = `✅ Stats Cargadas. ${window.statsData.length} registros.`;
                 } else {
                     window.fixturesData = normalizedData;
@@ -415,7 +414,6 @@
         const button = document.getElementById('btn-scan-fixtures');
         const leagueSelect = document.getElementById('league-select');
         
-        // Verifica que ambos archivos estén cargados Y que se haya seleccionado algo (cualquier liga o 'ALL')
         if (window.statsData && window.fixturesData && leagueSelect.value) {
             button.style.display = 'block';
         } else {
@@ -423,7 +421,6 @@
         }
     }
 
-    // Calculamos los GL para UNA LIGA específica
     function calculateLeagueGlobals(league) {
         if (!window.statsData || window.statsData.length === 0) return { GL_L: 0, GL_V: 0 };
         
@@ -439,7 +436,6 @@
         return { GL_L: GL_L_AVG, GL_V: GL_V_AVG };
     }
     
-    // --- FUNCIÓN CLAVE: OBTENER LIGAS COMUNES (Intersección) ---
     function getCommonLeagues() {
         if (!window.statsData || !window.fixturesData) {
             return [];
@@ -458,7 +454,7 @@
         const currentSelected = leagueSelect.value;
         leagueSelect.innerHTML = '<option value="">-- Seleccionar Liga --</option>';
         leagueSelect.onchange = () => {
-             // Si se selecciona una liga individual, actualizar el metadata
+             // Actualizar metadatos y estado del botón al cambiar la selección
              if (leagueSelect.value && leagueSelect.value !== ALL_LEAGUES_VALUE) {
                 const { GL_L, GL_V } = calculateLeagueGlobals(leagueSelect.value);
                 document.getElementById('gl-l-output').textContent = GL_L.toFixed(3);
@@ -466,6 +462,9 @@
              } else if (leagueSelect.value === ALL_LEAGUES_VALUE) {
                  document.getElementById('gl-l-output').textContent = 'Múltiple';
                  document.getElementById('gl-v-output').textContent = 'Múltiple';
+             } else {
+                 document.getElementById('gl-l-output').textContent = '0.000';
+                 document.getElementById('gl-v-output').textContent = '0.000';
              }
              checkReadyToScan();
         };
@@ -495,7 +494,7 @@
             leagueSelect.appendChild(option);
         });
 
-        // 3. Intentar restablecer la liga previamente seleccionada
+        // 3. Restaurar selección previa si es válida
         if (commonLeagues.includes(currentSelected) || currentSelected === ALL_LEAGUES_VALUE) {
              leagueSelect.value = currentSelected;
              // Si se restableció una liga individual, ejecutar la actualización de GL
@@ -503,6 +502,9 @@
                  const { GL_L, GL_V } = calculateLeagueGlobals(currentSelected);
                  document.getElementById('gl-l-output').textContent = GL_L.toFixed(3);
                  document.getElementById('gl-v-output').textContent = GL_V.toFixed(3);
+             } else if (currentSelected === ALL_LEAGUES_VALUE) {
+                 document.getElementById('gl-l-output').textContent = 'Múltiple';
+                 document.getElementById('gl-v-output').textContent = 'Múltiple';
              }
         } else {
              leagueSelect.value = ''; 
@@ -511,7 +513,7 @@
         checkReadyToScan();
     }
     
-    // --- FUNCIÓN MAESTRA DE ESCANEO DE FIXTURES (Modificada para 'ALL') ---
+    // --- FUNCIÓN MAESTRA DE ESCANEO DE FIXTURES (Validación de 10 partidos) ---
     function scanFixtures() {
         const selectedLeague = document.getElementById('league-select').value;
         const statusElement = document.getElementById('fixtures-status');
@@ -530,7 +532,6 @@
         const correlationFactor = parseFloat(document.getElementById('correlation_factor').value);
         let matchesProcessed = 0;
         
-        // Determinar qué ligas escanear
         const commonLeagues = getCommonLeagues();
         const leaguesToScan = (selectedLeague === ALL_LEAGUES_VALUE) ? commonLeagues : [selectedLeague];
         
@@ -542,7 +543,6 @@
         
         // Iterar sobre las ligas seleccionadas
         for (const league of leaguesToScan) {
-            // Recalcular GL para la liga actual
             const { GL_L, GL_V } = calculateLeagueGlobals(league);
             
             if (GL_L <= 0 || GL_V <= 0) {
@@ -550,7 +550,6 @@
                 continue;
             }
 
-            // Filtrar los fixtures de la liga actual
             const fixturesToScan = window.fixturesData.filter(f => f.League === league);
             
             for (const fixture of fixturesToScan) {
@@ -562,17 +561,20 @@
                 const teamLHomeMatches = window.statsData.filter(m => m.League === league && m.LocalTeam === teamL);
                 const teamVAwayMatches = window.statsData.filter(m => m.League === league && m.VisitantTeam === teamV);
                 
-                if (teamLHomeMatches.length === 0 || teamVAwayMatches.length === 0) {
-                    continue;
+                // <<< VALIDACIÓN CLAVE: Mínimo de 10 partidos para cada equipo >>>
+                if (teamLHomeMatches.length < MATCHES_LIMIT || teamVAwayMatches.length < MATCHES_LIMIT) {
+                     // Si el partido no cumple el mínimo de historial, simplemente se omite y no se procesa.
+                     continue; 
                 }
-
+                
+                // 2. CÁLCULO DE FUERZAS Y LAMBDAS 
+                
                 const gflGoals = teamLHomeMatches.map(m => m.LocalGoals); 
                 const GF_L = calculateWeightedAverage(gflGoals); 
                 
                 const gfvGoals = teamVAwayMatches.map(m => m.VisitantGoals); 
                 const GF_V = calculateWeightedAverage(gfvGoals); 
                 
-                // 2. CÁLCULO DE LAMBDAS
                 const lambdaL_FT = (GF_L / GL_L) * GL_V; 
                 const lambdaV_FT = (GF_V / GL_V) * GL_L; 
                 
@@ -635,7 +637,6 @@
         let normalizedProbMatrix = probMatrix_initial.map(row => row.map(p => p * normFactor));
         let finalProbMatrix = JSON.parse(JSON.stringify(normalizedProbMatrix)); 
 
-        // Aplicar Corrección de Correlación (ajuste a empates)
         if (correlationFactor > 0) {
             const CORR_FACTOR = correlationFactor;
             const prob00_orig = normalizedProbMatrix[0][0];
