@@ -171,7 +171,7 @@
         }
 
         /* Estilos de inputs */
-        .bookie-input, .result-select {
+        .bookie-input, .result-select, .bookie-select {
             padding: 5px;
             border: 1px solid var(--border-color);
             border-radius: 4px;
@@ -183,6 +183,7 @@
         }
         .bookie-input { width: 50px; }
         .result-select { width: 100px; font-size: 0.9em; }
+        .bookie-select { width: 90px; font-size: 0.8em; }
 
         /* Resaltado de Resultado */
         .result-win-row {
@@ -203,8 +204,8 @@
         .prob-real-positive { color: var(--success-color); font-weight: 700; }
         .prob-real-negative { color: var(--negative-color); font-weight: 700; }
         
-        /* ESTILO PARA LA NUEVA COLUMNA DE MERCADO */
-        .market-cell {
+        /* ESTILO PARA LA NUEVA COLUMNA DE MERCADO y CASA */
+        .market-cell, .bookie-cell {
              font-size: 0.85em; 
              font-weight: 500;
              text-align: left !important;
@@ -262,6 +263,7 @@
             th, td { padding: 6px 3px; font-size: 0.8em; }
             .bookie-input { width: 40px; padding: 3px; }
             .result-select { width: 80px; font-size: 0.8em; }
+            .bookie-select { width: 70px; font-size: 0.7em; }
             .stats-grid { grid-template-columns: 1fr; }
         }
     </style>
@@ -309,7 +311,8 @@
                 <tr>
                     <th class="col-date">Fecha/Hora</th>
                     <th>Partido</th>
-                    <th>Mercado</th> <th>Cuota Mínima (EV+)</th>
+                    <th>Mercado</th> 
+                    <th>Casa de Apuestas</th> <th>Cuota Mínima (EV+)</th>
                     <th>Cuota Bookie</th> 
                     <th>EV (%)</th> 
                     <th>Prob. Modelo (%)</th>
@@ -330,17 +333,24 @@
     const STORAGE_KEY = 'savedEVMatches'; 
     const THEME_KEY = 'colorMode';
     
+    // Lista de las casas de apuestas más comunes
+    const commonBookies = [
+        "Seleccionar",
+        "Bet365",
+        "Betfair",
+        "Bwin",
+        "William Hill",
+        "Codere",
+        "Otra"
+    ];
+
     // =======================================================
     // == TABLA DE CALIBRACIÓN EMPÍRICA (¡PERSONALIZA ESTO!) ==
-    // Los rangos deben ser mutuamente excluyentes y cubrir tus datos de backtesting.
-    // Ej: Si la cuota de la bookie está entre 1.81 y 2.20, históricamente ganaste el 70% de las veces en 100 partidos.
+    // =======================================================
     const tablaCalibracion = [
-        // { cuotaMin: 1.20, cuotaMax: 1.50, probReal: 75, partidos: 500 }, // Rango de cuotas bajas
-        // { cuotaMin: 1.51, cuotaMax: 1.80, probReal: 60, partidos: 800 }, // Rango medio-bajo
-        { cuotaMin: 1.81, cuotaMax: 2.20, probReal: 70, partidos: 100 }, // ¡Tu ejemplo!
-        { cuotaMin: 2.21, cuotaMax: 2.80, probReal: 40, partidos: 750 }, // Rango medio-alto
-        { cuotaMin: 2.81, cuotaMax: 3.50, probReal: 30, partidos: 400 }  // Rango de cuotas altas
-        // ... Añade más rangos según tu backtesting
+        { cuotaMin: 1.81, cuotaMax: 2.20, probReal: 70, partidos: 100 }, 
+        { cuotaMin: 2.21, cuotaMax: 2.80, probReal: 40, partidos: 750 }, 
+        { cuotaMin: 2.81, cuotaMax: 3.50, probReal: 30, partidos: 400 } 
     ];
 
     /**
@@ -348,7 +358,6 @@
      */
     function getCalibracion(cuotaBookie) {
         const match = tablaCalibracion.find(rango => {
-            // Asegúrate de usar >= y <= para incluir los límites
             return cuotaBookie >= rango.cuotaMin && cuotaBookie <= rango.cuotaMax;
         });
 
@@ -410,6 +419,7 @@
             const floatValue = parseFloat(value);
             
             if (index >= 0 && index < results.length) {
+                // Actualiza la Cuota
                 results[index].BookieOdd = (isNaN(floatValue) || value === '') ? null : floatValue; 
                 localStorage.setItem(STORAGE_KEY, JSON.stringify(results));
                 
@@ -433,6 +443,26 @@
         }
     }
     
+    /**
+     * Guarda la Casa de Apuestas en el registro correspondiente.
+     */
+    function saveBookieName(index, value) {
+        const savedData = localStorage.getItem(STORAGE_KEY);
+        if (!savedData) return;
+
+        try {
+            const results = JSON.parse(savedData);
+            
+            if (index >= 0 && index < results.length) {
+                // Si selecciona "Seleccionar", guardamos null o vacío
+                results[index].BookieName = value === 'Seleccionar' ? null : value; 
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(results));
+            }
+        } catch (e) {
+            console.error("Error al guardar la casa de apuestas:", e);
+        }
+    }
+
     /**
      * Actualiza las celdas de Probabilidad Real y Muestra Histórica.
      */
@@ -643,7 +673,8 @@
                 const probability = parseFloat(r.Prob); 
                 const bookieOddValue = r.BookieOdd === null ? '' : parseFloat(r.BookieOdd) || ''; 
                 const resultValue = r.Result || 'Pendiente'; 
-                
+                const bookieNameValue = r.BookieName || 'Seleccionar'; // Nuevo: valor por defecto
+
                 // Obtener calibración inicial
                 const bookieOddFloat = parseFloat(bookieOddValue);
                 const calibracion = getCalibracion(bookieOddFloat);
@@ -656,12 +687,22 @@
                 
                 const muestraDisplay = calibracion.partidos !== 'N/A' ? calibracion.partidos : '--';
 
+                // Generar opciones del select de Casa de Apuestas
+                let bookieOptions = commonBookies.map(bookie => 
+                    `<option value="${bookie}" ${bookieNameValue === bookie ? 'selected' : ''}>${bookie}</option>`
+                ).join('');
+
 
                 const newRow = tableBody.insertRow();
                 newRow.innerHTML = `
                     <td class="col-date">${formatDate(r.Date)}</td>
                     <td style="text-align: left; font-weight: 600;">${r.Match}</td>
-                    <td class="market-cell">${r.Market}</td> <td class="min-odd-cell">${minOdd.toFixed(2)}</td>
+                    <td class="market-cell">${r.Market}</td>
+                    <td class="bookie-cell">
+                        <select class="bookie-select" onchange="saveBookieName(${index}, this.value)">
+                            ${bookieOptions}
+                        </select>
+                    </td> <td class="min-odd-cell">${minOdd.toFixed(2)}</td>
                     <td>
                         <input type="number" 
                                step="0.01" 
