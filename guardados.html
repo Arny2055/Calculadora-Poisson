@@ -68,7 +68,7 @@
         }
 
         #saved-container {
-            max-width: 1500px; 
+            max-width: 1700px; /* Ancho aumentado para las nuevas columnas */
             margin: 0 auto;
             padding: 40px;
             background-color: var(--bg-card);
@@ -97,7 +97,7 @@
 
         .stats-grid {
             display: grid;
-            grid-template-columns: repeat(4, 1fr); /* 4 columnas para nuevas métricas */
+            grid-template-columns: repeat(4, 1fr); 
             gap: 20px;
             margin-top: 15px;
             text-align: center;
@@ -199,6 +199,10 @@
         .ev-negative { color: var(--negative-color); font-weight: 700; }
         .ev-neutral { color: var(--text-secondary); }
 
+        /* NUEVOS ESTILOS DE CALIBRACIÓN */
+        .prob-real-positive { color: var(--success-color); font-weight: 700; }
+        .prob-real-negative { color: var(--negative-color); font-weight: 700; }
+
         /* ================================================= */
         /* == ESTILOS DE BOTONES                          == */
         /* ================================================= */
@@ -297,14 +301,13 @@
             <thead>
                 <tr>
                     <th class="col-date">Fecha/Hora</th>
-                    <th>Liga</th>
                     <th>Partido</th>
-                    <th>Mercado</th>
-                    <th>Prob. Modelo (%)</th>
-                    <th>Cuota Implícita</th>
                     <th>Cuota Mínima (EV+)</th>
                     <th>Cuota Bookie</th> 
                     <th>EV (%)</th> 
+                    <th>Prob. Modelo (%)</th>
+                    <th>**Prob. Real (%)**</th> 
+                    <th>**Muestra Histórica**</th>
                     <th>Resultado</th>
                 </tr>
             </thead>
@@ -319,6 +322,42 @@
 <script>
     const STORAGE_KEY = 'savedEVMatches'; 
     const THEME_KEY = 'colorMode';
+    
+    // =======================================================
+    // == TABLA DE CALIBRACIÓN EMPÍRICA (¡PERSONALIZA ESTO!) ==
+    // Los rangos deben ser mutuamente excluyentes y cubrir tus datos de backtesting.
+    // Ej: Si la cuota de la bookie está entre 1.81 y 2.20, históricamente ganaste el 70% de las veces en 100 partidos.
+    const tablaCalibracion = [
+        // { cuotaMin: 1.20, cuotaMax: 1.50, probReal: 75, partidos: 500 }, // Rango de cuotas bajas
+        // { cuotaMin: 1.51, cuotaMax: 1.80, probReal: 60, partidos: 800 }, // Rango medio-bajo
+        { cuotaMin: 1.81, cuotaMax: 2.20, probReal: 70, partidos: 100 }, // ¡Tu ejemplo!
+        { cuotaMin: 2.21, cuotaMax: 2.80, probReal: 40, partidos: 750 }, // Rango medio-alto
+        { cuotaMin: 2.81, cuotaMax: 3.50, probReal: 30, partidos: 400 }  // Rango de cuotas altas
+        // ... Añade más rangos según tu backtesting
+    ];
+
+    /**
+     * Función que busca la probabilidad real en la tabla de calibración.
+     */
+    function getCalibracion(cuotaBookie) {
+        const match = tablaCalibracion.find(rango => {
+            // Asegúrate de usar >= y <= para incluir los límites
+            return cuotaBookie >= rango.cuotaMin && cuotaBookie <= rango.cuotaMax;
+        });
+
+        if (match) {
+            return {
+                probReal: match.probReal, // Porcentaje (ej: 70)
+                partidos: match.partidos
+            };
+        } else {
+            return {
+                probReal: null,
+                partidos: 'N/A'
+            };
+        }
+    }
+
 
     function formatDate(dateString) {
         const d = new Date(dateString);
@@ -335,7 +374,11 @@
             return `<span class="ev-neutral">N/A</span>`;
         }
         
-        const evValue = (bookieOdd * probability) - 1;
+        // La probabilidad viene como float (ej: 0.55), se convierte a decimal (ej: 55%)
+        const probDecimal = probability; 
+        
+        // EV = (Cuota * Prob. Modelo) - 1
+        const evValue = (bookieOdd * probDecimal) - 1;
         const evPercent = (evValue * 100).toFixed(2);
         
         let className = 'ev-neutral';
@@ -365,11 +408,17 @@
                 
                 const rowElement = inputElement.closest('tr');
                 const evCell = rowElement.querySelector('.ev-cell'); 
+                const probRealCell = rowElement.querySelector('.prob-real-cell');
+                const muestraCell = rowElement.querySelector('.muestra-cell');
                 
+                // 1. Actualiza EV
                 updateValueBetHighlight(rowElement, floatValue, minOdd);
                 evCell.innerHTML = calculateEV(floatValue, probability);
                 
-                // Recalcula la gráfica si hay un resultado finalizado y la cuota cambia
+                // 2. Actualiza la calibración
+                updateCalibracionCells(floatValue, probRealCell, muestraCell);
+
+                // 3. Recalcula la gráfica si hay un resultado finalizado y la cuota cambia
                 updateGraphIfFinalized(results, index);
             }
         } catch (e) {
@@ -377,6 +426,37 @@
         }
     }
     
+    /**
+     * Actualiza las celdas de Probabilidad Real y Muestra Histórica.
+     */
+    function updateCalibracionCells(bookieOdd, probRealCell, muestraCell) {
+        if (!bookieOdd) {
+            probRealCell.innerHTML = `<span class="ev-neutral">N/A</span>`;
+            muestraCell.textContent = 'N/A';
+            return;
+        }
+
+        const calibracion = getCalibracion(bookieOdd);
+        
+        if (calibracion.probReal !== null) {
+            const probImplBookie = (1 / bookieOdd) * 100;
+
+            let className = 'ev-neutral';
+            // Compara Probabilidad Real con Probabilidad Implícita de la Bookie
+            if (calibracion.probReal > probImplBookie) {
+                className = 'prob-real-positive'; // La realidad es más probable
+            } else if (calibracion.probReal < probImplBookie) {
+                className = 'prob-real-negative'; // La realidad es menos probable
+            }
+            
+            probRealCell.innerHTML = `<span class="${className}">${calibracion.probReal.toFixed(2)}%</span>`;
+            muestraCell.textContent = calibracion.partidos;
+        } else {
+            probRealCell.innerHTML = `<span class="ev-neutral">--</span>`;
+            muestraCell.textContent = '--';
+        }
+    }
+
     /**
      * Guarda el resultado (Ganada/Perdida/Pendiente) en el registro correspondiente y actualiza la UI.
      */
@@ -557,14 +637,21 @@
                 const bookieOddValue = r.BookieOdd === null ? '' : parseFloat(r.BookieOdd) || ''; 
                 const resultValue = r.Result || 'Pendiente'; 
                 
+                // Obtener calibración inicial
+                const bookieOddFloat = parseFloat(bookieOddValue);
+                const calibracion = getCalibracion(bookieOddFloat);
+                
+                const probRealDisplay = calibracion.probReal !== null 
+                    ? `<span class="${calibracion.probReal > (1 / bookieOddFloat) * 100 ? 'prob-real-positive' : 'prob-real-negative'}">${calibracion.probReal.toFixed(2)}%</span>` 
+                    : '<span class="ev-neutral">--</span>';
+                
+                const muestraDisplay = calibracion.partidos !== 'N/A' ? calibracion.partidos : '--';
+
+
                 const newRow = tableBody.insertRow();
                 newRow.innerHTML = `
                     <td class="col-date">${formatDate(r.Date)}</td>
-                    <td>${r.League}</td>
                     <td style="text-align: left; font-weight: 600;">${r.Match}</td>
-                    <td style="text-align: left;">${r.Market}</td>
-                    <td>${(r.Prob * 100).toFixed(2)}%</td>
-                    <td>${r.ImpliedOdd.toFixed(2)}</td>
                     <td class="min-odd-cell">${minOdd.toFixed(2)}</td>
                     <td>
                         <input type="number" 
@@ -577,6 +664,9 @@
                     <td class="ev-cell">
                         ${calculateEV(r.BookieOdd, probability)}
                     </td>
+                    <td>${(r.Prob * 100).toFixed(2)}%</td>
+                    <td class="prob-real-cell">${probRealDisplay}</td> 
+                    <td class="muestra-cell">${muestraDisplay}</td> 
                     <td>
                         <select class="result-select" onchange="saveResult(${index}, this.value, this)">
                             <option value="Pendiente" ${resultValue === 'Pendiente' ? 'selected' : ''}>⏳ Pendiente</option>
