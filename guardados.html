@@ -20,17 +20,17 @@
             --table-row-stripe: #f5f5f5; 
             --accent-main: #e63946; /* Rojo para resaltados importantes (EV+) */
             --accent-alt: #3d8bff;  /* Azul Brillante para títulos/bordes */
-            --success-color: #2a9d8f; /* Verde para EV+ */
+            --success-color: #2a9d8f; /* Verde para EV+ y Yield Positivo */
             --warning-color: #ffc300;
             --shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
-            --negative-color: #e63946; /* Rojo para EV- */
+            --negative-color: #e63946; /* Rojo para EV- y Yield Negativo */
 
             /* Colores de Resultado */
-            --result-win: #4CAF50; /* Verde brillante */
-            --result-loss: #f44336; /* Rojo vivo */
+            --result-win: #4CAF50; 
+            --result-loss: #f44336; 
             --result-pending: #888;
-            --bg-win-row: rgba(76, 175, 80, 0.15); /* Fondo verde muy claro */
-            --bg-loss-row: rgba(244, 67, 54, 0.15); /* Fondo rojo muy claro */
+            --bg-win-row: rgba(76, 175, 80, 0.15); 
+            --bg-loss-row: rgba(244, 67, 54, 0.15); 
         }
 
         /* ================================================= */
@@ -97,7 +97,7 @@
 
         .stats-grid {
             display: grid;
-            grid-template-columns: repeat(3, 1fr);
+            grid-template-columns: repeat(4, 1fr); /* 4 columnas para nuevas métricas */
             gap: 20px;
             margin-top: 15px;
             text-align: center;
@@ -111,7 +111,7 @@
         }
 
         .stat-box p {
-            font-size: 1.5em;
+            font-size: 1.4em;
             font-weight: 700;
             margin: 5px 0 0;
         }
@@ -120,11 +120,13 @@
             color: var(--text-secondary);
             display: block;
         }
-        #win-count p { color: var(--result-win); }
-        #loss-count p { color: var(--result-loss); }
-        #total-count p { color: var(--text-primary); }
         
-        
+        /* Estilos específicos para las métricas de unidades */
+        .units-positive { color: var(--success-color); }
+        .units-negative { color: var(--negative-color); }
+        .units-neutral { color: var(--text-primary); }
+
+
         /* ================================================= */
         /* == ESTILOS DE TABLAS Y FILAS                   == */
         /* ================================================= */
@@ -240,7 +242,10 @@
         }
 
         /* Responsive */
-        @media (max-width: 1000px) {
+        @media (max-width: 1200px) {
+             .stats-grid { grid-template-columns: repeat(2, 1fr); }
+        }
+        @media (max-width: 800px) {
             #saved-container { padding: 15px; }
             .button-group { flex-direction: column; }
             th, td { padding: 6px 3px; font-size: 0.8em; }
@@ -255,32 +260,36 @@
 <div id="saved-container">
     <header>
         <h1>Partidos de Valor Guardados (BTTS Sí & Over 2.5)</h1>
-        <p>Introduce la Cuota Bookie y marca el **Resultado** para el seguimiento de la rentabilidad.</p>
+        <p>Apuesta base: **1 unidad** por partido finalizado. El EV positivo debe llevar a ganancias a largo plazo.</p>
         
         <div class="button-group">
-            <button onclick="toggleGraph()" class="action-button graph-toggle" id="btn-graph-toggle">📊 Ver Gráfica de Resultados</button>
+            <button onclick="toggleGraph()" class="action-button graph-toggle" id="btn-graph-toggle">📊 Ver Resultados y Unidades</button>
             <button onclick="clearSavedMatches()" class="action-button">🗑️ Limpiar Todos los Partidos</button>
             <button onclick="window.location.href='index.html'" class="action-button back">⬅️ Volver al Escáner</button>
         </div>
     </header>
     
     <section id="graph-section" style="display: none;">
-        <h2>Análisis de Resultados de Apuestas</h2>
+        <h2>Análisis de Rendimiento (1 Unidad por Apuesta)</h2>
         <div class="stats-grid">
-            <div class="stat-box" id="win-count">
-                <span>Apuestas Ganadas</span>
-                <p>0</p>
+            <div class="stat-box" id="net-units-box">
+                <span>Unidades Netas</span>
+                <p class="units-neutral" id="net-units">0.00</p>
             </div>
-            <div class="stat-box" id="loss-count">
-                <span>Apuestas Perdidas</span>
-                <p>0</p>
+            <div class="stat-box" id="yield-box">
+                <span>Yield (%)</span>
+                <p class="units-neutral" id="yield-percent">0.00%</p>
             </div>
             <div class="stat-box" id="total-count">
-                <span>Total Finalizadas</span>
+                <span>Total Apuestas Finalizadas</span>
                 <p>0</p>
             </div>
+            <div class="stat-box" id="win-rate-box">
+                <span>Tasa de Acierto</span>
+                <p class="units-neutral" id="win-rate">0.00%</p>
+            </div>
         </div>
-        <p style="text-align: center; margin-top: 20px; color: var(--text-secondary);">Esta gráfica solo contabiliza los resultados marcados como "Ganada" o "Perdida".</p>
+        <p style="text-align: center; margin-top: 20px; color: var(--text-secondary);">El Yield y las Unidades Netas son la métrica clave de la rentabilidad.</p>
     </section>
     
     <main>
@@ -359,6 +368,9 @@
                 
                 updateValueBetHighlight(rowElement, floatValue, minOdd);
                 evCell.innerHTML = calculateEV(floatValue, probability);
+                
+                // Recalcula la gráfica si hay un resultado finalizado y la cuota cambia
+                updateGraphIfFinalized(results, index);
             }
         } catch (e) {
             console.error("Error al guardar la cuota de la bookie:", e);
@@ -418,39 +430,85 @@
     // =======================================================
 
     /**
-     * Calcula los conteos de Ganadas, Perdidas y Pendientes.
+     * Calcula los conteos de Ganadas, Perdidas y Unidades Netas.
+     * Asume 1 unidad de stake por apuesta.
      * @param {Array} results - El array de partidos guardados.
      */
     function calculateStats(results) {
         let wins = 0;
         let losses = 0;
-        let pending = 0;
+        let netUnits = 0;
+        let totalFinalized = 0;
         
         results.forEach(r => {
-            if (r.Result === 'Ganada') {
+            const bookieOdd = parseFloat(r.BookieOdd);
+            
+            if (r.Result === 'Ganada' && bookieOdd) {
+                // Ganancia = Cuota - 1 unidad (stake)
+                netUnits += (bookieOdd - 1);
                 wins++;
+                totalFinalized++;
             } else if (r.Result === 'Perdida') {
+                // Pérdida = -1 unidad (stake)
+                netUnits -= 1;
                 losses++;
-            } else {
-                pending++;
+                totalFinalized++;
             }
         });
+        
+        const yieldPercent = totalFinalized > 0 ? (netUnits / totalFinalized) * 100 : 0;
+        const winRate = totalFinalized > 0 ? (wins / totalFinalized) * 100 : 0;
 
-        return { wins, losses, totalFinalized: wins + losses };
+        return { netUnits, totalFinalized, yieldPercent, winRate };
     }
 
     /**
-     * Actualiza la sección de la gráfica con los nuevos conteos.
+     * Actualiza la sección de la gráfica con las nuevas métricas.
      * @param {Array} results - El array de partidos guardados.
      */
     function updateGraph(results) {
-        const { wins, losses, totalFinalized } = calculateStats(results);
+        const { netUnits, totalFinalized, yieldPercent, winRate } = calculateStats(results);
 
-        document.querySelector('#win-count p').textContent = wins;
-        document.querySelector('#loss-count p').textContent = losses;
+        const netUnitsElement = document.getElementById('net-units');
+        const yieldElement = document.getElementById('yield-percent');
+        
+        // Unidades Netas
+        netUnitsElement.textContent = netUnits.toFixed(2);
+        netUnitsElement.className = '';
+        if (netUnits > 0) {
+            netUnitsElement.classList.add('units-positive');
+        } else if (netUnits < 0) {
+            netUnitsElement.classList.add('units-negative');
+        } else {
+            netUnitsElement.classList.add('units-neutral');
+        }
+        
+        // Yield
+        yieldElement.textContent = yieldPercent.toFixed(2) + '%';
+        yieldElement.className = '';
+        if (yieldPercent > 0) {
+            yieldElement.classList.add('units-positive');
+        } else if (yieldPercent < 0) {
+            yieldElement.classList.add('units-negative');
+        } else {
+            yieldElement.classList.add('units-neutral');
+        }
+        
+        // Total Finalizadas y Tasa de Acierto
         document.querySelector('#total-count p').textContent = totalFinalized;
+        document.getElementById('win-rate').textContent = winRate.toFixed(2) + '%';
     }
     
+    /**
+     * Recalcula la gráfica solo si el partido afectado ya tiene un resultado (Ganada/Perdida).
+     */
+    function updateGraphIfFinalized(results, index) {
+        const result = results[index].Result;
+        if (result === 'Ganada' || result === 'Perdida') {
+            updateGraph(results);
+        }
+    }
+
     /**
      * Muestra/Oculta la sección de la gráfica y actualiza el texto del botón.
      */
@@ -460,10 +518,10 @@
         
         if (graphSection.style.display === 'none') {
             graphSection.style.display = 'block';
-            toggleButton.textContent = '❌ Ocultar Gráfica de Resultados';
+            toggleButton.textContent = '❌ Ocultar Resultados y Unidades';
         } else {
             graphSection.style.display = 'none';
-            toggleButton.textContent = '📊 Ver Gráfica de Resultados';
+            toggleButton.textContent = '📊 Ver Resultados y Unidades';
         }
     }
 
@@ -473,12 +531,13 @@
         const noMatchesText = document.getElementById('no-saved-matches');
         tableBody.innerHTML = '';
         noMatchesText.style.display = 'none';
+        document.getElementById('btn-graph-toggle').style.display = 'none';
+
 
         const savedData = localStorage.getItem(STORAGE_KEY);
         if (!savedData) {
             noMatchesText.style.display = 'block';
-            // También oculta la gráfica si no hay datos
-            document.getElementById('btn-graph-toggle').style.display = 'none';
+            updateGraph([]); // Inicializa la gráfica a 0
             return;
         }
 
@@ -486,10 +545,10 @@
             const results = JSON.parse(savedData);
             if (results.length === 0) {
                 noMatchesText.style.display = 'block';
-                 document.getElementById('btn-graph-toggle').style.display = 'none';
+                updateGraph([]);
                 return;
             }
-             document.getElementById('btn-graph-toggle').style.display = 'flex';
+            document.getElementById('btn-graph-toggle').style.display = 'flex';
 
 
             results.forEach((r, index) => {
@@ -499,7 +558,6 @@
                 const resultValue = r.Result || 'Pendiente'; 
                 
                 const newRow = tableBody.insertRow();
-                // Usamos la clase ev-cell en el <td> EV para que saveBookieOdd lo encuentre
                 newRow.innerHTML = `
                     <td class="col-date">${formatDate(r.Date)}</td>
                     <td>${r.League}</td>
@@ -567,7 +625,6 @@
         } else {
             applyMode('light');
         }
-        document.getElementById('btn-graph-toggle').style.display = 'none';
     });
 
 </script>
