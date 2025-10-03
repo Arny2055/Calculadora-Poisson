@@ -113,6 +113,25 @@
             transform: translateY(-1px); 
         }
 
+        /* Botón de guardar */
+        #btn-save-matches {
+            display: none;
+            width: 100%;
+            padding: 12px;
+            margin-top: 20px;
+            background-color: var(--success-color);
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 1em;
+            font-weight: 600;
+            transition: background-color 0.3s;
+        }
+        #btn-save-matches:hover {
+            background-color: #24887d;
+        }
+
         /* ================================================= */
         /* == METADATA (LAMBDAS)                          == */
         /* ================================================= */
@@ -244,6 +263,8 @@
                 Se han analizado <strong id="matches-scanned-count">0</strong> partidos. A continuación, se muestran solo los mercados **Ambos Anotan (Sí)** y **Más de 2.5 Goles** que cumplen con la probabilidad del **60% al 75%** y el mínimo de 10 partidos históricos.
             </p>
 
+            <button id="btn-save-matches" onclick="saveFilteredMatches()">💾 Guardar Oportunidades Filtradas (¡Abrir archivo "guardados.html" después!)</button>
+
             <h4 style="margin-top: 20px;">Mercados Filtrados por Probabilidad (60% - 75%)</h4>
             <table id="filtered-results-table">
                 <thead>
@@ -287,12 +308,14 @@
     window.statsData = null; 
     window.fixturesData = null; 
     window.leagueStats = {}; 
-    const MATCHES_LIMIT = 10; // <<-- REQUISITO MÍNIMO DE PARTIDOS HISTÓRICOS
+    window.currentFilteredResults = []; // [NUEVO] Para guardar los resultados actuales antes de guardarlos
+    const MATCHES_LIMIT = 10; 
     const DECAY_FACTOR = 0.95; 
     const PROBABILITY_MIN = 0.60; 
     const PROBABILITY_MAX = 0.75; 
     const REFERENCE_EDGE_MARGIN = 0.10; 
     const ALL_LEAGUES_VALUE = 'ALL_COMMON_LEAGUES'; 
+    const STORAGE_KEY = 'savedEVMatches'; // [NUEVO] Clave para localStorage
 
     // --- Funciones de Utilidad (Modo Oscuro, Factorial, Poisson) ---
     function applyMode(mode) {
@@ -353,6 +376,7 @@
         
         document.getElementById('output-section').style.display = 'none';
         document.getElementById('btn-scan-fixtures').style.display = 'none';
+        document.getElementById('btn-save-matches').style.display = 'none'; // [NUEVO] Ocultar botón de guardar
 
         if (fileInput.files.length === 0) {
             statusElement.textContent = `Error: Selecciona un archivo ${type}.`;
@@ -536,6 +560,7 @@
         statusElement.textContent = `Escaneando partidos...`;
         statusElement.style.color = '#ffc300';
         document.getElementById('output-section').style.display = 'none';
+        document.getElementById('btn-save-matches').style.display = 'none'; // [NUEVO] Ocultar antes de escanear
 
         const allFilteredResults = [];
         const correlationFactor = parseFloat(document.getElementById('correlation_factor').value);
@@ -607,7 +632,6 @@
                             Prob: m.prob,
                             ImpliedOdd: impliedOdd,
                             MinOdd: minOddValue,
-                            // [CAMBIO] Guardar la fecha del fixture para el ordenamiento
                             Date: fixture.Date 
                         });
                     }
@@ -616,13 +640,14 @@
         }
         
         // 5. ACTUALIZAR UI CON RESULTADOS FILTRADOS
+        window.currentFilteredResults = allFilteredResults; // [NUEVO] Guardar resultados en variable global
         updateFilteredUI(allFilteredResults, matchesProcessed);
         
         statusElement.textContent = `✅ Escaneo Completo. ${allFilteredResults.length} mercados de valor encontrados.`;
         statusElement.style.color = '#2a9d8f';
     }
 
-    // --- FUNCIONES DE SIMULACIÓN Y UI (Se mantienen) ---
+    // --- FUNCIONES DE SIMULACIÓN Y UI ---
     function runPoissonSimulation(lambdaL, lambdaV, correlationFactor) {
         const maxGoals = 4;
         let probMatrix_initial = [];
@@ -669,7 +694,7 @@
             }
         }
         
-        let prob1 = 0, probX = 0, prob2 = 0; // Se calculan pero no se usan en la lista de resultados finales
+        let prob1 = 0, probX = 0, prob2 = 0; 
         let probOU25 = 0;
         let probBTTS = 0; 
         
@@ -695,7 +720,6 @@
         }
 
         return {
-            prob1, probX, prob2, // Estos siguen siendo útiles para depuración, pero no se listan
             probOU25,
             probBTTS
         };
@@ -710,26 +734,31 @@
 
         if (results.length === 0) {
             document.getElementById('no-matches-found').style.display = 'block';
+            document.getElementById('btn-save-matches').style.display = 'none'; // [NUEVO] Ocultar si no hay resultados
             return;
         } else {
              document.getElementById('no-matches-found').style.display = 'none';
+             document.getElementById('btn-save-matches').style.display = 'block'; // [NUEVO] Mostrar si hay resultados
         }
         
-        // [CAMBIO] Ordenar primero por fecha (ascendente) y luego por probabilidad (descendente)
+        // Ordenar primero por fecha (ascendente) y luego por probabilidad (descendente)
         results.sort((a, b) => {
+            // Asegurar que las fechas son strings ISO o números para JSON.stringify
+            a.Date = a.Date instanceof Date ? a.Date.toISOString() : a.Date; 
+            b.Date = b.Date instanceof Date ? b.Date.toISOString() : b.Date;
+
             const dateA = new Date(a.Date).getTime();
             const dateB = new Date(b.Date).getTime();
 
             if (dateA !== dateB) {
-                return dateA - dateB; // Orden ascendente por fecha (el más cercano primero)
+                return dateA - dateB; 
             }
             
-            // Si las fechas son iguales, ordenar por probabilidad (descendente)
             return b.Prob - a.Prob; 
         });
 
-        const formatDate = (date) => {
-            const d = new Date(date);
+        const formatDate = (dateString) => {
+            const d = new Date(dateString);
             const dateStr = d.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit' });
             const timeStr = d.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
             return `${dateStr}<br/>${timeStr}`;
@@ -750,6 +779,28 @@
                 </tr>
             `;
         });
+    }
+
+    // [NUEVA FUNCIÓN] - Guarda los resultados filtrados en localStorage
+    function saveFilteredMatches() {
+        if (window.currentFilteredResults.length === 0) {
+            alert("No hay partidos de valor para guardar.");
+            return;
+        }
+
+        // Serializar los resultados actuales a una cadena JSON y guardarlos
+        try {
+            const resultsToSave = window.currentFilteredResults.map(r => ({
+                ...r,
+                Date: new Date(r.Date).toISOString() // Asegurar formato de fecha uniforme
+            }));
+            
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(resultsToSave));
+            alert(`✅ ${resultsToSave.length} mercados de valor guardados exitosamente. Ahora puedes abrir el archivo "guardados.html" para verlos.`);
+        } catch (e) {
+            alert("Error al guardar en el almacenamiento local. Es posible que esté lleno o deshabilitado.");
+            console.error("Error saving to localStorage:", e);
+        }
     }
 
     // --- Inicialización ---
