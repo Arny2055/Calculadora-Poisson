@@ -260,9 +260,23 @@
              display: block;
              width: 250px;
              margin-top: 20px;
+             color: white; /* Asegurar color blanco para el texto */
         }
         .action-button.back:hover {
              background-color: #24887d;
+        }
+        
+        /* Mensaje de error/alerta */
+        #data-status-message {
+            padding: 15px;
+            background-color: var(--warning-color);
+            border-radius: 6px;
+            font-weight: 600;
+            margin-bottom: 20px;
+            color: var(--text-primary);
+        }
+        .dark-mode #data-status-message {
+            color: #1e1e1e; /* Texto oscuro en modo oscuro */
         }
     </style>
 </head>
@@ -271,10 +285,12 @@
 <div id="backtest-container">
     <header>
         <h1>Herramienta de Backtesting Estratégico 🔬</h1>
-        <p>Utilice esta herramienta para simular estrategias y verificar el rendimiento histórico (EV) de su modelo de probabilidades.</p>
+        <p>Utilice esta herramienta para simular estrategias y verificar el rendimiento histórico (EV) de su modelo de probabilidades contra los **partidos guardados** en el escáner.</p>
         <button onclick="window.location.href='index.html'" class="action-button back">⬅️ Volver al Escáner</button>
     </header>
     
+    <div id="data-status-message" style="display: none;"></div>
+
     <section id="config-section">
         <h2>🛠️ Configuración de Estrategia</h2>
         <div class="config-grid">
@@ -326,12 +342,12 @@
     </section>
     
     <main>
-        <h2>Datos Históricos de Muestra</h2>
+        <h2>Datos Guardados de su Escáner</h2>
         <table id="backtest-table">
             <thead>
                 <tr>
-                    <th class="col-date">Fecha</th>
-                    <th>Partido (Liga)</th>
+                    <th class="col-date">Fecha/Hora</th>
+                    <th>Partido (Mercado)</th>
                     <th class="col-prob">Prob. Modelo (%)</th>
                     <th>Cuota Mínima (EV+)</th>
                     <th>**CUOTA BOOKIE (SIMULACIÓN)**</th>
@@ -350,30 +366,10 @@
 <script>
     const STORAGE_KEY_CALIBRATION = 'backtestCalibrationData';
     const MIN_EV_KEY = 'backtestMinEV';
+    const SAVED_MATCHES_KEY = 'savedEVMatches'; // Clave de guardados.html
 
-    // =======================================================
-    // == DATOS DE MUESTRA PARA BACKTESTING (SIMULACIÓN)    ==
-    // == (ESTO DEBE SER REEMPLAZADO POR DATOS REALES)      ==
-    // =======================================================
-    const mockHistoricalData = [
-        // BTTS Sí
-        { date: "2024-05-01", match: "B. Dortmund (Bundesliga)", prob: 0.60, minOdd: 1.80, bookieOdd: 1.85, result: "Ganada" },
-        { date: "2024-05-01", match: "PSG (Ligue 1)", prob: 0.75, minOdd: 1.50, bookieOdd: 1.40, result: "Perdida" },
-        { date: "2024-05-02", match: "Liverpool (Premier League)", prob: 0.55, minOdd: 1.95, bookieOdd: 2.10, result: "Ganada" },
-        { date: "2024-05-02", match: "Juventus (Serie A)", prob: 0.50, minOdd: 2.00, bookieOdd: 1.90, result: "Perdida" },
-        { date: "2024-05-03", match: "Bayern Munich (Bundesliga)", prob: 0.65, minOdd: 1.65, bookieOdd: 1.70, result: "Perdida" },
-        { date: "2024-05-03", match: "Real Madrid (La Liga)", prob: 0.70, minOdd: 1.55, bookieOdd: 1.60, result: "Ganada" },
-        // Over 2.5 Goles
-        { date: "2024-05-04", match: "Ajax (Eredivisie)", prob: 0.70, minOdd: 1.50, bookieOdd: 1.55, result: "Ganada" },
-        { date: "2024-05-04", match: "Inter Milan (Serie A)", prob: 0.45, minOdd: 2.30, bookieOdd: 2.45, result: "Perdida" },
-        { date: "2024-05-05", match: "Man City (Premier League)", prob: 0.80, minOdd: 1.30, bookieOdd: 1.25, result: "Pendiente" },
-        { date: "2024-05-05", match: "River Plate (Superliga Arg)", prob: 0.62, minOdd: 1.70, bookieOdd: 1.90, result: "Ganada" },
-        { date: "2024-05-06", match: "Flamengo (Brasileirao)", prob: 0.58, minOdd: 1.85, bookieOdd: 1.75, result: "Perdida" },
-        { date: "2024-05-07", match: "Cruz Azul (Liga MX)", prob: 0.40, minOdd: 2.50, bookieOdd: 2.60, result: "Ganada" },
-        { date: "2024-05-07", match: "LA Galaxy (MLS)", prob: 0.50, minOdd: 2.00, bookieOdd: 2.15, result: "Ganada" },
-        { date: "2024-05-08", match: "Celtic (Scottish Premiership)", prob: 0.72, minOdd: 1.45, bookieOdd: 1.40, result: "Perdida" },
-        { date: "2024-05-08", match: "Porto (Primeira Liga)", prob: 0.60, minOdd: 1.80, bookieOdd: 1.88, result: "Ganada" },
-    ];
+    // Variable global para mantener los datos cargados y actualizados
+    window.historicalData = []; 
     
     // Configuración de Calibración por defecto
     let defaultCalibration = [
@@ -384,6 +380,53 @@
     ];
 
     // =======================================================
+    // == LÓGICA DE CARGA DE DATOS (DEL ESCÁNER)            ==
+    // =======================================================
+    
+    function loadHistoricalData() {
+        const statusMessage = document.getElementById('data-status-message');
+        statusMessage.style.display = 'none';
+
+        const savedData = localStorage.getItem(SAVED_MATCHES_KEY);
+        if (!savedData) {
+            window.historicalData = [];
+            statusMessage.textContent = "⚠️ No hay partidos guardados. Vuelve al Escáner, genera oportunidades de valor y guárdalas.";
+            statusMessage.style.display = 'block';
+            return;
+        }
+
+        try {
+            const rawData = JSON.parse(savedData);
+            
+            // Mapear los datos del escáner a la estructura que necesita el backtesting
+            window.historicalData = rawData.map(item => ({
+                date: new Date(item.Date).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }),
+                match: `${item.Match} (${item.Market})`,
+                prob: item.Prob, // Probabilidad del modelo (0 a 1)
+                minOdd: item.MinOdd,
+                // Inicializar datos de simulación y resultado (si no existen)
+                bookieOdd: item.bookieOdd || item.MinOdd.toFixed(2), // Usar MinOdd como cuota inicial de simulación
+                result: item.result || 'Pendiente'
+            }));
+            
+            // Guardar esta nueva estructura para mantener el estado de la simulación
+            localStorage.setItem('backtestSimulationData', JSON.stringify(window.historicalData));
+
+            if (window.historicalData.length > 0) {
+                 statusMessage.textContent = `✅ ${window.historicalData.length} mercados de valor cargados desde el Escáner. ¡A backtestear!`;
+                 statusMessage.style.backgroundColor = '#4CAF50';
+                 statusMessage.style.color = 'white';
+            }
+
+        } catch (e) {
+            window.historicalData = [];
+            statusMessage.textContent = `❌ Error al cargar datos guardados: ${e.message}`;
+            statusMessage.style.display = 'block';
+            console.error("Error al parsear datos de guardados:", e);
+        }
+    }
+    
+    // =======================================================
     // == LÓGICA DE CALIBRACIÓN Y EV                        ==
     // =======================================================
     
@@ -393,7 +436,6 @@
             try {
                 return JSON.parse(savedData);
             } catch (e) {
-                console.error("Error loading calibration data, using default.", e);
                 return defaultCalibration;
             }
         }
@@ -421,7 +463,7 @@
     }
     
     function calculateEV(bookieOdd, probability) {
-        if (isNaN(bookieOdd) || bookieOdd <= 1) return { evPercent: 'N/A', className: 'ev-neutral' };
+        if (isNaN(bookieOdd) || bookieOdd <= 1) return { evValue: -1, evPercent: 'N/A', className: 'ev-neutral' };
         
         const evValue = (bookieOdd * probability) - 1;
         const evPercent = (evValue * 100).toFixed(2) + '%';
@@ -452,26 +494,21 @@
         let calibration = loadCalibration();
         calibration[index][key] = parseFloat(value) || 0;
         
-        // Asegurar que las cuotas mínimas/máximas estén en orden
-        if (key === 'cuotaMin' && index > 0) {
-            calibration[index].cuotaMin = Math.max(calibration[index].cuotaMin, calibration[index - 1].cuotaMax);
-        }
-        if (key === 'cuotaMax' && index < calibration.length - 1) {
-             calibration[index].cuotaMax = Math.min(calibration[index].cuotaMax, calibration[index + 1].cuotaMin);
-        }
+        // Asegurar que las cuotas mínimas/máximas estén en orden (lógica simplificada)
+        // Note: Se podría añadir una validación más estricta aquí si fuera necesario.
         
         saveCalibration(calibration);
-        renderCalibrationTable(calibration); // Recargar para corregir visualmente
+        renderCalibrationTable(calibration); 
         runBacktest();
     }
     
     function updateBookieOdd(index, value) {
-        mockHistoricalData[index].bookieOdd = parseFloat(value) || null;
+        window.historicalData[index].bookieOdd = parseFloat(value) || null;
         runBacktest();
     }
 
     function updateResult(index, value) {
-        mockHistoricalData[index].result = value;
+        window.historicalData[index].result = value;
         runBacktest();
     }
     
@@ -484,6 +521,9 @@
 
         const calibration = loadCalibration();
         renderCalibrationTable(calibration);
+        
+        // Cargar datos del escáner en lugar de mocks
+        loadHistoricalData();
         renderTable();
         runBacktest(); // Ejecutar backtest inicial
     }
@@ -493,6 +533,11 @@
     // =======================================================
 
     function runBacktest() {
+        if (window.historicalData.length === 0) {
+            updateResultsSection({ netUnits: 0, totalFinalized: 0, yieldPercent: 0, winRate: 0 });
+            return;
+        }
+
         const minEVPercent = parseFloat(document.getElementById('min-ev-percentage').value) / 100;
         const calibration = loadCalibration();
         
@@ -508,8 +553,10 @@
         const rows = tableBody.getElementsByTagName('tr');
 
         // 1. ITERAR SOBRE LOS DATOS Y CALCULAR EL RENDIMIENTO
-        mockHistoricalData.forEach((data, index) => {
+        window.historicalData.forEach((data, index) => {
             const row = rows[index];
+            if (!row) return; // Si la tabla no se renderizó completamente, saltar
+            
             const bookieOdd = data.bookieOdd;
             const probability = data.prob; // Prob. Modelo
             const result = data.result;
@@ -528,7 +575,7 @@
             const muestraCell = row.querySelector('.muestra-cell');
             
             if (probReal !== null) {
-                 const probImplBookie = (1 / bookieOdd) * 100;
+                 // const probImplBookie = (1 / bookieOdd) * 100; // No se usa directamente
                  let probRealClassName = probReal > (1 / bookieOdd) ? 'prob-real-positive' : 'prob-real-negative';
                  
                  probRealCell.innerHTML = `<span class="${probRealClassName}">${(probReal * 100).toFixed(2)}%</span>`;
@@ -542,20 +589,24 @@
             // 2. APLICAR LA ESTRATEGIA DE BACKTESTING
             row.classList.remove('value-bet-row', 'result-win-row', 'result-loss-row');
             
+            // La estrategia solo se aplica si la cuota simulada tiene EV positivo
             const isValueBet = evValue !== 'N/A' && evValue >= minEVPercent;
 
             if (isValueBet) {
                 row.classList.add('value-bet-row');
-                totalSimulatedBets++;
+                // Contar solo si el resultado está finalizado
+                if (result === 'Ganada' || result === 'Perdida') {
+                    totalSimulatedBets++;
 
-                if (result === 'Ganada') {
-                    totalUnits += (bookieOdd - 1);
-                    wins++;
-                    row.classList.add('result-win-row');
-                } else if (result === 'Perdida') {
-                    totalUnits -= 1;
-                    losses++;
-                    row.classList.add('result-loss-row');
+                    if (result === 'Ganada') {
+                        totalUnits += (bookieOdd - 1);
+                        wins++;
+                        row.classList.add('result-win-row');
+                    } else if (result === 'Perdida') {
+                        totalUnits -= 1;
+                        losses++;
+                        row.classList.add('result-loss-row');
+                    }
                 }
             }
         });
@@ -572,15 +623,17 @@
         const tableBody = document.querySelector('#backtest-table tbody');
         tableBody.innerHTML = '';
         
-        mockHistoricalData.forEach((data, index) => {
+        window.historicalData.forEach((data, index) => {
             const newRow = tableBody.insertRow();
             
+            // Recalcular EV y Calibración para la vista inicial
             const { evPercent, className } = calculateEV(data.bookieOdd, data.prob);
-            const { probReal, partidos } = getCalibration(data.bookieOdd, loadCalibration());
+            const calibration = loadCalibration();
+            const { probReal, partidos } = getCalibration(data.bookieOdd, calibration);
             
             let probRealDisplay = `<span class="ev-neutral">--</span>`;
             if (probReal !== null) {
-                const probImplBookie = (1 / data.bookieOdd) * 100;
+                // const probImplBookie = (1 / data.bookieOdd) * 100; // No se usa
                 let probRealClassName = probReal > (1 / data.bookieOdd) ? 'prob-real-positive' : 'prob-real-negative';
                 probRealDisplay = `<span class="${probRealClassName}">${(probReal * 100).toFixed(2)}%</span>`;
             }
