@@ -395,6 +395,7 @@
     // == TABLA DE CALIBRACIÓN EMPÍRICA (¡PERSONALIZA ESTO!) ==
     // =======================================================
     const tablaCalibracion = [
+        // Rango de Cuota Mínima - Cuota Máxima - Probabilidad Real Esperada - Muestra Histórica
         { cuotaMin: 1.81, cuotaMax: 2.20, probReal: 70, partidos: 100 }, 
         { cuotaMin: 2.21, cuotaMax: 2.80, probReal: 40, partidos: 750 }, 
         { cuotaMin: 2.81, cuotaMax: 3.50, probReal: 30, partidos: 400 } 
@@ -680,7 +681,7 @@
     }
 
     // =======================================================
-    // == 🧪 LÓGICA DE TRANSFERENCIA A BACKTEST (ACUMULACIÓN) ==
+    // == 🧪 LÓGICA DE TRANSFERENCIA A BACKTEST (SOBREESCRITURA) ==
     // =======================================================
     
     function saveForBacktest() {
@@ -698,18 +699,15 @@
             return;
         }
 
-        // 1. Filtrar solo los partidos que tienen resultado y una cuota bookie válida
+        // 1. Filtrar solo los partidos FINALIZADOS con una cuota bookie válida
         const readyForBacktest = currentMatches.filter(match => {
             const bookieOdd = parseFloat(match.BookieOdd);
             const isFinalized = match.Result === 'Ganada' || match.Result === 'Perdida';
             const hasValidOdd = !isNaN(bookieOdd) && bookieOdd > 1.0;
             
-            // Crear el objeto con las claves que espera backtest.html
-            if (isFinalized && hasValidOdd) {
-                 return true;
-            }
-            return false;
+            return isFinalized && hasValidOdd;
         }).map(match => ({
+            // Mapear los datos al formato que espera la herramienta de Backtest
             Date: match.Date,
             Match: match.Match,
             Market: match.Market,
@@ -725,48 +723,20 @@
             alert("Debe completar la Cuota Bookie y el Resultado (Ganada/Perdida) en al menos un partido antes de enviarlo a Backtesting.");
             return;
         }
-
-        // 2. Cargar los partidos ya existentes en la clave de Backtest
-        const savedBacktestData = localStorage.getItem(READY_MATCHES_KEY);
-        let historicalData = [];
-        if (savedBacktestData) {
-            try {
-                historicalData = JSON.parse(savedBacktestData);
-            } catch (e) {
-                console.error("Error al cargar datos históricos para Backtest:", e);
-            }
-        }
         
-        // 3. Identificar nuevos partidos y evitar duplicados
-        // Se usa una clave única (Match + Market + Date)
-        const existingKeys = new Set(historicalData.map(m => 
-            `${m.Match}|${m.Market}|${m.Date}`
-        ));
-        
-        const newMatches = readyForBacktest.filter(match => {
-            const key = `${match.Match}|${match.Market}|${match.Date}`;
-            return !existingKeys.has(key);
-        });
-
-        // 4. Combinar la lista histórica con los nuevos partidos únicos
-        const finalData = historicalData.concat(newMatches);
-
-        // 5. Guardar la lista COMPLETA de nuevo en localStorage (ACUMULACIÓN)
+        // 2. *** MODIFICACIÓN CRÍTICA: SOBREESCRIBIR EL HISTORIAL ***
+        // No cargamos datos históricos, simplemente guardamos la lista filtrada.
         try {
-            localStorage.setItem(READY_MATCHES_KEY, JSON.stringify(finalData));
+            localStorage.setItem(READY_MATCHES_KEY, JSON.stringify(readyForBacktest));
             
-            // 6. Informar y redirigir
-            if (newMatches.length > 0) {
-                 alert(`✅ Se han agregado ${newMatches.length} partidos nuevos al Backtesting. Partidos totales: ${finalData.length}. Redirigiendo...`);
-            } else {
-                 alert(`ℹ️ No se agregaron nuevos partidos. Ya tienes ${finalData.length} partidos guardados para Backtesting. Redirigiendo...`);
-            }
+            // 3. Informar y redirigir
+            alert(`✅ Se han SOBREESCRITO los datos de Backtesting. Partidos enviados: ${readyForBacktest.length}. Redirigiendo...`);
            
             // Redirección
             window.location.href = 'backtest.html';
 
         } catch (e) {
-            alert("Error al guardar los datos para Backtesting.");
+            alert("Error al guardar los datos para Backtesting. Intente limpiar su almacenamiento local.");
             console.error("Error saving for backtest:", e);
         }
     }
