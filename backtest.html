@@ -108,29 +108,28 @@
             gap: 20px;
         }
         
-        /* Contenedor para los límites de EV (Nuevo) */
-        .ev-limits-container {
-            display: flex;
-            flex-direction: column;
+        /* Contenedor principal para límites y EV */
+        .limits-container {
+            display: grid;
+            grid-template-columns: 1fr 1fr; /* Divide la primera columna en dos para los 4 límites */
             gap: 15px;
             padding: 15px;
             background-color: var(--bg-card);
             border-radius: 6px;
             box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
         }
-
+        
+        /* Reutilizamos esta clase, aunque ahora es más general */
         .config-item {
-            padding: 15px;
+            /* Restablecer el estilo base de config-item para el contenedor de calibración */
+            padding: 15px; 
             background-color: var(--bg-card);
             border-radius: 6px;
             box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
         }
         
-        .ev-limit-input-group {
-            /* Estilo para los grupos de input individuales dentro de ev-limits-container */
-            padding: 0;
-            background: none;
-            box-shadow: none;
+        .limit-input-group {
+            /* Estilo para los grupos de input individuales */
         }
 
         .config-item label {
@@ -140,7 +139,7 @@
             color: var(--text-primary);
         }
 
-        .config-item input, .config-item select {
+        .config-item input, .config-item select, .limit-input-group input {
             width: 100%;
             padding: 8px;
             border: 1px solid var(--border-color);
@@ -150,7 +149,7 @@
             color: var(--text-primary);
         }
 
-        .config-item p {
+        .config-item p, .limits-container p {
             font-size: 0.8em;
             color: var(--text-secondary);
             margin: 5px 0 0;
@@ -331,21 +330,35 @@
     <div id="data-status-message" style="display: none;"></div>
 
     <section id="config-section">
-        <h2>🛠️ Configuración de Estrategia</h2>
+        <h2>🛠️ Configuración de Estrategia y Límites</h2>
         <div class="config-grid">
             
-            <div class="ev-limits-container"> 
-                <div class="ev-limit-input-group">
+            <div class="limits-container"> 
+                
+                <div class="limit-input-group">
                     <label for="min-ev-percentage">EV Mínimo Requerido (%)</label>
                     <input type="number" id="min-ev-percentage" value="1.00" step="0.01" onchange="runBacktest()">
-                    <p>Solo se considerarán apuestas si EV% es mayor o igual a este valor.</p>
+                    <p>Filtra por valor esperado mínimo (ej: 1.00%).</p>
                 </div>
                 
-                <div class="ev-limit-input-group">
+                <div class="limit-input-group">
                     <label for="max-ev-percentage">EV Máximo Permitido (%)</label>
                     <input type="number" id="max-ev-percentage" value="100.00" step="0.01" onchange="runBacktest()">
-                    <p>Solo se considerarán apuestas si EV% es menor o igual a este valor.</p>
+                    <p>Filtra por valor esperado máximo (ej: 100.00%).</p>
                 </div>
+
+                <div class="limit-input-group">
+                    <label for="min-bookie-odd">Cuota Mínima Bookie</label>
+                    <input type="number" id="min-bookie-odd" value="1.01" step="0.01" onchange="runBacktest()">
+                    <p>Solo apuestas con cuota Bookie mayor o igual.</p>
+                </div>
+                
+                <div class="limit-input-group">
+                    <label for="max-bookie-odd">Cuota Máxima Bookie</label>
+                    <input type="number" id="max-bookie-odd" value="99.00" step="0.01" onchange="runBacktest()">
+                    <p>Solo apuestas con cuota Bookie menor o igual.</p>
+                </div>
+                
             </div>
             
             <div class="config-item calibracion-table">
@@ -414,7 +427,9 @@
 <script>
     const STORAGE_KEY_CALIBRATION = 'backtestCalibrationData';
     const MIN_EV_KEY = 'backtestMinEV';
-    const MAX_EV_KEY = 'backtestMaxEV'; // NUEVA CLAVE
+    const MAX_EV_KEY = 'backtestMaxEV';
+    const MIN_ODD_KEY = 'backtestMinOdd'; // NUEVA CLAVE
+    const MAX_ODD_KEY = 'backtestMaxOdd'; // NUEVA CLAVE
     const READY_MATCHES_KEY = 'backtestReadyMatches'; 
 
     // Variable global para mantener los datos cargados y actualizados
@@ -483,14 +498,14 @@
         if (confirm("¿Estás seguro de que quieres ELIMINAR los datos y la configuración guardada de Backtesting? Los partidos originales en 'guardados.html' NO se borrarán.")) {
             // 1. Borrar la clave de datos de partidos listos
             localStorage.removeItem(READY_MATCHES_KEY);
-            // 2. Borrar la clave de configuración de calibración
+            // 2. Borrar las claves de configuración
             localStorage.removeItem(STORAGE_KEY_CALIBRATION);
-            // 3. Borrar el EV mínimo guardado
             localStorage.removeItem(MIN_EV_KEY);
-            // 4. Borrar el EV máximo guardado (NUEVO)
             localStorage.removeItem(MAX_EV_KEY);
+            localStorage.removeItem(MIN_ODD_KEY); // BORRAR NUEVA CLAVE
+            localStorage.removeItem(MAX_ODD_KEY); // BORRAR NUEVA CLAVE
 
-            // 5. Recargar la página para restablecer todo
+            // 3. Recargar la página para restablecer todo
             window.location.reload(); 
         }
     }
@@ -579,20 +594,34 @@
     }
     
     function initializeBacktest() {
-        // Cargar configuración inicial
+        // Cargar límites de EV
         const savedMinEV = localStorage.getItem(MIN_EV_KEY);
         if (savedMinEV) {
             document.getElementById('min-ev-percentage').value = savedMinEV;
         }
 
-        // Cargar EV Máximo (NUEVO)
         const savedMaxEV = localStorage.getItem(MAX_EV_KEY);
         if (savedMaxEV) {
             document.getElementById('max-ev-percentage').value = savedMaxEV;
         } else {
-             // Default EV Máximo a 100.00%
              document.getElementById('max-ev-percentage').value = "100.00"; 
         }
+        
+        // Cargar límites de Cuota Bookie (NUEVO)
+        const savedMinOdd = localStorage.getItem(MIN_ODD_KEY);
+        if (savedMinOdd) {
+            document.getElementById('min-bookie-odd').value = savedMinOdd;
+        } else {
+             document.getElementById('min-bookie-odd').value = "1.01"; 
+        }
+        
+        const savedMaxOdd = localStorage.getItem(MAX_ODD_KEY);
+        if (savedMaxOdd) {
+            document.getElementById('max-bookie-odd').value = savedMaxOdd;
+        } else {
+             document.getElementById('max-bookie-odd').value = "99.00"; 
+        }
+
 
         const calibration = loadCalibration();
         renderCalibrationTable(calibration);
@@ -612,12 +641,21 @@
             return;
         }
 
+        // Obtener límites de EV
         const minEVPercent = parseFloat(document.getElementById('min-ev-percentage').value) / 100;
-        const maxEVPercent = parseFloat(document.getElementById('max-ev-percentage').value) / 100; // OBTENER EV MÁXIMO
+        const maxEVPercent = parseFloat(document.getElementById('max-ev-percentage').value) / 100; 
+        
+        // Obtener límites de Cuota Bookie (NUEVO)
+        const minBookieOdd = parseFloat(document.getElementById('min-bookie-odd').value);
+        const maxBookieOdd = parseFloat(document.getElementById('max-bookie-odd').value);
+        
         const calibration = loadCalibration();
         
+        // Guardar configuración
         localStorage.setItem(MIN_EV_KEY, document.getElementById('min-ev-percentage').value);
-        localStorage.setItem(MAX_EV_KEY, document.getElementById('max-ev-percentage').value); // GUARDAR EV MÁXIMO
+        localStorage.setItem(MAX_EV_KEY, document.getElementById('max-ev-percentage').value);
+        localStorage.setItem(MIN_ODD_KEY, document.getElementById('min-bookie-odd').value);
+        localStorage.setItem(MAX_ODD_KEY, document.getElementById('max-bookie-odd').value);
 
         let totalUnits = 0;
         let totalSimulatedBets = 0;
@@ -644,7 +682,7 @@
             const probRealCell = row.querySelector('.prob-real-cell');
             const muestraCell = row.querySelector('.muestra-cell');
             
-            if (probReal !== null) {
+            if (probReal !== null && bookieOdd) {
                  let probRealClassName = probReal > (1 / bookieOdd) ? 'prob-real-positive' : 'prob-real-negative';
                  
                  probRealCell.innerHTML = `<span class="${probRealClassName}">${(probReal * 100).toFixed(2)}%</span>`;
@@ -657,10 +695,12 @@
             // Eliminar clases de valor y resultado para volver a aplicar
             row.classList.remove('value-bet-row', 'result-win-row', 'result-loss-row');
             
-            // LÓGICA DE FILTRO MODIFICADA PARA INCLUIR EV MÁXIMO
+            // LÓGICA DE FILTRO MODIFICADA para incluir EV MÁXIMO y RANGO DE CUOTA
             const isValueBet = evValue !== 'N/A' && 
                                evValue >= minEVPercent && 
-                               evValue <= maxEVPercent; 
+                               evValue <= maxEVPercent &&
+                               (bookieOdd >= minBookieOdd) && // NUEVO FILTRO MÍNIMO
+                               (bookieOdd <= maxBookieOdd);   // NUEVO FILTRO MÁXIMO
 
             if (isValueBet) {
                 row.classList.add('value-bet-row');
