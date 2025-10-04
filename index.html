@@ -260,7 +260,7 @@
 <div id="calculator-container">
     <header>
         <h1>Escáner de Valor (EV) - Doble JSON</h1>
-        <h2>Filtro de Mercados: Ambos Anotan (Sí) & Más de 2.5 Goles (60% - 75% Prob.)</h2>
+        <h2>Filtro de Mercados: Ambos Anotan (Sí) & Más de 2.5 Goles</h2>
     </header>
 
     <main>
@@ -313,12 +313,14 @@
         <section id="output-section" style="display: none;">
             <h3>3. Oportunidades de Valor (BTTS Sí & Over 2.5)</h3>
             <p style="font-size: 1em; color: var(--text-secondary);">
-                Se han analizado <strong id="matches-scanned-count">0</strong> partidos. A continuación, se muestran solo los mercados **Ambos Anotan (Sí)** y **Más de 2.5 Goles** que cumplen con la probabilidad del **60% al 75%** y el mínimo de 10 partidos históricos.
+                Se han analizado <strong id="matches-scanned-count">0</strong> partidos. A continuación, se muestran solo los mercados que cumplen **dos filtros**: 
+                <br/>1. **Filtro Histórico (60%-80%):** El promedio BTTS y Over 2.5 de los últimos 10 partidos de ambos equipos debe estar entre 60% y 80%.
+                <br/>2. **Filtro del Modelo (60%-75%):** La probabilidad del Modelo de Poisson debe estar entre 60% y 75%.
             </p>
             
             <button id="btn-save-matches" onclick="saveFilteredMatches()">💾 Guardar Oportunidades Filtradas (¡Abrir archivo "guardados.html" después!)</button>
 
-            <h4 style="margin-top: 20px;">Mercados Filtrados por Probabilidad (60% - 75%)</h4>
+            <h4 style="margin-top: 20px;">Mercados Filtrados por Probabilidad</h4>
             <table id="filtered-results-table">
                 <thead>
                     <tr>
@@ -335,7 +337,7 @@
                     </tbody>
             </table>
             
-            <p id="no-matches-found" style="text-align: center; margin-top: 20px; font-weight: bold; color: var(--text-secondary); display: none;">No se encontraron mercados de valor (60%-75%) que cumplieran los requisitos de confiabilidad.</p>
+            <p id="no-matches-found" style="text-align: center; margin-top: 20px; font-weight: bold; color: var(--text-secondary); display: none;">No se encontraron mercados de valor que cumplieran los requisitos de confiabilidad.</p>
 
             <hr style="margin: 30px 0; border-color: var(--border-color);">
 
@@ -366,6 +368,8 @@
     const DECAY_FACTOR = 0.95; 
     const PROBABILITY_MIN = 0.60; 
     const PROBABILITY_MAX = 0.75; 
+    const HISTORICAL_MIN_AVG = 0.60; // NUEVO: Mínimo 60% en promedio histórico
+    const HISTORICAL_MAX_AVG = 0.80; // NUEVO: Máximo 80% en promedio histórico
     const REFERENCE_EDGE_MARGIN = 0.10; 
     const ALL_LEAGUES_VALUE = 'ALL_COMMON_LEAGUES'; 
     const STORAGE_KEY = 'savedEVMatches'; 
@@ -419,8 +423,31 @@
 
         return weightTotal > 0 ? weightedSum / weightTotal : 0;
     }
+    
+    // NUEVA FUNCIÓN: Calcula el porcentaje histórico de BTTS o Over 2.5 (Simple Average)
+    function calculateHistoricalPercentage(matchesArray, type) {
+        let count = 0;
+        // Usamos slice(0, MATCHES_LIMIT) para asegurar que solo son los últimos 10
+        const recentMatches = matchesArray.slice(0, MATCHES_LIMIT); 
+        
+        recentMatches.forEach(m => {
+            const totalGoals = m.LocalGoals + m.VisitantGoals;
+            const btts = m.LocalGoals >= 1 && m.VisitantGoals >= 1;
+            const over25 = totalGoals > 2;
 
-    // --- Lógica de Carga de Múltiples JSON ---
+            if (type === 'BTTS' && btts) {
+                count++;
+            } else if (type === 'OU25' && over25) {
+                count++;
+            }
+        });
+
+        // Devuelve el porcentaje simple (count / 10)
+        return recentMatches.length > 0 ? (count / recentMatches.length) : 0;
+    }
+
+
+    // --- Lógica de Carga de Múltiples JSON (SIN CAMBIOS RELEVANTES) ---
     function readJSONFile(type) {
         const inputId = (type === 'stats') ? 'json-stats-input' : 'json-fixtures-input';
         const statusId = (type === 'stats') ? 'stats-status' : 'fixtures-status';
@@ -653,7 +680,28 @@
                      continue; // Saltar el partido si no cumple el requisito mínimo
                 }
                 
-                // 2. CÁLCULO DE FUERZAS Y LAMBDAS 
+                // 2. CÁLCULO DE PROMEDIOS HISTÓRICOS Y APLICACIÓN DEL FILTRO DEL USUARIO (60-80%)
+                const bttsL_hist = calculateHistoricalPercentage(teamLHomeMatches, 'BTTS');
+                const bttsV_hist = calculateHistoricalPercentage(teamVAwayMatches, 'BTTS');
+                const btts_avg_hist = (bttsL_hist + bttsV_hist) / 2;
+
+                const ou25L_hist = calculateHistoricalPercentage(teamLHomeMatches, 'OU25');
+                const ou25V_hist = calculateHistoricalPercentage(teamVAwayMatches, 'OU25');
+                const ou25_avg_hist = (ou25L_hist + ou25V_hist) / 2;
+
+                // FILTRO 1: BTTS (Ambos Anotan)
+                if (btts_avg_hist < HISTORICAL_MIN_AVG || btts_avg_hist > HISTORICAL_MAX_AVG) {
+                    continue; 
+                }
+                
+                // FILTRO 2: Over 2.5
+                if (ou25_avg_hist < HISTORICAL_MIN_AVG || ou25_avg_hist > HISTORICAL_MAX_AVG) {
+                    continue; 
+                }
+                
+                // El partido pasa el filtro histórico (60%-80%), procedemos al cálculo del modelo.
+                
+                // 3. CÁLCULO DE FUERZAS Y LAMBDAS (Existente)
                 const gflGoals = teamLHomeMatches.map(m => m.LocalGoals); 
                 const GF_L = calculateWeightedAverage(gflGoals); 
                 
@@ -663,17 +711,17 @@
                 const lambdaL_FT = (GF_L / GL_L) * GL_V; 
                 const lambdaV_FT = (GF_V / GL_V) * GL_L; 
                 
-                // 3. EJECUTAR SIMULACIÓN
+                // 4. EJECUTAR SIMULACIÓN (Existente)
                 const ft_results = runPoissonSimulation(lambdaL_FT, lambdaV_FT, correlationFactor);
                 
-                // 4. FILTRAR Y REGISTRAR SOLO BTTS-SÍ y OVER 2.5
+                // 5. FILTRAR Y REGISTRAR SOLO BTTS-SÍ y OVER 2.5 (Filtro del Modelo: 60%-75%)
                 const rawMarkets = [
-                    // Solo incluimos los dos mercados solicitados
                     { name: 'Ambos Equipos Anotan (Sí)', prob: ft_results.probBTTS },
                     { name: 'Total Goles Over 2.5', prob: ft_results.probOU25 }
                 ];
                 
                 rawMarkets.forEach(m => {
+                    // El filtro del modelo sigue siendo el original (60% al 75%)
                     if (m.prob >= PROBABILITY_MIN && m.prob <= PROBABILITY_MAX) {
                         const impliedOdd = (1 / m.prob);
                         const minOddValue = (impliedOdd + REFERENCE_EDGE_MARGIN);
@@ -692,7 +740,7 @@
             }
         }
         
-        // 5. ACTUALIZAR UI CON RESULTADOS FILTRADOS
+        // 6. ACTUALIZAR UI CON RESULTADOS FILTRADOS
         window.currentFilteredResults = allFilteredResults; 
         updateFilteredUI(allFilteredResults, matchesProcessed);
         
@@ -700,7 +748,7 @@
         statusElement.style.color = '#2a9d8f';
     }
 
-    // --- FUNCIONES DE SIMULACIÓN Y UI ---
+    // --- FUNCIONES DE SIMULACIÓN Y UI (SIN CAMBIOS) ---
     function runPoissonSimulation(lambdaL, lambdaV, correlationFactor) {
         const maxGoals = 4;
         let probMatrix_initial = [];
@@ -819,7 +867,7 @@
         });
     }
 
-    // --- FUNCIÓN CORREGIDA PARA ACUMULAR PARTIDOS Y EVITAR DUPLICADOS ---
+    // --- FUNCIÓN CORREGIDA PARA ACUMULAR PARTIDOS Y EVITAR DUPLICADOS (SIN CAMBIOS) ---
     function saveFilteredMatches() {
         if (window.currentFilteredResults.length === 0) {
             alert("No hay partidos de valor para guardar.");
