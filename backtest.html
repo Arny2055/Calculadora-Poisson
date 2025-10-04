@@ -285,7 +285,7 @@
 <div id="backtest-container">
     <header>
         <h1>Herramienta de Backtesting Estratégico 🔬</h1>
-        <p>Utilice esta herramienta para simular estrategias y verificar el rendimiento histórico (EV) de su modelo de probabilidades contra los **partidos guardados** en el escáner.</p>
+        <p>Utilice esta herramienta para simular estrategias y verificar el rendimiento histórico (EV) de su modelo de probabilidades contra los **partidos listos para Backtest**.</p>
         <button onclick="window.location.href='index.html'" class="action-button back">⬅️ Volver al Escáner</button>
     </header>
     
@@ -342,7 +342,7 @@
     </section>
     
     <main>
-        <h2>Datos Guardados de su Escáner</h2>
+        <h2>Partidos Listos para Análisis (Cargados desde Guardados)</h2>
         <table id="backtest-table">
             <thead>
                 <tr>
@@ -350,7 +350,7 @@
                     <th>Partido (Mercado)</th>
                     <th class="col-prob">Prob. Modelo (%)</th>
                     <th>Cuota Mínima (EV+)</th>
-                    <th>**CUOTA BOOKIE (SIMULACIÓN)**</th>
+                    <th>**CUOTA BOOKIE**</th>
                     <th>EV Calculado (%)</th> 
                     <th>Prob. Real (%)</th> 
                     <th>Muestra Histórica</th>
@@ -366,7 +366,8 @@
 <script>
     const STORAGE_KEY_CALIBRATION = 'backtestCalibrationData';
     const MIN_EV_KEY = 'backtestMinEV';
-    const SAVED_MATCHES_KEY = 'savedEVMatches'; // Clave de guardados.html
+    // CLAVE MODIFICADA: Ahora lee solo los partidos listos para Backtest
+    const READY_MATCHES_KEY = 'backtestReadyMatches'; 
 
     // Variable global para mantener los datos cargados y actualizados
     window.historicalData = []; 
@@ -387,42 +388,42 @@
         const statusMessage = document.getElementById('data-status-message');
         statusMessage.style.display = 'none';
 
-        const savedData = localStorage.getItem(SAVED_MATCHES_KEY);
+        // Intenta leer de la nueva clave de partidos listos
+        const savedData = localStorage.getItem(READY_MATCHES_KEY); 
+        
         if (!savedData) {
             window.historicalData = [];
-            statusMessage.textContent = "⚠️ No hay partidos guardados. Vuelve al Escáner, genera oportunidades de valor y guárdalas.";
+            statusMessage.textContent = "⚠️ No hay partidos listos para Backtesting. Debe completar la cuota de la bookie y el resultado en la página 'guardados.html' y presionar 'Guardar para Backtest'.";
             statusMessage.style.display = 'block';
+            statusMessage.style.backgroundColor = 'var(--warning-color)';
+            statusMessage.style.color = 'var(--text-primary)';
             return;
         }
 
         try {
             const rawData = JSON.parse(savedData);
             
-            // Mapear los datos del escáner a la estructura que necesita el backtesting
+            // Los datos ya vienen listos desde guardados.html
             window.historicalData = rawData.map(item => ({
                 date: new Date(item.Date).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }),
                 match: `${item.Match} (${item.Market})`,
                 prob: item.Prob, // Probabilidad del modelo (0 a 1)
                 minOdd: item.MinOdd,
-                // Inicializar datos de simulación y resultado (si no existen)
-                bookieOdd: item.bookieOdd || item.MinOdd.toFixed(2), // Usar MinOdd como cuota inicial de simulación
-                result: item.result || 'Pendiente'
+                bookieOdd: item.bookieOdd, // Ya vienen cargados
+                result: item.result // Ya vienen cargados
             }));
             
-            // Guardar esta nueva estructura para mantener el estado de la simulación
-            localStorage.setItem('backtestSimulationData', JSON.stringify(window.historicalData));
-
             if (window.historicalData.length > 0) {
-                 statusMessage.textContent = `✅ ${window.historicalData.length} mercados de valor cargados desde el Escáner. ¡A backtestear!`;
+                 statusMessage.textContent = `✅ ${window.historicalData.length} partidos listos cargados para el análisis.`;
                  statusMessage.style.backgroundColor = '#4CAF50';
                  statusMessage.style.color = 'white';
             }
 
         } catch (e) {
             window.historicalData = [];
-            statusMessage.textContent = `❌ Error al cargar datos guardados: ${e.message}`;
+            statusMessage.textContent = `❌ Error al cargar datos listos para Backtest: ${e.message}`;
             statusMessage.style.display = 'block';
-            console.error("Error al parsear datos de guardados:", e);
+            console.error("Error al parsear datos de backtest:", e);
         }
     }
     
@@ -494,14 +495,13 @@
         let calibration = loadCalibration();
         calibration[index][key] = parseFloat(value) || 0;
         
-        // Asegurar que las cuotas mínimas/máximas estén en orden (lógica simplificada)
-        // Note: Se podría añadir una validación más estricta aquí si fuera necesario.
-        
         saveCalibration(calibration);
         renderCalibrationTable(calibration); 
         runBacktest();
     }
     
+    // No necesitamos actualizar los datos aquí, ya que se asume que vienen fijos desde guardados.html
+    // Dejamos las funciones solo para que el usuario pueda jugar con los inputs en backtest si lo desea.
     function updateBookieOdd(index, value) {
         window.historicalData[index].bookieOdd = parseFloat(value) || null;
         runBacktest();
@@ -522,10 +522,9 @@
         const calibration = loadCalibration();
         renderCalibrationTable(calibration);
         
-        // Cargar datos del escáner en lugar de mocks
         loadHistoricalData();
         renderTable();
-        runBacktest(); // Ejecutar backtest inicial
+        runBacktest(); 
     }
 
     // =======================================================
@@ -541,7 +540,6 @@
         const minEVPercent = parseFloat(document.getElementById('min-ev-percentage').value) / 100;
         const calibration = loadCalibration();
         
-        // Guardar la configuración de EV mínimo para la próxima carga
         localStorage.setItem(MIN_EV_KEY, document.getElementById('min-ev-percentage').value);
 
         let totalUnits = 0;
@@ -552,22 +550,17 @@
         const tableBody = document.querySelector('#backtest-table tbody');
         const rows = tableBody.getElementsByTagName('tr');
 
-        // 1. ITERAR SOBRE LOS DATOS Y CALCULAR EL RENDIMIENTO
         window.historicalData.forEach((data, index) => {
             const row = rows[index];
-            if (!row) return; // Si la tabla no se renderizó completamente, saltar
+            if (!row) return; 
             
             const bookieOdd = data.bookieOdd;
-            const probability = data.prob; // Prob. Modelo
+            const probability = data.prob; 
             const result = data.result;
             
-            // Recalcular EV
             const { evValue, evPercent, className } = calculateEV(bookieOdd, probability);
-            
-            // Recalcular Calibración
             const { probReal, partidos } = getCalibration(bookieOdd, calibration);
             
-            // Actualizar la fila (EV y Calibración)
             const evCell = row.querySelector('.ev-cell');
             evCell.innerHTML = `<span class="${className}">${evPercent}</span>`;
             
@@ -575,7 +568,6 @@
             const muestraCell = row.querySelector('.muestra-cell');
             
             if (probReal !== null) {
-                 // const probImplBookie = (1 / bookieOdd) * 100; // No se usa directamente
                  let probRealClassName = probReal > (1 / bookieOdd) ? 'prob-real-positive' : 'prob-real-negative';
                  
                  probRealCell.innerHTML = `<span class="${probRealClassName}">${(probReal * 100).toFixed(2)}%</span>`;
@@ -585,16 +577,13 @@
                  muestraCell.textContent = '--';
             }
 
-
-            // 2. APLICAR LA ESTRATEGIA DE BACKTESTING
             row.classList.remove('value-bet-row', 'result-win-row', 'result-loss-row');
             
-            // La estrategia solo se aplica si la cuota simulada tiene EV positivo
             const isValueBet = evValue !== 'N/A' && evValue >= minEVPercent;
 
             if (isValueBet) {
                 row.classList.add('value-bet-row');
-                // Contar solo si el resultado está finalizado
+                
                 if (result === 'Ganada' || result === 'Perdida') {
                     totalSimulatedBets++;
 
@@ -611,7 +600,6 @@
             }
         });
 
-        // 3. ACTUALIZAR RESULTADOS
         const totalFinalized = wins + losses;
         const yieldPercent = totalFinalized > 0 ? (totalUnits / totalFinalized) * 100 : 0;
         const winRate = totalFinalized > 0 ? (wins / totalFinalized) * 100 : 0;
@@ -626,18 +614,17 @@
         window.historicalData.forEach((data, index) => {
             const newRow = tableBody.insertRow();
             
-            // Recalcular EV y Calibración para la vista inicial
             const { evPercent, className } = calculateEV(data.bookieOdd, data.prob);
             const calibration = loadCalibration();
             const { probReal, partidos } = getCalibration(data.bookieOdd, calibration);
             
             let probRealDisplay = `<span class="ev-neutral">--</span>`;
             if (probReal !== null) {
-                // const probImplBookie = (1 / data.bookieOdd) * 100; // No se usa
                 let probRealClassName = probReal > (1 / data.bookieOdd) ? 'prob-real-positive' : 'prob-real-negative';
                 probRealDisplay = `<span class="${probRealClassName}">${(probReal * 100).toFixed(2)}%</span>`;
             }
 
+            // Los inputs se mantienen editables para ajustes *dentro* del backtest
             newRow.innerHTML = `
                 <td class="col-date">${data.date}</td>
                 <td style="text-align: left; font-weight: 600;">${data.match}</td>
