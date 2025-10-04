@@ -384,7 +384,7 @@
 
 <script>
     const STORAGE_KEY = 'savedEVMatches'; 
-    const READY_MATCHES_KEY = 'backtestReadyMatches'; // 🆕 Nueva clave para Backtest
+    const READY_MATCHES_KEY = 'backtestReadyMatches'; // 🆕 Clave para Backtest
     const THEME_KEY = 'colorMode';
     
     const commonBookies = [
@@ -680,12 +680,9 @@
     }
 
     // =======================================================
-    // == 🧪 LÓGICA DE TRANSFERENCIA A BACKTEST             ==
+    // == 🧪 LÓGICA DE TRANSFERENCIA A BACKTEST (ACUMULACIÓN) ==
     // =======================================================
-    /**
-     * Filtra los partidos con cuota y resultado válidos y los guarda en la
-     * clave de backtesting para su posterior análisis.
-     */
+    
     function saveForBacktest() {
         const savedData = localStorage.getItem(STORAGE_KEY);
         if (!savedData) {
@@ -693,47 +690,78 @@
             return;
         }
         
-        let results;
+        let currentMatches;
         try {
-            results = JSON.parse(savedData);
+            currentMatches = JSON.parse(savedData);
         } catch (e) {
             alert("Error de datos. No se pueden cargar los partidos guardados.");
             return;
         }
 
         // 1. Filtrar solo los partidos que tienen resultado y una cuota bookie válida
-        const readyForBacktest = results.filter(match => {
+        const readyForBacktest = currentMatches.filter(match => {
             const bookieOdd = parseFloat(match.BookieOdd);
             const isFinalized = match.Result === 'Ganada' || match.Result === 'Perdida';
             const hasValidOdd = !isNaN(bookieOdd) && bookieOdd > 1.0;
             
-            return isFinalized && hasValidOdd;
-        });
+            // Crear el objeto con las claves que espera backtest.html
+            if (isFinalized && hasValidOdd) {
+                 return true;
+            }
+            return false;
+        }).map(match => ({
+            Date: match.Date,
+            Match: match.Match,
+            Market: match.Market,
+            Prob: match.Prob,
+            MinOdd: match.MinOdd,
+            bookieOdd: match.BookieOdd, 
+            result: match.Result, 
+            BookieName: match.BookieName || 'N/A'
+        }));
+
 
         if (readyForBacktest.length === 0) {
             alert("Debe completar la Cuota Bookie y el Resultado (Ganada/Perdida) en al menos un partido antes de enviarlo a Backtesting.");
             return;
         }
 
-        // 2. Mapear los datos para que coincidan con la estructura que backtest.html espera
-        const finalMatchesData = readyForBacktest.map(match => ({
-            Date: match.Date,
-            Match: match.Match,
-            Market: match.Market,
-            Prob: match.Prob,
-            MinOdd: match.MinOdd,
-            // Renombrar a las claves que backtest.html usa (minúscula en el backtest anterior)
-            bookieOdd: match.BookieOdd, 
-            result: match.Result, 
-            BookieName: match.BookieName || 'N/A' // Se incluye por si se quiere usar en backtest
-        }));
+        // 2. Cargar los partidos ya existentes en la clave de Backtest
+        const savedBacktestData = localStorage.getItem(READY_MATCHES_KEY);
+        let historicalData = [];
+        if (savedBacktestData) {
+            try {
+                historicalData = JSON.parse(savedBacktestData);
+            } catch (e) {
+                console.error("Error al cargar datos históricos para Backtest:", e);
+            }
+        }
+        
+        // 3. Identificar nuevos partidos y evitar duplicados
+        // Se usa una clave única (Match + Market + Date)
+        const existingKeys = new Set(historicalData.map(m => 
+            `${m.Match}|${m.Market}|${m.Date}`
+        ));
+        
+        const newMatches = readyForBacktest.filter(match => {
+            const key = `${match.Match}|${match.Market}|${match.Date}`;
+            return !existingKeys.has(key);
+        });
 
-        // 3. Guardar los datos filtrados en la nueva clave
+        // 4. Combinar la lista histórica con los nuevos partidos únicos
+        const finalData = historicalData.concat(newMatches);
+
+        // 5. Guardar la lista COMPLETA de nuevo en localStorage (ACUMULACIÓN)
         try {
-            localStorage.setItem(READY_MATCHES_KEY, JSON.stringify(finalMatchesData));
+            localStorage.setItem(READY_MATCHES_KEY, JSON.stringify(finalData));
             
-            // 4. Informar y redirigir
-            alert(`✅ ${finalMatchesData.length} partidos finalizados listos para análisis. Redirigiendo a Backtesting.`);
+            // 6. Informar y redirigir
+            if (newMatches.length > 0) {
+                 alert(`✅ Se han agregado ${newMatches.length} partidos nuevos al Backtesting. Partidos totales: ${finalData.length}. Redirigiendo...`);
+            } else {
+                 alert(`ℹ️ No se agregaron nuevos partidos. Ya tienes ${finalData.length} partidos guardados para Backtesting. Redirigiendo...`);
+            }
+           
             // Redirección
             window.location.href = 'backtest.html';
 
@@ -748,9 +776,6 @@
     // =======================================================
     
     function loadSavedMatches() {
-        // ... (resto de la función loadSavedMatches)
-        // [CÓDIGO DE loadSavedMatches MANTENIDO EN LA POSICIÓN ORIGINAL]
-        
         const tableBody = document.querySelector('#saved-results-table tbody');
         const noMatchesText = document.getElementById('no-saved-matches');
         tableBody.innerHTML = '';
