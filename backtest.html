@@ -118,6 +118,19 @@
             border-radius: 6px;
             box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
         }
+
+        /* Contenedor separado para el filtro de mercado */
+        .market-filter-container {
+            grid-column: 1 / 3; /* Ocupa ambas columnas para mayor claridad */
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 15px;
+            padding: 15px;
+            background-color: var(--bg-card);
+            border-radius: 6px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+            margin-top: 15px;
+        }
         
         /* Reutilizamos esta clase, aunque ahora es más general */
         .config-item {
@@ -139,7 +152,7 @@
             color: var(--text-primary);
         }
 
-        .config-item input, .config-item select, .limit-input-group input {
+        .config-item input, .config-item select, .limit-input-group input, .market-filter-container select {
             width: 100%;
             padding: 8px;
             border: 1px solid var(--border-color);
@@ -149,7 +162,7 @@
             color: var(--text-primary);
         }
 
-        .config-item p, .limits-container p {
+        .config-item p, .limits-container p, .market-filter-container p {
             font-size: 0.8em;
             color: var(--text-secondary);
             margin: 5px 0 0;
@@ -370,6 +383,13 @@
                     <input type="number" id="max-model-prob" value="100.00" step="0.01" onchange="runBacktest()">
                     <p>Filtra por Probabilidad del Modelo máxima (ej: 100.00%).</p>
                 </div>
+                <div class="market-filter-container">
+                    <label for="market-filter">Filtrar por Mercado</label>
+                    <select id="market-filter" onchange="runBacktest()">
+                        <option value="Todos">⚽ Todos los Mercados</option>
+                        </select>
+                    <p>Seleccione el mercado específico a analizar. Solo afecta al cálculo de resultados.</p>
+                </div>
                 </div>
             
             <div class="config-item calibracion-table">
@@ -441,9 +461,9 @@
     const MAX_EV_KEY = 'backtestMaxEV';
     const MIN_ODD_KEY = 'backtestMinOdd'; 
     const MAX_ODD_KEY = 'backtestMaxOdd'; 
-    // NUEVAS CLAVES DE PROBABILIDAD DEL MODELO
     const MIN_PROB_KEY = 'backtestMinProb'; 
     const MAX_PROB_KEY = 'backtestMaxProb'; 
+    const MARKET_FILTER_KEY = 'backtestMarketFilter'; // NUEVA CLAVE DE MERCADO
 
     const READY_MATCHES_KEY = 'backtestReadyMatches'; 
 
@@ -483,6 +503,7 @@
             window.historicalData = rawData.map(item => ({
                 date: new Date(item.Date).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }),
                 match: `${item.Match} (${item.Market})`,
+                market: item.Market, // Guardamos el mercado por separado para el filtro
                 prob: item.Prob, // Probabilidad del modelo (0 a 1)
                 minOdd: item.MinOdd,
                 bookieOdd: item.bookieOdd, // Ya vienen cargados
@@ -495,7 +516,8 @@
                  statusMessage.style.color = 'white';
                  statusMessage.style.display = 'block';
             }
-
+            
+            populateMarketFilter(); // Rellenar las opciones de mercado
         } catch (e) {
             window.historicalData = [];
             statusMessage.textContent = `❌ Error al cargar datos listos para Backtest: ${e.message}`;
@@ -503,6 +525,37 @@
             statusMessage.style.backgroundColor = 'var(--negative-color)';
             statusMessage.style.color = 'white';
             console.error("Error al parsear datos de backtest:", e);
+        }
+    }
+
+    // =======================================================
+    // == LÓGICA DE FILTRO DE MERCADO                       ==
+    // =======================================================
+    
+    function populateMarketFilter() {
+        const select = document.getElementById('market-filter');
+        const currentFilter = localStorage.getItem(MARKET_FILTER_KEY) || 'Todos';
+        
+        // 1. Obtener mercados únicos
+        const markets = new Set(window.historicalData.map(data => data.market).filter(m => m));
+        
+        // 2. Limpiar opciones (manteniendo "Todos")
+        select.innerHTML = '<option value="Todos">⚽ Todos los Mercados</option>';
+
+        // 3. Añadir opciones dinámicamente
+        markets.forEach(market => {
+            const option = document.createElement('option');
+            option.value = market;
+            option.textContent = market;
+            if (market === currentFilter) {
+                option.selected = true;
+            }
+            select.appendChild(option);
+        });
+        
+        // Si el filtro guardado ya no existe, volvemos a 'Todos'
+        if (!markets.has(currentFilter) && currentFilter !== 'Todos') {
+            select.value = 'Todos';
         }
     }
     
@@ -519,8 +572,9 @@
             localStorage.removeItem(MAX_EV_KEY);
             localStorage.removeItem(MIN_ODD_KEY); 
             localStorage.removeItem(MAX_ODD_KEY); 
-            localStorage.removeItem(MIN_PROB_KEY); // BORRAR NUEVA CLAVE
-            localStorage.removeItem(MAX_PROB_KEY); // BORRAR NUEVA CLAVE
+            localStorage.removeItem(MIN_PROB_KEY); 
+            localStorage.removeItem(MAX_PROB_KEY); 
+            localStorage.removeItem(MARKET_FILTER_KEY); // BORRAR NUEVA CLAVE
 
             // 3. Recargar la página para restablecer todo
             window.location.reload(); 
@@ -639,7 +693,7 @@
              document.getElementById('max-bookie-odd').value = "99.00"; 
         }
 
-        // Cargar límites de Probabilidad del Modelo (NUEVO)
+        // Cargar límites de Probabilidad del Modelo
         const savedMinProb = localStorage.getItem(MIN_PROB_KEY);
         if (savedMinProb) {
             document.getElementById('min-model-prob').value = savedMinProb;
@@ -652,6 +706,12 @@
             document.getElementById('max-model-prob').value = savedMaxProb;
         } else {
              document.getElementById('max-model-prob').value = "100.00"; 
+        }
+        
+        // Cargar Filtro de Mercado (NUEVO)
+        const savedMarketFilter = localStorage.getItem(MARKET_FILTER_KEY);
+        if (savedMarketFilter) {
+            // Esto se manejará en populateMarketFilter() después de cargar los datos
         }
 
 
@@ -673,17 +733,14 @@
             return;
         }
 
-        // Obtener límites de EV
+        // Obtener límites de configuración
         const minEVPercent = parseFloat(document.getElementById('min-ev-percentage').value) / 100;
         const maxEVPercent = parseFloat(document.getElementById('max-ev-percentage').value) / 100; 
-        
-        // Obtener límites de Cuota Bookie
         const minBookieOdd = parseFloat(document.getElementById('min-bookie-odd').value);
         const maxBookieOdd = parseFloat(document.getElementById('max-bookie-odd').value);
-        
-        // Obtener límites de Probabilidad del Modelo (NUEVO)
-        const minModelProb = parseFloat(document.getElementById('min-model-prob').value) / 100; // Convertir a decimal (0 a 1)
-        const maxModelProb = parseFloat(document.getElementById('max-model-prob').value) / 100; // Convertir a decimal (0 a 1)
+        const minModelProb = parseFloat(document.getElementById('min-model-prob').value) / 100; 
+        const maxModelProb = parseFloat(document.getElementById('max-model-prob').value) / 100; 
+        const marketFilter = document.getElementById('market-filter').value; // NUEVO FILTRO DE MERCADO
         
         const calibration = loadCalibration();
         
@@ -692,8 +749,9 @@
         localStorage.setItem(MAX_EV_KEY, document.getElementById('max-ev-percentage').value);
         localStorage.setItem(MIN_ODD_KEY, document.getElementById('min-bookie-odd').value);
         localStorage.setItem(MAX_ODD_KEY, document.getElementById('max-bookie-odd').value);
-        localStorage.setItem(MIN_PROB_KEY, document.getElementById('min-model-prob').value); // GUARDAR NUEVA CLAVE
-        localStorage.setItem(MAX_PROB_KEY, document.getElementById('max-model-prob').value); // GUARDAR NUEVA CLAVE
+        localStorage.setItem(MIN_PROB_KEY, document.getElementById('min-model-prob').value);
+        localStorage.setItem(MAX_PROB_KEY, document.getElementById('max-model-prob').value);
+        localStorage.setItem(MARKET_FILTER_KEY, marketFilter); // GUARDAR NUEVA CLAVE
 
         let totalUnits = 0;
         let totalSimulatedBets = 0;
@@ -708,8 +766,9 @@
             if (!row) return; 
             
             const bookieOdd = data.bookieOdd;
-            const probability = data.prob; // Probabilidad del modelo (0 a 1)
+            const probability = data.prob; 
             const result = data.result;
+            const market = data.market; // Mercado del partido
             
             const { evValue, evPercent, className } = calculateEV(bookieOdd, probability);
             const { probReal, partidos } = getCalibration(bookieOdd, calibration);
@@ -733,14 +792,17 @@
             // Eliminar clases de valor y resultado para volver a aplicar
             row.classList.remove('value-bet-row', 'result-win-row', 'result-loss-row');
             
-            // LÓGICA DE FILTRO MODIFICADA (AHORA INCLUYE LÍMITES DE PROBABILIDAD)
+            // LÓGICA DE FILTRO COMPLETA
+            const passesMarketFilter = marketFilter === 'Todos' || market === marketFilter; // NUEVO FILTRO DE MERCADO
+
             const isValueBet = evValue !== 'N/A' && 
                                evValue >= minEVPercent && 
                                evValue <= maxEVPercent &&
                                (bookieOdd >= minBookieOdd) && 
                                (bookieOdd <= maxBookieOdd) &&
-                               (probability >= minModelProb) && // NUEVO FILTRO MÍNIMO DE PROBABILIDAD
-                               (probability <= maxModelProb);  // NUEVO FILTRO MÁXIMO DE PROBABILIDAD
+                               (probability >= minModelProb) && 
+                               (probability <= maxModelProb) &&
+                               passesMarketFilter; // APLICAR FILTRO DE MERCADO
 
             if (isValueBet) {
                 row.classList.add('value-bet-row');
