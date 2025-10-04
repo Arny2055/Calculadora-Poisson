@@ -248,22 +248,39 @@
         .result-win-row { background-color: var(--bg-win-row); }
         .result-loss-row { background-color: var(--bg-loss-row); }
 
-        /* Botón de volver */
-        .action-button.back {
-             background-color: var(--success-color);
+        /* Botones de acción */
+        .action-button-group {
+            display: flex;
+            gap: 15px;
+            margin-top: 20px;
+            margin-bottom: 30px;
+        }
+
+        .action-button {
              padding: 10px 15px;
              border: none;
              border-radius: 5px;
              cursor: pointer;
              font-weight: 600;
              transition: background-color 0.3s;
-             display: block;
+             color: white; 
+             flex-grow: 1;
+        }
+        
+        .action-button.back {
+             background-color: var(--success-color);
              width: 250px;
-             margin-top: 20px;
-             color: white; /* Asegurar color blanco para el texto */
         }
         .action-button.back:hover {
              background-color: #24887d;
+        }
+
+        .action-button.clear {
+             background-color: var(--negative-color);
+             width: auto;
+        }
+        .action-button.clear:hover {
+             background-color: #c72834;
         }
         
         /* Mensaje de error/alerta */
@@ -286,7 +303,11 @@
     <header>
         <h1>Herramienta de Backtesting Estratégico 🔬</h1>
         <p>Utilice esta herramienta para simular estrategias y verificar el rendimiento histórico (EV) de su modelo de probabilidades contra los **partidos listos para Backtest**.</p>
-        <button onclick="window.location.href='index.html'" class="action-button back">⬅️ Volver al Escáner</button>
+        
+        <div class="action-button-group">
+            <button onclick="window.location.href='index.html'" class="action-button back">⬅️ Volver al Escáner</button>
+            <button onclick="clearBacktestData()" class="action-button clear">🗑️ Limpiar Datos de Backtesting</button>
+        </div>
     </header>
     
     <div id="data-status-message" style="display: none;"></div>
@@ -366,7 +387,6 @@
 <script>
     const STORAGE_KEY_CALIBRATION = 'backtestCalibrationData';
     const MIN_EV_KEY = 'backtestMinEV';
-    // CLAVE MODIFICADA: Ahora lee solo los partidos listos para Backtest
     const READY_MATCHES_KEY = 'backtestReadyMatches'; 
 
     // Variable global para mantener los datos cargados y actualizados
@@ -403,7 +423,7 @@
         try {
             const rawData = JSON.parse(savedData);
             
-            // Los datos ya vienen listos desde guardados.html
+            // Mapear los datos de 'guardados.html' al formato local
             window.historicalData = rawData.map(item => ({
                 date: new Date(item.Date).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }),
                 match: `${item.Match} (${item.Market})`,
@@ -415,15 +435,36 @@
             
             if (window.historicalData.length > 0) {
                  statusMessage.textContent = `✅ ${window.historicalData.length} partidos listos cargados para el análisis.`;
-                 statusMessage.style.backgroundColor = '#4CAF50';
+                 // Uso de color de éxito para el mensaje de éxito
+                 statusMessage.style.backgroundColor = 'var(--success-color)';
                  statusMessage.style.color = 'white';
+                 statusMessage.style.display = 'block';
             }
 
         } catch (e) {
             window.historicalData = [];
             statusMessage.textContent = `❌ Error al cargar datos listos para Backtest: ${e.message}`;
             statusMessage.style.display = 'block';
+            statusMessage.style.backgroundColor = 'var(--negative-color)';
+            statusMessage.style.color = 'white';
             console.error("Error al parsear datos de backtest:", e);
+        }
+    }
+    
+    // =======================================================
+    // == FUNCIÓN PARA LIMPIAR DATOS DE BACKTESTING         ==
+    // =======================================================
+    function clearBacktestData() {
+        if (confirm("¿Estás seguro de que quieres ELIMINAR los datos y la configuración guardada de Backtesting? Los partidos originales en 'guardados.html' NO se borrarán.")) {
+            // 1. Borrar la clave de datos de partidos listos
+            localStorage.removeItem(READY_MATCHES_KEY);
+            // 2. Borrar la clave de configuración de calibración
+            localStorage.removeItem(STORAGE_KEY_CALIBRATION);
+            // 3. Borrar el EV mínimo guardado
+            localStorage.removeItem(MIN_EV_KEY);
+
+            // 4. Recargar la página para restablecer todo
+            window.location.reload(); 
         }
     }
     
@@ -500,8 +541,6 @@
         runBacktest();
     }
     
-    // No necesitamos actualizar los datos aquí, ya que se asume que vienen fijos desde guardados.html
-    // Dejamos las funciones solo para que el usuario pueda jugar con los inputs en backtest si lo desea.
     function updateBookieOdd(index, value) {
         window.historicalData[index].bookieOdd = parseFloat(value) || null;
         runBacktest();
@@ -577,6 +616,7 @@
                  muestraCell.textContent = '--';
             }
 
+            // Eliminar clases de valor y resultado para volver a aplicar
             row.classList.remove('value-bet-row', 'result-win-row', 'result-loss-row');
             
             const isValueBet = evValue !== 'N/A' && evValue >= minEVPercent;
@@ -601,8 +641,9 @@
         });
 
         const totalFinalized = wins + losses;
-        const yieldPercent = totalFinalized > 0 ? (totalUnits / totalFinalized) * 100 : 0;
-        const winRate = totalFinalized > 0 ? (wins / totalFinalized) * 100 : 0;
+        // La métrica 'totalSimulatedBets' es más precisa para el Yield, ya que solo contamos las que el filtro EV aceptó
+        const yieldPercent = totalSimulatedBets > 0 ? (totalUnits / totalSimulatedBets) * 100 : 0; 
+        const winRate = totalSimulatedBets > 0 ? (wins / totalSimulatedBets) * 100 : 0;
 
         updateResultsSection({ netUnits: totalUnits, totalFinalized: totalSimulatedBets, yieldPercent, winRate });
     }
@@ -619,7 +660,7 @@
             const { probReal, partidos } = getCalibration(data.bookieOdd, calibration);
             
             let probRealDisplay = `<span class="ev-neutral">--</span>`;
-            if (probReal !== null) {
+            if (probReal !== null && data.bookieOdd) {
                 let probRealClassName = probReal > (1 / data.bookieOdd) ? 'prob-real-positive' : 'prob-real-negative';
                 probRealDisplay = `<span class="${probRealClassName}">${(probReal * 100).toFixed(2)}%</span>`;
             }
