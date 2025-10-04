@@ -669,8 +669,8 @@
                 // 4. FILTRAR Y REGISTRAR SOLO BTTS-SÍ y OVER 2.5
                 const rawMarkets = [
                     // Solo incluimos los dos mercados solicitados
-                    { name: 'Total Goles Over 2.5', prob: ft_results.probOU25 },
-                    { name: 'Ambos Equipos Anotan (Sí)', prob: ft_results.probBTTS }
+                    { name: 'Ambos Equipos Anotan (Sí)', prob: ft_results.probBTTS },
+                    { name: 'Total Goles Over 2.5', prob: ft_results.probOU25 }
                 ];
                 
                 rawMarkets.forEach(m => {
@@ -819,24 +819,62 @@
         });
     }
 
-    // --- FUNCIÓN CORREGIDA PARA INCLUIR EL MERCADO EN EL MENSAJE ---
+    // --- FUNCIÓN CORREGIDA PARA ACUMULAR PARTIDOS Y EVITAR DUPLICADOS ---
     function saveFilteredMatches() {
         if (window.currentFilteredResults.length === 0) {
             alert("No hay partidos de valor para guardar.");
             return;
         }
+        
+        // 1. Cargar los partidos existentes (si los hay)
+        const savedData = localStorage.getItem(STORAGE_KEY);
+        let existingMatches = [];
+        if (savedData) {
+            try {
+                // Parseamos los datos existentes
+                existingMatches = JSON.parse(savedData);
+            } catch (e) {
+                console.error("Error al cargar datos guardados existentes:", e);
+                // Si hay error, asumimos que no hay datos válidos y empezamos de cero
+            }
+        }
 
-        // Serializar los resultados actuales a una cadena JSON y guardarlos
+        // 2. Normalizar los resultados actuales para guardar
+        const newMatchesToSave = window.currentFilteredResults.map(r => ({
+            // Asegurar formato de fecha uniforme para la clave única
+            ...r,
+            Date: new Date(r.Date).toISOString(), 
+            // Añadir campos iniciales que guardados.html espera (si no existen)
+            BookieOdd: r.BookieOdd || null, 
+            Result: r.Result || 'Pendiente',
+            BookieName: r.BookieName || null
+        }));
+        
+        // 3. Crear un conjunto (Set) de claves únicas de los partidos existentes
+        // Clave única: Match + Market + Date (solo día)
+        const existingKeys = new Set(existingMatches.map(m => 
+            `${m.Match}|${m.Market}|${m.Date.split('T')[0]}` // Usar solo la fecha (día) para la unicidad
+        ));
+
+        // 4. Filtrar los nuevos partidos para incluir solo aquellos que NO estén en la lista existente
+        const uniqueNewMatches = newMatchesToSave.filter(newMatch => {
+            // Creamos la clave única para el nuevo partido
+            const newKey = `${newMatch.Match}|${newMatch.Market}|${newMatch.Date.split('T')[0]}`;
+            return !existingKeys.has(newKey);
+        });
+
+        // 5. Combinar la lista histórica con los nuevos partidos únicos
+        const finalMatches = existingMatches.concat(uniqueNewMatches);
+        
+        // 6. Guardar la lista COMPLETA de nuevo en localStorage
         try {
-            const resultsToSave = window.currentFilteredResults.map(r => ({
-                ...r,
-                Date: new Date(r.Date).toISOString() // Asegurar formato de fecha uniforme
-            }));
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(finalMatches));
             
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(resultsToSave));
-            
-            // Mensaje de éxito modificado
-            alert(`✅ ${resultsToSave.length} mercados de valor (BTTS Sí & Over 2.5) guardados exitosamente. Ahora puedes abrir el archivo "guardados.html" para verlos.`);
+            const message = uniqueNewMatches.length > 0 
+                ? `✅ Se agregaron ${uniqueNewMatches.length} mercados nuevos. Total: ${finalMatches.length}. Abre "guardados.html" para verlos.`
+                : `ℹ️ No se agregaron nuevos mercados. Ya tienes ${finalMatches.length} mercados guardados. Abre "guardados.html" para verlos.`;
+                
+            alert(message);
         } catch (e) {
             alert("Error al guardar en el almacenamiento local. Es posible que esté lleno o deshabilitado.");
             console.error("Error saving to localStorage:", e);
