@@ -107,12 +107,30 @@
             grid-template-columns: 1fr 1fr;
             gap: 20px;
         }
+        
+        /* Contenedor para los límites de EV (Nuevo) */
+        .ev-limits-container {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            padding: 15px;
+            background-color: var(--bg-card);
+            border-radius: 6px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+        }
 
         .config-item {
             padding: 15px;
             background-color: var(--bg-card);
             border-radius: 6px;
             box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+        }
+        
+        .ev-limit-input-group {
+            /* Estilo para los grupos de input individuales dentro de ev-limits-container */
+            padding: 0;
+            background: none;
+            box-shadow: none;
         }
 
         .config-item label {
@@ -241,7 +259,7 @@
         .prob-real-positive { color: var(--success-color); font-weight: 700; }
         .prob-real-negative { color: var(--negative-color); font-weight: 700; }
         
-        /* Resaltado de Apuesta de Valor (Solo si EV > 0) */
+        /* Resaltado de Apuesta de Valor (Solo si EV está en rango) */
         .value-bet-row {
             border-left: 5px solid var(--accent-main);
         }
@@ -315,10 +333,19 @@
     <section id="config-section">
         <h2>🛠️ Configuración de Estrategia</h2>
         <div class="config-grid">
-            <div class="config-item">
-                <label for="min-ev-percentage">EV Mínimo Requerido (%)</label>
-                <input type="number" id="min-ev-percentage" value="1.00" step="0.01" onchange="runBacktest()">
-                <p>Solo se considerarán apuestas si EV% es mayor o igual a este valor.</p>
+            
+            <div class="ev-limits-container"> 
+                <div class="ev-limit-input-group">
+                    <label for="min-ev-percentage">EV Mínimo Requerido (%)</label>
+                    <input type="number" id="min-ev-percentage" value="1.00" step="0.01" onchange="runBacktest()">
+                    <p>Solo se considerarán apuestas si EV% es mayor o igual a este valor.</p>
+                </div>
+                
+                <div class="ev-limit-input-group">
+                    <label for="max-ev-percentage">EV Máximo Permitido (%)</label>
+                    <input type="number" id="max-ev-percentage" value="100.00" step="0.01" onchange="runBacktest()">
+                    <p>Solo se considerarán apuestas si EV% es menor o igual a este valor.</p>
+                </div>
             </div>
             
             <div class="config-item calibracion-table">
@@ -387,6 +414,7 @@
 <script>
     const STORAGE_KEY_CALIBRATION = 'backtestCalibrationData';
     const MIN_EV_KEY = 'backtestMinEV';
+    const MAX_EV_KEY = 'backtestMaxEV'; // NUEVA CLAVE
     const READY_MATCHES_KEY = 'backtestReadyMatches'; 
 
     // Variable global para mantener los datos cargados y actualizados
@@ -408,7 +436,6 @@
         const statusMessage = document.getElementById('data-status-message');
         statusMessage.style.display = 'none';
 
-        // Intenta leer de la nueva clave de partidos listos
         const savedData = localStorage.getItem(READY_MATCHES_KEY); 
         
         if (!savedData) {
@@ -423,7 +450,6 @@
         try {
             const rawData = JSON.parse(savedData);
             
-            // Mapear los datos de 'guardados.html' al formato local
             window.historicalData = rawData.map(item => ({
                 date: new Date(item.Date).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }),
                 match: `${item.Match} (${item.Market})`,
@@ -435,7 +461,6 @@
             
             if (window.historicalData.length > 0) {
                  statusMessage.textContent = `✅ ${window.historicalData.length} partidos listos cargados para el análisis.`;
-                 // Uso de color de éxito para el mensaje de éxito
                  statusMessage.style.backgroundColor = 'var(--success-color)';
                  statusMessage.style.color = 'white';
                  statusMessage.style.display = 'block';
@@ -462,8 +487,10 @@
             localStorage.removeItem(STORAGE_KEY_CALIBRATION);
             // 3. Borrar el EV mínimo guardado
             localStorage.removeItem(MIN_EV_KEY);
+            // 4. Borrar el EV máximo guardado (NUEVO)
+            localStorage.removeItem(MAX_EV_KEY);
 
-            // 4. Recargar la página para restablecer todo
+            // 5. Recargar la página para restablecer todo
             window.location.reload(); 
         }
     }
@@ -558,6 +585,15 @@
             document.getElementById('min-ev-percentage').value = savedMinEV;
         }
 
+        // Cargar EV Máximo (NUEVO)
+        const savedMaxEV = localStorage.getItem(MAX_EV_KEY);
+        if (savedMaxEV) {
+            document.getElementById('max-ev-percentage').value = savedMaxEV;
+        } else {
+             // Default EV Máximo a 100.00%
+             document.getElementById('max-ev-percentage').value = "100.00"; 
+        }
+
         const calibration = loadCalibration();
         renderCalibrationTable(calibration);
         
@@ -577,9 +613,11 @@
         }
 
         const minEVPercent = parseFloat(document.getElementById('min-ev-percentage').value) / 100;
+        const maxEVPercent = parseFloat(document.getElementById('max-ev-percentage').value) / 100; // OBTENER EV MÁXIMO
         const calibration = loadCalibration();
         
         localStorage.setItem(MIN_EV_KEY, document.getElementById('min-ev-percentage').value);
+        localStorage.setItem(MAX_EV_KEY, document.getElementById('max-ev-percentage').value); // GUARDAR EV MÁXIMO
 
         let totalUnits = 0;
         let totalSimulatedBets = 0;
@@ -619,7 +657,10 @@
             // Eliminar clases de valor y resultado para volver a aplicar
             row.classList.remove('value-bet-row', 'result-win-row', 'result-loss-row');
             
-            const isValueBet = evValue !== 'N/A' && evValue >= minEVPercent;
+            // LÓGICA DE FILTRO MODIFICADA PARA INCLUIR EV MÁXIMO
+            const isValueBet = evValue !== 'N/A' && 
+                               evValue >= minEVPercent && 
+                               evValue <= maxEVPercent; 
 
             if (isValueBet) {
                 row.classList.add('value-bet-row');
@@ -641,7 +682,6 @@
         });
 
         const totalFinalized = wins + losses;
-        // La métrica 'totalSimulatedBets' es más precisa para el Yield, ya que solo contamos las que el filtro EV aceptó
         const yieldPercent = totalSimulatedBets > 0 ? (totalUnits / totalSimulatedBets) * 100 : 0; 
         const winRate = totalSimulatedBets > 0 ? (wins / totalSimulatedBets) * 100 : 0;
 
