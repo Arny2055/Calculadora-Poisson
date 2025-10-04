@@ -359,7 +359,18 @@
                     <p>Solo apuestas con cuota Bookie menor o igual.</p>
                 </div>
                 
-            </div>
+                <div class="limit-input-group">
+                    <label for="min-model-prob">Prob. Mínima Modelo (%)</label>
+                    <input type="number" id="min-model-prob" value="0.01" step="0.01" onchange="runBacktest()">
+                    <p>Filtra por Probabilidad del Modelo mínima (ej: 0.01%).</p>
+                </div>
+
+                <div class="limit-input-group">
+                    <label for="max-model-prob">Prob. Máxima Modelo (%)</label>
+                    <input type="number" id="max-model-prob" value="100.00" step="0.01" onchange="runBacktest()">
+                    <p>Filtra por Probabilidad del Modelo máxima (ej: 100.00%).</p>
+                </div>
+                </div>
             
             <div class="config-item calibracion-table">
                 <label>Tabla de Calibración Empírica</label>
@@ -428,8 +439,12 @@
     const STORAGE_KEY_CALIBRATION = 'backtestCalibrationData';
     const MIN_EV_KEY = 'backtestMinEV';
     const MAX_EV_KEY = 'backtestMaxEV';
-    const MIN_ODD_KEY = 'backtestMinOdd'; // NUEVA CLAVE
-    const MAX_ODD_KEY = 'backtestMaxOdd'; // NUEVA CLAVE
+    const MIN_ODD_KEY = 'backtestMinOdd'; 
+    const MAX_ODD_KEY = 'backtestMaxOdd'; 
+    // NUEVAS CLAVES DE PROBABILIDAD DEL MODELO
+    const MIN_PROB_KEY = 'backtestMinProb'; 
+    const MAX_PROB_KEY = 'backtestMaxProb'; 
+
     const READY_MATCHES_KEY = 'backtestReadyMatches'; 
 
     // Variable global para mantener los datos cargados y actualizados
@@ -502,8 +517,10 @@
             localStorage.removeItem(STORAGE_KEY_CALIBRATION);
             localStorage.removeItem(MIN_EV_KEY);
             localStorage.removeItem(MAX_EV_KEY);
-            localStorage.removeItem(MIN_ODD_KEY); // BORRAR NUEVA CLAVE
-            localStorage.removeItem(MAX_ODD_KEY); // BORRAR NUEVA CLAVE
+            localStorage.removeItem(MIN_ODD_KEY); 
+            localStorage.removeItem(MAX_ODD_KEY); 
+            localStorage.removeItem(MIN_PROB_KEY); // BORRAR NUEVA CLAVE
+            localStorage.removeItem(MAX_PROB_KEY); // BORRAR NUEVA CLAVE
 
             // 3. Recargar la página para restablecer todo
             window.location.reload(); 
@@ -607,7 +624,7 @@
              document.getElementById('max-ev-percentage').value = "100.00"; 
         }
         
-        // Cargar límites de Cuota Bookie (NUEVO)
+        // Cargar límites de Cuota Bookie
         const savedMinOdd = localStorage.getItem(MIN_ODD_KEY);
         if (savedMinOdd) {
             document.getElementById('min-bookie-odd').value = savedMinOdd;
@@ -620,6 +637,21 @@
             document.getElementById('max-bookie-odd').value = savedMaxOdd;
         } else {
              document.getElementById('max-bookie-odd').value = "99.00"; 
+        }
+
+        // Cargar límites de Probabilidad del Modelo (NUEVO)
+        const savedMinProb = localStorage.getItem(MIN_PROB_KEY);
+        if (savedMinProb) {
+            document.getElementById('min-model-prob').value = savedMinProb;
+        } else {
+             document.getElementById('min-model-prob').value = "0.01"; 
+        }
+
+        const savedMaxProb = localStorage.getItem(MAX_PROB_KEY);
+        if (savedMaxProb) {
+            document.getElementById('max-model-prob').value = savedMaxProb;
+        } else {
+             document.getElementById('max-model-prob').value = "100.00"; 
         }
 
 
@@ -645,9 +677,13 @@
         const minEVPercent = parseFloat(document.getElementById('min-ev-percentage').value) / 100;
         const maxEVPercent = parseFloat(document.getElementById('max-ev-percentage').value) / 100; 
         
-        // Obtener límites de Cuota Bookie (NUEVO)
+        // Obtener límites de Cuota Bookie
         const minBookieOdd = parseFloat(document.getElementById('min-bookie-odd').value);
         const maxBookieOdd = parseFloat(document.getElementById('max-bookie-odd').value);
+        
+        // Obtener límites de Probabilidad del Modelo (NUEVO)
+        const minModelProb = parseFloat(document.getElementById('min-model-prob').value) / 100; // Convertir a decimal (0 a 1)
+        const maxModelProb = parseFloat(document.getElementById('max-model-prob').value) / 100; // Convertir a decimal (0 a 1)
         
         const calibration = loadCalibration();
         
@@ -656,6 +692,8 @@
         localStorage.setItem(MAX_EV_KEY, document.getElementById('max-ev-percentage').value);
         localStorage.setItem(MIN_ODD_KEY, document.getElementById('min-bookie-odd').value);
         localStorage.setItem(MAX_ODD_KEY, document.getElementById('max-bookie-odd').value);
+        localStorage.setItem(MIN_PROB_KEY, document.getElementById('min-model-prob').value); // GUARDAR NUEVA CLAVE
+        localStorage.setItem(MAX_PROB_KEY, document.getElementById('max-model-prob').value); // GUARDAR NUEVA CLAVE
 
         let totalUnits = 0;
         let totalSimulatedBets = 0;
@@ -670,7 +708,7 @@
             if (!row) return; 
             
             const bookieOdd = data.bookieOdd;
-            const probability = data.prob; 
+            const probability = data.prob; // Probabilidad del modelo (0 a 1)
             const result = data.result;
             
             const { evValue, evPercent, className } = calculateEV(bookieOdd, probability);
@@ -695,12 +733,14 @@
             // Eliminar clases de valor y resultado para volver a aplicar
             row.classList.remove('value-bet-row', 'result-win-row', 'result-loss-row');
             
-            // LÓGICA DE FILTRO MODIFICADA para incluir EV MÁXIMO y RANGO DE CUOTA
+            // LÓGICA DE FILTRO MODIFICADA (AHORA INCLUYE LÍMITES DE PROBABILIDAD)
             const isValueBet = evValue !== 'N/A' && 
                                evValue >= minEVPercent && 
                                evValue <= maxEVPercent &&
-                               (bookieOdd >= minBookieOdd) && // NUEVO FILTRO MÍNIMO
-                               (bookieOdd <= maxBookieOdd);   // NUEVO FILTRO MÁXIMO
+                               (bookieOdd >= minBookieOdd) && 
+                               (bookieOdd <= maxBookieOdd) &&
+                               (probability >= minModelProb) && // NUEVO FILTRO MÍNIMO DE PROBABILIDAD
+                               (probability <= maxModelProb);  // NUEVO FILTRO MÁXIMO DE PROBABILIDAD
 
             if (isValueBet) {
                 row.classList.add('value-bet-row');
