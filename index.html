@@ -234,7 +234,7 @@
         
         /* Ocultar el contenedor de inputs ocultos */
         #hidden-inputs-container {
-            display: none;
+            display: none; /* Ya no es necesario el input de correlation_factor */
         }
 
         /* ================================================= */
@@ -307,15 +307,14 @@
         <hr style="margin: 30px 0; border-color: var(--border-color);">
         
         <div id="hidden-inputs-container">
-            <input type="number" id="correlation_factor" value="0.04" step="0.005"> 
-        </div>
+            </div>
 
         <section id="output-section" style="display: none;">
             <h3>3. Oportunidades de Valor (BTTS Sí & Over 2.5)</h3>
             <p style="font-size: 1em; color: var(--text-secondary);">
                 Se han analizado <strong id="matches-scanned-count">0</strong> partidos. A continuación, se muestran solo los mercados que cumplen **dos filtros**: 
                 <br/>1. **Filtro Histórico (60%-80%):** El promedio BTTS y Over 2.5 de los últimos 10 partidos de ambos equipos debe estar entre 60% y 80%.
-                <br/>2. **Filtro del Modelo (60%-75%):** La probabilidad del Modelo de Poisson debe estar entre 60% y 75%.
+                <br/>2. **Filtro del Modelo (60%-75%):** La probabilidad del Modelo (Ajustado por Correlación de Empates) debe estar entre 60% y 75%.
             </p>
             
             <button id="btn-save-matches" onclick="saveFilteredMatches()">💾 Guardar Oportunidades Filtradas (¡Abrir archivo "guardados.html" después!)</button>
@@ -368,11 +367,20 @@
     const DECAY_FACTOR = 0.95; 
     const PROBABILITY_MIN = 0.60; 
     const PROBABILITY_MAX = 0.75; 
-    const HISTORICAL_MIN_AVG = 0.60; // NUEVO: Mínimo 60% en promedio histórico
-    const HISTORICAL_MAX_AVG = 0.80; // NUEVO: Máximo 80% en promedio histórico
+    const HISTORICAL_MIN_AVG = 0.60; 
+    const HISTORICAL_MAX_AVG = 0.80; 
     const REFERENCE_EDGE_MARGIN = 0.10; 
     const ALL_LEAGUES_VALUE = 'ALL_COMMON_LEAGUES'; 
     const STORAGE_KEY = 'savedEVMatches'; 
+    
+    // =================================================
+    // == CORRELACIÓN DIXON & COLES SIMPLIFICADA (RHO) ==
+    // =================================================
+    // Rho (ρ): Factor de correlación para aumentar la probabilidad de empates de baja puntuación (0-0, 1-1).
+    // Un valor de 0.08 a 0.15 es común para ligas de alta correlación/defensivas.
+    // Lo fijamos aquí, ya que el cálculo dinámico es demasiado complejo para JS de navegador.
+    const CORRELATION_RHO = 0.10; 
+
 
     // --- Funciones de Utilidad (Modo Oscuro, Factorial, Poisson) ---
     function applyMode(mode) {
@@ -424,10 +432,8 @@
         return weightTotal > 0 ? weightedSum / weightTotal : 0;
     }
     
-    // NUEVA FUNCIÓN: Calcula el porcentaje histórico de BTTS o Over 2.5 (Simple Average)
     function calculateHistoricalPercentage(matchesArray, type) {
         let count = 0;
-        // Usamos slice(0, MATCHES_LIMIT) para asegurar que solo son los últimos 10
         const recentMatches = matchesArray.slice(0, MATCHES_LIMIT); 
         
         recentMatches.forEach(m => {
@@ -442,7 +448,6 @@
             }
         });
 
-        // Devuelve el porcentaje simple (count / 10)
         return recentMatches.length > 0 ? (count / recentMatches.length) : 0;
     }
 
@@ -499,11 +504,9 @@
                 });
                 
                 if (type === 'stats') {
-                    // Ordenar stats históricas por fecha descendente
                     window.statsData = normalizedData.sort((a, b) => b.Date.getTime() - a.Date.getTime());
                     statusElement.textContent = `✅ Stats Cargadas. ${window.statsData.length} registros.`;
                 } else {
-                    // Ordenar fixtures por fecha ascendente (útil para el escaneo)
                     window.fixturesData = normalizedData.sort((a, b) => a.Date.getTime() - b.Date.getTime());
                     statusElement.textContent = `✅ Fixtures Cargados. ${window.fixturesData.length} partidos.`;
                 }
@@ -567,7 +570,6 @@
         const currentSelected = leagueSelect.value;
         leagueSelect.innerHTML = '<option value="">-- Seleccionar Liga --</option>';
         leagueSelect.onchange = () => {
-             // Actualizar metadatos y estado del botón al cambiar la selección
              if (leagueSelect.value && leagueSelect.value !== ALL_LEAGUES_VALUE) {
                 const { GL_L, GL_V } = calculateLeagueGlobals(leagueSelect.value);
                 document.getElementById('gl-l-output').textContent = GL_L.toFixed(3);
@@ -593,13 +595,11 @@
 
         leagueSelect.disabled = false;
         
-        // 1. Agregar la opción "Todas las Ligas"
         const allOption = document.createElement('option');
         allOption.value = ALL_LEAGUES_VALUE;
         allOption.textContent = '🎯 TODAS LAS LIGAS COMUNES';
         leagueSelect.appendChild(allOption);
 
-        // 2. Agregar las ligas individuales
         commonLeagues.forEach(league => {
             const option = document.createElement('option');
             option.value = league;
@@ -607,10 +607,8 @@
             leagueSelect.appendChild(option);
         });
 
-        // 3. Restaurar selección previa si es válida
         if (commonLeagues.includes(currentSelected) || currentSelected === ALL_LEAGUES_VALUE) {
              leagueSelect.value = currentSelected;
-             // Si se restableció una liga individual, ejecutar la actualización de GL
              if (currentSelected && currentSelected !== ALL_LEAGUES_VALUE) {
                  const { GL_L, GL_V } = calculateLeagueGlobals(currentSelected);
                  document.getElementById('gl-l-output').textContent = GL_L.toFixed(3);
@@ -643,7 +641,6 @@
         document.getElementById('btn-save-matches').style.display = 'none';
 
         const allFilteredResults = [];
-        const correlationFactor = parseFloat(document.getElementById('correlation_factor').value);
         let matchesProcessed = 0;
         
         const commonLeagues = getCommonLeagues();
@@ -655,7 +652,6 @@
             return;
         }
         
-        // Iterar sobre las ligas seleccionadas
         for (const league of leaguesToScan) {
             const { GL_L, GL_V } = calculateLeagueGlobals(league);
             
@@ -671,16 +667,13 @@
                 const teamL = fixture.LocalTeam;
                 const teamV = fixture.VisitantTeam;
                 
-                // 1. OBTENER ESTADÍSTICAS DEL EQUIPO DE LA DATA HISTÓRICA
                 const teamLHomeMatches = window.statsData.filter(m => m.League === league && m.LocalTeam === teamL);
                 const teamVAwayMatches = window.statsData.filter(m => m.League === league && m.VisitantTeam === teamV);
                 
-                // VALIDACIÓN CLAVE: Mínimo de 10 partidos para cada equipo
                 if (teamLHomeMatches.length < MATCHES_LIMIT || teamVAwayMatches.length < MATCHES_LIMIT) {
-                     continue; // Saltar el partido si no cumple el requisito mínimo
+                     continue; 
                 }
                 
-                // 2. CÁLCULO DE PROMEDIOS HISTÓRICOS Y APLICACIÓN DEL FILTRO DEL USUARIO (60-80%)
                 const bttsL_hist = calculateHistoricalPercentage(teamLHomeMatches, 'BTTS');
                 const bttsV_hist = calculateHistoricalPercentage(teamVAwayMatches, 'BTTS');
                 const btts_avg_hist = (bttsL_hist + bttsV_hist) / 2;
@@ -689,19 +682,16 @@
                 const ou25V_hist = calculateHistoricalPercentage(teamVAwayMatches, 'OU25');
                 const ou25_avg_hist = (ou25L_hist + ou25V_hist) / 2;
 
-                // FILTRO 1: BTTS (Ambos Anotan)
+                // FILTRO 1: BTTS (Ambos Anotan) - Histórico 60-80%
                 if (btts_avg_hist < HISTORICAL_MIN_AVG || btts_avg_hist > HISTORICAL_MAX_AVG) {
                     continue; 
                 }
                 
-                // FILTRO 2: Over 2.5
+                // FILTRO 2: Over 2.5 - Histórico 60-80%
                 if (ou25_avg_hist < HISTORICAL_MIN_AVG || ou25_avg_hist > HISTORICAL_MAX_AVG) {
                     continue; 
                 }
                 
-                // El partido pasa el filtro histórico (60%-80%), procedemos al cálculo del modelo.
-                
-                // 3. CÁLCULO DE FUERZAS Y LAMBDAS (Existente)
                 const gflGoals = teamLHomeMatches.map(m => m.LocalGoals); 
                 const GF_L = calculateWeightedAverage(gflGoals); 
                 
@@ -711,17 +701,16 @@
                 const lambdaL_FT = (GF_L / GL_L) * GL_V; 
                 const lambdaV_FT = (GF_V / GL_V) * GL_L; 
                 
-                // 4. EJECUTAR SIMULACIÓN (Existente)
-                const ft_results = runPoissonSimulation(lambdaL_FT, lambdaV_FT, correlationFactor);
+                // AHORA LLAMAMOS A LA SIMULACIÓN SIN FACTOR EXTERNO, USANDO CORRELATION_RHO INTERNO
+                const ft_results = runPoissonSimulation(lambdaL_FT, lambdaV_FT);
                 
-                // 5. FILTRAR Y REGISTRAR SOLO BTTS-SÍ y OVER 2.5 (Filtro del Modelo: 60%-75%)
                 const rawMarkets = [
                     { name: 'Ambos Equipos Anotan (Sí)', prob: ft_results.probBTTS },
                     { name: 'Total Goles Over 2.5', prob: ft_results.probOU25 }
                 ];
                 
                 rawMarkets.forEach(m => {
-                    // El filtro del modelo sigue siendo el original (60% al 75%)
+                    // FILTRO DEL MODELO: Probabilidad del Modelo entre 60% y 75%
                     if (m.prob >= PROBABILITY_MIN && m.prob <= PROBABILITY_MAX) {
                         const impliedOdd = (1 / m.prob);
                         const minOddValue = (impliedOdd + REFERENCE_EDGE_MARGIN);
@@ -748,60 +737,72 @@
         statusElement.style.color = '#2a9d8f';
     }
 
-    // --- FUNCIONES DE SIMULACIÓN Y UI (SIN CAMBIOS) ---
-    function runPoissonSimulation(lambdaL, lambdaV, correlationFactor) {
+    // --- FUNCIÓN DE SIMULACIÓN MEJORADA CON AJUSTE DE CORRELACIÓN (DIXON & COLES SIMPLIFICADO) ---
+    function runPoissonSimulation(lambdaL, lambdaV) {
         const maxGoals = 4;
         let probMatrix_initial = [];
         let totalProb_initial = 0;
-        const P_plus = (lambda) => 1 - Array.from({ length: maxGoals }, (_, k) => poisson(k, lambda)).reduce((a, b) => a + b, 0);
-
+        
+        // Calcular la matriz de probabilidades Poisson Bivariante (sin ajuste de covarianza)
         for (let i = 0; i <= maxGoals; i++) {
             probMatrix_initial[i] = [];
             for (let j = 0; j <= maxGoals; j++) {
-                const probL = (i < maxGoals) ? poisson(i, lambdaL) : P_plus(lambdaL);
-                const probV = (j < maxGoals) ? poisson(j, lambdaV) : P_plus(lambdaV);
+                const probL = poisson(i, lambdaL);
+                const probV = poisson(j, lambdaV);
+                // Si i o j es maxGoals, asumimos la probabilidad residual (simplificación)
                 probMatrix_initial[i][j] = probL * probV;
                 totalProb_initial += probMatrix_initial[i][j];
             }
         }
         
+        // Normalizar la matriz (para asegurar que la suma de probabilidades sea 1)
         const normFactor = 1.0 / totalProb_initial;
-        let normalizedProbMatrix = probMatrix_initial.map(row => row.map(p => p * normFactor));
-        let finalProbMatrix = JSON.parse(JSON.stringify(normalizedProbMatrix)); 
+        let finalProbMatrix = probMatrix_initial.map(row => row.map(p => p * normFactor));
+        
+        // =======================================================
+        // == APLICAR AJUSTE DE CORRELACIÓN (RHO) DIXON & COLES ==
+        // =======================================================
+        const rho = CORRELATION_RHO;
 
-        if (correlationFactor > 0) {
-            const CORR_FACTOR = correlationFactor;
-            const prob00_orig = normalizedProbMatrix[0][0];
-            const prob11_orig = normalizedProbMatrix[1][1];
-            
-            const sumDraws_Orig = prob00_orig + prob11_orig;
-            
-            if (sumDraws_Orig > 0) {
-                finalProbMatrix[0][0] += CORR_FACTOR * (prob00_orig / sumDraws_Orig);
-                finalProbMatrix[1][1] += CORR_FACTOR * (prob11_orig / sumDraws_Orig);
-                
-                const sumDraws_New = finalProbMatrix[0][0] + finalProbMatrix[1][1];
-                const sumNonDraws_Original = 1.0 - sumDraws_Orig;
-                const sumNonDraws_Required = 1.0 - sumDraws_New;
-                const reductionFactor = (sumNonDraws_Original > 0) ? sumNonDraws_Required / sumNonDraws_Original : 1.0; 
+        // 1. Ajuste de 0-0 y 1-1 (Aumentar empates de pocos goles)
+        // Probabilidades originales de 0-0 y 1-1
+        const P00_orig = finalProbMatrix[0][0];
+        const P11_orig = finalProbMatrix[1][1];
 
-                for (let i = 0; i <= maxGoals; i++) {
-                    for (let j = 0; j <= maxGoals; j++) {
-                        if (!((i === 0 && j === 0) || (i === 1 && j === 1))) {
-                            finalProbMatrix[i][j] = normalizedProbMatrix[i][j] * reductionFactor;
-                        }
-                    }
-                }
+        // 2. Aumentar las probabilidades de 0-0 y 1-1 usando Rho
+        if (rho > 0) {
+            finalProbMatrix[0][0] += rho * P00_orig * P11_orig;
+            finalProbMatrix[1][1] += rho * P00_orig * P11_orig;
+            
+            // 3. Compensación: Reducir las probabilidades de 1-0 y 0-1
+            // Esto es crucial para mantener la media de goles (lambda) igual,
+            // pero redistribuir la probabilidad de los resultados de un gol.
+            if (finalProbMatrix[1][0] >= rho * P00_orig * P11_orig) {
+                 finalProbMatrix[1][0] -= rho * P00_orig * P11_orig;
+            } else {
+                finalProbMatrix[1][0] = 0;
+            }
+            if (finalProbMatrix[0][1] >= rho * P00_orig * P11_orig) {
+                 finalProbMatrix[0][1] -= rho * P00_orig * P11_orig;
+            } else {
+                 finalProbMatrix[0][1] = 0;
             }
         }
-        
+        // 4. Se requiere una normalización final para asegurar que la suma sigue siendo 1
+        let newTotalProb = finalProbMatrix.flat().reduce((sum, p) => sum + p, 0);
+        const finalNormFactor = 1.0 / newTotalProb;
+        finalProbMatrix = finalProbMatrix.map(row => row.map(p => p * finalNormFactor));
+
+
         let probOU25 = 0;
         let probBTTS = 0; 
         
         for (let i = 0; i <= maxGoals; i++) {
             for (let j = 0; j <= maxGoals; j++) {
                 const P = finalProbMatrix[i][j];
+                // Probabilidad Over 2.5
                 if (i + j > 2) { probOU25 += P; }
+                // Probabilidad Ambos Anotan (i >= 1 y j >= 1)
                 if (i >= 1 && j >= 1) { probBTTS += P; }
             }
         }
@@ -828,7 +829,6 @@
              document.getElementById('btn-save-matches').style.display = 'block';
         }
         
-        // Ordenar primero por fecha (ascendente) y luego por probabilidad (descendente)
         results.sort((a, b) => {
             a.Date = a.Date instanceof Date ? a.Date.toISOString() : a.Date; 
             b.Date = b.Date instanceof Date ? b.Date.toISOString() : b.Date;
@@ -867,54 +867,41 @@
         });
     }
 
-    // --- FUNCIÓN CORREGIDA PARA ACUMULAR PARTIDOS Y EVITAR DUPLICADOS (SIN CAMBIOS) ---
     function saveFilteredMatches() {
         if (window.currentFilteredResults.length === 0) {
             alert("No hay partidos de valor para guardar.");
             return;
         }
         
-        // 1. Cargar los partidos existentes (si los hay)
         const savedData = localStorage.getItem(STORAGE_KEY);
         let existingMatches = [];
         if (savedData) {
             try {
-                // Parseamos los datos existentes
                 existingMatches = JSON.parse(savedData);
             } catch (e) {
                 console.error("Error al cargar datos guardados existentes:", e);
-                // Si hay error, asumimos que no hay datos válidos y empezamos de cero
             }
         }
 
-        // 2. Normalizar los resultados actuales para guardar
         const newMatchesToSave = window.currentFilteredResults.map(r => ({
-            // Asegurar formato de fecha uniforme para la clave única
             ...r,
             Date: new Date(r.Date).toISOString(), 
-            // Añadir campos iniciales que guardados.html espera (si no existen)
             BookieOdd: r.BookieOdd || null, 
             Result: r.Result || 'Pendiente',
             BookieName: r.BookieName || null
         }));
         
-        // 3. Crear un conjunto (Set) de claves únicas de los partidos existentes
-        // Clave única: Match + Market + Date (solo día)
         const existingKeys = new Set(existingMatches.map(m => 
-            `${m.Match}|${m.Market}|${m.Date.split('T')[0]}` // Usar solo la fecha (día) para la unicidad
+            `${m.Match}|${m.Market}|${m.Date.split('T')[0]}`
         ));
 
-        // 4. Filtrar los nuevos partidos para incluir solo aquellos que NO estén en la lista existente
         const uniqueNewMatches = newMatchesToSave.filter(newMatch => {
-            // Creamos la clave única para el nuevo partido
             const newKey = `${newMatch.Match}|${newMatch.Market}|${newMatch.Date.split('T')[0]}`;
             return !existingKeys.has(newKey);
         });
 
-        // 5. Combinar la lista histórica con los nuevos partidos únicos
         const finalMatches = existingMatches.concat(uniqueNewMatches);
         
-        // 6. Guardar la lista COMPLETA de nuevo en localStorage
         try {
             localStorage.setItem(STORAGE_KEY, JSON.stringify(finalMatches));
             
