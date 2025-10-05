@@ -475,14 +475,12 @@
     const MIN_PROB_KEY = 'backtestMinProb'; 
     const MAX_PROB_KEY = 'backtestMaxProb'; 
     const MARKET_FILTER_KEY = 'backtestMarketFilter'; 
-    const LEAGUE_FILTER_KEY = 'backtestLeagueFilter'; // NUEVA CLAVE PARA LA LIGA
+    const LEAGUE_FILTER_KEY = 'backtestLeagueFilter'; 
 
     const READY_MATCHES_KEY = 'backtestReadyMatches'; 
 
-    // Variable global para mantener los datos cargados y actualizados
     window.historicalData = []; 
     
-    // Configuración de Calibración por defecto
     let defaultCalibration = [
         { cuotaMin: 1.01, cuotaMax: 1.60, probReal: 85, partidos: 500 }, 
         { cuotaMin: 1.61, cuotaMax: 2.20, probReal: 65, partidos: 1000 }, 
@@ -516,15 +514,22 @@
                 date: new Date(item.Date).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }),
                 match: `${item.Match} (${item.Market})`,
                 market: item.Market, 
-                league: item.League, // AÑADIR LIGA
+                league: item.League || 'Desconocida', // Asegurar que siempre hay una liga
                 prob: item.Prob, 
                 minOdd: item.MinOdd,
-                bookieOdd: item.BookieOdd, // Usar BookieOdd, que se usa en el Escáner Guardados
+                bookieOdd: item.BookieOdd, 
                 result: item.Result 
             }));
             
-            // FILTRAR aquellos que no tienen cuota o resultado definido (pueden venir del escáner guardado original)
-            window.historicalData = window.historicalData.filter(item => item.bookieOdd !== null && item.bookieOdd !== undefined && item.result !== null && item.result !== undefined);
+            // FILTRAR aquellos que no tienen cuota o resultado definido
+            window.historicalData = window.historicalData.filter(item => 
+                item.bookieOdd !== null && 
+                item.bookieOdd !== undefined && 
+                item.bookieOdd > 1 && // Asegurar cuota válida
+                item.result !== null && 
+                item.result !== undefined && 
+                item.result !== 'Pendiente' // Solo procesar finalizados
+            );
 
             if (window.historicalData.length > 0) {
                  statusMessage.textContent = `✅ ${window.historicalData.length} partidos listos cargados para el análisis.`;
@@ -534,7 +539,10 @@
             }
             
             populateMarketFilter(); 
-            populateLeagueFilter(); // NUEVA FUNCIÓN
+            populateLeagueFilter(); 
+            renderTable(); // Dibujar la tabla *antes* de correr el backtest
+            runBacktest(); // Correr el backtest para aplicar los filtros
+            
         } catch (e) {
             window.historicalData = [];
             statusMessage.textContent = `❌ Error al cargar datos listos para Backtest: ${e.message}`;
@@ -552,52 +560,33 @@
     function populateMarketFilter() {
         const select = document.getElementById('market-filter');
         const currentFilter = localStorage.getItem(MARKET_FILTER_KEY) || 'Todos';
-        
         const markets = new Set(window.historicalData.map(data => data.market).filter(m => m));
         
         select.innerHTML = '<option value="Todos">⚽ Todos los Mercados</option>';
-
         markets.forEach(market => {
             const option = document.createElement('option');
             option.value = market;
             option.textContent = market;
-            if (market === currentFilter) {
-                option.selected = true;
-            }
             select.appendChild(option);
         });
-        
-        if (!markets.has(currentFilter) && currentFilter !== 'Todos') {
-            select.value = 'Todos';
-        }
+        select.value = currentFilter;
+        if (select.value !== currentFilter) select.value = 'Todos'; // Reset si el guardado no existe
     }
 
-    // NUEVA FUNCIÓN PARA POPULAR EL FILTRO DE LIGA
     function populateLeagueFilter() {
         const select = document.getElementById('league-filter');
         const currentFilter = localStorage.getItem(LEAGUE_FILTER_KEY) || 'Todas';
-        
-        // 1. Obtener ligas únicas
         const leagues = new Set(window.historicalData.map(data => data.league).filter(l => l));
         
-        // 2. Limpiar opciones (manteniendo "Todas")
         select.innerHTML = '<option value="Todas">🏆 Todas las Ligas</option>';
-
-        // 3. Añadir opciones dinámicamente
         leagues.forEach(league => {
             const option = document.createElement('option');
             option.value = league;
             option.textContent = league;
-            if (league === currentFilter) {
-                option.selected = true;
-            }
             select.appendChild(option);
         });
-        
-        // Si el filtro guardado ya no existe, volvemos a 'Todas'
-        if (!leagues.has(currentFilter) && currentFilter !== 'Todas') {
-            select.value = 'Todas';
-        }
+        select.value = currentFilter;
+        if (select.value !== currentFilter) select.value = 'Todas'; // Reset si el guardado no existe
     }
     
     // =======================================================
@@ -605,9 +594,7 @@
     // =======================================================
     function clearBacktestData() {
         if (confirm("¿Estás seguro de que quieres ELIMINAR los datos y la configuración guardada de Backtesting? Los partidos originales en 'guardados.html' NO se borrarán.")) {
-            // 1. Borrar la clave de datos de partidos listos
             localStorage.removeItem(READY_MATCHES_KEY);
-            // 2. Borrar las claves de configuración
             localStorage.removeItem(STORAGE_KEY_CALIBRATION);
             localStorage.removeItem(MIN_EV_KEY);
             localStorage.removeItem(MAX_EV_KEY);
@@ -616,9 +603,8 @@
             localStorage.removeItem(MIN_PROB_KEY); 
             localStorage.removeItem(MAX_PROB_KEY); 
             localStorage.removeItem(MARKET_FILTER_KEY); 
-            localStorage.removeItem(LEAGUE_FILTER_KEY); // BORRAR NUEVA CLAVE
+            localStorage.removeItem(LEAGUE_FILTER_KEY); 
 
-            // 3. Recargar la página para restablecer todo
             window.location.reload(); 
         }
     }
@@ -696,31 +682,21 @@
         runBacktest();
     }
     
-    // Estas funciones ya no deberían ser necesarias si se cargan los datos correctamente desde 'guardados.html'
-    // Se mantienen por si el usuario quiere hacer micro-ajustes en la tabla de backtest, pero no actualizan la fuente.
     function updateBookieOdd(index, value) {
-        // En un entorno de backtest real, la cuota es histórica y no se debería cambiar.
-        // Si el usuario edita aquí, solo se aplica al cálculo actual de runBacktest().
         window.historicalData[index].bookieOdd = parseFloat(value) || null;
         runBacktest();
     }
 
     function updateResult(index, value) {
-        // Lo mismo aplica para el resultado.
         window.historicalData[index].result = value;
         runBacktest();
     }
     
     function initializeBacktest() {
-        // Cargar límites de EV
         document.getElementById('min-ev-percentage').value = localStorage.getItem(MIN_EV_KEY) || "1.00";
         document.getElementById('max-ev-percentage').value = localStorage.getItem(MAX_EV_KEY) || "100.00";
-        
-        // Cargar límites de Cuota Bookie
         document.getElementById('min-bookie-odd').value = localStorage.getItem(MIN_ODD_KEY) || "1.01";
         document.getElementById('max-bookie-odd').value = localStorage.getItem(MAX_ODD_KEY) || "99.00";
-
-        // Cargar límites de Probabilidad del Modelo
         document.getElementById('min-model-prob').value = localStorage.getItem(MIN_PROB_KEY) || "0.01";
         document.getElementById('max-model-prob').value = localStorage.getItem(MAX_PROB_KEY) || "100.00";
 
@@ -728,8 +704,6 @@
         renderCalibrationTable(calibration);
         
         loadHistoricalData();
-        renderTable();
-        // runBacktest() se llama implícitamente al final de loadHistoricalData si hay datos
     }
 
     // =======================================================
@@ -750,7 +724,7 @@
         const minModelProb = parseFloat(document.getElementById('min-model-prob').value) / 100; 
         const maxModelProb = parseFloat(document.getElementById('max-model-prob').value) / 100; 
         const marketFilter = document.getElementById('market-filter').value; 
-        const leagueFilter = document.getElementById('league-filter').value; // OBTENER NUEVO FILTRO DE LIGA
+        const leagueFilter = document.getElementById('league-filter').value; 
         
         const calibration = loadCalibration();
         
@@ -762,7 +736,7 @@
         localStorage.setItem(MIN_PROB_KEY, document.getElementById('min-model-prob').value);
         localStorage.setItem(MAX_PROB_KEY, document.getElementById('max-model-prob').value);
         localStorage.setItem(MARKET_FILTER_KEY, marketFilter); 
-        localStorage.setItem(LEAGUE_FILTER_KEY, leagueFilter); // GUARDAR NUEVA CLAVE
+        localStorage.setItem(LEAGUE_FILTER_KEY, leagueFilter); 
 
         let totalUnits = 0;
         let totalSimulatedBets = 0;
@@ -780,11 +754,12 @@
             const probability = data.prob; 
             const result = data.result;
             const market = data.market; 
-            const league = data.league; // LIGA DEL PARTIDO
+            const league = data.league; 
             
             const { evValue, evPercent, className } = calculateEV(bookieOdd, probability);
             const { probReal, partidos } = getCalibration(bookieOdd, calibration);
             
+            // Renderizar EV y Prob Real en la fila (Actualización en tiempo real)
             const evCell = row.querySelector('.ev-cell');
             evCell.innerHTML = `<span class="${className}">${evPercent}</span>`;
             
@@ -793,7 +768,6 @@
             
             if (probReal !== null && bookieOdd) {
                  let probRealClassName = probReal > (1 / bookieOdd) ? 'prob-real-positive' : 'prob-real-negative';
-                 
                  probRealCell.innerHTML = `<span class="${probRealClassName}">${(probReal * 100).toFixed(2)}%</span>`;
                  muestraCell.textContent = partidos;
             } else {
@@ -801,12 +775,11 @@
                  muestraCell.textContent = '--';
             }
 
-            // Eliminar clases de valor y resultado para volver a aplicar
+            // --- Lógica de Filtros y Simulación ---
             row.classList.remove('value-bet-row', 'result-win-row', 'result-loss-row');
             
-            // LÓGICA DE FILTRO COMPLETA
             const passesMarketFilter = marketFilter === 'Todos' || market === marketFilter; 
-            const passesLeagueFilter = leagueFilter === 'Todas' || league === leagueFilter; // NUEVO FILTRO DE LIGA
+            const passesLeagueFilter = leagueFilter === 'Todas' || league === leagueFilter; 
 
             const isValueBet = evValue !== 'N/A' && 
                                evValue >= minEVPercent && 
@@ -816,11 +789,12 @@
                                (probability >= minModelProb) && 
                                (probability <= maxModelProb) &&
                                passesMarketFilter &&
-                               passesLeagueFilter; // APLICAR NUEVO FILTRO DE LIGA
+                               passesLeagueFilter; 
 
             if (isValueBet) {
                 row.classList.add('value-bet-row');
                 
+                // Simulación (solo si la apuesta califica como EV+ con los filtros)
                 if (result === 'Ganada' || result === 'Perdida') {
                     totalSimulatedBets++;
 
@@ -842,14 +816,14 @@
             }
         });
 
-        const totalFinalized = wins + losses;
-        const totalWagered = totalSimulatedBets; // 1 unidad por apuesta
+        const totalWagered = totalSimulatedBets; 
         const yieldPercent = totalWagered > 0 ? (totalUnits / totalWagered) * 100 : 0; 
         const winRate = totalWagered > 0 ? (wins / totalWagered) * 100 : 0;
 
         updateResultsSection({ netUnits: totalUnits, totalFinalized: totalSimulatedBets, yieldPercent, winRate });
     }
 
+    // Corregida: Esta función ahora solo dibuja los datos, sin ocultar filas.
     function renderTable() {
         const tableBody = document.querySelector('#backtest-table tbody');
         tableBody.innerHTML = '';
@@ -857,7 +831,8 @@
         window.historicalData.forEach((data, index) => {
             const newRow = tableBody.insertRow();
             
-            const { evPercent, className } = calculateEV(data.bookieOdd, data.prob);
+            // Usar una celda EV temporal al renderizar, el valor final se calcula en runBacktest
+            const { evPercent, className } = calculateEV(data.bookieOdd, data.prob); 
             const calibration = loadCalibration();
             const { probReal, partidos } = getCalibration(data.bookieOdd, calibration);
             
@@ -867,7 +842,6 @@
                 probRealDisplay = `<span class="${probRealClassName}">${(probReal * 100).toFixed(2)}%</span>`;
             }
 
-            // Los inputs se mantienen editables para ajustes *dentro* del backtest
             newRow.innerHTML = `
                 <td class="col-date">${data.date}</td>
                 <td style="text-align: left; font-weight: 600;">${data.match}</td>
@@ -897,8 +871,8 @@
             } else if (data.result === 'Perdida') {
                 newRow.classList.add('result-loss-row');
             }
-             // Ocultar por defecto, se mostrarán en runBacktest si pasan el filtro
-             newRow.style.display = 'none';
+             // Importante: No se oculta aquí. runBacktest lo hará.
+             newRow.style.display = ''; 
         });
     }
 
@@ -950,7 +924,6 @@
         } else {
             applyMode('light');
         }
-        // Llamada a initializeBacktest al cargar la página
     });
 
 </script>
