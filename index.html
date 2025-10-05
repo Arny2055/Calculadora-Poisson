@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>BetAGS Pro - Escáner de Valor (NB + Dixon & Coles) - EV+ Puro</title>
+    <title>BetAGS Pro - Escáner de Valor (NB + Dixon & Coles) - Ajuste Avanzado</title>
     <style>
         /* ================================================= */
         /* == CSS: Variables Globales y Estilos Base      == */
@@ -205,8 +205,27 @@
             font-size: 0.85em;
         }
         
-        #hidden-inputs-container {
-            display: none; 
+        input[type="number"], select {
+            padding: 10px;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            background-color: var(--bg-card);
+            color: var(--text-primary);
+            transition: border-color 0.3s;
+        }
+
+        .param-group {
+            background-color: var(--bg-param-group);
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 20px;
+        }
+        .param-group h4 {
+             border: none; 
+             margin-top: 0; 
+             padding-bottom: 0; 
+             font-weight: 600;
+             color: var(--accent-alt);
         }
 
         @media (max-width: 800px) {
@@ -231,8 +250,8 @@
 
     <main>
         <section id="data-load-section">
-            <h3>1. Carga de Datos y Parámetros</h3>
-            <p style="font-size: 0.9em; color: var(--text-secondary);">El modelo usa **Binomial Negativa** para mejor precisión en la varianza de goles. Se requiere un mínimo de **10 partidos** por equipo/condición.</p>
+            <h3>1. Carga de Datos y Liga</h3>
+            <p style="font-size: 0.9em; color: var(--text-secondary);">El modelo usa **Binomial Negativa** para mejor precisión en la varianza de goles.</p>
 
             <div class="input-param-grid">
                 <div class="input-pair">
@@ -258,6 +277,32 @@
                 </div>
             </div>
             
+            <div class="param-group">
+                <h4>Ajustes de Valor y Modelo Avanzado</h4>
+                <div class="input-param-grid">
+                    <div class="input-pair">
+                        <label for="edge-margin-input">Margen de Valor Deseado (EV+ Puro) [0.01 - 0.20]:</label>
+                        <input type="number" id="edge-margin-input" value="0.05" min="0.01" max="0.20" step="0.01">
+                        <p style="font-size: 0.75em; color: var(--text-secondary);">Bajar este valor a 0.01-0.03 te mostrará más partidos con valor marginal.</p>
+                    </div>
+                    <div class="input-pair">
+                        <label for="dispersion-k-input">Factor de Dispersión Binomial Negativa ($\mathbf{k}$) [0.5 - 2.0]:</label>
+                        <input type="number" id="dispersion-k-input" value="0.90" min="0.50" max="2.00" step="0.05">
+                        <p style="font-size: 0.75em; color: var(--text-secondary);">Bajar 'k' aumenta la predicción de goleadas o resultados extremos (mayor Over/Under).</p>
+                    </div>
+                    <div class="input-pair">
+                        <label for="correlation-rho-input">Factor de Correlación ($\mathbf{\rho}$) [0.00 - 0.30]:</label>
+                        <input type="number" id="correlation-rho-input" value="0.15" min="0.00" max="0.30" step="0.01">
+                        <p style="font-size: 0.75em; color: var(--text-secondary);">Subir '$\rho$' aumenta la probabilidad de que ambos anoten (favorece BTTS Sí).</p>
+                    </div>
+                    <div class="input-pair">
+                        <label for="min-implied-odd-input">Cuota Implícita Mínima del Modelo:</label>
+                        <input type="number" id="min-implied-odd-input" value="1.50" min="1.05" max="5.00" step="0.05">
+                        <p style="font-size: 0.75em; color: var(--text-secondary);">Evita mercados con probabilidad extrema. (Evita cuotas triviales)</p>
+                    </div>
+                </div>
+            </div>
+
             <div class="nav-action-group">
                 <button id="btn-goto-saved" class="nav-button" onclick="window.location.href='guardados.html'">
                     ➡️ Ir a Partidos Guardados
@@ -272,9 +317,6 @@
 
         <hr style="margin: 30px 0; border-color: var(--border-color);">
         
-        <div id="hidden-inputs-container">
-            </div>
-
         <section id="output-section" style="display: none;">
             <h3>3. Oportunidades de Valor (EV+ Puro)</h3>
             <p style="font-size: 1em; color: var(--text-secondary);">
@@ -308,7 +350,8 @@
             <div class="metadata-grid" id="metadata-output">
                 <div class="metadata-box"><span>Media Goles Local ($\mu_L$)</span><p id="gl-l-output">0.000</p></div>
                 <div class="metadata-box"><span>Media Goles Visitante ($\mu_V$)</span><p id="gl-v-output">0.000</p></div>
-                <div class="metadata-box"><span>Factor de Dispersión ($k$)</span><p id="k-output">1.000</p></div>
+                <div class="metadata-box"><span>Factor de Dispersión ($k$)</span><p id="k-output">0.900</p></div>
+                <div class="metadata-box"><span>Factor Correlación ($\rho$)</span><p id="rho-output">0.150</p></div>
             </div>
         </section>
     </main>
@@ -332,16 +375,9 @@
     const MATCHES_LIMIT = 10; 
     const DECAY_FACTOR = 0.95; 
     
-    // NOTA: Se eliminan PROBABILITY_MIN, PROBABILITY_MAX, HISTORICAL_MIN_AVG, HISTORICAL_MAX_AVG
-    
-    const REFERENCE_EDGE_MARGIN = 0.10; // Margen de +10% sobre la cuota implícita para definir EV+
     const ALL_LEAGUES_VALUE = 'ALL_COMMON_LEAGUES'; 
     const STORAGE_KEY = 'savedEVMatches'; 
     
-    // PARÁMETROS CLAVE DE LA DISTRIBUCIÓN BINOMIAL NEGATIVA Y CORRELACIÓN
-    const DISPERSION_K = 1.0; 
-    const CORRELATION_RHO = 0.10; 
-
     // --- Funciones de Utilidad (Modo Oscuro, Factorial, Gamma) ---
     function applyMode(mode) {
         const body = document.body;
@@ -430,26 +466,6 @@
         return weightTotal > 0 ? weightedSum / weightTotal : 0;
     }
     
-    // NOTA: Esta función ya NO se usa para el filtro, pero se mantiene como utilidad
-    function calculateHistoricalPercentage(matchesArray, type) {
-        let count = 0;
-        const recentMatches = matchesArray.slice(0, MATCHES_LIMIT); 
-        
-        recentMatches.forEach(m => {
-            const totalGoals = m.LocalGoals + m.VisitantGoals;
-            const btts = m.LocalGoals >= 1 && m.VisitantGoals >= 1;
-            const over25 = totalGoals > 2;
-
-            if (type === 'BTTS' && btts) {
-                count++;
-            } else if (type === 'OU25' && over25) {
-                count++;
-            }
-        });
-
-        return recentMatches.length > 0 ? (count / recentMatches.length) : 0;
-    }
-
     // --- Lógica de Carga de Múltiples JSON (sin cambios) ---
     function readJSONFile(type) {
         const inputId = (type === 'stats') ? 'json-stats-input' : 'json-fixtures-input';
@@ -568,6 +584,9 @@
         const currentSelected = leagueSelect.value;
         leagueSelect.innerHTML = '<option value="">-- Seleccionar Liga --</option>';
         leagueSelect.onchange = () => {
+             const k_input = document.getElementById('dispersion-k-input');
+             const rho_input = document.getElementById('correlation-rho-input');
+             
              if (leagueSelect.value && leagueSelect.value !== ALL_LEAGUES_VALUE) {
                 const { GL_L, GL_V } = calculateLeagueGlobals(leagueSelect.value);
                 document.getElementById('gl-l-output').textContent = GL_L.toFixed(3);
@@ -579,7 +598,8 @@
                  document.getElementById('gl-l-output').textContent = '0.000';
                  document.getElementById('gl-v-output').textContent = '0.000';
              }
-             document.getElementById('k-output').textContent = DISPERSION_K.toFixed(3);
+             document.getElementById('k-output').textContent = parseFloat(k_input.value).toFixed(3);
+             document.getElementById('rho-output').textContent = parseFloat(rho_input.value).toFixed(3);
              checkReadyToScan();
         };
 
@@ -619,13 +639,30 @@
         } else {
              leagueSelect.value = ''; 
         }
-        document.getElementById('k-output').textContent = DISPERSION_K.toFixed(3);
+        
+        // Inicializar los valores de los parámetros en el display
+        const k_input = document.getElementById('dispersion-k-input');
+        const rho_input = document.getElementById('correlation-rho-input');
+        document.getElementById('k-output').textContent = parseFloat(k_input.value).toFixed(3);
+        document.getElementById('rho-output').textContent = parseFloat(rho_input.value).toFixed(3);
+
         checkReadyToScan();
     }
     
     // --- FUNCIÓN MAESTRA DE ESCANEO DE FIXTURES ---
     function scanFixtures() {
         const selectedLeague = document.getElementById('league-select').value;
+        
+        // LEER PARÁMETROS AJUSTABLES
+        const REFERENCE_EDGE_MARGIN = parseFloat(document.getElementById('edge-margin-input').value) || 0.05;
+        const DISPERSION_K = parseFloat(document.getElementById('dispersion-k-input').value) || 0.90;
+        const CORRELATION_RHO = parseFloat(document.getElementById('correlation-rho-input').value) || 0.15;
+        const MIN_IMPLIED_ODD = parseFloat(document.getElementById('min-implied-odd-input').value) || 1.50;
+        
+        // ACTUALIZAR OUTPUT DISPLAY
+        document.getElementById('k-output').textContent = DISPERSION_K.toFixed(3);
+        document.getElementById('rho-output').textContent = CORRELATION_RHO.toFixed(3);
+        
         const statusElement = document.getElementById('fixtures-status');
         
         if (!window.statsData || !window.fixturesData || !selectedLeague) {
@@ -673,8 +710,6 @@
                      continue; 
                 }
                 
-                // NOTA: Los promedios históricos de BTTS/O2.5 ya NO se usan para filtrar.
-                
                 const gflGoals = teamLHomeMatches.map(m => m.LocalGoals); 
                 const GF_L = calculateWeightedAverage(gflGoals); 
                 
@@ -685,7 +720,8 @@
                 const lambdaL_FT = (GF_L / GL_L) * GL_V; 
                 const lambdaV_FT = (GF_V / GL_V) * GL_L; 
                 
-                const ft_results = runNegativeBinomialSimulation(lambdaL_FT, lambdaV_FT);
+                // Pasa los parámetros ajustables a la función de simulación
+                const ft_results = runNegativeBinomialSimulation(lambdaL_FT, lambdaV_FT, DISPERSION_K, CORRELATION_RHO);
                 
                 const rawMarkets = [
                     { name: 'Ambos Equipos Anotan (Sí)', prob: ft_results.probBTTS },
@@ -693,20 +729,10 @@
                 ];
                 
                 rawMarkets.forEach(m => {
-                    // Nuevo Filtro Único: SOLO EV+ (la probabilidad es suficiente para la cuota mínima)
-                    
                     const impliedOdd = (1 / m.prob);
                     const minOddValue = (impliedOdd + REFERENCE_EDGE_MARGIN);
                     
-                    // La cuota de la casa de apuestas (que no tenemos) debe ser mayor 
-                    // a la "Cuota Mínima (EV+)" calculada.
-                    
-                    // Como no tenemos la cuota de la casa de apuestas, el modelo 
-                    // muestra TODAS las predicciones para que el usuario pueda comparar
-                    // con las cuotas reales y encontrar el EV+.
-                    // Mantenemos el filtro de cuota implícita >= 1.50 para evitar resultados triviales.
-                    
-                    if (impliedOdd >= 1.50) { // Filtro de cuota trivial, se puede ajustar o eliminar
+                    if (impliedOdd >= MIN_IMPLIED_ODD) { 
                         allFilteredResults.push({
                             League: league,
                             Match: `${teamL} vs ${teamV}`,
@@ -723,17 +749,15 @@
         
         // 6. ACTUALIZAR UI CON RESULTADOS FILTRADOS
         window.currentFilteredResults = allFilteredResults; 
-        updateFilteredUI(allFilteredResults, matchesProcessed);
+        updateFilteredUI(allFilteredResults, matchesProcessed, REFERENCE_EDGE_MARGIN);
         
-        statusElement.textContent = `✅ Escaneo Completo (NB). ${allFilteredResults.length} mercados encontrados (EV+).`;
+        statusElement.textContent = `✅ Escaneo Completo (NB). ${allFilteredResults.length} mercados encontrados (Margen ${REFERENCE_EDGE_MARGIN.toFixed(2)}).`;
         statusElement.style.color = '#2a9d8f';
     }
 
-    // --- FUNCIÓN DE SIMULACIÓN MEJORADA CON BINOMIAL NEGATIVA Y AJUSTE DE CORRELACIÓN (SIN CAMBIOS) ---
-    function runNegativeBinomialSimulation(lambdaL, lambdaV) {
+    // --- FUNCIÓN DE SIMULACIÓN MEJORADA CON BINOMIAL NEGATIVA Y AJUSTE DE CORRELACIÓN ---
+    function runNegativeBinomialSimulation(lambdaL, lambdaV, k, rho) {
         const maxGoals = 5; 
-        const k = DISPERSION_K;
-        const rho = CORRELATION_RHO;
         
         let probMatrix_initial = [];
         let totalProb_initial = 0;
@@ -742,7 +766,8 @@
         for (let i = 0; i <= maxGoals; i++) {
             probMatrix_initial[i] = [];
             for (let j = 0; j <= maxGoals; j++) {
-                const probL = negativeBinomial(i, lambdaL, k);
+                // Usa el factor 'k' del input para el cálculo
+                const probL = negativeBinomial(i, lambdaL, k); 
                 const probV = negativeBinomial(j, lambdaV, k);
                 probMatrix_initial[i][j] = probL * probV;
                 totalProb_initial += probMatrix_initial[i][j];
@@ -757,11 +782,13 @@
         const P00_orig = finalProbMatrix[0][0];
         const P11_orig = finalProbMatrix[1][1];
 
-        if (rho > 0) {
+        // Usa el factor 'rho' del input para el cálculo
+        if (rho > 0) { 
             const adjustment = rho * P00_orig * P11_orig;
             finalProbMatrix[0][0] += adjustment;
             finalProbMatrix[1][1] += adjustment;
             
+            // Asegura que las probabilidades no sean negativas
             if (finalProbMatrix[1][0] >= adjustment) {
                  finalProbMatrix[1][0] -= adjustment;
             } else {
@@ -800,7 +827,7 @@
     }
     
     // --- Funciones de Interfaz de Usuario (sin cambios funcionales) ---
-    function updateFilteredUI(results, totalMatchesScanned) {
+    function updateFilteredUI(results, totalMatchesScanned, edgeMargin) {
         document.getElementById('output-section').style.display = 'block';
         document.getElementById('matches-scanned-count').textContent = totalMatchesScanned;
 
@@ -918,7 +945,17 @@
         const calculateBtn = document.getElementById('btn-scan-fixtures');
         calculateBtn.onclick = scanFixtures;
         
-        document.getElementById('k-output').textContent = DISPERSION_K.toFixed(3);
+        // Inicializa el display de los parámetros en la UI
+        document.getElementById('k-output').textContent = (document.getElementById('dispersion-k-input').value).toFixed(3);
+        document.getElementById('rho-output').textContent = (document.getElementById('correlation-rho-input').value).toFixed(3);
+        
+        // Adjunta un listener para actualizar el display al cambiar los inputs
+        document.getElementById('dispersion-k-input').addEventListener('input', (e) => {
+            document.getElementById('k-output').textContent = parseFloat(e.target.value).toFixed(3);
+        });
+        document.getElementById('correlation-rho-input').addEventListener('input', (e) => {
+            document.getElementById('rho-output').textContent = parseFloat(e.target.value).toFixed(3);
+        });
     });
 </script>
 
