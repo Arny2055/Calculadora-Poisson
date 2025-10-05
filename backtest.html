@@ -119,11 +119,11 @@
             box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
         }
 
-        /* Contenedor separado para el filtro de mercado */
-        .market-filter-container {
+        /* Contenedor separado para los filtros de mercado y liga */
+        .filter-group-container {
             grid-column: 1 / 3; /* Ocupa ambas columnas para mayor claridad */
             display: grid;
-            grid-template-columns: 1fr;
+            grid-template-columns: 1fr 1fr; /* Dividir en 2 para Mercado y Liga */
             gap: 15px;
             padding: 15px;
             background-color: var(--bg-card);
@@ -152,7 +152,7 @@
             color: var(--text-primary);
         }
 
-        .config-item input, .config-item select, .limit-input-group input, .market-filter-container select {
+        .config-item input, .config-item select, .limit-input-group input, .filter-group-container select {
             width: 100%;
             padding: 8px;
             border: 1px solid var(--border-color);
@@ -162,7 +162,7 @@
             color: var(--text-primary);
         }
 
-        .config-item p, .limits-container p, .market-filter-container p {
+        .config-item p, .limits-container p, .filter-group-container p {
             font-size: 0.8em;
             color: var(--text-secondary);
             margin: 5px 0 0;
@@ -383,12 +383,23 @@
                     <input type="number" id="max-model-prob" value="100.00" step="0.01" onchange="runBacktest()">
                     <p>Filtra por Probabilidad del Modelo máxima (ej: 100.00%).</p>
                 </div>
-                <div class="market-filter-container">
-                    <label for="market-filter">Filtrar por Mercado</label>
-                    <select id="market-filter" onchange="runBacktest()">
-                        <option value="Todos">⚽ Todos los Mercados</option>
-                        </select>
-                    <p>Seleccione el mercado específico a analizar. Solo afecta al cálculo de resultados.</p>
+
+                <div class="filter-group-container">
+                    <div class="limit-input-group">
+                        <label for="market-filter">Filtrar por Mercado</label>
+                        <select id="market-filter" onchange="runBacktest()">
+                            <option value="Todos">⚽ Todos los Mercados</option>
+                            </select>
+                        <p>Seleccione el mercado específico a analizar.</p>
+                    </div>
+                    
+                    <div class="limit-input-group">
+                        <label for="league-filter">Filtrar por Liga</label>
+                        <select id="league-filter" onchange="runBacktest()">
+                            <option value="Todas">🏆 Todas las Ligas</option>
+                            </select>
+                        <p>Seleccione la liga específica a analizar.</p>
+                    </div>
                 </div>
                 </div>
             
@@ -463,7 +474,8 @@
     const MAX_ODD_KEY = 'backtestMaxOdd'; 
     const MIN_PROB_KEY = 'backtestMinProb'; 
     const MAX_PROB_KEY = 'backtestMaxProb'; 
-    const MARKET_FILTER_KEY = 'backtestMarketFilter'; // NUEVA CLAVE DE MERCADO
+    const MARKET_FILTER_KEY = 'backtestMarketFilter'; 
+    const LEAGUE_FILTER_KEY = 'backtestLeagueFilter'; // NUEVA CLAVE PARA LA LIGA
 
     const READY_MATCHES_KEY = 'backtestReadyMatches'; 
 
@@ -503,13 +515,17 @@
             window.historicalData = rawData.map(item => ({
                 date: new Date(item.Date).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }),
                 match: `${item.Match} (${item.Market})`,
-                market: item.Market, // Guardamos el mercado por separado para el filtro
-                prob: item.Prob, // Probabilidad del modelo (0 a 1)
+                market: item.Market, 
+                league: item.League, // AÑADIR LIGA
+                prob: item.Prob, 
                 minOdd: item.MinOdd,
-                bookieOdd: item.bookieOdd, // Ya vienen cargados
-                result: item.result // Ya vienen cargados
+                bookieOdd: item.BookieOdd, // Usar BookieOdd, que se usa en el Escáner Guardados
+                result: item.Result 
             }));
             
+            // FILTRAR aquellos que no tienen cuota o resultado definido (pueden venir del escáner guardado original)
+            window.historicalData = window.historicalData.filter(item => item.bookieOdd !== null && item.bookieOdd !== undefined && item.result !== null && item.result !== undefined);
+
             if (window.historicalData.length > 0) {
                  statusMessage.textContent = `✅ ${window.historicalData.length} partidos listos cargados para el análisis.`;
                  statusMessage.style.backgroundColor = 'var(--success-color)';
@@ -517,7 +533,8 @@
                  statusMessage.style.display = 'block';
             }
             
-            populateMarketFilter(); // Rellenar las opciones de mercado
+            populateMarketFilter(); 
+            populateLeagueFilter(); // NUEVA FUNCIÓN
         } catch (e) {
             window.historicalData = [];
             statusMessage.textContent = `❌ Error al cargar datos listos para Backtest: ${e.message}`;
@@ -529,20 +546,17 @@
     }
 
     // =======================================================
-    // == LÓGICA DE FILTRO DE MERCADO                       ==
+    // == LÓGICA DE FILTRO DE MERCADO Y LIGA                ==
     // =======================================================
     
     function populateMarketFilter() {
         const select = document.getElementById('market-filter');
         const currentFilter = localStorage.getItem(MARKET_FILTER_KEY) || 'Todos';
         
-        // 1. Obtener mercados únicos
         const markets = new Set(window.historicalData.map(data => data.market).filter(m => m));
         
-        // 2. Limpiar opciones (manteniendo "Todos")
         select.innerHTML = '<option value="Todos">⚽ Todos los Mercados</option>';
 
-        // 3. Añadir opciones dinámicamente
         markets.forEach(market => {
             const option = document.createElement('option');
             option.value = market;
@@ -553,9 +567,36 @@
             select.appendChild(option);
         });
         
-        // Si el filtro guardado ya no existe, volvemos a 'Todos'
         if (!markets.has(currentFilter) && currentFilter !== 'Todos') {
             select.value = 'Todos';
+        }
+    }
+
+    // NUEVA FUNCIÓN PARA POPULAR EL FILTRO DE LIGA
+    function populateLeagueFilter() {
+        const select = document.getElementById('league-filter');
+        const currentFilter = localStorage.getItem(LEAGUE_FILTER_KEY) || 'Todas';
+        
+        // 1. Obtener ligas únicas
+        const leagues = new Set(window.historicalData.map(data => data.league).filter(l => l));
+        
+        // 2. Limpiar opciones (manteniendo "Todas")
+        select.innerHTML = '<option value="Todas">🏆 Todas las Ligas</option>';
+
+        // 3. Añadir opciones dinámicamente
+        leagues.forEach(league => {
+            const option = document.createElement('option');
+            option.value = league;
+            option.textContent = league;
+            if (league === currentFilter) {
+                option.selected = true;
+            }
+            select.appendChild(option);
+        });
+        
+        // Si el filtro guardado ya no existe, volvemos a 'Todas'
+        if (!leagues.has(currentFilter) && currentFilter !== 'Todas') {
+            select.value = 'Todas';
         }
     }
     
@@ -574,7 +615,8 @@
             localStorage.removeItem(MAX_ODD_KEY); 
             localStorage.removeItem(MIN_PROB_KEY); 
             localStorage.removeItem(MAX_PROB_KEY); 
-            localStorage.removeItem(MARKET_FILTER_KEY); // BORRAR NUEVA CLAVE
+            localStorage.removeItem(MARKET_FILTER_KEY); 
+            localStorage.removeItem(LEAGUE_FILTER_KEY); // BORRAR NUEVA CLAVE
 
             // 3. Recargar la página para restablecer todo
             window.location.reload(); 
@@ -654,73 +696,40 @@
         runBacktest();
     }
     
+    // Estas funciones ya no deberían ser necesarias si se cargan los datos correctamente desde 'guardados.html'
+    // Se mantienen por si el usuario quiere hacer micro-ajustes en la tabla de backtest, pero no actualizan la fuente.
     function updateBookieOdd(index, value) {
+        // En un entorno de backtest real, la cuota es histórica y no se debería cambiar.
+        // Si el usuario edita aquí, solo se aplica al cálculo actual de runBacktest().
         window.historicalData[index].bookieOdd = parseFloat(value) || null;
         runBacktest();
     }
 
     function updateResult(index, value) {
+        // Lo mismo aplica para el resultado.
         window.historicalData[index].result = value;
         runBacktest();
     }
     
     function initializeBacktest() {
         // Cargar límites de EV
-        const savedMinEV = localStorage.getItem(MIN_EV_KEY);
-        if (savedMinEV) {
-            document.getElementById('min-ev-percentage').value = savedMinEV;
-        }
-
-        const savedMaxEV = localStorage.getItem(MAX_EV_KEY);
-        if (savedMaxEV) {
-            document.getElementById('max-ev-percentage').value = savedMaxEV;
-        } else {
-             document.getElementById('max-ev-percentage').value = "100.00"; 
-        }
+        document.getElementById('min-ev-percentage').value = localStorage.getItem(MIN_EV_KEY) || "1.00";
+        document.getElementById('max-ev-percentage').value = localStorage.getItem(MAX_EV_KEY) || "100.00";
         
         // Cargar límites de Cuota Bookie
-        const savedMinOdd = localStorage.getItem(MIN_ODD_KEY);
-        if (savedMinOdd) {
-            document.getElementById('min-bookie-odd').value = savedMinOdd;
-        } else {
-             document.getElementById('min-bookie-odd').value = "1.01"; 
-        }
-        
-        const savedMaxOdd = localStorage.getItem(MAX_ODD_KEY);
-        if (savedMaxOdd) {
-            document.getElementById('max-bookie-odd').value = savedMaxOdd;
-        } else {
-             document.getElementById('max-bookie-odd').value = "99.00"; 
-        }
+        document.getElementById('min-bookie-odd').value = localStorage.getItem(MIN_ODD_KEY) || "1.01";
+        document.getElementById('max-bookie-odd').value = localStorage.getItem(MAX_ODD_KEY) || "99.00";
 
         // Cargar límites de Probabilidad del Modelo
-        const savedMinProb = localStorage.getItem(MIN_PROB_KEY);
-        if (savedMinProb) {
-            document.getElementById('min-model-prob').value = savedMinProb;
-        } else {
-             document.getElementById('min-model-prob').value = "0.01"; 
-        }
-
-        const savedMaxProb = localStorage.getItem(MAX_PROB_KEY);
-        if (savedMaxProb) {
-            document.getElementById('max-model-prob').value = savedMaxProb;
-        } else {
-             document.getElementById('max-model-prob').value = "100.00"; 
-        }
-        
-        // Cargar Filtro de Mercado (NUEVO)
-        const savedMarketFilter = localStorage.getItem(MARKET_FILTER_KEY);
-        if (savedMarketFilter) {
-            // Esto se manejará en populateMarketFilter() después de cargar los datos
-        }
-
+        document.getElementById('min-model-prob').value = localStorage.getItem(MIN_PROB_KEY) || "0.01";
+        document.getElementById('max-model-prob').value = localStorage.getItem(MAX_PROB_KEY) || "100.00";
 
         const calibration = loadCalibration();
         renderCalibrationTable(calibration);
         
         loadHistoricalData();
         renderTable();
-        runBacktest(); 
+        // runBacktest() se llama implícitamente al final de loadHistoricalData si hay datos
     }
 
     // =======================================================
@@ -740,7 +749,8 @@
         const maxBookieOdd = parseFloat(document.getElementById('max-bookie-odd').value);
         const minModelProb = parseFloat(document.getElementById('min-model-prob').value) / 100; 
         const maxModelProb = parseFloat(document.getElementById('max-model-prob').value) / 100; 
-        const marketFilter = document.getElementById('market-filter').value; // NUEVO FILTRO DE MERCADO
+        const marketFilter = document.getElementById('market-filter').value; 
+        const leagueFilter = document.getElementById('league-filter').value; // OBTENER NUEVO FILTRO DE LIGA
         
         const calibration = loadCalibration();
         
@@ -751,7 +761,8 @@
         localStorage.setItem(MAX_ODD_KEY, document.getElementById('max-bookie-odd').value);
         localStorage.setItem(MIN_PROB_KEY, document.getElementById('min-model-prob').value);
         localStorage.setItem(MAX_PROB_KEY, document.getElementById('max-model-prob').value);
-        localStorage.setItem(MARKET_FILTER_KEY, marketFilter); // GUARDAR NUEVA CLAVE
+        localStorage.setItem(MARKET_FILTER_KEY, marketFilter); 
+        localStorage.setItem(LEAGUE_FILTER_KEY, leagueFilter); // GUARDAR NUEVA CLAVE
 
         let totalUnits = 0;
         let totalSimulatedBets = 0;
@@ -768,7 +779,8 @@
             const bookieOdd = data.bookieOdd;
             const probability = data.prob; 
             const result = data.result;
-            const market = data.market; // Mercado del partido
+            const market = data.market; 
+            const league = data.league; // LIGA DEL PARTIDO
             
             const { evValue, evPercent, className } = calculateEV(bookieOdd, probability);
             const { probReal, partidos } = getCalibration(bookieOdd, calibration);
@@ -793,7 +805,8 @@
             row.classList.remove('value-bet-row', 'result-win-row', 'result-loss-row');
             
             // LÓGICA DE FILTRO COMPLETA
-            const passesMarketFilter = marketFilter === 'Todos' || market === marketFilter; // NUEVO FILTRO DE MERCADO
+            const passesMarketFilter = marketFilter === 'Todos' || market === marketFilter; 
+            const passesLeagueFilter = leagueFilter === 'Todas' || league === leagueFilter; // NUEVO FILTRO DE LIGA
 
             const isValueBet = evValue !== 'N/A' && 
                                evValue >= minEVPercent && 
@@ -802,7 +815,8 @@
                                (bookieOdd <= maxBookieOdd) &&
                                (probability >= minModelProb) && 
                                (probability <= maxModelProb) &&
-                               passesMarketFilter; // APLICAR FILTRO DE MERCADO
+                               passesMarketFilter &&
+                               passesLeagueFilter; // APLICAR NUEVO FILTRO DE LIGA
 
             if (isValueBet) {
                 row.classList.add('value-bet-row');
@@ -820,12 +834,18 @@
                         row.classList.add('result-loss-row');
                     }
                 }
+                // Si la fila pasa los filtros, se muestra
+                row.style.display = '';
+            } else {
+                // Si la fila NO pasa los filtros, se oculta
+                row.style.display = 'none';
             }
         });
 
         const totalFinalized = wins + losses;
-        const yieldPercent = totalSimulatedBets > 0 ? (totalUnits / totalSimulatedBets) * 100 : 0; 
-        const winRate = totalSimulatedBets > 0 ? (wins / totalSimulatedBets) * 100 : 0;
+        const totalWagered = totalSimulatedBets; // 1 unidad por apuesta
+        const yieldPercent = totalWagered > 0 ? (totalUnits / totalWagered) * 100 : 0; 
+        const winRate = totalWagered > 0 ? (wins / totalWagered) * 100 : 0;
 
         updateResultsSection({ netUnits: totalUnits, totalFinalized: totalSimulatedBets, yieldPercent, winRate });
     }
@@ -877,6 +897,8 @@
             } else if (data.result === 'Perdida') {
                 newRow.classList.add('result-loss-row');
             }
+             // Ocultar por defecto, se mostrarán en runBacktest si pasan el filtro
+             newRow.style.display = 'none';
         });
     }
 
@@ -928,6 +950,7 @@
         } else {
             applyMode('light');
         }
+        // Llamada a initializeBacktest al cargar la página
     });
 
 </script>
