@@ -290,9 +290,14 @@
                         <p style="font-size: 0.75em; color: var(--text-secondary);">Diferencia mínima entre Cuota Casa y Cuota Modelo.</p>
                     </div>
                      <div class="input-pair">
-                        <label for="min-prob-input" class="highlight-prob">Probabilidad Mínima del Modelo (Filtro Duro) [0.50 - 0.90]:</label>
+                        <label for="min-prob-input" class="highlight-prob">Probabilidad Mínima del Modelo & Últimos 10 (Filtro Duro) [0.50 - 0.90]:</label>
                         <input type="number" id="min-prob-input" value="0.60" min="0.50" max="0.90" step="0.01">
-                        <p style="font-size: 0.75em; color: var(--text-secondary);">Solo muestra mercados con **Probabilidad $\ge 60\%$**.</p>
+                        <p style="font-size: 0.75em; color: var(--text-secondary);">Prob. Ponderada del Modelo **Y** Promedio Simple últimos 10 deben ser $\ge$ a este valor.</p>
+                    </div>
+                    <div class="input-pair">
+                        <label for="min-prob-3-input" class="highlight-prob">Prob. Mínima Promedio Últimos 3 (Filtro Duro) [0.50 - 1.00]:</label>
+                        <input type="number" id="min-prob-3-input" value="0.66" min="0.50" max="1.00" step="0.01">
+                        <p style="font-size: 0.75em; color: var(--text-secondary);">El promedio simple de Ocurrencia en los **últimos 3** de L/V debe ser $\ge$ a este valor (0.66 = 2/3).</p>
                     </div>
                 </div>
             </div>
@@ -314,7 +319,7 @@
         <section id="output-section" style="display: none;">
             <h3>3. Oportunidades de Valor (EV+ Puro)</h3>
             <p style="font-size: 1em; color: var(--text-secondary);">
-                Se han analizado <strong id="matches-scanned-count">0</strong> partidos. Se muestran solo mercados con **Probabilidad del Modelo $\ge 60\%$** que cumplen el criterio **EV+**.
+                Se han analizado <strong id="matches-scanned-count">0</strong> partidos. Se muestran solo mercados que cumplen **EV+** y los criterios de **Promedio Simple ($\mathbf{\ge 60\%}$) en los últimos 10 y 3 partidos**.
             </p>
             
             <button id="btn-save-matches" onclick="saveFilteredMatches()">💾 Guardar Oportunidades Filtradas (¡Abrir archivo "guardados.html" después!)</button>
@@ -336,7 +341,7 @@
                     </tbody>
             </table>
             
-            <p id="no-matches-found" style="text-align: center; margin-top: 20px; font-weight: bold; color: var(--text-secondary); display: none;">No se encontraron mercados de valor que cumplieran el requisito EV+ y la probabilidad mínima.</p>
+            <p id="no-matches-found" style="text-align: center; margin-top: 20px; font-weight: bold; color: var(--text-secondary); display: none;">No se encontraron mercados de valor que cumplieran el requisito EV+ y los filtros de probabilidad mínima.</p>
 
         </section>
     </main>
@@ -383,12 +388,12 @@
     }
 
     // =================================================
-    // == LÓGICA DE PROMEDIO SIMPLE PONDERADO         ==
+    // == LÓGICA DE PROMEDIO SIMPLE Y PONDERADO       ==
     // =================================================
 
     /**
      * Calcula la tasa de ocurrencia (probabilidad) ponderada de un evento
-     * (BTTS o Over 2.5) en los últimos 10 partidos.
+     * (BTTS o Over 2.5) en los últimos 10 partidos. (MODELO PRINCIPAL)
      * @param {Array<boolean>} eventOccurrences - Array de booleanos (true = ocurrió, false = no ocurrió).
      */
     function calculateWeightedProbability(eventOccurrences) {
@@ -410,6 +415,23 @@
         }
 
         return weightTotal > 0 ? weightedSuccessSum / weightTotal : 0;
+    }
+    
+    /**
+     * Calcula la tasa de ocurrencia (probabilidad) simple (no ponderada) 
+     * de un evento en los últimos N partidos. (FILTRO FRECUENTISTA)
+     * @param {Array<boolean>} eventOccurrences - Array de booleanos (true = ocurrió, false = no ocurrió).
+     * @param {number} n - El número de partidos a considerar (3 o 10).
+     */
+    function calculateSimpleProbability(eventOccurrences, n) {
+        // Limita a los últimos N partidos
+        const recentEvents = eventOccurrences.slice(0, n);
+        
+        if (recentEvents.length === 0) return 0;
+
+        const successes = recentEvents.filter(Boolean).length;
+        
+        return successes / recentEvents.length;
     }
     
     // --- Lógica de Carga de Múltiples JSON (sin cambios funcionales) ---
@@ -557,7 +579,10 @@
         
         // LEER PARÁMETROS AJUSTABLES
         const REFERENCE_EDGE_MARGIN = parseFloat(document.getElementById('edge-margin-input').value) || 0.05;
-        const MIN_MODEL_PROBABILITY = parseFloat(document.getElementById('min-prob-input').value) || 0.60;
+        // Prob. Mínima para Modelo Ponderado Y para el Promedio Simple de los Últimos 10
+        const MIN_PROBABILITY_10 = parseFloat(document.getElementById('min-prob-input').value) || 0.60;
+        // Prob. Mínima para el Promedio Simple de los Últimos 3
+        const MIN_PROBABILITY_3 = parseFloat(document.getElementById('min-prob-3-input').value) || 0.66;
         
         const statusElement = document.getElementById('fixtures-status');
         
@@ -601,48 +626,67 @@
                      continue; 
                 }
                 
-                // 1. OBTENER PROBABILIDAD DE BTTS (Ambos Anotan)
-                // Ocurrencia de BTTS en partidos recientes del Local como Local
-                const bttsL_occurrences = teamLHomeMatches.map(m => m.BTTS);
-                // Ocurrencia de BTTS en partidos recientes del Visitante como Visitante
-                const bttsV_occurrences = teamVAwayMatches.map(m => m.BTTS);
+                // 1. CÁLCULO DE PROBABILIDAD PONDERADA (MODELO PRINCIPAL)
                 
-                // Probabilidad ponderada de que BTTS ocurra en los partidos del Local
-                const probL_BTTS = calculateWeightedProbability(bttsL_occurrences);
-                // Probabilidad ponderada de que BTTS ocurra en los partidos del Visitante
-                const probV_BTTS = calculateWeightedProbability(bttsV_occurrences);
-                
-                // PROBABILIDAD FINAL BTTS: Promedio simple de las ocurrencias ponderadas de ambos equipos
-                const finalProbBTTS = (probL_BTTS + probV_BTTS) / 2;
+                // BTTS
+                const bttsL_occurrences_all = teamLHomeMatches.map(m => m.BTTS);
+                const bttsV_occurrences_all = teamVAwayMatches.map(m => m.BTTS);
+                const finalProbBTTS = (calculateWeightedProbability(bttsL_occurrences_all) + 
+                                       calculateWeightedProbability(bttsV_occurrences_all)) / 2;
 
-                // 2. OBTENER PROBABILIDAD DE OVER 2.5
-                // Ocurrencia de O2.5 en partidos recientes del Local como Local
-                const o25L_occurrences = teamLHomeMatches.map(m => m.Over25); 
-                // Ocurrencia de O2.5 en partidos recientes del Visitante como Visitante
-                const o25V_occurrences = teamVAwayMatches.map(m => m.Over25);
-                
-                // Probabilidad ponderada de que O2.5 ocurra en los partidos del Local
-                const probL_O25 = calculateWeightedProbability(o25L_occurrences);
-                // Probabilidad ponderada de que O2.5 ocurra en los partidos del Visitante
-                const probV_O25 = calculateWeightedProbability(o25V_occurrences);
+                // Over 2.5
+                const o25L_occurrences_all = teamLHomeMatches.map(m => m.Over25); 
+                const o25V_occurrences_all = teamVAwayMatches.map(m => m.Over25);
+                const finalProbO25 = (calculateWeightedProbability(o25L_occurrences_all) + 
+                                      calculateWeightedProbability(o25V_occurrences_all)) / 2;
 
-                // PROBABILIDAD FINAL O2.5: Promedio simple de las ocurrencias ponderadas de ambos equipos
-                const finalProbO25 = (probL_O25 + probV_O25) / 2;
 
+                // 2. CÁLCULO DE PROMEDIOS SIMPLES PARA EL FILTRO (Últimos 10 y Últimos 3)
                 
+                // Promedio Simple BTTS (N=10)
+                const probL_BTTS_10_Simple = calculateSimpleProbability(bttsL_occurrences_all, 10);
+                const probV_BTTS_10_Simple = calculateSimpleProbability(bttsV_occurrences_all, 10);
+                const avgProbBTTS_10 = (probL_BTTS_10_Simple + probV_BTTS_10_Simple) / 2;
+                
+                // Promedio Simple BTTS (N=3)
+                const probL_BTTS_3_Simple = calculateSimpleProbability(bttsL_occurrences_all, 3);
+                const probV_BTTS_3_Simple = calculateSimpleProbability(bttsV_occurrences_all, 3);
+                const avgProbBTTS_3 = (probL_BTTS_3_Simple + probV_BTTS_3_Simple) / 2;
+
+                // Promedio Simple O2.5 (N=10)
+                const probL_O25_10_Simple = calculateSimpleProbability(o25L_occurrences_all, 10);
+                const probV_O25_10_Simple = calculateSimpleProbability(o25V_occurrences_all, 10);
+                const avgProbO25_10 = (probL_O25_10_Simple + probV_O25_10_Simple) / 2;
+                
+                // Promedio Simple O2.5 (N=3)
+                const probL_O25_3_Simple = calculateSimpleProbability(o25L_occurrences_all, 3);
+                const probV_O25_3_Simple = calculateSimpleProbability(o25V_occurrences_all, 3);
+                const avgProbO25_3 = (probL_O25_3_Simple + probV_O25_3_Simple) / 2;
+
+
                 const rawMarkets = [
-                    { name: 'Ambos Equipos Anotan (Sí)', prob: finalProbBTTS },
-                    { name: 'Total Goles Over 2.5', prob: finalProbO25 }
+                    { name: 'Ambos Equipos Anotan (Sí)', prob: finalProbBTTS, avg10: avgProbBTTS_10, avg3: avgProbBTTS_3 },
+                    { name: 'Total Goles Over 2.5', prob: finalProbO25, avg10: avgProbO25_10, avg3: avgProbO25_3 }
                 ];
                 
+                // 3. APLICACIÓN DE FILTROS Y REGISTRO DE EV+
                 rawMarkets.forEach(m => {
-                    if (m.prob <= 0) return; // Evita división por cero en impliedOdd
+                    if (m.prob <= 0) return; // Evita división por cero
                     
-                    const impliedOdd = (1 / m.prob);
-                    const minOddValue = (impliedOdd + REFERENCE_EDGE_MARGIN);
+                    // FILTRO FRECUENTISTA 1: Promedio Simple Últimos 10 (Local/Visitante) >= 60%
+                    const meets10Filter = m.avg10 >= MIN_PROBABILITY_10;
                     
-                    // FILTRO: Probabilidad del Modelo >= 60% (o el valor del input)
-                    if (m.prob >= MIN_MODEL_PROBABILITY) { 
+                    // FILTRO FRECUENTISTA 2: Promedio Simple Últimos 3 (Local/Visitante) >= 66%
+                    const meets3Filter = m.avg3 >= MIN_PROBABILITY_3;
+                    
+                    // FILTRO MODELO: Probabilidad Ponderada del Modelo >= 60%
+                    const meetsModelProbFilter = m.prob >= MIN_PROBABILITY_10; 
+
+                    if (meets10Filter && meets3Filter && meetsModelProbFilter) {
+                        
+                        const impliedOdd = (1 / m.prob);
+                        const minOddValue = (impliedOdd + REFERENCE_EDGE_MARGIN);
+                        
                         allFilteredResults.push({
                             League: league,
                             Match: `${teamL} vs ${teamV}`,
@@ -657,11 +701,11 @@
             }
         }
         
-        // 6. ACTUALIZAR UI CON RESULTADOS FILTRADOS
+        // 4. ACTUALIZAR UI CON RESULTADOS FILTRADOS
         window.currentFilteredResults = allFilteredResults; 
         updateFilteredUI(allFilteredResults, matchesProcessed, REFERENCE_EDGE_MARGIN);
         
-        statusElement.textContent = `✅ Escaneo Completo (Frecuentista). ${allFilteredResults.length} mercados encontrados (Prob. Mínima ${MIN_MODEL_PROBABILITY*100}%).`;
+        statusElement.textContent = `✅ Escaneo Completo (Frecuentista). ${allFilteredResults.length} mercados encontrados.`;
         statusElement.style.color = '#2a9d8f';
     }
     
