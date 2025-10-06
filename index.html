@@ -318,7 +318,7 @@
                 </button>
             </div>
 
-            <button id="btn-scan-fixtures" class="action-btn">2. Escanear Mercados de Valor (BTTS Sí & Over 2.5)</button>
+            <button id="btn-scan-fixtures" class="action-btn">2. Escanear Mercados de Valor (BTTS Sí, Total Goles FT y 1H)</button>
         </section>
 
         <hr style="margin: 30px 0; border-color: var(--border-color);">
@@ -369,8 +369,8 @@
     window.currentFilteredResults = []; 
     
     // Parámetros Fijos
-    const MATCHES_LIMIT = 10; // Usado SÓLO para los filtros de forma (simple)
-    const DECAY_FACTOR = 0.95; // Factor de decaimiento (ya NO se usa para la probabilidad principal)
+    const MATCHES_LIMIT = 10; 
+    const DECAY_FACTOR = 0.95; 
     
     const ALL_LEAGUES_VALUE = 'ALL_COMMON_LEAGUES'; 
     const STORAGE_KEY = 'savedEVMatches'; 
@@ -399,31 +399,6 @@
     // =================================================
 
     /**
-     * Calcula la tasa de ocurrencia (probabilidad) PONDERADA (Media Móvil Exponencial)
-     * de un evento en los últimos 10 partidos. (Usado SÓLO para el FILTRO DE FORMA, no para la CR)
-     * @param {Array<boolean>} eventOccurrences - Array de booleanos (true = ocurrió, false = no ocurrió).
-     */
-    function calculateWeightedProbability(eventOccurrences) {
-        let weightedSuccessSum = 0;
-        let weightTotal = 0;
-
-        // Limita a los últimos 10 partidos
-        const recentEvents = eventOccurrences.slice(0, MATCHES_LIMIT);
-
-        for (let i = 0; i < recentEvents.length; i++) {
-            // Decaimiento: i=0 (más reciente) tiene más peso que i=9 (más antiguo)
-            const weight = Math.pow(DECAY_FACTOR, i);
-            
-            if (recentEvents[i]) {
-                weightedSuccessSum += weight;
-            }
-            weightTotal += weight;
-        }
-
-        return weightTotal > 0 ? weightedSuccessSum / weightTotal : 0;
-    }
-
-    /**
      * Calcula la tasa de ocurrencia (probabilidad) simple (no ponderada) 
      * de un evento en los últimos N partidos. (Usado SÓLO para FILTROS DE FORMA)
      * @param {Array<boolean>} eventOccurrences - Array de booleanos (true = ocurrió, false = no ocurrió).
@@ -442,21 +417,18 @@
     
     /**
      * Calcula la FRECUENCIA PURA sobre toda la muestra disponible. (MODELO PRINCIPAL DE CUOTA REAL)
-     * Esto simula el cálculo de Betpractice con "Temporada Actual" o "12 Meses".
      * @param {Array<boolean>} eventOccurrences - Array de booleanos (true = ocurrió, false = no ocurrió).
      */
     function calculateSimpleAllTimeProbability(eventOccurrences) {
         if (eventOccurrences.length === 0) return 0;
         
-        // Contamos los 'true' (éxitos) en toda la muestra disponible
         const successes = eventOccurrences.filter(Boolean).length;
         
-        // Devolvemos la frecuencia pura (Probabilidad)
         return successes / eventOccurrences.length;
     }
 
     
-    // --- Lógica de Carga de Múltiples JSON (sin cambios funcionales) ---
+    // --- Lógica de Carga de Múltiples JSON (con cálculo de 1H) ---
     function readJSONFile(type) {
         const inputId = (type === 'stats') ? 'json-stats-input' : 'json-fixtures-input';
         const statusId = (type === 'stats') ? 'stats-status' : 'fixtures-status';
@@ -493,26 +465,35 @@
                     const localTeam = matchParts[0] ? matchParts[0].trim() : match.LocalTeam || 'Desconocido L';
                     const visitantTeam = matchParts[1] ? matchParts[1].trim() : match.VisitantTeam || 'Desconocido V';
                     
-                    const resultParts = match['Result FT'] ? match['Result FT'].split('-') : [0, 0];
-                    const localGoals = parseInt(resultParts[0]) || 0;
-                    const visitantGoals = parseInt(resultParts[1]) || 0;
+                    const resultFTParts = match['Result FT'] ? match['Result FT'].split('-') : [0, 0];
+                    const localGoalsFT = parseInt(resultFTParts[0]) || 0;
+                    const visitantGoalsFT = parseInt(resultFTParts[1]) || 0;
+                    
+                    // Novedad: Obtener goles del primer tiempo (HT)
+                    const resultHTParts = match['Result HT'] ? match['Result HT'].split('-') : [0, 0];
+                    const localGoalsHT = parseInt(resultHTParts[0]) || 0;
+                    const visitantGoalsHT = parseInt(resultHTParts[1]) || 0;
+                    const totalGoalsHT = localGoalsHT + visitantGoalsHT;
+
                     const date = new Date(match.Date);
 
                     return {
                         League: match.League || 'Sin Liga',
                         LocalTeam: localTeam,
                         VisitantTeam: visitantTeam,
-                        LocalGoals: localGoals,
-                        VisitantGoals: visitantGoals,
+                        LocalGoals: localGoalsFT,
+                        VisitantGoals: visitantGoalsFT,
                         Date: isNaN(date.getTime()) ? new Date(0) : date,
-                        // Añadir los resultados binarios para el modelo frecuentista
-                        BTTS: localGoals >= 1 && visitantGoals >= 1,
-                        Over25: (localGoals + visitantGoals) > 2
+                        // Mercados de tiempo completo (FT)
+                        BTTS: localGoalsFT >= 1 && visitantGoalsFT >= 1,
+                        Over25: (localGoalsFT + visitantGoalsFT) > 2,
+                        // Mercados de primer tiempo (1H)
+                        Over05_1H: totalGoalsHT >= 1,
+                        Over15_1H: totalGoalsHT >= 2
                     };
                 });
                 
                 if (type === 'stats') {
-                    // Ordenar por fecha descendente para que el .slice(0, N) en los filtros tome los más recientes
                     window.statsData = normalizedData.sort((a, b) => b.Date.getTime() - a.Date.getTime());
                     statusElement.textContent = `✅ Stats Cargadas. ${window.statsData.length} registros.`;
                 } else {
@@ -525,7 +506,7 @@
                 checkReadyToScan();
 
             } catch (e) {
-                statusElement.textContent = `Error al procesar JSON de ${type}: ${e.message}`;
+                statusElement.textContent = `Error al procesar JSON de ${type}: ${e.message}. Asegúrate de que existe la columna 'Result HT' o similar.`;
                 statusElement.style.color = '#e63946';
                 if (type === 'stats') { window.statsData = null; }
                 else { window.fixturesData = null; }
@@ -643,89 +624,83 @@
                 const teamV = fixture.VisitantTeam;
                 
                 // --- Extracción de Eventos ---
-                // Obtener TODO el historial para el cálculo de Cuota Real
                 const teamLHomeMatches = window.statsData.filter(m => m.League === league && m.LocalTeam === teamL);
                 const teamVAwayMatches = window.statsData.filter(m => m.League === league && m.VisitantTeam === teamV);
                 
-                // Si la muestra total es pequeña (ej. < 10), es mejor descartar el partido
                 if (teamLHomeMatches.length < MATCHES_LIMIT || teamVAwayMatches.length < MATCHES_LIMIT) {
                      continue; 
                 }
                 
-                // 1. CÁLCULO DE PROBABILIDAD PURA (MODELO PRINCIPAL = CUOTA REAL DE 12M)
-                
-                // BTTS
+                // --- ARRAYS DE OCURRENCIAS COMPLETAS ---
+                // FT
                 const bttsL_occurrences_all = teamLHomeMatches.map(m => m.BTTS);
                 const bttsV_occurrences_all = teamVAwayMatches.map(m => m.BTTS);
-                // Usamos la nueva función para obtener la frecuencia pura sobre toda la muestra
-                const finalProbBTTS = (calculateSimpleAllTimeProbability(bttsL_occurrences_all) + 
-                                       calculateSimpleAllTimeProbability(bttsV_occurrences_all)) / 2;
-
-                // Over 2.5
                 const o25L_occurrences_all = teamLHomeMatches.map(m => m.Over25); 
                 const o25V_occurrences_all = teamVAwayMatches.map(m => m.Over25);
-                // Usamos la nueva función para obtener la frecuencia pura sobre toda la muestra
-                const finalProbO25 = (calculateSimpleAllTimeProbability(o25L_occurrences_all) + 
-                                      calculateSimpleAllTimeProbability(o25V_occurrences_all)) / 2;
+                
+                // 1H (NUEVOS)
+                const o05_1HL_occurrences_all = teamLHomeMatches.map(m => m.Over05_1H);
+                const o05_1HV_occurrences_all = teamVAwayMatches.map(m => m.Over05_1H);
+                const o15_1HL_occurrences_all = teamLHomeMatches.map(m => m.Over15_1H);
+                const o15_1HV_occurrences_all = teamVAwayMatches.map(m => m.Over15_1H);
+                
+                // 1. CÁLCULO DE PROBABILIDAD PURA (MODELO PRINCIPAL = CUOTA REAL DE 12M)
+                
+                // FT
+                const finalProbBTTS = (calculateSimpleAllTimeProbability(bttsL_occurrences_all) + calculateSimpleAllTimeProbability(bttsV_occurrences_all)) / 2;
+                const finalProbO25 = (calculateSimpleAllTimeProbability(o25L_occurrences_all) + calculateSimpleAllTimeProbability(o25V_occurrences_all)) / 2;
+                
+                // 1H (NUEVOS CÁLCULOS)
+                const finalProbO05_1H = (calculateSimpleAllTimeProbability(o05_1HL_occurrences_all) + calculateSimpleAllTimeProbability(o05_1HV_occurrences_all)) / 2;
+                const finalProbO15_1H = (calculateSimpleAllTimeProbability(o15_1HL_occurrences_all) + calculateSimpleAllTimeProbability(o15_1HV_occurrences_all)) / 2;
 
 
                 // 2. CÁLCULO DE PROMEDIOS SIMPLES PARA EL FILTRO (Últimos 10, 5 y 3)
-                // Estos filtros aseguran que la FORMA RECIENTE sea buena, además de la estadística histórica.
+                // Esto se hace para CADA mercado.
                 
-                // Promedio Simple BTTS (N=10)
-                const probL_BTTS_10_Simple = calculateSimpleProbability(bttsL_occurrences_all, 10);
-                const probV_BTTS_10_Simple = calculateSimpleProbability(bttsV_occurrences_all, 10);
-                const avgProbBTTS_10 = (probL_BTTS_10_Simple + probV_BTTS_10_Simple) / 2;
-                
-                // Promedio Simple BTTS (N=5) 
-                const probL_BTTS_5_Simple = calculateSimpleProbability(bttsL_occurrences_all, 5);
-                const probV_BTTS_5_Simple = calculateSimpleProbability(bttsV_occurrences_all, 5);
-                const avgProbBTTS_5 = (probL_BTTS_5_Simple + probV_BTTS_5_Simple) / 2;
-
-                // Promedio Simple BTTS (N=3)
-                const probL_BTTS_3_Simple = calculateSimpleProbability(bttsL_occurrences_all, 3);
-                const probV_BTTS_3_Simple = calculateSimpleProbability(bttsV_occurrences_all, 3);
-                const avgProbBTTS_3 = (probL_BTTS_3_Simple + probV_BTTS_3_Simple) / 2;
-
-                // Promedio Simple O2.5 (N=10)
-                const probL_O25_10_Simple = calculateSimpleProbability(o25L_occurrences_all, 10);
-                const probV_O25_10_Simple = calculateSimpleProbability(o25V_occurrences_all, 10);
-                const avgProbO25_10 = (probL_O25_10_Simple + probV_O25_10_Simple) / 2;
-                
-                // Promedio Simple O2.5 (N=5) 
-                const probL_O25_5_Simple = calculateSimpleProbability(o25L_occurrences_all, 5);
-                const probV_O25_5_Simple = calculateSimpleProbability(o25V_occurrences_all, 5);
-                const avgProbO25_5 = (probL_O25_5_Simple + probV_O25_5_Simple) / 2;
-                
-                // Promedio Simple O2.5 (N=3)
-                const probL_O25_3_Simple = calculateSimpleProbability(o25L_occurrences_all, 3);
-                const probV_O25_3_Simple = calculateSimpleProbability(o25V_occurrences_all, 3);
-                const avgProbO25_3 = (probL_O25_3_Simple + probV_O25_3_Simple) / 2;
-
+                const getAvgProb = (marketOccurrencesL, marketOccurrencesV, n) => {
+                    const probL = calculateSimpleProbability(marketOccurrencesL, n);
+                    const probV = calculateSimpleProbability(marketOccurrencesV, n);
+                    return (probL + probV) / 2;
+                };
 
                 const rawMarkets = [
-                    { name: 'Ambos Equipos Anotan (Sí)', prob: finalProbBTTS, avg10: avgProbBTTS_10, avg5: avgProbBTTS_5, avg3: avgProbBTTS_3 },
-                    { name: 'Total Goles Over 2.5', prob: finalProbO25, avg10: avgProbO25_10, avg5: avgProbO25_5, avg3: avgProbO25_3 }
+                    // --- Mercados FT ---
+                    { name: 'Ambos Equipos Anotan (Sí)', prob: finalProbBTTS, 
+                      avg10: getAvgProb(bttsL_occurrences_all, bttsV_occurrences_all, 10), 
+                      avg5: getAvgProb(bttsL_occurrences_all, bttsV_occurrences_all, 5), 
+                      avg3: getAvgProb(bttsL_occurrences_all, bttsV_occurrences_all, 3) },
+                      
+                    { name: 'Total Goles Over 2.5', prob: finalProbO25, 
+                      avg10: getAvgProb(o25L_occurrences_all, o25V_occurrences_all, 10), 
+                      avg5: getAvgProb(o25L_occurrences_all, o25V_occurrences_all, 5), 
+                      avg3: getAvgProb(o25L_occurrences_all, o25V_occurrences_all, 3) },
+                      
+                    // --- Mercados 1H (NUEVOS) ---
+                    { name: 'Over 0.5 Goles 1H', prob: finalProbO05_1H, 
+                      avg10: getAvgProb(o05_1HL_occurrences_all, o05_1HV_occurrences_all, 10), 
+                      avg5: getAvgProb(o05_1HL_occurrences_all, o05_1HV_occurrences_all, 5), 
+                      avg3: getAvgProb(o05_1HL_occurrences_all, o05_1HV_occurrences_all, 3) },
+                      
+                    { name: 'Over 1.5 Goles 1H', prob: finalProbO15_1H, 
+                      avg10: getAvgProb(o15_1HL_occurrences_all, o15_1HV_occurrences_all, 10), 
+                      avg5: getAvgProb(o15_1HL_occurrences_all, o15_1HV_occurrences_all, 5), 
+                      avg3: getAvgProb(o15_1HL_occurrences_all, o15_1HV_occurrences_all, 3) }
                 ];
                 
                 // 3. APLICACIÓN DE FILTROS Y REGISTRO DE EV+
                 rawMarkets.forEach(m => {
-                    if (m.prob <= 0) return; // Evita división por cero
+                    if (m.prob <= 0) return; 
                     
-                    // FILTRO MODELO: Probabilidad Pura del Modelo >= MIN_PROBABILITY_MODEL
+                    // 1. FILTRO MODELO: Probabilidad Pura del Modelo >= MIN_PROBABILITY_MODEL
                     const meetsModelProbFilter = m.prob >= MIN_PROBABILITY_MODEL; 
 
-                    // FILTRO FRECUENTISTA 1: Promedio Simple Últimos 10 >= MIN_PROBABILITY_10
+                    // 2. FILTRO FORMA: Promedio Simple Últimos 10/5/3 debe ser bueno.
                     const meets10Filter = m.avg10 >= MIN_PROBABILITY_10;
-                    
-                    // FILTRO FRECUENTISTA 2: Promedio Simple Últimos 5 >= MIN_PROBABILITY_5
                     const meets5Filter = m.avg5 >= MIN_PROBABILITY_5; 
-                    
-                    // FILTRO FRECUENTISTA 3: Promedio Simple Últimos 3 >= MIN_PROBABILITY_3
                     const meets3Filter = m.avg3 >= MIN_PROBABILITY_3;
                     
                     
-                    // Solo si cumple la Frecuencia Histórica Y la Forma Reciente
                     if (meetsModelProbFilter && meets10Filter && meets5Filter && meets3Filter) {
                         
                         // CÁLCULO DE CUOTA REAL (Implied Odd)
