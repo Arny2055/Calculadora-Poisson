@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>BetAGS Pro - Escáner de Valor (Frecuentista Ponderado)</title>
+    <title>BetAGS Pro - Escáner de Valor (Frecuentista Puro)</title>
     <style>
         /* ================================================= */
         /* == CSS: Variables Globales y Estilos Base      == */
@@ -248,14 +248,14 @@
 
 <div id="calculator-container">
     <header>
-        <h1>Escáner de Valor (EV) - Frecuentista Ponderado</h1>
-        <h2>Basado en Media Móvil Ponderada de Ocurrencia (Decaimiento $\alpha=0.95$)</h2>
+        <h1>Escáner de Valor (EV) - Frecuentista Puro (Cuota Real 12M)</h1>
+        <h2>Basado en **Frecuencia Histórica Pura** (12 Meses) + **Filtros de Forma Reciente**</h2>
     </header>
 
     <main>
         <section id="data-load-section">
             <h3>1. Carga de Datos y Liga</h3>
-            <p style="font-size: 0.9em; color: var(--text-secondary);">El modelo usa historial de los **últimos 10 partidos** y **NO usa distribuciones (Poisson/Binomial)**.</p>
+            <p style="font-size: 0.9em; color: var(--text-secondary);">El modelo calcula la **Cuota Real** con **todos los partidos disponibles** (suponiendo 12 meses), y usa los **últimos 10/5/3** como filtros de "forma".</p>
 
             <div class="input-param-grid">
                 <div class="input-pair">
@@ -292,7 +292,7 @@
                      <div class="input-pair">
                         <label for="min-prob-input" class="highlight-prob">Probabilidad Mínima del Modelo & Últimos 10 (Filtro Duro) [0.50 - 0.90]:</label>
                         <input type="number" id="min-prob-input" value="0.60" min="0.50" max="0.90" step="0.01">
-                        <p style="font-size: 0.75em; color: var(--text-secondary);">Prob. Ponderada del Modelo **Y** Promedio Simple últimos 10 deben ser $\ge$ a este valor.</p>
+                        <p style="font-size: 0.75em; color: var(--text-secondary);">Prob. Pura del Modelo **Y** Promedio Simple últimos 10 deben ser $\ge$ a este valor.</p>
                     </div>
                     
                     <div class="input-pair">
@@ -326,7 +326,7 @@
         <section id="output-section" style="display: none;">
             <h3>3. Oportunidades de Valor (EV+ Puro)</h3>
             <p style="font-size: 1em; color: var(--text-secondary);">
-                Se han analizado <strong id="matches-scanned-count">0</strong> partidos. Se muestran solo mercados que cumplen **EV+** y los criterios de **Promedio Simple ($\mathbf{\ge 60\%}$) en los últimos 10, 5 y 3 partidos**.
+                Se han analizado <strong id="matches-scanned-count">0</strong> partidos. Se muestran solo mercados que cumplen **EV+** y los criterios de **Frecuencia Pura ($\mathbf{\ge 60\%}$) y los Filtros de Forma Reciente (últimos 10, 5 y 3 partidos)**.
             </p>
             
             <button id="btn-save-matches" onclick="saveFilteredMatches()">💾 Guardar Oportunidades Filtradas (¡Abrir archivo "guardados.html" después!)</button>
@@ -369,8 +369,8 @@
     window.currentFilteredResults = []; 
     
     // Parámetros Fijos
-    const MATCHES_LIMIT = 10; 
-    const DECAY_FACTOR = 0.95; // Factor de decaimiento (más reciente es más importante)
+    const MATCHES_LIMIT = 10; // Usado SÓLO para los filtros de forma (simple)
+    const DECAY_FACTOR = 0.95; // Factor de decaimiento (ya NO se usa para la probabilidad principal)
     
     const ALL_LEAGUES_VALUE = 'ALL_COMMON_LEAGUES'; 
     const STORAGE_KEY = 'savedEVMatches'; 
@@ -395,12 +395,12 @@
     }
 
     // =================================================
-    // == LÓGICA DE PROMEDIO SIMPLE Y PONDERADO       ==
+    // == LÓGICA DE PROBABILIDAD (FRECUENCIA)         ==
     // =================================================
 
     /**
-     * Calcula la tasa de ocurrencia (probabilidad) ponderada de un evento
-     * (BTTS o Over 2.5) en los últimos 10 partidos. (MODELO PRINCIPAL)
+     * Calcula la tasa de ocurrencia (probabilidad) PONDERADA (Media Móvil Exponencial)
+     * de un evento en los últimos 10 partidos. (Usado SÓLO para el FILTRO DE FORMA, no para la CR)
      * @param {Array<boolean>} eventOccurrences - Array de booleanos (true = ocurrió, false = no ocurrió).
      */
     function calculateWeightedProbability(eventOccurrences) {
@@ -414,7 +414,6 @@
             // Decaimiento: i=0 (más reciente) tiene más peso que i=9 (más antiguo)
             const weight = Math.pow(DECAY_FACTOR, i);
             
-            // Si el evento ocurrió, suma el peso; si no, suma 0
             if (recentEvents[i]) {
                 weightedSuccessSum += weight;
             }
@@ -423,10 +422,10 @@
 
         return weightTotal > 0 ? weightedSuccessSum / weightTotal : 0;
     }
-    
+
     /**
      * Calcula la tasa de ocurrencia (probabilidad) simple (no ponderada) 
-     * de un evento en los últimos N partidos. (FILTRO FRECUENTISTA)
+     * de un evento en los últimos N partidos. (Usado SÓLO para FILTROS DE FORMA)
      * @param {Array<boolean>} eventOccurrences - Array de booleanos (true = ocurrió, false = no ocurrió).
      * @param {number} n - El número de partidos a considerar (3, 5 o 10).
      */
@@ -440,6 +439,22 @@
         
         return successes / recentEvents.length;
     }
+    
+    /**
+     * Calcula la FRECUENCIA PURA sobre toda la muestra disponible. (MODELO PRINCIPAL DE CUOTA REAL)
+     * Esto simula el cálculo de Betpractice con "Temporada Actual" o "12 Meses".
+     * @param {Array<boolean>} eventOccurrences - Array de booleanos (true = ocurrió, false = no ocurrió).
+     */
+    function calculateSimpleAllTimeProbability(eventOccurrences) {
+        if (eventOccurrences.length === 0) return 0;
+        
+        // Contamos los 'true' (éxitos) en toda la muestra disponible
+        const successes = eventOccurrences.filter(Boolean).length;
+        
+        // Devolvemos la frecuencia pura (Probabilidad)
+        return successes / eventOccurrences.length;
+    }
+
     
     // --- Lógica de Carga de Múltiples JSON (sin cambios funcionales) ---
     function readJSONFile(type) {
@@ -473,6 +488,7 @@
                 if (!Array.isArray(rawData)) throw new Error("El archivo no es un arreglo de partidos.");
 
                 const normalizedData = rawData.map(match => {
+                    // Normalización para compatibilidad y robustez de datos
                     const matchParts = match.Match ? match.Match.split(' - ') : [];
                     const localTeam = matchParts[0] ? matchParts[0].trim() : match.LocalTeam || 'Desconocido L';
                     const visitantTeam = matchParts[1] ? matchParts[1].trim() : match.VisitantTeam || 'Desconocido V';
@@ -496,6 +512,7 @@
                 });
                 
                 if (type === 'stats') {
+                    // Ordenar por fecha descendente para que el .slice(0, N) en los filtros tome los más recientes
                     window.statsData = normalizedData.sort((a, b) => b.Date.getTime() - a.Date.getTime());
                     statusElement.textContent = `✅ Stats Cargadas. ${window.statsData.length} registros.`;
                 } else {
@@ -586,11 +603,9 @@
         
         // LEER PARÁMETROS AJUSTABLES
         const REFERENCE_EDGE_MARGIN = parseFloat(document.getElementById('edge-margin-input').value) || 0.05;
-        // Prob. Mínima para Modelo Ponderado Y para el Promedio Simple de los Últimos 10
+        const MIN_PROBABILITY_MODEL = parseFloat(document.getElementById('min-prob-input').value) || 0.60;
         const MIN_PROBABILITY_10 = parseFloat(document.getElementById('min-prob-input').value) || 0.60;
-        // Prob. Mínima para el Promedio Simple de los Últimos 5 (NUEVO)
-        const MIN_PROBABILITY_5 = parseFloat(document.getElementById('min-prob-5-input').value) || 0.70; // 0.70 como valor por defecto (3.5/5)
-        // Prob. Mínima para el Promedio Simple de los Últimos 3
+        const MIN_PROBABILITY_5 = parseFloat(document.getElementById('min-prob-5-input').value) || 0.70; 
         const MIN_PROBABILITY_3 = parseFloat(document.getElementById('min-prob-3-input').value) || 0.66;
         
         const statusElement = document.getElementById('fixtures-status');
@@ -628,36 +643,41 @@
                 const teamV = fixture.VisitantTeam;
                 
                 // --- Extracción de Eventos ---
+                // Obtener TODO el historial para el cálculo de Cuota Real
                 const teamLHomeMatches = window.statsData.filter(m => m.League === league && m.LocalTeam === teamL);
                 const teamVAwayMatches = window.statsData.filter(m => m.League === league && m.VisitantTeam === teamV);
                 
+                // Si la muestra total es pequeña (ej. < 10), es mejor descartar el partido
                 if (teamLHomeMatches.length < MATCHES_LIMIT || teamVAwayMatches.length < MATCHES_LIMIT) {
                      continue; 
                 }
                 
-                // 1. CÁLCULO DE PROBABILIDAD PONDERADA (MODELO PRINCIPAL)
+                // 1. CÁLCULO DE PROBABILIDAD PURA (MODELO PRINCIPAL = CUOTA REAL DE 12M)
                 
                 // BTTS
                 const bttsL_occurrences_all = teamLHomeMatches.map(m => m.BTTS);
                 const bttsV_occurrences_all = teamVAwayMatches.map(m => m.BTTS);
-                const finalProbBTTS = (calculateWeightedProbability(bttsL_occurrences_all) + 
-                                       calculateWeightedProbability(bttsV_occurrences_all)) / 2;
+                // Usamos la nueva función para obtener la frecuencia pura sobre toda la muestra
+                const finalProbBTTS = (calculateSimpleAllTimeProbability(bttsL_occurrences_all) + 
+                                       calculateSimpleAllTimeProbability(bttsV_occurrences_all)) / 2;
 
                 // Over 2.5
                 const o25L_occurrences_all = teamLHomeMatches.map(m => m.Over25); 
                 const o25V_occurrences_all = teamVAwayMatches.map(m => m.Over25);
-                const finalProbO25 = (calculateWeightedProbability(o25L_occurrences_all) + 
-                                      calculateWeightedProbability(o25V_occurrences_all)) / 2;
+                // Usamos la nueva función para obtener la frecuencia pura sobre toda la muestra
+                const finalProbO25 = (calculateSimpleAllTimeProbability(o25L_occurrences_all) + 
+                                      calculateSimpleAllTimeProbability(o25V_occurrences_all)) / 2;
 
 
                 // 2. CÁLCULO DE PROMEDIOS SIMPLES PARA EL FILTRO (Últimos 10, 5 y 3)
+                // Estos filtros aseguran que la FORMA RECIENTE sea buena, además de la estadística histórica.
                 
                 // Promedio Simple BTTS (N=10)
                 const probL_BTTS_10_Simple = calculateSimpleProbability(bttsL_occurrences_all, 10);
                 const probV_BTTS_10_Simple = calculateSimpleProbability(bttsV_occurrences_all, 10);
                 const avgProbBTTS_10 = (probL_BTTS_10_Simple + probV_BTTS_10_Simple) / 2;
                 
-                // Promedio Simple BTTS (N=5) - NUEVO CÁLCULO
+                // Promedio Simple BTTS (N=5) 
                 const probL_BTTS_5_Simple = calculateSimpleProbability(bttsL_occurrences_all, 5);
                 const probV_BTTS_5_Simple = calculateSimpleProbability(bttsV_occurrences_all, 5);
                 const avgProbBTTS_5 = (probL_BTTS_5_Simple + probV_BTTS_5_Simple) / 2;
@@ -672,7 +692,7 @@
                 const probV_O25_10_Simple = calculateSimpleProbability(o25V_occurrences_all, 10);
                 const avgProbO25_10 = (probL_O25_10_Simple + probV_O25_10_Simple) / 2;
                 
-                // Promedio Simple O2.5 (N=5) - NUEVO CÁLCULO
+                // Promedio Simple O2.5 (N=5) 
                 const probL_O25_5_Simple = calculateSimpleProbability(o25L_occurrences_all, 5);
                 const probV_O25_5_Simple = calculateSimpleProbability(o25V_occurrences_all, 5);
                 const avgProbO25_5 = (probL_O25_5_Simple + probV_O25_5_Simple) / 2;
@@ -692,22 +712,25 @@
                 rawMarkets.forEach(m => {
                     if (m.prob <= 0) return; // Evita división por cero
                     
-                    // FILTRO FRECUENTISTA 1: Promedio Simple Últimos 10 (Local/Visitante) >= MIN_PROBABILITY_10
+                    // FILTRO MODELO: Probabilidad Pura del Modelo >= MIN_PROBABILITY_MODEL
+                    const meetsModelProbFilter = m.prob >= MIN_PROBABILITY_MODEL; 
+
+                    // FILTRO FRECUENTISTA 1: Promedio Simple Últimos 10 >= MIN_PROBABILITY_10
                     const meets10Filter = m.avg10 >= MIN_PROBABILITY_10;
                     
-                    // FILTRO FRECUENTISTA 2: Promedio Simple Últimos 5 (Local/Visitante) >= MIN_PROBABILITY_5 (NUEVO FILTRO)
+                    // FILTRO FRECUENTISTA 2: Promedio Simple Últimos 5 >= MIN_PROBABILITY_5
                     const meets5Filter = m.avg5 >= MIN_PROBABILITY_5; 
                     
-                    // FILTRO FRECUENTISTA 3: Promedio Simple Últimos 3 (Local/Visitante) >= MIN_PROBABILITY_3
+                    // FILTRO FRECUENTISTA 3: Promedio Simple Últimos 3 >= MIN_PROBABILITY_3
                     const meets3Filter = m.avg3 >= MIN_PROBABILITY_3;
                     
-                    // FILTRO MODELO: Probabilidad Ponderada del Modelo >= MIN_PROBABILITY_10
-                    const meetsModelProbFilter = m.prob >= MIN_PROBABILITY_10; 
-
-                    // La condición de filtrado ahora incluye el filtro de N=5
-                    if (meets10Filter && meets5Filter && meets3Filter && meetsModelProbFilter) {
+                    
+                    // Solo si cumple la Frecuencia Histórica Y la Forma Reciente
+                    if (meetsModelProbFilter && meets10Filter && meets5Filter && meets3Filter) {
                         
+                        // CÁLCULO DE CUOTA REAL (Implied Odd)
                         const impliedOdd = (1 / m.prob);
+                        // CÁLCULO DE CUOTA MÍNIMA DE VALOR (Min Odd)
                         const minOddValue = (impliedOdd + REFERENCE_EDGE_MARGIN);
                         
                         allFilteredResults.push({
