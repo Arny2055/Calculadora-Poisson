@@ -389,62 +389,26 @@
     // Parámetros Fijos
     const MATCHES_LIMIT = 10; 
     const ALL_LEAGUES_VALUE = 'ALL_COMMON_LEAGUES'; 
-    const TOP_SEMI_TOP_VALUE = 'TOP_AND_SEMI_TOP_LEAGUES'; // Nuevo valor
+    const TOP_SEMI_TOP_VALUE = 'TOP_AND_SEMI_TOP_LEAGUES'; 
     const STORAGE_KEY = 'savedEVMatches'; 
     
     // =================================================================
     // === LISTAS DE LIGAS TOP PARA RESALTADO (DEFINICIÓN CENTRAL) ===
     // =================================================================
     const TOP_LEAGUES = [
-        'England Premier League', 
-        'Spain LaLiga',           
-        'Italy Serie A',          
-        'Germany Bundesliga',     
-        'France Ligue 1',         
-        'Netherlands Eredivisie', 
-        'Portugal Primeira Liga', 
-        'Scotland Premiership',   
-        
-        // América Top (posiciones 21-24)
-        'Brazil Serie A',
-        'Argentina Liga Profesional',
-        'USA MLS',
-        'Mexico Liga MX'
+        'England Premier League', 'Spain LaLiga', 'Italy Serie A', 'Germany Bundesliga', 'France Ligue 1', 
+        'Netherlands Eredivisie', 'Portugal Primeira Liga', 'Scotland Premiership', 'Brazil Serie A',
+        'Argentina Liga Profesional', 'USA MLS', 'Mexico Liga MX'
     ];
 
     const SEMI_TOP_LEAGUES = [
-        // Europa Semi-Top (posiciones 9-20)
-        'Belgium Pro League',
-        'Turkey Super Lig',
-        'Switzerland Super League',
-        'Austria Bundesliga',
-        'Danish Superliga',
-        'Czech First League',
-        'Ukrainian Premier League',
-        'Greek Super League',
-        'Polish Ekstraklasa',
-        'Russian Premier League',
-        'Norwegian Eliteserien',
-        'Swedish Allsvenskan',
-        
-        // América Semi-Top (posiciones 25-32)
-        'Chile Primera División',
-        'Colombia Categoría Primera A',
-        'Uruguay Primera División',
-        'Paraguay Primera División',
-        'Ecuador Serie A',
-        'Perú Liga 1',
-        'Venezuela Primera División',
-        'USA USL Championship',
-        
-        // Asia Semi-Top (posiciones 33-39)
-        'Japan J1 League',
-        'Saudi Pro League',
-        'Qatar Stars League',
-        'South Korea K League 1',
-        'China Super League',
-        'Iran Persian Gulf Pro League',
-        'UAE Pro League'
+        'Belgium Pro League', 'Turkey Super Lig', 'Switzerland Super League', 'Austria Bundesliga',
+        'Danish Superliga', 'Czech First League', 'Ukrainian Premier League', 'Greek Super League', 
+        'Polish Ekstraklasa', 'Russian Premier League', 'Norwegian Eliteserien', 'Swedish Allsvenskan',
+        'Chile Primera División', 'Colombia Categoría Primera A', 'Uruguay Primera División', 
+        'Paraguay Primera División', 'Ecuador Serie A', 'Perú Liga 1', 'Venezuela Primera División',
+        'USA USL Championship', 'Japan J1 League', 'Saudi Pro League', 'Qatar Stars League', 
+        'South Korea K League 1', 'China Super League', 'Iran Persian Gulf Pro League', 'UAE Pro League'
     ];
     // =================================================================
     
@@ -468,13 +432,50 @@
     }
 
     // =================================================
+    // == PRE-PROCESAMIENTO DE FECHA (CRÍTICO)        ==
+    // =================================================
+
+    // Mapeo para traducir abreviaturas de meses en español a números.
+    const monthMap = {
+        'ene': '01', 'feb': '02', 'mar': '03', 'abr': '04', 
+        'may': '05', 'jun': '06', 'jul': '07', 'ago': '08', 
+        'sep': '09', 'oct': '10', 'nov': '11', 'dic': '12'
+    };
+
+    /**
+     * Normaliza la cadena de fecha personalizada para que pueda ser parseada por new Date().
+     * Formato de entrada: "mar., 07 oct. 2025 17:00"
+     * Formato de salida: "2025-10-07T17:00:00" (o similar, que Date() pueda entender)
+     */
+    function normalizeCustomDate(dateStr) {
+        if (!dateStr || typeof dateStr !== 'string') return null;
+
+        // 1. Quitar el día de la semana y la coma (Ej: "mar., ")
+        let cleanStr = dateStr.replace(/^[a-zA-Z]{3}\.,\s*/, '').trim(); 
+
+        // 2. Extraer partes (07 oct. 2025 17:00)
+        const parts = cleanStr.split(/[\s\.]+/).filter(p => p); // [07, oct, 2025, 17:00]
+        
+        if (parts.length < 4) return null;
+
+        const day = parts[0]; 
+        const monthAbbr = parts[1].toLowerCase().replace('.', ''); // oct
+        const year = parts[2];
+        const time = parts[3] + ":00"; // 17:00:00
+
+        const monthNum = monthMap[monthAbbr];
+        if (!monthNum) return null;
+
+        // Formato que la mayoría de los motores V8 (Chrome, Edge) pueden interpretar como hora local si no hay Z: YYYY-MM-DDTHH:mm:ss
+        // Para asegurar que la hora sea la que está en el JSON, la construimos en formato ISO "local" (sin Z) y luego la mostramos con UTC.
+        // Agregamos un segundo para asegurarnos que el parseo sea válido.
+        return `${year}-${monthNum}-${day}T${time}`;
+    }
+
+    // =================================================
     // == LÓGICA DE PROBABILIDAD (FRECUENCIA)         ==
     // =================================================
     
-    /**
-     * Calcula la tasa de ocurrencia (probabilidad) simple (no ponderada) 
-     * de un evento en los últimos N partidos. (Usado SÓLO para FILTROS DE FORMA)
-     */
     function calculateSimpleProbability(eventOccurrences, n) {
         const recentEvents = eventOccurrences.slice(0, n);
         if (recentEvents.length === 0) return 0;
@@ -482,9 +483,6 @@
         return successes / recentEvents.length;
     }
     
-    /**
-     * Calcula la FRECUENCIA PURA sobre toda la muestra disponible. (MODELO PRINCIPAL DE CUOTA REAL)
-     */
     function calculateSimpleAllTimeProbability(eventOccurrences) {
         if (eventOccurrences.length === 0) return 0;
         const successes = eventOccurrences.filter(Boolean).length;
@@ -525,7 +523,6 @@
 
                 const normalizedData = rawData.map(match => {
                     
-                    // Función para parsear resultados como "3-1" o "1-1"
                     const parseGoals = (resultStr) => {
                         const parts = resultStr ? resultStr.split('-') : [0, 0];
                         return {
@@ -534,32 +531,24 @@
                         };
                     };
 
-                    // Datos FT
                     const goalsFT = parseGoals(match['Result FT']);
                     const localGoalsFT = goalsFT.L;
                     const visitantGoalsFT = goalsFT.V;
                     const totalGoalsFT = localGoalsFT + visitantGoalsFT;
                     
-                    // Datos HT
                     const goalsHT = parseGoals(match['Result HT']);
-                    const localGoalsHT = goalsHT.L;
-                    const visitantGoalsHT = goalsHT.V;
-                    const totalGoalsHT = localGoalsHT + visitantGoalsHT;
-
-                    // Datos 2H (Calculados)
+                    const totalGoalsHT = goalsHT.L + goalsHT.V;
                     const totalGoals2H = totalGoalsFT - totalGoalsHT;
                     
-                    // Córners
                     const localCorners = parseInt(match['Home Corners at FT']) || 0;
                     const visitantCorners = parseInt(match['Away Corners at FT']) || 0;
                     const totalCorners = localCorners + visitantCorners;
 
-                    // === FIX DE FECHA: Checkea si el valor de match.Date es válido ===
-                    // Nota: Date() lee el string. Si el string tiene Z al final, es UTC. Si no, se asume hora local. 
-                    // Lo importante es la comprobación de 1969/1970
-                    const dateCandidate = new Date(match.Date);
-                    // Si la fecha es inválida (getTime() retorna NaN) o es 1970 (Epoch time) 
-                    // usa la fecha actual como fallback.
+                    // === CORRECCIÓN DE FECHA: Usar la función de normalización ===
+                    const normalizedDateStr = normalizeCustomDate(match.Date);
+                    let dateCandidate = new Date(normalizedDateStr);
+                    
+                    // Si el parseo es inválido (ej: la liga no existe), usamos la fecha actual.
                     const date = (isNaN(dateCandidate.getTime()) || dateCandidate.getFullYear() < 1971) 
                         ? new Date() 
                         : dateCandidate;
@@ -569,7 +558,7 @@
                         League: match.League || 'Sin Liga',
                         LocalTeam: match.LocalTeam || (match.Match ? match.Match.split(' - ')[0].trim() : 'Desconocido L'),
                         VisitantTeam: match.VisitantTeam || (match.Match ? match.Match.split(' - ')[1].trim() : 'Desconocido V'),
-                        Date: date, // Usa la fecha corregida
+                        Date: date, 
                         
                         // --- Mercados de Goles ---
                         BTTS: localGoalsFT >= 1 && visitantGoalsFT >= 1,
@@ -579,7 +568,7 @@
                         Over15_1H: totalGoalsHT >= 2,
                         Over05_2H: totalGoals2H >= 1,
                         GoalV: visitantGoalsFT >= 1, 
-                        BTTS_1H: localGoalsHT >= 1 && visitantGoalsHT >= 1, 
+                        BTTS_1H: goalsHT.L >= 1 && goalsHT.V >= 1, 
 
                         // --- Mercados de Rendimiento ---
                         Over85Corners: totalCorners > 8 
@@ -599,7 +588,7 @@
                 checkReadyToScan();
 
             } catch (e) {
-                statusElement.textContent = `Error al procesar JSON de ${type}: ${e.message}. Verifica el formato de 'Result HT', 'Result FT', 'Home Corners at FT' y 'Away Corners at FT'.`;
+                statusElement.textContent = `Error al procesar JSON de ${type}: ${e.message}. Verifica el formato, especialmente el campo 'Date' ("mar., 07 oct. 2025 17:00").`;
                 statusElement.style.color = '#e63946';
                 if (type === 'stats') { window.statsData = null; }
                 else { window.fixturesData = null; }
@@ -872,13 +861,15 @@
 
         // =========================================================================
         // === FORMATO DE FECHA CORREGIDO: DD/MM/YYYY HH:mm:ss (USANDO UTC) ===
+        // === Esto muestra la hora tal como fue parseada del JSON ===
         // =========================================================================
         const pad = (num) => num.toString().padStart(2, '0');
         
-        const formatDate = (dateString) => {
-            const d = new Date(dateString);
+        const formatDate = (dateObject) => {
+            // El objeto Date ya tiene los valores correctos (aunque internamente use el UTC), 
+            // al usar getUTC* evitamos que el navegador aplique un desfase de zona horaria.
+            const d = dateObject;
             
-            // Forzar el uso de los componentes UTC para evitar desfases de zona horaria del cliente
             const day = pad(d.getUTCDate());
             const month = pad(d.getUTCMonth() + 1); // getUTCMonth() retorna 0-11
             const year = d.getUTCFullYear();
@@ -946,7 +937,7 @@
         }));
         
         const existingKeys = new Set(existingMatches.map(m => 
-            // Usamos solo la parte de la fecha (YYYY-MM-DD) para evitar duplicados por la hora
+            // Usamos Match, Mercado y la fecha (solo DD/MM/YYYY) para evitar duplicados.
             `${m.Match}|${m.Market}|${m.Date.split('T')[0]}`
         ));
 
