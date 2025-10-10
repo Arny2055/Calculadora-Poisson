@@ -1,654 +1,141 @@
-<!DOCTYPE html>
-<html lang="es">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>BetAGS Pro - Calculadora de Cuota Real (Frecuentista Puro) v2.0</title>
-    <style>
-        /* ================================================= */
-        /* == CSS: Variables Globales y Estilos Base      == */
-        /* ================================================= */
-        :root {
-            /* Modo Claro (Institucional) */
-            --bg-page: #f9f9f9;
-            --bg-card: #ffffff;
-            --text-primary: #123456; /* Azul Oscuro Institucional */
-            --text-secondary: #56789a;
-            --border-color: #e0e0e0;
-            --table-header-bg: #123456; /* Azul Oscuro */
-            --table-header-text: #ffffff;
-            --table-row-stripe: #f5f5f5; /* Rayado suave */
-            --accent-main: #e63946; /* Rojo para resaltados importantes (EV+) */
-            --accent-alt: #3d8bff;  /* Azul Brillante para títulos/bordes */
-            --success-color: #2a9d8f;
-            --warning-color: #ffc300;
-            --shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
-            --bg-param-group: #f0f0f0;
-            --error-color: #e63946;
+import requests
+import pandas as pd
+from bs4 import BeautifulSoup
+import re
 
-            /* Colores específicos de la tabla de Goles/Under */
-            --color-high-prob: #4caf50; /* Verde fuerte */
-            --color-med-prob: #ffc107; /* Amarillo/Ámbar */
-            --color-low-prob: #f44336;  /* Rojo */
-            --color-neutral-bg: #404040; /* Fondo oscuro de bloqueo */
-            --color-neutral-text: #e0e0e0; /* Texto claro */
-        }
+# URL de las estadísticas de jugadores de La Liga que deseas scrapear
+LA_LIGA_URL = "https://fbref.com/en/comps/12/La-Liga-Stats"
 
-        /* ================================================= */
-        /* == MODO OSCURO MEJORADO (Adaptado)             == */
-        /* ================================================= */
-        .dark-mode {
-            --bg-page: #1e1e1e;             
-            --bg-card: #2c2c2c;             
-            --text-primary: #e0e0e0;        
-            --text-secondary: #b0b0b0;      
-            --border-color: #444444;        
-            --shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
-            --table-header-bg: #185a9a;     
-            --table-header-text: #ffffff;
-            --table-row-stripe: #363636;
-            --accent-main: #ff6b6b;         /* Rojo más brillante */
-            --accent-alt: #74aeff;          
-            --success-color: #4CAF50;       
-            --warning-color: #FFC107;       
-            --bg-param-group: #3a3a3a;      
-            --error-color: #ff6b6b;         
-        }
+def get_fbref_table(url, table_id, header_row=1):
+    """
+    Función para extraer una tabla específica de FBref.
+    :param url: La URL de la página.
+    :param table_id: El ID HTML de la tabla a extraer (ej. 'stats_standard').
+    :param header_row: El índice de la fila que contiene los nombres de las columnas.
+    :return: Un DataFrame de pandas con los datos.
+    """
+    try:
+        # 1. Obtener el contenido de la página
+        print(f"Obteniendo datos de: {url}...")
+        response = requests.get(url)
+        response.raise_for_status()  # Lanza un error para códigos de estado HTTP malos
+
+        # 2. Parsear el HTML
+        soup = BeautifulSoup(response.content, 'html.parser')
         
-        body {
-            font-family: 'Roboto', sans-serif;
-            margin: 0;
-            padding: 25px;
-            background-color: var(--bg-page);
-            color: var(--text-primary);
-            transition: all 0.5s ease-in-out;
-            line-height: 1.6;
-        }
-
-        h1, h2, h3, h4 {
-            color: var(--text-primary);
-            font-weight: 500;
-            border-bottom: 2px solid var(--border-color);
-            padding-bottom: 5px;
-            margin-top: 30px;
-        }
-        h1 { border: none; font-weight: 700; color: var(--accent-alt); }
-        
-        #calculator-container {
-            max-width: 1000px; 
-            margin: 0 auto;
-            padding: 40px;
-            background-color: var(--bg-card);
-            box-shadow: var(--shadow);
-            border-radius: 10px;
-        }
-        
-        /* Estilos de grid, botones, tablas */
-        .input-param-grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr; 
-            gap: 20px;
-            margin-top: 20px;
-        }
-        
-        .input-param-grid.triple {
-             grid-template-columns: 1fr 1fr 1fr; 
-        }
-
-        .input-pair {
-            display: flex;
-            flex-direction: column;
-        }
-        
-        #btn-calculate {
-            width: 100%;
-            padding: 18px;
-            border: none;
-            border-radius: 6px;
-            cursor: pointer;
-            font-size: 1.2em;
-            font-weight: 600;
-            letter-spacing: 0.5px;
-            transition: background-color 0.3s, transform 0.1s;
-            background-color: var(--accent-main);
-            color: var(--table-header-text); 
-            margin-top: 30px; 
-            margin-bottom: 20px;
-        }
-        #btn-calculate:hover:not(:disabled) { 
-            background-color: #c72834; 
-            transform: translateY(-1px); 
-        }
-        #btn-calculate:disabled {
-            background-color: var(--text-secondary);
-            cursor: not-allowed;
-        }
-
-
-        /* TABLAS */
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            font-size: 0.95em;
-            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.05);
-            border-radius: 5px; 
-            overflow: hidden; 
-            margin-top: 20px;
-        }
-        
-        th, td {
-            padding: 12px 8px; 
-            text-align: center;
-            border: 1px solid var(--border-color);
-        }
-        
-        thead th {
-            background-color: var(--table-header-bg);
-            color: var(--table-header-text);
-            font-weight: 600;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            border: none;
-        }
-
-        tbody tr:nth-child(even) {
-            background-color: var(--table-row-stripe);
-        }
-
-        input[type="file"], select {
-            padding: 10px;
-            border: 1px solid var(--border-color);
-            border-radius: 4px;
-            background-color: var(--bg-card);
-            color: var(--text-primary);
-            transition: border-color 0.3s;
-        }
-
-        .highlight-prob-L, .highlight-prob-V {
-            font-weight: 500;
-            color: var(--text-secondary);
-        }
-
-        .highlight-prob-final {
-            color: var(--accent-main);
-            font-weight: 700;
-            font-size: 1.05em;
-        }
-        .highlight-odd {
-            color: var(--success-color);
-            font-weight: 700;
-            font-size: 1.1em;
-        }
-        
-        .alert-box {
-            padding: 10px;
-            border-left: 5px solid var(--warning-color);
-            background-color: var(--bg-param-group);
-            color: var(--text-primary);
-            margin-top: 15px;
-            font-size: 0.9em;
-            border-radius: 4px;
-        }
-        
-        .alert-error {
-            border-left: 5px solid var(--error-color);
-        }
-        
-        /* ================================================= */
-        /* == ESTILOS ESPECÍFICOS DE LA TABLA OVER/UNDER  == */
-        /* ================================================= */
-        .prob-cell {
-            padding: 5px;
-            margin: 2px;
-            border-radius: 4px;
-            font-weight: 600;
-            color: var(--text-primary); /* Texto negro/oscuro por defecto */
-            text-align: center;
-            display: inline-block;
-            width: 80%;
-            min-width: 60px;
-            box-sizing: border-box;
-        }
-
-        .color-0 {
-            background-color: var(--color-low-prob);
-            color: white;
-        } /* Rojo (Baja probabilidad) */
-        .color-1 {
-            background-color: #f07470; 
-            color: white;
-        } /* Rojo claro */
-        .color-2 {
-            background-color: var(--color-med-prob);
-        } /* Amarillo (Media probabilidad) */
-        .color-3 {
-            background-color: #a8d792; 
-        } /* Verde claro */
-        .color-4 {
-            background-color: var(--color-high-prob);
-        } /* Verde fuerte (Alta probabilidad) */
-
-        .prob-locked {
-            background-color: var(--color-neutral-bg);
-            color: var(--color-neutral-text);
-            border-radius: 4px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            height: 30px;
-            width: 80%;
-            margin: 0 auto;
-        }
-
-        .prob-locked svg {
-            fill: var(--color-neutral-text);
-            width: 15px;
-            height: 15px;
-        }
-        
-        @media (max-width: 1024px) {
-            #calculator-container { padding: 15px; }
-            .input-param-grid {
-                grid-template-columns: 1fr;
-            }
-            .input-param-grid.triple {
-                 grid-template-columns: 1fr;
-            }
-            th, td { padding: 8px 3px; font-size: 0.8em;}
+        # 3. Encontrar el contenedor de la tabla
+        # FBref a menudo oculta la tabla principal en un comentario HTML, 
+        # por lo que primero buscamos la tabla en el HTML normal y luego en los comentarios.
+        table_container = soup.find('div', {'id': table_id + '_container'})
+        if not table_container:
+            print(f"Contenedor {table_id} no encontrado. Intentando buscar en comentarios...")
+            # Búsqueda en comentarios para tablas avanzadas
+            comments = soup.find_all(string=lambda text: isinstance(text, re.Comment))
+            comment_content = None
+            for comment in comments:
+                if table_id in str(comment):
+                    comment_content = str(comment)
+                    break
             
-            /* Ajuste de columna para móviles */
-            #results-table thead th:nth-child(2),
-            #results-table tbody td:nth-child(2),
-            #results-table thead th:nth-child(3),
-            #results-table tbody td:nth-child(3) {
-                 display: none; /* Ocultar Prob L y V en pantallas pequeñas para ahorrar espacio */
-            }
-        }
-    </style>
-</head>
-<body>
+            if comment_content:
+                soup_comment = BeautifulSoup(comment_content, 'html.parser')
+                table = soup_comment.find('table', {'id': table_id})
+            else:
+                print(f"Error: No se pudo encontrar la tabla con ID '{table_id}'.")
+                return pd.DataFrame()
+        else:
+             table = table_container.find('table', {'id': table_id})
 
-<div id="calculator-container">
-    <header>
-        <h1>Calculadora de Cuota Real (CR) - Frecuentista Puro v2.0</h1>
-        <h2>Análisis de Partidos Basado en Frecuencia Histórica Pura</h2>
-    </header>
+        if not table:
+             print(f"Error: La tabla con ID '{table_id}' no está presente en el HTML.")
+             return pd.DataFrame()
 
-    <main>
-        <section id="data-load-section">
-            <h3>1. Carga de Datos Históricos (Muestra $\approx$ 12 meses)</h3>
-
-            <div class="input-param-grid">
-                <div class="input-pair">
-                    <label for="json-stats-input">Archivo JSON de **Estadísticas Históricas**:</label>
-                    <input type="file" id="json-stats-input" accept=".json" onchange="readJSONFile()">
-                    <p id="stats-status" style="margin-top: 5px; font-size: 0.8em; color: var(--text-secondary);">Estatus Stats: Esperando carga. (Usando datos simulados)</p>
-                </div>
-            </div>
-
-            <p class="alert-box" style="margin-top: 15px;">
-                🔑 **Formato Requerido:** El JSON debe ser un **arreglo** de objetos con las claves: `League`, `LocalTeam`, `VisitantTeam`, **`Result FT`**, etc.
-            </p>
-
-            <hr style="margin: 25px 0; border-color: var(--border-color);">
-            
-            <h3>2. Selección del Partido a Analizar</h3>
-            <div class="input-param-grid triple">
-                <div class="input-pair">
-                    <label for="league-select">Seleccionar Liga:</label>
-                    <select id="league-select" disabled onchange="populateTeamSelectors()">
-                        <option value="Spain - La Liga 2">Spain - La Liga 2 (Simulado)</option>
-                    </select>
-                </div>
-                
-                <div class="input-pair">
-                    <label for="local-team-select">Seleccionar Equipo Local:</label>
-                    <select id="local-team-select" onchange="checkReadyToCalculate()">
-                        <option value="Granada">Granada (Simulado)</option>
-                    </option>
-                    </select>
-                </div>
-                
-                <div class="input-pair">
-                    <label for="visitant-team-select">Seleccionar Equipo Visitante:</label>
-                    <select id="visitant-team-select" onchange="checkReadyToCalculate()">
-                        <option value="Las Palmas">Las Palmas (Simulado)</option>
-                    </select>
-                </div>
-            </div>
-
-            <button id="btn-calculate">3. Calcular Cuota Real (Goles Over/Under)</button>
-        </section>
-
-        <hr style="margin: 30px 0; border-color: var(--border-color);">
+        # 4. Usar pandas para leer la tabla directamente
+        # FBref usa filas de encabezado doble. Leemos dos, luego corregimos.
+        df_list = pd.read_html(str(table), header=[0, header_row])
+        df = df_list[0]
         
-        <section id="output-section" style="display: none;">
-            <h3>4. Resultados Frecuentistas (Cuota Real / CR)</h3>
-            <h4 id="match-title" style="margin-top: 20px;"></h4>
-            <p id="match-stats-info" style="font-size: 0.9em; color: var(--text-secondary);"></p>
-            <div id="min-matches-warning" class="alert-box alert-error" style="display: none;"></div>
-            
-            <table id="results-table">
-                <thead>
-                    <tr>
-                        <th style="width: 35%; text-align: left;">Mercado</th>
-                        <th style="width: 20%;">Local (Granada)</th>
-                        <th style="width: 20%;">Visitante (Las Palmas)</th>
-                        <th style="width: 25%;">Promedio</th>
-                    </tr>
-                </thead>
-                <tbody></tbody>
-            </table>
-            
-        </section>
-    </main>
+        # 5. Limpiar y estandarizar los nombres de las columnas
+        df.columns = ['_'.join(col).strip() for col in df.columns.values]
+        
+        # Renombrar columnas clave y eliminar filas de encabezado duplicadas
+        df = df.rename(columns={'Unnamed: 0_level_0_Rk': 'Rank'})
+        df = df[df['Rk_Rk'] != 'Rk'] # Elimina las filas de encabezado que aparecen a mitad de tabla
+        
+        # Eliminar columnas irrelevantes
+        df = df.drop(columns=['Rk_Rk', 'Matches_Matches', 'Player_Player'], errors='ignore')
+        
+        # 6. Estandarizar el nombre de las columnas después de la limpieza
+        new_cols = []
+        for col in df.columns:
+            # Elimina el prefijo duplicado si existe (ej. 'Standard Stats_Gls' a 'Gls')
+            parts = col.split('_')
+            if len(parts) > 1 and parts[-2] == parts[-1]:
+                new_cols.append(parts[-1])
+            else:
+                 # Conserva la estructura para diferenciar estadísticas (ej. 'Standard Stats_Gls')
+                new_cols.append(col)
 
-    <footer>
-        <button id="mode-toggle" onclick="toggleMode()">🌞 Alternar Modo (Claro/Oscuro) 🌙</button>
-    </footer>
-</div>
+        df.columns = new_cols
+        print(f"Tabla '{table_id}' extraída con {len(df)} filas.")
+        return df
 
-<script>
-    // =================================================
-    // == JAVASCRIPT: Lógica del Modelo Frecuentista  ==
-    // =================================================
+    except requests.exceptions.HTTPError as e:
+        print(f"Error HTTP al acceder a la URL: {e}")
+        return pd.DataFrame()
+    except Exception as e:
+        print(f"Ocurrió un error inesperado: {e}")
+        return pd.DataFrame()
 
-    const THEME_KEY = 'colorMode';
-    window.statsData = [
-        // Datos simulados para hacer que la tabla se autogenere con los valores de la imagen
-        // Los valores 1/0 simulan la ocurrencia o no de cada evento en un partido histórico.
-        // Simulamos 30 partidos para Granada y 30 para Las Palmas.
-        // P(O+0.5 L) = 30/30 = 100%
-        // P(O+1.5 L) = 26/30 = 87% (Ajustado a 88% para coincidir con la imagen)
-        ...Array(30).fill(0).map((_, i) => ({
-            League: 'Spain - La Liga 2',
-            LocalTeam: 'Granada',
-            VisitantTeam: 'Otro V', // Irrelevante para stats Home
-            Over05: 1, // Siempre
-            Over15: (i < 26) ? 1 : 0, // 87% (26/30) -> Usaremos el 88% de la imagen
-            Over25: 0, // Bloqueado
-            Under05: 0,
-            Under15: (i < 4) ? 1 : 0, // 13% (4/30) -> Usaremos el 12% de la imagen
-            Under25: 0,
-        })),
-        // P(O+0.5 V) = 26/30 = 87%
-        // P(O+1.5 V) = 12/30 = 40%
-        ...Array(30).fill(0).map((_, i) => ({
-            League: 'Spain - La Liga 2',
-            LocalTeam: 'Otro L', // Irrelevante para stats Away
-            VisitantTeam: 'Las Palmas',
-            Over05: (i < 26) ? 1 : 0, // 87%
-            Over15: (i < 12) ? 1 : 0, // 40%
-            Over25: 0, // Bloqueado
-            Under05: (i >= 26) ? 1 : 0, // 13%
-            Under15: (i >= 12) ? 1 : 0, // 60%
-            Under25: 0,
-        }))
-    ]; 
+if __name__ == '__main__':
+    # Las tablas de estadísticas de jugadores de La Liga tienen los siguientes IDs:
+    # 'stats_standard' -> Estadísticas Estándar
+    # 'stats_shooting' -> Disparos
+    # 'stats_passing'  -> Pases
     
-    // Parámetros Fijos
-    const MIN_MATCHES_REQUIRED = 10; 
-
-    // --- Funciones de Utilidad (Modo Oscuro) ---
-    function applyMode(mode) {
-        const body = document.body;
-        if (mode === 'dark') {
-            body.classList.remove('light-mode');
-            body.classList.add('dark-mode');
-            localStorage.setItem(THEME_KEY, 'dark');
-        } else {
-            body.classList.remove('dark-mode');
-            body.classList.add('light-mode');
-            localStorage.setItem(THEME_KEY, 'light');
-        }
-    }
-
-    function toggleMode() {
-        const isDark = document.body.classList.contains('dark-mode');
-        applyMode(isDark ? 'light' : 'dark');
-    }
-
-    // =================================================
-    // == LÓGICA DE PROBABILIDAD (FRECUENCIA)         ==
-    // =================================================
+    # 1. Extraer las estadísticas estándar
+    stats_standard_df = get_fbref_table(LA_LIGA_URL, 'stats_standard')
     
-    // Función para calcular la probabilidad de un evento (frecuencia simple)
-    function calculateSimpleAllTimeProbability(eventOccurrences) {
-        if (eventOccurrences.length === 0) return 0;
-        const successes = eventOccurrences.filter(Boolean).length;
-        return successes / eventOccurrences.length;
-    }
+    # 2. Extraer las estadísticas de disparos
+    # Nota: Si el ID de la tabla es diferente o la estructura cambia, este paso fallará.
+    # El ID 'stats_shooting' a menudo requiere buscar dentro de un comentario HTML.
+    stats_shooting_df = get_fbref_table(LA_LIGA_URL, 'stats_shooting')
+
+    # --- Procesamiento y Uso de la Herramienta ---
+
+    if not stats_standard_df.empty:
+        # Renombrar las columnas de unión antes de combinar para evitar conflictos
+        stats_standard_df = stats_standard_df.rename(columns={'Player': 'Player_Name', 'Squad': 'Team'})
+        
+        # Si la tabla de disparos también se extrajo
+        if not stats_shooting_df.empty:
+            stats_shooting_df = stats_shooting_df.rename(columns={'Player': 'Player_Name', 'Squad': 'Team'})
+            
+            # Combinar las tablas utilizando 'Player_Name', 'Team' y 'Born' como claves de unión
+            # Usamos un sufijo para diferenciar columnas que puedan tener el mismo nombre
+            combined_df = pd.merge(
+                stats_standard_df, 
+                stats_shooting_df, 
+                on=['Player_Name', 'Team', 'Born'], 
+                how='inner',
+                suffixes=('_Std', '_Shot')
+            )
+            
+            print("\n✅ Datos Combinados con Éxito (Estándar + Disparos).")
+            # Mostrar las primeras 5 filas y algunas columnas clave
+            print(combined_df[['Player_Name', 'Team', 'Pos', 'Gls_Std', 'PK_Shot', 'xG_Shot', 'Min_Std']].head())
+
+            # Guardar el resultado final en un archivo CSV
+            output_file = 'LaLiga_Stats_Combinadas.csv'
+            combined_df.to_csv(output_file, index=False, encoding='utf-8-sig')
+            print(f"\n✨ ¡Herramienta completada! Los datos se han guardado en: {output_file}")
+            
+        else:
+            # Si solo se extrajo la tabla estándar
+            output_file = 'LaLiga_Stats_Estandar.csv'
+            stats_standard_df.to_csv(output_file, index=False, encoding='utf-8-sig')
+            print(f"\n✨ ¡Herramienta completada! Solo se guardaron las Estadísticas Estándar en: {output_file}")
     
-    // Función de clasificación para el color (replicando el estilo de la imagen)
-    function getColorClass(percentage) {
-        if (percentage >= 80) return 'color-4'; // Verde Oscuro
-        if (percentage >= 60) return 'color-3'; // Verde Claro
-        if (percentage >= 40) return 'color-2'; // Amarillo
-        if (percentage >= 20) return 'color-1'; // Rojo Claro
-        return 'color-0'; // Rojo Oscuro
-    }
+    else:
+        print("\n❌ Fallo en la extracción de datos. Revisa la URL y los IDs de las tablas.")
 
-    // --- Lógica de Carga de JSON (DEJADA POR REFERENCIA, USAMOS DATOS SIMULADOS) ---
-    function readJSONFile() {
-        // En un caso real, esta función procesaría el JSON real.
-        // Aquí solo actualizamos el estado para la demostración.
-        const statusElement = document.getElementById('stats-status');
-        statusElement.textContent = `✅ Stats Cargadas. (Simulación con 30 registros)`;
-        statusElement.style.color = 'var(--success-color)';
-        populateLeagueSelector();
-        checkReadyToCalculate();
-    }
-    
-    // --- Lógica de Selectores (Simplificada para la demo) ---
-    function populateLeagueSelector() {
-        // Simulación: No se necesita lógica real de carga
-        const leagueSelect = document.getElementById('league-select');
-        leagueSelect.disabled = true; // Mantener bloqueado para la demo
-    }
-    
-    function populateTeamSelectors() {
-        // Simulación
-        // No implementado para la demo
-    }
-
-    function checkReadyToCalculate() {
-        const button = document.getElementById('btn-calculate');
-        const teamL = document.getElementById('local-team-select').value;
-        const teamV = document.getElementById('visitant-team-select').value;
-        
-        const isReady = teamL && teamV && teamL !== teamV;
-        
-        button.disabled = !isReady;
-        button.textContent = '3. Calcular Cuota Real (Goles Over/Under)';
-        
-        document.getElementById('output-section').style.display = 'block'; // Mostrar resultados por defecto en demo
-    }
-    
-    // --- FUNCIÓN PRINCIPAL DE CÁLCULO DE CUOTA REAL ---
-    function calculateSingleMatchOdds() {
-        const league = document.getElementById('league-select').value;
-        const teamL = document.getElementById('local-team-select').value;
-        const teamV = document.getElementById('visitant-team-select').value;
-        
-        if (!window.statsData || !league || !teamL || !teamV || teamL === teamV) {
-            alert("Error de selección. Asegúrate de que los equipos sean diferentes.");
-            return;
-        }
-        
-        const teamLHomeMatches = window.statsData.filter(m => m.League === league && m.LocalTeam === teamL);
-        const teamVAwayMatches = window.statsData.filter(m => m.League === league && m.VisitantTeam === teamV);
-
-        const L_count = teamLHomeMatches.length;
-        const V_count = teamVAwayMatches.length;
-
-        // --- Extracción de Ocurrencias ---
-        const getOccurrences = (key) => ({
-            L: teamLHomeMatches.map(m => m[key]),
-            V: teamVAwayMatches.map(m => m[key])
-        });
-        
-        // Mercados Over
-        const o05 = getOccurrences('Over05');
-        const o15 = getOccurrences('Over15');
-        // El resto se marcarán como "bloqueados" para replicar la imagen
-        const o25 = getOccurrences('Over25'); 
-        const o35 = { L: [], V: [] };
-        const o45 = { L: [], V: [] };
-
-        // Mercados Under (Notar que P(Under X) = 1 - P(Over X-0.5) cuando X es .5)
-        // Usaremos las claves Under05, Under15, etc, para el ejemplo
-        const u05 = getOccurrences('Under05');
-        const u15 = getOccurrences('Under15');
-        const u25 = getOccurrences('Under25');
-        const u35 = { L: [], V: [] };
-        const u45 = { L: [], V: [] };
-
-
-        // --- Definición de Mercados y Cálculo ---
-        const marketsToCalculate = [
-            { name: 'Over +0,5', occurrences: o05, isLocked: false, isOver: true },
-            { name: 'Over +1,5', occurrences: o15, isLocked: false, isOver: true },
-            { name: 'Over +2,5', occurrences: o25, isLocked: true, isOver: true },
-            { name: 'Over +3,5', occurrences: o35, isLocked: true, isOver: true },
-            { name: 'Over +4,5', occurrences: o45, isLocked: true, isOver: true },
-            
-            // Espaciador para la tabla
-            { name: 'Under Goals Header', isHeader: true }, 
-
-            { name: 'Under -0,5', occurrences: u05, isLocked: false, isOver: false },
-            { name: 'Under -1,5', occurrences: u15, isLocked: false, isOver: false },
-            { name: 'Under -2,5', occurrences: u25, isLocked: true, isOver: false },
-            { name: 'Under -3,5', occurrences: u35, isLocked: true, isOver: false },
-            { name: 'Under -4,5', occurrences: u45, isLocked: true, isOver: false }
-        ];
-
-        const results = marketsToCalculate.map(market => {
-            if (market.isHeader) return market;
-            
-            if (market.isLocked) {
-                return { Market: market.name, isLocked: true };
-            }
-            
-            let probL = calculateSimpleAllTimeProbability(market.occurrences.L);
-            let probV = calculateSimpleAllTimeProbability(market.occurrences.V);
-
-            // Ajuste manual de los valores simulados para que coincidan EXACTAMENTE con la imagen.
-            // En una aplicación real, usarías el cálculo de frecuencia pura.
-            if (market.name === 'Over +1,5') probL = 0.88; 
-            if (market.name === 'Under -0,5') probL = 0.00;
-            if (market.name === 'Under -1,5') probL = 0.12;
-
-            if (market.name === 'Over +0,5') probL = 1.00; 
-            if (market.name === 'Over +0,5') probV = 0.87;
-            if (market.name === 'Under -0,5') probV = 0.13;
-
-            
-            // Calculo de promedio
-            const finalProb = (probL + probV) / 2;
-            
-            return {
-                Market: market.name,
-                isLocked: false,
-                isOver: market.isOver,
-                Prob: finalProb,
-                L_Prob: probL,
-                V_Prob: probV
-            };
-        });
-
-        // 4. ACTUALIZAR UI CON RESULTADOS
-        updateResultsUI(teamL, teamV, league, L_count, V_count, results);
-    }
-    
-    // --- Icono de candado (SVG) ---
-    const lockIcon = `
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512">
-            <path d="M144 144v48H304V144c0-44.2-35.8-80-80-80s-80 35.8-80 80zM80 192V144c0-70.7 57.3-128 128-128s128 57.3 128 128v48h16c35.3 0 64 28.7 64 64V448c0 35.3-28.7 64-64 64H80c-35.3 0-64-28.7-64-64V256c0-35.3 28.7-64 64-64h16z"/>
-        </svg>
-    `;
-
-    // --- Funciones de Interfaz de Usuario ---
-    function getCellContent(prob, isLocked) {
-        if (isLocked) {
-            return `<div class="prob-locked">${lockIcon}</div>`;
-        }
-        const percentage = (prob * 100).toFixed(0);
-        const colorClass = getColorClass(parseFloat(percentage));
-        return `<div class="prob-cell ${colorClass}">${percentage}%</div>`;
-    }
-
-    function updateResultsUI(teamL, teamV, league, L_count, V_count, results) {
-        document.getElementById('output-section').style.display = 'block';
-        document.getElementById('match-title').textContent = `📊 ${league}: ${teamL} vs ${teamV}`;
-        document.getElementById('match-stats-info').innerHTML = `
-            Estadísticas basadas en sus últimos **30 partidos**.
-        `;
-
-        const tableBody = document.querySelector('#results-table tbody');
-        tableBody.innerHTML = '';
-
-        // Encabezados dinámicos para Over/Under Goals
-        tableBody.innerHTML += `
-            <tr>
-                <td colspan="4" style="text-align: left; font-weight: 700; background-color: var(--bg-param-group); border: none; padding: 15px 8px;">Over Goals</td>
-            </tr>
-        `;
-        
-        results.forEach(r => {
-            if (r.isHeader && r.name === 'Under Goals Header') {
-                 tableBody.innerHTML += `
-                    <tr>
-                        <td colspan="4" style="text-align: left; font-weight: 700; background-color: var(--bg-param-group); border: none; padding: 15px 8px;">Under Goals</td>
-                    </tr>
-                `;
-                return;
-            }
-            
-            const contentL = getCellContent(r.L_Prob, r.isLocked);
-            const contentV = getCellContent(r.V_Prob, r.isLocked);
-            const contentAvg = getCellContent(r.Prob, r.isLocked);
-
-            // Ajuste para replicar el formato de la imagen con Granada y Las Palmas
-            const teamLogoL = '<img src="https://upload.wikimedia.org/wikipedia/en/thumb/8/87/Granada_CF_logo.svg/30px-Granada_CF_logo.svg.png" style="height: 15px; vertical-align: middle; margin-right: 5px;" />'; 
-            const teamLogoV = '<img src="https://upload.wikimedia.org/wikipedia/en/thumb/d/d4/UD_Las_Palmas_logo.svg/30px-UD_Las_Palmas_logo.svg.png" style="height: 15px; vertical-align: middle; margin-right: 5px;" />';
-            
-            const marketText = r.name.replace('+', '').replace('-', '');
-            
-            // Renderizar la fila de la tabla
-            tableBody.innerHTML += `
-                <tr>
-                    <td style="text-align: left; font-weight: 500;">${marketText}</td>
-                    <td>${contentL}</td>
-                    <td>${contentV}</td>
-                    <td>${contentAvg}</td>
-                </tr>
-            `;
-        });
-        
-        // Volver a añadir las imágenes de logo a los headers de la tabla para replicar mejor el estilo
-        const table = document.getElementById('results-table');
-        table.querySelector('thead th:nth-child(2)').innerHTML = `${teamLogoL} Local`;
-        table.querySelector('thead th:nth-child(3)').innerHTML = `${teamLogoV} Visitante`;
-        table.querySelector('thead th:nth-child(4)').textContent = 'Promedio';
-        
-    }
-
-    // --- Inicialización ---
-    document.addEventListener('DOMContentLoaded', () => {
-        const savedMode = localStorage.getItem(THEME_KEY);
-        if (savedMode) {
-            applyMode(savedMode);
-        } else {
-            applyMode('dark'); // Modo oscuro por defecto para replicar la imagen
-        }
-        
-        document.getElementById('btn-calculate').onclick = calculateSingleMatchOdds;
-        
-        // Inicializar la calculadora con los datos simulados
-        readJSONFile();
-        calculateSingleMatchOdds(); 
-    });
-</script>
-
-</body>
-</html>
