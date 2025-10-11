@@ -3,19 +3,20 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Modelo de Poisson: Carga de Archivo JSON para O2.5</title>
+    <title>Modelo de Poisson: Carga de Archivo JSON y Selectores Dinámicos</title>
     <style>
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f7f6; color: #333; margin: 20px; }
         .container { max-width: 900px; margin: 0 auto; background-color: #fff; padding: 30px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1); }
-        h1 { color: #17a2b8; text-align: center; margin-bottom: 20px; }
+        h1 { color: #007bff; text-align: center; margin-bottom: 20px; }
         label { display: block; margin-top: 15px; font-weight: bold; }
-        input[type="text"], input[type="file"] { width: 100%; padding: 10px; margin-top: 5px; border: 1px solid #ccc; border-radius: 6px; box-sizing: border-box; font-size: 1em; }
+        input[type="file"], select { width: 100%; padding: 10px; margin-top: 5px; border: 1px solid #ccc; border-radius: 6px; box-sizing: border-box; font-size: 1em; }
         input[type="file"] { padding: 10px 10px; background-color: #e9ecef; cursor: pointer; }
-        button { background-color: #17a2b8; color: white; padding: 12px 20px; border: none; border-radius: 6px; cursor: pointer; font-size: 1.1em; margin-top: 20px; width: 100%; transition: background-color 0.3s; }
-        button:hover { background-color: #138496; }
-        #resultados { margin-top: 30px; padding: 20px; border: 2px solid #17a2b8; border-radius: 8px; background-color: #e2f7f9; }
-        #resultados h2 { color: #17a2b8; border-bottom: 2px solid #17a2b8; padding-bottom: 10px; margin-top: 0; }
-        .result-item { margin-top: 10px; padding: 8px; border-left: 4px solid #17a2b8; background-color: #fff; border-radius: 4px; }
+        select { background-color: #fff; appearance: none; }
+        button { background-color: #007bff; color: white; padding: 12px 20px; border: none; border-radius: 6px; cursor: pointer; font-size: 1.1em; margin-top: 20px; width: 100%; transition: background-color 0.3s; }
+        button:hover { background-color: #0056b3; }
+        #resultados { margin-top: 30px; padding: 20px; border: 2px solid #007bff; border-radius: 8px; background-color: #e6f7ff; }
+        #resultados h2 { color: #007bff; border-bottom: 2px solid #007bff; padding-bottom: 10px; margin-top: 0; }
+        .result-item { margin-top: 10px; padding: 8px; border-left: 4px solid #007bff; background-color: #fff; border-radius: 4px; }
         .alert-error { color: #dc3545; font-weight: bold; margin-top: 15px; }
         .simulacion-notice { color: #ffc107; background-color: #fff3cd; padding: 10px; border-radius: 6px; margin-bottom: 20px; border: 1px solid #ffc107; }
         .prediction { font-size: 1.5em; color: #28a745; font-weight: bold; }
@@ -25,23 +26,29 @@
 <body>
 
 <div class="container">
-    <h1>Modelo de Poisson: Carga de Archivo Histórico para O2.5</h1>
+    <h1>Modelo de Poisson: Selectores Dinámicos para O2.5</h1>
     <div class="simulacion-notice">
-        **Requisitos de Datos:** El archivo JSON debe contener un **array de objetos** con las claves: `League`, `Home`, `Away`, `GolesLocal`, y `GolesVisita`. El modelo usará entre 8 y 10 partidos por equipo en su rol.
+        **Instrucción:** Primero selecciona el archivo JSON. Los menús desplegables de Liga y Equipos se llenarán automáticamente con los datos cargados.
     </div>
 
     <form id="poissonForm">
-        <label for="liga">Liga a Pronosticar:</label>
-        <input type="text" id="liga" value="Brazil Serie B" required>
-
-        <label for="local">Equipo Local:</label>
-        <input type="text" id="local" value="ABC" required>
-
-        <label for="visita">Equipo Visitante:</label>
-        <input type="text" id="visita" value="Mirassol" required>
-
-        <label for="fileInput">Selecciona tu archivo JSON de partidos históricos:</label>
+        <label for="fileInput">1. Selecciona tu archivo JSON de partidos históricos:</label>
         <input type="file" id="fileInput" accept=".json" required>
+        
+        <label for="liga">2. Selecciona la Liga:</label>
+        <select id="liga" disabled>
+            <option value="">Carga el archivo...</option>
+        </select>
+
+        <label for="local">3. Selecciona el Equipo Local:</label>
+        <select id="local" disabled>
+            <option value="">Carga el archivo...</option>
+        </select>
+
+        <label for="visita">4. Selecciona el Equipo Visitante:</label>
+        <select id="visita" disabled>
+            <option value="">Carga el archivo...</option>
+        </select>
         
         <button type="submit">Calcular Probabilidad O2.5 con Poisson</button>
     </form>
@@ -50,15 +57,15 @@
         <h2>Predicción del Modelo de Poisson</h2>
         <p class="alert-error" id="errorMsg" style="display: none;"></p>
         <div id="modelOutput">
-            <p>Selecciona un archivo JSON y ejecuta el modelo.</p>
+            <p>Elige un archivo, selecciona las opciones y presiona calcular.</p>
         </div>
     </div>
 </div>
 
 <script>
-    // --- Funciones Matemáticas ---
+    let globalHistory = []; // Almacena el array de partidos cargado globalmente
 
-    // Factorial (para la fórmula de Poisson)
+    // --- Funciones Matemáticas ---
     function factorial(n) {
         if (n === 0 || n === 1) return 1;
         let result = 1;
@@ -67,60 +74,76 @@
         }
         return result;
     }
-
-    // Probabilidad de Poisson P(X=k | lambda)
     function poisson_prob(k, lambda) {
         if (k < 0) return 0;
-        // P(X=k) = (lambda^k * e^(-lambda)) / k!
         return (Math.pow(lambda, k) * Math.exp(-lambda)) / factorial(k);
+    }
+
+    // --- Funciones de Llenado Dinámico ---
+
+    function populateSelect(selectId, optionsSet) {
+        const select = document.getElementById(selectId);
+        select.innerHTML = '<option value="">-- Selecciona --</option>'; // Opción por defecto
+        optionsSet.forEach(option => {
+            const element = document.createElement('option');
+            element.value = option;
+            element.textContent = option;
+            select.appendChild(element);
+        });
+        select.disabled = false;
+    }
+
+    // Analiza los datos y llena los selectores
+    function loadAndPopulateData(history) {
+        const leagues = new Set();
+        const teams = new Set();
+
+        history.forEach(match => {
+            if (match.League) leagues.add(match.League);
+            if (match.Home) teams.add(match.Home);
+            if (match.Away) teams.add(match.Away);
+        });
+
+        populateSelect('liga', Array.from(leagues).sort());
+        populateSelect('local', Array.from(teams).sort());
+        populateSelect('visita', Array.from(teams).sort());
     }
 
     // --- Funciones de Procesamiento de Datos ---
 
     // Filtra y limita los datos históricos al rango de 8 a 10 partidos.
     function filterAndLimitData(history, team, role, maxCount = 10, minCount = 8) {
+        // Filtrar por equipo y rol
         const filtered = history
             .filter(match => (role === 'Home' ? match.Home === team : match.Away === team));
         
-        // Tomamos solo los 'maxCount' partidos más recientes (asumiendo que los últimos están al final del array)
+        // Tomamos los partidos más recientes (asumiendo que los últimos están al final)
         const recentMatches = filtered.slice(Math.max(filtered.length - maxCount, 0));
         
         const dataUsed = recentMatches.length;
 
-        // Calculamos la suma de goles del equipo en su rol
+        // Suma de goles a favor del equipo en su rol
         const goalsSum = recentMatches.reduce((sum, match) => {
             return sum + (role === 'Home' ? match.GolesLocal : match.GolesVisita);
         }, 0);
 
-        // Si hay datos, calculamos el promedio. Si no, devolvemos 0.
         const avg = dataUsed > 0 ? goalsSum / dataUsed : 0;
 
         return { avg, dataUsed, goalsSum, hasMinData: dataUsed >= minCount };
     }
 
 
-    // --- Lógica Principal ---
+    // --- Manejo del Evento de Carga de Archivo ---
 
-    document.getElementById('poissonForm').addEventListener('submit', function(e) {
-        e.preventDefault();
-        
-        const fileInput = document.getElementById('fileInput');
-        const file = fileInput.files[0];
-        
+    document.getElementById('fileInput').addEventListener('change', function(e) {
+        const file = e.target.files[0];
         const errorMsg = document.getElementById('errorMsg');
-        const outputDiv = document.getElementById('modelOutput');
-        outputDiv.innerHTML = '';
         errorMsg.style.display = 'none';
 
-        if (!file) {
-            errorMsg.textContent = 'Por favor, selecciona un archivo JSON.';
-            errorMsg.style.display = 'block';
-            return;
-        }
+        if (!file) return;
 
         const reader = new FileReader();
 
-        // 1. Leer el contenido del archivo
         reader.onload = function(event) {
             try {
                 const jsonText = event.target.result;
@@ -129,89 +152,136 @@
                 if (!Array.isArray(history) || history.length < 1) {
                     throw new Error("El archivo JSON debe contener un array de partidos.");
                 }
-
-                const localTeam = document.getElementById('local').value;
-                const awayTeam = document.getElementById('visita').value;
-                const league = document.getElementById('liga').value;
                 
-                // 2. Procesamiento de la Muestra Limitada
-                const localData = filterAndLimitData(history, localTeam, 'Home');
-                const awayData = filterAndLimitData(history, awayTeam, 'Away');
-
-                // Validar la muestra mínima
-                if (!localData.hasMinData || !awayData.hasMinData) {
-                    const missing = [];
-                    if (!localData.hasMinData) missing.push(`${localTeam} (Local)`);
-                    if (!awayData.hasMinData) missing.push(`${awayTeam} (Visitante)`);
-                    
-                    outputDiv.innerHTML += `<p class="simulacion-notice">
-                        ⚠️ **Muestra Insuficiente:** Faltan datos para ${missing.join(' y ')}. Se usaron ${localData.dataUsed} y ${awayData.dataUsed} partidos, pero se requiere un mínimo de 8.
-                    </p>`;
-                }
+                // Almacenar globalmente la data
+                globalHistory = history;
                 
-                // 3. Simulación de la Regresión de Poisson (Cálculo de Lambdas)
-                const lambda_Home = localData.avg;
-                const lambda_Away = awayData.avg;
-
-                if (lambda_Home === 0 || lambda_Away === 0) {
-                     throw new Error("No se encontraron partidos suficientes o válidos para calcular la media de goles (lambda) para ambos equipos.");
-                }
-
-                // 4. Cálculo de Probabilidades de Poisson
-                let P_Less_Equal_2 = 0; // P(Total Goles <= 2) = P(0) + P(1) + P(2)
-
-                // Sumamos las probabilidades de todos los resultados donde la suma es 0, 1 o 2
-                for (let i = 0; i <= 2; i++) { // Goles del Local (i)
-                    for (let j = 0; j <= 2 - i; j++) { // Goles del Visitante (j), tal que i + j <= 2
-                        
-                        const P_Home = poisson_prob(i, lambda_Home);
-                        const P_Away = poisson_prob(j, lambda_Away);
-                        
-                        P_Less_Equal_2 += P_Home * P_Away;
-                    }
-                }
-
-                const P_Over_25 = 1 - P_Less_Equal_2;
-
-                // 5. Mostrar Resultados
-                outputDiv.innerHTML += `
-                    <h2>Detalles de la Predicción</h2>
-                    <div class="result-item">
-                        <strong>Liga:</strong> ${league} | <strong>Partido:</strong> ${localTeam} vs ${awayTeam}
-                    </div>
-                    
-                    <h3>Parámetros Poisson ($\lambda$) y Muestra Utilizada</h3>
-                    <div class="result-item">
-                        ** $\lambda_{\\text{Local}}$ (${localTeam}):** ${lambda_Home.toFixed(3)}
-                        <div class="data-summary">(${localData.goalsSum} goles en ${localData.dataUsed} partidos como Local)</div>
-                    </div>
-                    <div class="result-item">
-                        ** $\lambda_{\\text{Visitante}}$ (${awayTeam}):** ${lambda_Away.toFixed(3)}
-                        <div class="data-summary">(${awayData.goalsSum} goles en ${awayData.dataUsed} partidos como Visitante)</div>
-                    </div>
-                    
-                    <h3>Probabilidad del Mercado Over 2.5 (Poisson)</h3>
-                    <div class="result-item prediction">
-                        P(Total $\\le 2$ Goles): ${ (P_Less_Equal_2 * 100).toFixed(2) }%
-                        <br>P(Total $\\ge 3$ Goles) **(Over 2.5):** <strong>${ (P_Over_25 * 100).toFixed(2) }%</strong>
-                    </div>
-                `;
-
-            } catch (e) {
-                console.error("Error al procesar el archivo:", e);
-                errorMsg.textContent = `Error al procesar el archivo JSON: ${e.message}. Asegúrate de que el formato es correcto.`;
+                // Llenar los selectores
+                loadAndPopulateData(history);
+                
+                // Limpiar el resultado anterior
+                document.getElementById('modelOutput').innerHTML = '<p>Archivo cargado exitosamente. Ahora selecciona la liga y los equipos.</p>';
+            } catch (error) {
+                console.error("Error al procesar el archivo:", error);
+                errorMsg.textContent = `Error al procesar el archivo JSON: ${error.message}. Asegúrate del formato.`;
                 errorMsg.style.display = 'block';
+                // Deshabilitar selectores si falla la carga
+                document.getElementById('liga').disabled = true;
+                document.getElementById('local').disabled = true;
+                document.getElementById('visita').disabled = true;
+                globalHistory = [];
             }
         };
-
-        // 2. Manejo de error de lectura de archivo
-        reader.onerror = function() {
-            errorMsg.textContent = 'Error al leer el archivo. Asegúrate de que el archivo no está corrupto.';
+        reader.onerror = () => {
+            errorMsg.textContent = 'Error al leer el archivo. Intenta de nuevo.';
             errorMsg.style.display = 'block';
         };
 
-        // 3. Iniciar la lectura del archivo como texto
         reader.readAsText(file);
+    });
+
+    // --- Manejo del Evento de Formulario (Cálculo) ---
+
+    document.getElementById('poissonForm').addEventListener('submit', function(e) {
+        e.preventDefault();
+        
+        const localTeam = document.getElementById('local').value;
+        const awayTeam = document.getElementById('visita').value;
+        const league = document.getElementById('liga').value;
+        const errorMsg = document.getElementById('errorMsg');
+        const outputDiv = document.getElementById('modelOutput');
+        outputDiv.innerHTML = '';
+        errorMsg.style.display = 'none';
+
+        if (!globalHistory || globalHistory.length === 0) {
+            errorMsg.textContent = 'Por favor, primero carga un archivo JSON válido.';
+            errorMsg.style.display = 'block';
+            return;
+        }
+
+        if (!league || !localTeam || !awayTeam) {
+            errorMsg.textContent = 'Por favor, selecciona la Liga, el Equipo Local y el Equipo Visitante.';
+            errorMsg.style.display = 'block';
+            return;
+        }
+
+        try {
+            // Filtrar los datos por la liga seleccionada
+            const filteredHistory = globalHistory.filter(match => match.League === league);
+
+            // 1. Procesamiento de la Muestra Limitada
+            const localData = filterAndLimitData(filteredHistory, localTeam, 'Home');
+            const awayData = filterAndLimitData(filteredHistory, awayTeam, 'Away');
+
+            // 2. Simulación de la Regresión de Poisson (Cálculo de Lambdas)
+            const lambda_Home = localData.avg;
+            const lambda_Away = awayData.avg;
+
+            if (lambda_Home === 0 && lambda_Away === 0) {
+                 throw new Error("Los equipos seleccionados no tienen datos válidos para calcular la media de goles en la liga elegida.");
+            }
+
+            // Media total de goles en la liga filtrada
+            const totalGoals = filteredHistory.reduce((sum, match) => sum + match.GolesLocal + match.GolesVisita, 0);
+            const leagueAvgGoal = filteredHistory.length > 0 ? totalGoals / (filteredHistory.length * 2) : 0;
+            
+            // 3. Cálculo de Probabilidades de Poisson
+            let P_Less_Equal_2 = 0; // P(Total Goles <= 2) = P(0) + P(1) + P(2)
+
+            for (let i = 0; i <= 2; i++) { // Goles del Local (i)
+                for (let j = 0; j <= 2 - i; j++) { // Goles del Visitante (j)
+                    
+                    const P_Home = poisson_prob(i, lambda_Home);
+                    const P_Away = poisson_prob(j, lambda_Away);
+                    
+                    P_Less_Equal_2 += P_Home * P_Away;
+                }
+            }
+
+            const P_Over_25 = 1 - P_Less_Equal_2;
+
+            // 4. Mostrar Resultados
+            let missingDataWarning = '';
+            if (!localData.hasMinData || !awayData.hasMinData) {
+                const missing = [];
+                if (!localData.hasMinData) missing.push(`${localTeam} (Local)`);
+                if (!awayData.hasMinData) missing.push(`${awayTeam} (Visitante)`);
+                missingDataWarning = `<p class="simulacion-notice">⚠️ **Muestra Insuficiente:** Se usaron ${localData.dataUsed} y ${awayData.dataUsed} partidos, pero se requiere un mínimo de 8 por equipo en su rol. El resultado puede ser menos fiable.</p>`;
+            }
+
+            outputDiv.innerHTML += `
+                ${missingDataWarning}
+                <h2>Detalles de la Predicción</h2>
+                <div class="result-item">
+                    <strong>Liga Seleccionada:</strong> ${league}
+                    <br><strong>Partidos de Liga Analizados:</strong> ${filteredHistory.length}
+                </div>
+                
+                <h3>Parámetros Poisson ($\lambda$) y Muestra Utilizada</h3>
+                <div class="result-item">
+                    ** $\lambda_{\\text{Local}}$ (${localTeam}):** ${lambda_Home.toFixed(3)}
+                    <div class="data-summary">(${localData.goalsSum} goles en ${localData.dataUsed} partidos como Local)</div>
+                </div>
+                <div class="result-item">
+                    ** $\lambda_{\\text{Visitante}}$ (${awayTeam}):** ${lambda_Away.toFixed(3)}
+                    <div class="data-summary">(${awayData.goalsSum} goles en ${awayData.dataUsed} partidos como Visitante)</div>
+                </div>
+                <div class="result-item">
+                    **Media de Goles de la Liga (por equipo/partido):** ${leagueAvgGoal.toFixed(3)}
+                </div>
+                
+                <h3>Probabilidad del Mercado Over 2.5 (Poisson)</h3>
+                <div class="result-item prediction">
+                    P(Total $\\le 2$ Goles): ${ (P_Less_Equal_2 * 100).toFixed(2) }%
+                    <br>P(Total $\\ge 3$ Goles) **(Over 2.5):** <strong>${ (P_Over_25 * 100).toFixed(2) }%</strong>
+                </div>
+            `;
+
+        } catch (e) {
+            console.error("Error en el cálculo:", e);
+            errorMsg.textContent = `Error en el cálculo del modelo: ${e.message}`;
+            errorMsg.style.display = 'block';
+        }
     });
 </script>
 
