@@ -1,184 +1,186 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Cargar JSON — Over 2.5</title>
-  <style>
-    body {
-      font-family: 'Segoe UI', sans-serif;
-      background: #181818;
-      color: #f0f0f0;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      padding: 40px;
-    }
-    h1 {
-      color: #00e676;
-    }
-    .container {
-      background: #252525;
-      padding: 25px 30px;
-      border-radius: 10px;
-      width: 320px;
-      box-shadow: 0 0 10px rgba(0,0,0,0.5);
-    }
-    label {
-      display: block;
-      margin-top: 15px;
-      font-weight: bold;
-    }
-    select, input[type="file"] {
-      width: 100%;
-      padding: 8px;
-      margin-top: 5px;
-      border: none;
-      border-radius: 5px;
-      background: #3a3a3a;
-      color: #fff;
-      outline: none;
-    }
-    button {
-      margin-top: 20px;
-      width: 100%;
-      padding: 10px;
-      border: none;
-      border-radius: 5px;
-      background: #00e676;
-      color: #181818;
-      font-weight: bold;
-      cursor: pointer;
-    }
-    button:hover {
-      background: #00ff9d;
-    }
-    .hidden {
-      display: none;
-    }
-  </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Análisis Over 2.5 — Últimos 8–10 Partidos</title>
+<style>
+  body {
+    font-family: 'Segoe UI', sans-serif;
+    background: #121212;
+    color: #eee;
+    padding: 30px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+  h1 {
+    color: #00e676;
+  }
+  .container {
+    background: #1e1e1e;
+    padding: 25px 30px;
+    border-radius: 10px;
+    width: 95%;
+    max-width: 950px;
+    box-shadow: 0 0 10px rgba(0,0,0,0.5);
+  }
+  input[type="file"] {
+    background: #2a2a2a;
+    border: none;
+    padding: 10px;
+    border-radius: 6px;
+    color: #fff;
+    cursor: pointer;
+    width: 100%;
+    margin-bottom: 20px;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 20px;
+  }
+  th, td {
+    border-bottom: 1px solid #333;
+    padding: 8px;
+    text-align: center;
+  }
+  th {
+    background: #00e676;
+    color: #111;
+  }
+  tr:hover {
+    background: #222;
+  }
+</style>
 </head>
 <body>
-  <h1>Filtro Over 2.5 (O25)</h1>
 
-  <div class="container">
-    <label for="fileInput">Selecciona archivo JSON:</label>
-    <input type="file" id="fileInput" accept=".json">
+<h1>📊 Análisis Over 2.5 (Últimos 8–10 Partidos)</h1>
 
-    <div id="selectors" class="hidden">
-      <label for="ligaSelect">Liga:</label>
-      <select id="ligaSelect">
-        <option value="">Selecciona liga</option>
-      </select>
+<div class="container">
+  <input type="file" id="fileInput" accept=".json">
+  <div id="tabla-container"></div>
+</div>
 
-      <label for="localSelect">Local:</label>
-      <select id="localSelect">
-        <option value="">Selecciona local</option>
-      </select>
+<script>
+document.getElementById('fileInput').addEventListener('change', function(e) {
+  const file = e.target.files[0];
+  if (!file) return;
 
-      <label for="visitaSelect">Visita:</label>
-      <select id="visitaSelect">
-        <option value="">Selecciona visita</option>
-      </select>
+  const reader = new FileReader();
+  reader.onload = function(event) {
+    try {
+      let data = JSON.parse(event.target.result);
+      if (!Array.isArray(data)) data = [data];
 
-      <button id="mostrarBtn">Mostrar selección</button>
-    </div>
-  </div>
+      // Filtrar partidos válidos con resultado final
+      data = data.filter(item => item["Result FT"] && item["Match"]);
 
-  <script>
-    let data = [];
+      // Ordenar por fecha si existe el campo Date
+      data.sort((a, b) => new Date(a.Date) - new Date(b.Date));
 
-    const fileInput = document.getElementById('fileInput');
-    const ligaSelect = document.getElementById('ligaSelect');
-    const localSelect = document.getElementById('localSelect');
-    const visitaSelect = document.getElementById('visitaSelect');
-    const selectorsDiv = document.getElementById('selectors');
-    const mostrarBtn = document.getElementById('mostrarBtn');
+      const stats = calcularProbabilidades(data);
+      mostrarTabla(stats);
+    } catch (err) {
+      alert("Error al leer el archivo JSON. Verifica su formato.");
+    }
+  };
+  reader.readAsText(file);
+});
 
-    fileInput.addEventListener('change', function(event) {
-      const file = event.target.files[0];
-      if (!file) return;
+function calcularProbabilidades(data) {
+  const equipos = {};
 
-      const reader = new FileReader();
-      reader.onload = function(e) {
-        try {
-          const parsed = JSON.parse(e.target.result);
+  data.forEach(item => {
+    const match = item.Match.split(" - ");
+    if (match.length < 2) return;
 
-          // Si es un solo objeto, lo convertimos a array
-          data = Array.isArray(parsed) ? parsed : [parsed];
+    const local = match[0].trim();
+    const visita = match[1].trim();
+    const resultado = item["Result FT"].split("-");
+    const golesLocal = parseInt(resultado[0]);
+    const golesVisita = parseInt(resultado[1]);
+    const totalGoles = golesLocal + golesVisita;
+    const esOver = totalGoles > 2.5 ? 1 : 0;
 
-          // Filtrar solo Over 2.5
-          data = data.filter(item => item["Desired Outcome"] === "O25");
+    // Agregar partido a historial de local y visita
+    equipos[local] = equipos[local] || { local: [] };
+    equipos[local].local.push(esOver);
 
-          if (data.length === 0) {
-            alert("No se encontraron partidos con Over 2.5 (O25).");
-            return;
-          }
+    equipos[visita] = equipos[visita] || { visita: [] };
+    equipos[visita].visita.push(esOver);
+  });
 
-          cargarLigas();
-          selectorsDiv.classList.remove('hidden');
-        } catch (error) {
-          alert("Error al leer el archivo JSON. Verifica su formato.");
-        }
-      };
-      reader.readAsText(file);
-    });
+  const resultados = [];
 
-    function cargarLigas() {
-      const ligas = [...new Set(data.map(item => item.League))];
-      ligaSelect.innerHTML = '<option value="">Selecciona liga</option>';
-      ligas.forEach(liga => {
-        const option = document.createElement('option');
-        option.value = liga;
-        option.textContent = liga;
-        ligaSelect.appendChild(option);
+  for (const equipo in equipos) {
+    for (const rol in equipos[equipo]) {
+      const partidos = equipos[equipo][rol];
+      if (!partidos || partidos.length < 8) continue;
+
+      // Tomar los últimos 8, 9 o 10 (si hay más)
+      const ultimos = partidos.slice(-10);
+      if (ultimos.length < 8) continue; // descartar si no alcanza 8
+
+      const jugados = ultimos.length;
+      const ganados = ultimos.reduce((a, b) => a + b, 0);
+      const prob = ganados / jugados;
+      const cuota = 1 / prob;
+
+      resultados.push({
+        equipo,
+        rol,
+        jugados,
+        ganados,
+        probabilidad: (prob * 100).toFixed(1) + "%",
+        cuota: cuota.toFixed(2)
       });
     }
+  }
 
-    ligaSelect.addEventListener('change', function() {
-      const ligaSeleccionada = ligaSelect.value;
-      const partidos = data.filter(item => item.League === ligaSeleccionada);
+  return resultados.sort((a, b) => parseFloat(b.probabilidad) - parseFloat(a.probabilidad));
+}
 
-      const locales = [...new Set(partidos.map(item => item.Match.split(" - ")[0]))];
-      const visitas = [...new Set(partidos.map(item => item.Match.split(" - ")[1]))];
+function mostrarTabla(datos) {
+  const container = document.getElementById('tabla-container');
+  if (datos.length === 0) {
+    container.innerHTML = "<p>No hay equipos con al menos 8 partidos recientes.</p>";
+    return;
+  }
 
-      localSelect.innerHTML = '<option value="">Selecciona local</option>';
-      locales.forEach(local => {
-        const option = document.createElement('option');
-        option.value = local;
-        option.textContent = local;
-        localSelect.appendChild(option);
-      });
+  let html = `
+    <table>
+      <thead>
+        <tr>
+          <th>Equipo</th>
+          <th>Rol</th>
+          <th>Partidos (últimos)</th>
+          <th>Overs 2.5</th>
+          <th>Probabilidad</th>
+          <th>Cuota Justa</th>
+        </tr>
+      </thead>
+      <tbody>
+  `;
 
-      visitaSelect.innerHTML = '<option value="">Selecciona visita</option>';
-      visitas.forEach(visita => {
-        const option = document.createElement('option');
-        option.value = visita;
-        option.textContent = visita;
-        visitaSelect.appendChild(option);
-      });
-    });
+  datos.forEach(d => {
+    html += `
+      <tr>
+        <td>${d.equipo}</td>
+        <td>${d.rol}</td>
+        <td>${d.jugados}</td>
+        <td>${d.ganados}</td>
+        <td>${d.probabilidad}</td>
+        <td>${d.cuota}</td>
+      </tr>
+    `;
+  });
 
-    mostrarBtn.addEventListener('click', () => {
-      const liga = ligaSelect.value;
-      const local = localSelect.value;
-      const visita = visitaSelect.value;
+  html += "</tbody></table>";
+  container.innerHTML = html;
+}
+</script>
 
-      if (!liga || !local || !visita) {
-        alert('Selecciona todos los campos.');
-        return;
-      }
-
-      const partido = data.find(
-        item => item.League === liga && item.Match.includes(local) && item.Match.includes(visita)
-      );
-
-      if (partido) {
-        alert(`Liga: ${liga}\nLocal: ${local}\nVisita: ${visita}\nCuota Over 2.5: ${partido.Odd}`);
-      } else {
-        alert("No se encontró el partido en los datos cargados.");
-      }
-    });
-  </script>
 </body>
 </html>
