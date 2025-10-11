@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Modelo de Poisson: Selectores Dinámicos Corregidos (Normalización)</title>
+    <script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></script>
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
     <style>
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f7f6; color: #333; margin: 20px; }
         .container { max-width: 900px; margin: 0 auto; background-color: #fff; padding: 30px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1); }
@@ -30,25 +32,44 @@
     <div class="simulacion-notice">
         ✅ **Solución de Normalización:** Se ha añadido una **normalización** para ignorar mayúsculas/minúsculas y espacios en los nombres de las ligas y equipos, resolviendo el problema de coincidencia de datos.
     </div>
+    <div class="simulacion-notice">
+        <strong>Formato JSON esperado:</strong>
+        <pre>
+[
+    {
+        "League": "NombreLiga",
+        "Home": "EquipoLocal",
+        "Away": "EquipoVisitante",
+        "GolesLocal": 2,
+        "GolesVisita": 1
+    },
+    ...
+]
+        </pre>
+    </div>
 
     <form id="poissonForm">
         <label for="fileInput">1. Selecciona tu archivo JSON de partidos históricos:</label>
-        <input type="file" id="fileInput" accept=".json" required>
+        <input type="file" id="fileInput" accept=".json" required aria-describedby="fileInputHelp">
+        <small id="fileInputHelp" class="data-summary">Carga un archivo JSON con datos históricos de partidos.</small>
         
         <label for="liga">2. Selecciona la Liga:</label>
-        <select id="liga" disabled>
+        <select id="liga" disabled aria-describedby="ligaHelp">
             <option value="">Carga el archivo...</option>
         </select>
+        <small id="ligaHelp" class="data-summary">Selecciona la liga de los equipos a analizar.</small>
 
         <label for="local">3. Selecciona el Equipo Local:</label>
-        <select id="local" disabled>
+        <select id="local" disabled aria-describedby="localHelp">
             <option value="">Selecciona una liga...</option>
         </select>
+        <small id="localHelp" class="data-summary">Selecciona el equipo que juega como local.</small>
 
         <label for="visita">4. Selecciona el Equipo Visitante:</label>
-        <select id="visita" disabled>
+        <select id="visita" disabled aria-describedby="visitaHelp">
             <option value="">Selecciona una liga...</option>
         </select>
+        <small id="visitaHelp" class="data-summary">Selecciona el equipo que juega como visitante.</small>
         
         <button type="submit">Calcular Probabilidad O2.5 con Poisson</button>
     </form>
@@ -64,6 +85,7 @@
 
 <script>
     let globalHistory = []; 
+    let leagueTeamsMap = new Map();
 
     // Función para normalizar cadenas (quitar espacios extra, minúsculas)
     function normalizeString(str) {
@@ -99,20 +121,36 @@
         select.disabled = false;
     }
 
+    // Construye el mapa de ligas y equipos
+    function buildLeagueTeamsMap(history) {
+        leagueTeamsMap.clear();
+        history.forEach(match => {
+            const league = normalizeString(match.League);
+            if (!leagueTeamsMap.has(league)) {
+                leagueTeamsMap.set(league, new Set());
+            }
+            const teams = leagueTeamsMap.get(league);
+            if (match.Home) teams.add(match.Home.trim());
+            if (match.Away) teams.add(match.Away.trim());
+        });
+    }
+
     // Analiza TODAS las ligas y llena el selector de liga
     function loadLeagues(history) {
-        const leagues = new Set();
-        history.forEach(match => {
-            if (match.League) leagues.add(match.League.trim());
-        });
-        populateSelect('liga', Array.from(leagues).sort(), '-- Selecciona una liga --');
+        const leagues = Array.from(leagueTeamsMap.keys()).map(normalized => {
+            const match = history.find(m => normalizeString(m.League) === normalized);
+            return match ? match.League.trim() : normalized;
+        }).sort();
+        populateSelect('liga', leagues, '-- Selecciona una liga --');
     }
 
     // Filtra los equipos según la liga seleccionada
     function populateTeamsByLeague() {
         const selectedLeague = document.getElementById('liga').value;
-        const normalizedLeague = normalizeString(selectedLeague); // Normalizamos la selección
-        
+        const selectedLocal = document.getElementById('local').value;
+        const selectedVisita = document.getElementById('visita').value;
+        const normalizedLeague = normalizeString(selectedLeague);
+
         const localSelect = document.getElementById('local');
         const visitaSelect = document.getElementById('visita');
 
@@ -123,28 +161,16 @@
         visitaSelect.disabled = true;
 
         if (!selectedLeague) {
-             localSelect.innerHTML = '<option value="">Selecciona una liga...</option>';
-             visitaSelect.innerHTML = '<option value="">Selecciona una liga...</option>';
+            localSelect.innerHTML = '<option value="">Selecciona una liga...</option>';
+            visitaSelect.innerHTML = '<option value="">Selecciona una liga...</option>';
             return;
         }
 
-        const teams = new Set();
-        
-        // Filtra comparando la liga normalizada del partido con la liga seleccionada normalizada
-        const leagueMatches = globalHistory.filter(match => 
-            normalizeString(match.League) === normalizedLeague
-        );
+        const teams = Array.from(leagueTeamsMap.get(normalizedLeague) || []).sort();
 
-        leagueMatches.forEach(match => {
-            if (match.Home) teams.add(match.Home.trim());
-            if (match.Away) teams.add(match.Away.trim());
-        });
-        
-        const sortedTeams = Array.from(teams).sort();
-        
-        if (sortedTeams.length > 0) {
-            populateSelect('local', sortedTeams, '-- Selecciona Local --');
-            populateSelect('visita', sortedTeams, '-- Selecciona Visitante --');
+        if (teams.length > 0) {
+            populateSelect('local', teams.filter(team => team !== selectedVisita), '-- Selecciona Local --');
+            populateSelect('visita', teams.filter(team => team !== selectedLocal), '-- Selecciona Visitante --');
         } else {
             localSelect.innerHTML = '<option value="">No hay equipos para esta liga</option>';
             visitaSelect.innerHTML = '<option value="">No hay equipos para esta liga</option>';
@@ -152,6 +178,14 @@
     }
 
     // --- Funciones de Procesamiento de Datos ---
+
+    // Validar estructura JSON
+    function validateJSON(history) {
+        const requiredKeys = ['League', 'Home', 'Away', 'GolesLocal', 'GolesVisita'];
+        return history.every(match => 
+            requiredKeys.every(key => key in match && match[key] != null)
+        );
+    }
 
     // Filtra y limita los datos históricos al rango de 8 a 10 partidos.
     function filterAndLimitData(history, team, role, maxCount = 10, minCount = 8) {
@@ -178,7 +212,6 @@
         return { avg, dataUsed, goalsSum, hasMinData: dataUsed >= minCount };
     }
 
-
     // --- Manejo de Eventos ---
 
     // 1. Manejo del Evento de Carga de Archivo
@@ -199,9 +232,13 @@
                 if (!Array.isArray(history) || history.length < 1) {
                     throw new Error("El archivo JSON debe contener un array de partidos.");
                 }
+
+                if (!validateJSON(history)) {
+                    throw new Error("El archivo JSON debe contener las claves: League, Home, Away, GolesLocal, GolesVisita.");
+                }
                 
                 globalHistory = history;
-                
+                buildLeagueTeamsMap(history);
                 loadLeagues(history);
                 
                 document.getElementById('local').innerHTML = '<option value="">Selecciona una liga...</option>';
@@ -229,8 +266,11 @@
     // 2. Manejo del Evento de Cambio de Liga
     document.getElementById('liga').addEventListener('change', populateTeamsByLeague);
 
+    // 3. Manejo de Cambios en Equipos para prevenir selección del mismo equipo
+    document.getElementById('local').addEventListener('change', populateTeamsByLeague);
+    document.getElementById('visita').addEventListener('change', populateTeamsByLeague);
 
-    // 3. Manejo del Evento de Formulario (Cálculo)
+    // 4. Manejo del Evento de Formulario (Cálculo)
     document.getElementById('poissonForm').addEventListener('submit', function(e) {
         e.preventDefault();
         
@@ -270,18 +310,19 @@
             const localData = filterAndLimitData(filteredHistory, localTeam, 'Home');
             const awayData = filterAndLimitData(filteredHistory, awayTeam, 'Away');
 
-            // 2. Simulación de la Regresión de Poisson (Cálculo de Lambdas)
-            const lambda_Home = localData.avg;
-            const lambda_Away = awayData.avg;
-
-            if (localData.dataUsed < 1 || awayData.dataUsed < 1) {
-                 throw new Error("No se encontraron suficientes partidos históricos para uno o ambos equipos en esta liga.");
-            }
-
             // Media total de goles en la liga filtrada
             const totalGoals = filteredHistory.reduce((sum, match) => sum + match.GolesLocal + match.GolesVisita, 0);
             const leagueAvgGoal = filteredHistory.length > 0 ? totalGoals / (filteredHistory.length * 2) : 0;
-            
+
+            if (localData.dataUsed < 1 || awayData.dataUsed < 1) {
+                const missingTeam = localData.dataUsed < 1 ? localTeam : awayTeam;
+                throw new Error(`No se encontraron partidos históricos para ${missingTeam} en la liga ${league}.`);
+            }
+
+            // 2. Simulación de la Regresión de Poisson (Cálculo de Lambdas) con fallback
+            const lambda_Home = localData.hasMinData ? localData.avg : leagueAvgGoal;
+            const lambda_Away = awayData.hasMinData ? awayData.avg : leagueAvgGoal;
+
             // 3. Cálculo de Probabilidades de Poisson
             let P_Less_Equal_2 = 0; 
 
@@ -303,7 +344,7 @@
                 const missing = [];
                 if (!localData.hasMinData) missing.push(`${localTeam} (Local)`);
                 if (!awayData.hasMinData) missing.push(`${awayTeam} (Visitante)`);
-                missingDataWarning = `<p class="simulacion-notice">⚠️ **Muestra Insuficiente:** Se usaron ${localData.dataUsed} y ${awayData.dataUsed} partidos (mínimo 8 requerido). El resultado puede ser menos fiable.</p>`;
+                missingDataWarning = `<p class="simulacion-notice">⚠️ **Muestra Insuficiente:** Se usaron ${localData.dataUsed} y ${awayData.dataUsed} partidos (mínimo 8 requerido). Se usó el promedio de la liga como fallback. El resultado puede ser menos fiable.</p>`;
             }
 
             outputDiv.innerHTML += `
@@ -330,6 +371,9 @@
                     <br>P(Total $\\ge 3$ Goles) **(Over 2.5):** <strong>${ (P_Over_25 * 100).toFixed(2) }%</strong>
                 </div>
             `;
+
+            // Refrescar MathJax para renderizar LaTeX
+            MathJax.typesetPromise();
 
         } catch (e) {
             console.error("Error en el cálculo:", e);
