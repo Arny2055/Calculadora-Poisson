@@ -28,7 +28,7 @@
 <div class="container">
     <h1>Modelo de Poisson: Selectores Dinámicos para O2.5</h1>
     <div class="simulacion-notice">
-        **Instrucción:** Elige un archivo JSON. Luego, al seleccionar la Liga, los menús de equipos se actualizarán automáticamente.
+        **Instrucción:** Elige un archivo JSON. **Asegúrate de que tus datos usan las claves exactas:** `League`, `Home`, `Away`, `GolesLocal`, `GolesVisita`. Al seleccionar la Liga, los menús de equipos se actualizarán.
     </div>
 
     <form id="poissonForm">
@@ -97,6 +97,7 @@
     function loadLeagues(history) {
         const leagues = new Set();
         history.forEach(match => {
+            // Se asume que la clave de la liga es 'League'
             if (match.League) leagues.add(match.League);
         });
         populateSelect('liga', Array.from(leagues).sort(), '-- Selecciona una liga --');
@@ -109,12 +110,14 @@
         const visitaSelect = document.getElementById('visita');
 
         // Resetear selectores de equipo
-        localSelect.innerHTML = '<option value="">Selecciona una liga...</option>';
-        visitaSelect.innerHTML = '<option value="">Selecciona una liga...</option>';
+        localSelect.innerHTML = '<option value="">Cargando equipos...</option>';
+        visitaSelect.innerHTML = '<option value="">Cargando equipos...</option>';
         localSelect.disabled = true;
         visitaSelect.disabled = true;
 
         if (!selectedLeague) {
+             localSelect.innerHTML = '<option value="">Selecciona una liga...</option>';
+             visitaSelect.innerHTML = '<option value="">Selecciona una liga...</option>';
             return;
         }
 
@@ -124,14 +127,22 @@
         const leagueMatches = globalHistory.filter(match => match.League === selectedLeague);
 
         leagueMatches.forEach(match => {
+            // Se asumen las claves 'Home' y 'Away'
             if (match.Home) teams.add(match.Home);
             if (match.Away) teams.add(match.Away);
         });
-
-        // Llenar los selectores de equipo con los equipos únicos de esa liga
+        
         const sortedTeams = Array.from(teams).sort();
-        populateSelect('local', sortedTeams, '-- Selecciona Local --');
-        populateSelect('visita', sortedTeams, '-- Selecciona Visitante --');
+        
+        if (sortedTeams.length > 0) {
+            // Llenar los selectores de equipo con los equipos únicos de esa liga
+            populateSelect('local', sortedTeams, '-- Selecciona Local --');
+            populateSelect('visita', sortedTeams, '-- Selecciona Visitante --');
+        } else {
+             // Si no hay equipos, significa que la liga seleccionada no tiene partidos en el archivo
+            localSelect.innerHTML = '<option value="">No hay equipos para esta liga</option>';
+            visitaSelect.innerHTML = '<option value="">No hay equipos para esta liga</option>';
+        }
     }
 
     // --- Funciones de Procesamiento de Datos ---
@@ -172,6 +183,7 @@
                 const jsonText = event.target.result;
                 const history = JSON.parse(jsonText);
 
+                // Validación básica de la estructura del JSON
                 if (!Array.isArray(history) || history.length < 1) {
                     throw new Error("El archivo JSON debe contener un array de partidos.");
                 }
@@ -182,7 +194,7 @@
                 // Llenar solo el selector de Ligas
                 loadLeagues(history);
                 
-                // Resetear y deshabilitar selectores de equipos hasta que se elija la liga
+                // Resetear y deshabilitar selectores de equipos
                 document.getElementById('local').innerHTML = '<option value="">Selecciona una liga...</option>';
                 document.getElementById('visita').innerHTML = '<option value="">Selecciona una liga...</option>';
                 document.getElementById('local').disabled = true;
@@ -191,7 +203,7 @@
                 document.getElementById('modelOutput').innerHTML = '<p>Archivo cargado exitosamente. Ahora selecciona la liga.</p>';
             } catch (error) {
                 console.error("Error al procesar el archivo:", error);
-                errorMsg.textContent = `Error al procesar el archivo JSON: ${error.message}. Asegúrate del formato.`;
+                errorMsg.textContent = `Error al procesar el archivo JSON: ${error.message}. Verifica que sea JSON válido y use las claves correctas.`;
                 errorMsg.style.display = 'block';
                 document.getElementById('liga').disabled = true;
                 globalHistory = [];
@@ -252,8 +264,8 @@
             const lambda_Home = localData.avg;
             const lambda_Away = awayData.avg;
 
-            if (lambda_Home === 0 && lambda_Away === 0) {
-                 throw new Error("No se encontraron datos de goles para ninguno de los equipos seleccionados en esta liga.");
+            if (localData.dataUsed < 1 || awayData.dataUsed < 1) {
+                 throw new Error("No se encontraron suficientes partidos históricos para uno o ambos equipos en esta liga.");
             }
 
             // Media total de goles en la liga filtrada
