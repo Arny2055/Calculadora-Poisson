@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Herramienta de Backtesting por Casa de Apuestas</title>
+    <title>Herramienta de Backtesting Detallado por Equipo y Casa</title>
     <style>
         body { font-family: Arial, sans-serif; margin: 20px; background-color: #f4f4f9; color: #333; }
         h1 { color: #0056b3; }
@@ -16,12 +16,14 @@
         th, td { border: 1px solid #ddd; padding: 10px; text-align: left; }
         th { background-color: #007bff; color: white; }
         tr:nth-child(even) { background-color: #f2f2f2; }
+        /* Estilo específico para la tabla de equipo-casa */
+        .equipo-row { background-color: #d8eaff; font-weight: bold; }
     </style>
 </head>
 <body>
 
-    <h1>Herramienta de Backtesting por Casa de Apuestas 💰</h1>
-    <p>Analiza la rentabilidad de los mercados 1X2 y O/U 2.5 para todas las casas de apuestas.</p>
+    <h1>Herramienta de Backtesting Detallado (Equipo, Casa y Mercado) 📊</h1>
+    <p>Carga tu archivo JSON para obtener un análisis granular.</p>
 
     <input type="file" id="jsonFile" accept=".json">
     <button onclick="iniciarBacktesting()">Iniciar Backtesting</button>
@@ -37,10 +39,11 @@
         const MERCADOS = ['1X2_H', '1X2_D', '1X2_A', 'O2.5', 'U2.5'];
         const CASAS = ['B365', 'BFD', 'BMGM', 'BV', 'BW', 'CL', 'LB', 'PS', 'Max', 'Avg'];
 
-        // Estructura para análisis de rentabilidad por mercado y casa
-        let analisisCasas = {};
+        // Estructuras de Análisis
+        let analisisCasas = {}; // Global por Casa y Mercado
+        let analisisEquipoCasaMercado = {}; // Detallado por Equipo, Casa y Mercado
 
-        // Inicializa la estructura analisisCasas
+        // Inicializa la estructura de análisisCasas (Global por Casa)
         CASAS.forEach(casa => {
             analisisCasas[casa] = {};
             MERCADOS.forEach(mercado => {
@@ -49,8 +52,8 @@
                 };
             });
         });
-        
-        // Estructura para rangos de cuotas (solo para el O2.5 en este ejemplo)
+
+        // Estructura para rangos de cuotas (solo para el O2.5 en Avg)
         let analisisRangosO25 = {
             '1.00-1.50': { apuestas: 0, gananciaNeta: 0, victorias: 0, perdidas: 0 },
             '1.51-2.00': { apuestas: 0, gananciaNeta: 0, victorias: 0, perdidas: 0 },
@@ -88,6 +91,10 @@
 
         // --- FUNCIONES AUXILIARES DE ANÁLISIS ---
 
+        function inicializarEstadisticasDetalle() {
+            return { apuestas: 0, gananciaNeta: 0, victorias: 0, perdidas: 0, cuotaMedia: 0, totalCuota: 0 };
+        }
+
         function actualizarEstadisticasEquipo(equipo, esLocal, golesFavor, golesContra, resultadoFTR) {
             // ... (Función para actualizar estadísticas por equipo, la misma de antes)
             if (!equipo || !resultadoFTR) return; 
@@ -113,7 +120,7 @@
                 stats.empates++;
             }
         }
-
+        
         function obtenerRangoCuotaO25(cuota) {
             if (cuota >= 1.00 && cuota <= 1.50) return '1.00-1.50';
             if (cuota >= 1.51 && cuota <= 2.00) return '1.51-2.00';
@@ -122,11 +129,69 @@
             return null;
         }
 
+
+        // Función que actualiza las 3 estructuras de análisis simultáneamente
+        function actualizarAnalisis(equipo, casa, mercado, cuota, esGanadora) {
+            const apuesta = 1; // Stake fijo
+
+            // 1. Inicializar estructura de Equipo -> Casa -> Mercado si es la primera vez
+            if (!analisisEquipoCasaMercado[equipo]) analisisEquipoCasaMercado[equipo] = {};
+            if (!analisisEquipoCasaMercado[equipo][casa]) analisisEquipoCasaMercado[equipo][casa] = {};
+            if (!analisisEquipoCasaMercado[equipo][casa][mercado]) {
+                analisisEquipoCasaMercado[equipo][casa][mercado] = inicializarEstadisticasDetalle();
+            }
+
+            // --- Actualizar Estadísticas ---
+            
+            // a) Global por Casa y Mercado
+            const statsCasa = analisisCasas[casa][mercado];
+            // b) Detallado por Equipo, Casa y Mercado
+            const statsDetalle = analisisEquipoCasaMercado[equipo][casa][mercado];
+
+            [statsCasa, statsDetalle].forEach(stats => {
+                stats.apuestas++;
+                stats.totalCuota += cuota;
+                stats.cuotaMedia = stats.totalCuota / stats.apuestas;
+
+                if (esGanadora) {
+                    stats.gananciaNeta += (cuota - 1) * apuesta;
+                    stats.victorias++;
+                } else {
+                    stats.gananciaNeta -= apuesta;
+                    stats.perdidas++;
+                }
+            });
+        }
+
+
         // --- FUNCIONES DE GENERACIÓN DE TABLAS ---
+        
+        function generarFilaEstadistica(stats, isHeader = false) {
+            if (isHeader) {
+                return '<th>PJ</th><th>Cuota Media</th><th>Ganancia Neta (u)</th><th>ROI (%)</th><th>Acierto (%)</th>';
+            }
+            if (stats.apuestas === 0) {
+                return '<td colspan="5">-</td>';
+            }
+
+            const totalApuestas = stats.apuestas;
+            const roi = (stats.gananciaNeta / totalApuestas) * 100;
+            const acierto = (stats.victorias / totalApuestas) * 100;
+            const cssClass = stats.gananciaNeta >= 0 ? 'success' : 'failure';
+
+            return `
+                <td>${totalApuestas}</td>
+                <td>${stats.cuotaMedia.toFixed(3)}</td>
+                <td class="${cssClass}">${stats.gananciaNeta.toFixed(2)}</td>
+                <td class="${cssClass}">${roi.toFixed(2)}%</td>
+                <td>${acierto.toFixed(1)}%</td>
+            `;
+        }
 
         function generarTablaEquipos() {
             // ... (Función para generar tabla de equipos, la misma de antes)
             let htmlTabla = '<h3>Análisis de Rendimiento General por Equipo (Todos los partidos)</h3>';
+            // ... (código HTML de la tabla de equipos)
             htmlTabla += '<table>';
             htmlTabla += '<tr><th>Equipo</th><th>PJ</th><th>V</th><th>E</th><th>D</th><th>GF</th><th>GC</th><th>Dif</th><th>%V</th></tr>';
 
@@ -154,9 +219,42 @@
             return htmlTabla;
         }
 
+        function generarTablaCasas() {
+            // ... (Función para generar tabla global por casa, la misma de antes)
+            let htmlTabla = '<h3>Rentabilidad Global por Casa de Apuestas y Mercado (Stake Fijo de 1u)</h3>';
+            htmlTabla += '<table>';
+            htmlTabla += '<tr><th>Casa</th><th>Mercado</th><th>Apuestas</th><th>Cuota Media</th><th>Ganancia Neta (u)</th><th>ROI (%)</th><th>Acierto (%)</th></tr>';
+            
+            CASAS.forEach(casa => {
+                MERCADOS.forEach(mercado => {
+                    const stats = analisisCasas[casa][mercado];
+                    const totalApuestas = stats.apuestas;
+                    
+                    if (totalApuestas > 0) {
+                        const roi = (stats.gananciaNeta / totalApuestas) * 100;
+                        const acierto = (stats.victorias / totalApuestas) * 100;
+                        const cssClass = stats.gananciaNeta >= 0 ? 'success' : 'failure';
+    
+                        htmlTabla += `<tr>
+                            <td>${casa}</td>
+                            <td>${mercado}</td>
+                            <td>${totalApuestas}</td>
+                            <td>${stats.cuotaMedia.toFixed(3)}</td>
+                            <td class="${cssClass}">${stats.gananciaNeta.toFixed(2)}</td>
+                            <td class="${cssClass}">${roi.toFixed(2)}%</td>
+                            <td>${acierto.toFixed(1)}%</td>
+                        </tr>`;
+                    }
+                });
+            });
+
+            htmlTabla += '</table>';
+            return htmlTabla;
+        }
+
         function generarTablaRangosO25() {
+             // ... (Función para generar tabla de rangos O25, la misma de antes)
             let htmlTabla = '<h3>Desglose de Rentabilidad: Over 2.5 Goles (Avg) por Rango de Cuotas</h3>';
-            htmlTabla += '<p>Analiza el ROI del O2.5 promedio en diferentes niveles de cuotas.</p>';
             htmlTabla += '<table>';
             htmlTabla += '<tr><th>Rango de Cuotas</th><th>Apuestas</th><th>Ganancia Neta (u)</th><th>ROI (%)</th><th>Acierto (%)</th></tr>';
 
@@ -180,39 +278,37 @@
             return htmlTabla;
         }
         
-        function generarTablaCasas() {
-            let htmlTabla = '<h3>Rentabilidad por Casa de Apuestas y Mercado (Stake Fijo de 1u)</h3>';
-            htmlTabla += '<p>Los valores muestran la rentabilidad al apostar a TODOS los partidos del dataset en el mercado específico de esa casa.</p>';
-            htmlTabla += '<table>';
-            htmlTabla += '<tr><th>Casa</th><th>Mercado</th><th>Apuestas</th><th>Cuota Media</th><th>Ganancia Neta (u)</th><th>ROI (%)</th><th>Acierto (%)</th></tr>';
+        function generarTablaDetallada() {
+            let htmlTabla = '<h3>Rentabilidad Detallada por Equipo, Casa de Apuestas y Mercado</h3>';
+            htmlTabla += '<p>Muestra el rendimiento de los mercados para cada equipo individualmente en cada casa de apuestas.</p>';
             
-            CASAS.forEach(casa => {
-                MERCADOS.forEach(mercado => {
-                    const stats = analisisCasas[casa][mercado];
-                    const totalApuestas = stats.apuestas;
-                    
-                    // Solo mostramos si hay datos válidos (apuestas > 0)
-                    if (totalApuestas > 0) {
-                        const roi = (stats.gananciaNeta / totalApuestas) * 100;
-                        const acierto = (stats.victorias / totalApuestas) * 100;
-                        const cssClass = stats.gananciaNeta >= 0 ? 'success' : 'failure';
-    
-                        htmlTabla += `<tr>
-                            <td>${casa}</td>
-                            <td>${mercado}</td>
-                            <td>${totalApuestas}</td>
-                            <td>${stats.cuotaMedia.toFixed(3)}</td>
-                            <td class="${cssClass}">${stats.gananciaNeta.toFixed(2)}</td>
-                            <td class="${cssClass}">${roi.toFixed(2)}%</td>
-                            <td>${acierto.toFixed(1)}%</td>
-                        </tr>`;
-                    }
-                });
-            });
+            const equipos = Object.keys(analisisEquipoCasaMercado).sort();
+            
+            equipos.forEach(equipo => {
+                htmlTabla += `<h4>Equipo: ${equipo}</h4>`;
+                htmlTabla += '<table>';
+                htmlTabla += '<tr><th>Casa</th><th>Mercado</th>' + generarFilaEstadistica(null, true) + '</tr>';
 
-            htmlTabla += '</table>';
+                CASAS.forEach(casa => {
+                    MERCADOS.forEach(mercado => {
+                        const stats = analisisEquipoCasaMercado[equipo] && analisisEquipoCasaMercado[equipo][casa] ? analisisEquipoCasaMercado[equipo][casa][mercado] : null;
+
+                        // Solo mostrar filas con datos
+                        if (stats && stats.apuestas > 0) {
+                            htmlTabla += `<tr>
+                                <td>${casa}</td>
+                                <td>${mercado}</td>
+                                ${generarFilaEstadistica(stats)}
+                            </tr>`;
+                        }
+                    });
+                });
+                htmlTabla += '</table>';
+            });
+            
             return htmlTabla;
         }
+
 
         // --- FUNCIÓN PRINCIPAL DE BACKTESTING ---
 
@@ -224,14 +320,13 @@
 
             // Reiniciar estructuras de análisis
             analisisEquipos = {}; 
-            
-            // Reiniciar análisisCasas y Rangos
+            analisisEquipoCasaMercado = {}; // Reiniciar el análisis detallado
+
+            // (Reiniciar análisisCasas y Rangos O25 - lógica omitida para concisión, ya está arriba)
             CASAS.forEach(casa => {
                 analisisCasas[casa] = {};
                 MERCADOS.forEach(mercado => {
-                    analisisCasas[casa][mercado] = {
-                        apuestas: 0, gananciaNeta: 0, victorias: 0, perdidas: 0, cuotaMedia: 0, totalCuota: 0 
-                    };
+                    analisisCasas[casa][mercado] = inicializarEstadisticasDetalle();
                 });
             });
             analisisRangosO25 = {
@@ -242,31 +337,12 @@
             };
 
 
-            // Función para actualizar las estadísticas de una casa/mercado
-            function actualizarCasaMercado(casa, mercado, cuota, esGanadora) {
-                const stats = analisisCasas[casa][mercado];
-                const apuesta = 1; // Stake fijo
-
-                stats.apuestas++;
-                stats.totalCuota += cuota;
-                stats.cuotaMedia = stats.totalCuota / stats.apuestas;
-
-                if (esGanadora) {
-                    stats.gananciaNeta += (cuota - 1) * apuesta;
-                    stats.victorias++;
-                } else {
-                    stats.gananciaNeta -= apuesta;
-                    stats.perdidas++;
-                }
-            }
-
-
             // --- BUCLE DE BACKTESTING ---
             datosPartidos.forEach((partido) => {
                 const homeTeam = partido.HomeTeam;
                 const awayTeam = partido.AwayTeam;
                 
-                // Resultados del partido
+                // Resultados
                 const fthg = parseInt(partido.FTHG) || 0; 
                 const ftag = parseInt(partido.FTAG) || 0; 
                 const ftr = partido.FTR;
@@ -277,32 +353,40 @@
                 actualizarEstadisticasEquipo(awayTeam, false, ftag, fthg, ftr);
 
 
-                // =========================================================
-                // 2. BACKTESTING POR CASA DE APUESTAS
-                // (Se simula una apuesta a CADA MERCADO en CADA PARTIDO)
-                // =========================================================
+                // 2. BACKTESTING POR CASA DE APUESTAS Y EQUIPO
                 const ganaO2_5 = golesTotales >= 3;
                 const ganaU2_5 = golesTotales <= 2;
                 
                 CASAS.forEach(casa => {
-                    // --- Mercado 1X2 ---
+                    // --- 2.1 Mercado 1X2 ---
                     const cuotas1X2 = {
                         'H': parseFloat(partido[casa + 'H']) || 0,
                         'D': parseFloat(partido[casa + 'D']) || 0,
                         'A': parseFloat(partido[casa + 'A']) || 0
                     };
                     
-                    if (cuotas1X2.H > 0) actualizarCasaMercado(casa, '1X2_H', cuotas1X2.H, ftr === 'H');
-                    if (cuotas1X2.D > 0) actualizarCasaMercado(casa, '1X2_D', cuotas1X2.D, ftr === 'D');
-                    if (cuotas1X2.A > 0) actualizarCasaMercado(casa, '1X2_A', cuotas1X2.A, ftr === 'A');
+                    // Solo se consideran apuestas si la cuota es válida
+                    if (cuotas1X2.H > 0) {
+                        actualizarAnalisis(homeTeam, casa, '1X2_H', cuotas1X2.H, ftr === 'H');
+                        actualizarAnalisis(awayTeam, casa, '1X2_H', cuotas1X2.H, ftr === 'H');
+                    }
+                    if (cuotas1X2.D > 0) {
+                        actualizarAnalisis(homeTeam, casa, '1X2_D', cuotas1X2.D, ftr === 'D');
+                        actualizarAnalisis(awayTeam, casa, '1X2_D', cuotas1X2.D, ftr === 'D');
+                    }
+                    if (cuotas1X2.A > 0) {
+                        actualizarAnalisis(homeTeam, casa, '1X2_A', cuotas1X2.A, ftr === 'A');
+                        actualizarAnalisis(awayTeam, casa, '1X2_A', cuotas1X2.A, ftr === 'A');
+                    }
+                    
 
-                    // --- Mercado O/U 2.5 ---
-                    // NOTA: Las cuotas de O/U están en arrays anidados. Usaremos el índice [5] para O/U 2.5
+                    // --- 2.2 Mercado O/U 2.5 ---
                     const cuotaO2_5 = parseFloat(partido[casa + '>2'] ? partido[casa + '>2'][5] : null) || 0; 
                     const cuotaU2_5 = parseFloat(partido[casa + '<2'] ? partido[casa + '<2'][5] : null) || 0;
                     
                     if (cuotaO2_5 > 0) {
-                        actualizarCasaMercado(casa, 'O2.5', cuotaO2_5, ganaO2_5);
+                        actualizarAnalisis(homeTeam, casa, 'O2.5', cuotaO2_5, ganaO2_5);
+                        actualizarAnalisis(awayTeam, casa, 'O2.5', cuotaO2_5, ganaO2_5);
 
                         // REGISTRO DE RANGOS O2.5 (Solo para el promedio 'Avg')
                         if (casa === 'Avg') {
@@ -321,7 +405,8 @@
                         }
                     }
                     if (cuotaU2_5 > 0) {
-                        actualizarCasaMercado(casa, 'U2.5', cuotaU2_5, ganaU2_5);
+                        actualizarAnalisis(homeTeam, casa, 'U2.5', cuotaU2_5, ganaU2_5);
+                        actualizarAnalisis(awayTeam, casa, 'U2.5', cuotaU2_5, ganaU2_5);
                     }
                 });
             });
@@ -330,13 +415,16 @@
             // --- Generar Reporte ---
             let resultadosHTML = '';
             
-            // 1. Tabla de Mercados por Casa
+            // 1. Tabla Detallada por Equipo, Casa y Mercado (NUEVA)
+            resultadosHTML += generarTablaDetallada();
+            
+            // 2. Tabla Global por Casa
             resultadosHTML += generarTablaCasas();
             
-            // 2. Desglose de Rangos O2.5 (Usando Avg)
+            // 3. Desglose de Rangos O2.5 (Usando Avg)
             resultadosHTML += generarTablaRangosO25();
             
-            // 3. Tabla de Equipos
+            // 4. Tabla de Rendimiento General de Equipos
             resultadosHTML += generarTablaEquipos();
             
             document.getElementById('resultados').innerHTML = resultadosHTML;
