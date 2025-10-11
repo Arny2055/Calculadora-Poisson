@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Herramienta de Backtesting de Fútbol</title>
+    <title>Herramienta de Backtesting de Múltiples Mercados</title>
     <style>
         body { font-family: Arial, sans-serif; margin: 20px; background-color: #f4f4f9; color: #333; }
         h1 { color: #0056b3; }
@@ -20,8 +20,8 @@
 </head>
 <body>
 
-    <h1>Herramienta de Backtesting de Fútbol ⚽</h1>
-    <p>Carga tu archivo JSON (debe ser un array de objetos de partido) y haz clic en Iniciar Backtesting.</p>
+    <h1>Herramienta de Backtesting de Múltiples Mercados ⚽</h1>
+    <p>Carga tu archivo JSON y analiza la rentabilidad de varios mercados simultáneamente.</p>
 
     <input type="file" id="jsonFile" accept=".json">
     <button onclick="iniciarBacktesting()">Iniciar Backtesting</button>
@@ -33,14 +33,24 @@
         let datosPartidos = []; 
         let analisisEquipos = {}; 
         
-        let analisisRangos = {
-            '1.00-1.25': { apuestas: 0, gananciaNeta: 0, victorias: 0, perdidas: 0 },
-            '1.26-1.50': { apuestas: 0, gananciaNeta: 0, victorias: 0, perdidas: 0 },
-            '1.51-1.75': { apuestas: 0, gananciaNeta: 0, victorias: 0, perdidas: 0 },
-            '1.76-2.00': { apuestas: 0, gananciaNeta: 0, victorias: 0, perdidas: 0 },
+        // Estructura para análisis de rentabilidad por mercado
+        let analisisMercados = {
+            '1X2_H': { apuestas: 0, gananciaNeta: 0, victorias: 0, perdidas: 0, cuotaMedia: 0, totalCuota: 0 },
+            '1X2_D': { apuestas: 0, gananciaNeta: 0, victorias: 0, perdidas: 0, cuotaMedia: 0, totalCuota: 0 },
+            '1X2_A': { apuestas: 0, gananciaNeta: 0, victorias: 0, perdidas: 0, cuotaMedia: 0, totalCuota: 0 },
+            'O2.5': { apuestas: 0, gananciaNeta: 0, victorias: 0, perdidas: 0, cuotaMedia: 0, totalCuota: 0 },
+            'U2.5': { apuestas: 0, gananciaNeta: 0, victorias: 0, perdidas: 0, cuotaMedia: 0, totalCuota: 0 }
+            // Se puede agregar más aquí (e.g., AH, HT/FT, etc.)
+        };
+        
+        // Estructura para rangos de cuotas (solo para el O2.5 en este ejemplo, se puede expandir)
+        let analisisRangosO25 = {
+            '1.00-1.50': { apuestas: 0, gananciaNeta: 0, victorias: 0, perdidas: 0 },
+            '1.51-2.00': { apuestas: 0, gananciaNeta: 0, victorias: 0, perdidas: 0 },
             '2.01-2.50': { apuestas: 0, gananciaNeta: 0, victorias: 0, perdidas: 0 },
             '2.51+':     { apuestas: 0, gananciaNeta: 0, victorias: 0, perdidas: 0 }
         };
+
 
         // --- MANEJO DE ARCHIVOS ---
         document.getElementById('jsonFile').addEventListener('change', function(event) {
@@ -52,11 +62,10 @@
                 try {
                     datosPartidos = JSON.parse(e.target.result);
                     if (!Array.isArray(datosPartidos)) {
-                        // Si el JSON es un objeto único, lo convertimos a un array de un elemento para procesarlo
                         if (typeof datosPartidos === 'object' && datosPartidos !== null) {
                             datosPartidos = [datosPartidos];
                         } else {
-                             throw new Error("El archivo JSON debe ser un array de partidos o un objeto de partido único.");
+                             throw new Error("El archivo JSON debe ser un array de partidos.");
                         }
                     }
                     if (datosPartidos.length === 0) {
@@ -74,7 +83,8 @@
         // --- FUNCIONES AUXILIARES DE ANÁLISIS ---
 
         function actualizarEstadisticasEquipo(equipo, esLocal, golesFavor, golesContra, resultadoFTR) {
-            if (!equipo || !resultadoFTR) return; // Evitar errores si faltan datos esenciales
+            // ... (Función para actualizar estadísticas por equipo, la misma de antes)
+            if (!equipo || !resultadoFTR) return; 
 
             if (!analisisEquipos[equipo]) {
                 analisisEquipos[equipo] = {
@@ -98,19 +108,36 @@
             }
         }
 
-        function obtenerRangoCuota(cuota) {
-            if (cuota >= 1.00 && cuota <= 1.25) return '1.00-1.25';
-            if (cuota >= 1.26 && cuota <= 1.50) return '1.26-1.50';
-            if (cuota >= 1.51 && cuota <= 1.75) return '1.51-1.75';
-            if (cuota >= 1.76 && cuota <= 2.00) return '1.76-2.00';
+        function obtenerRangoCuotaO25(cuota) {
+            if (cuota >= 1.00 && cuota <= 1.50) return '1.00-1.50';
+            if (cuota >= 1.51 && cuota <= 2.00) return '1.51-2.00';
             if (cuota >= 2.01 && cuota <= 2.50) return '2.01-2.50';
             if (cuota > 2.50) return '2.51+';
             return null;
+        }
+
+        function actualizarAnalisisMercados(mercado, cuota, esGanadora) {
+            const stats = analisisMercados[mercado];
+            const apuesta = 1; // Stake fijo
+
+            stats.apuestas++;
+            stats.totalCuota += cuota;
+            stats.cuotaMedia = stats.totalCuota / stats.apuestas;
+
+            if (esGanadora) {
+                const ganancia = (cuota - 1) * apuesta;
+                stats.gananciaNeta += ganancia;
+                stats.victorias++;
+            } else {
+                stats.gananciaNeta -= apuesta;
+                stats.perdidas++;
+            }
         }
         
         // --- FUNCIONES DE GENERACIÓN DE TABLAS ---
 
         function generarTablaEquipos() {
+            // ... (Función para generar tabla de equipos, la misma de antes)
             let htmlTabla = '<h3>Análisis de Rendimiento General por Equipo (Todos los partidos)</h3>';
             htmlTabla += '<table>';
             htmlTabla += '<tr><th>Equipo</th><th>PJ</th><th>V</th><th>E</th><th>D</th><th>GF</th><th>GC</th><th>Dif</th><th>%V</th></tr>';
@@ -139,14 +166,14 @@
             return htmlTabla;
         }
 
-        function generarTablaRangos() {
-            let htmlTabla = '<h3>Rentabilidad por Rango de Cuotas (Estrategia O2.5)</h3>';
-            htmlTabla += '<p>Muestra el rendimiento de la estrategia de Over 2.5 (usando la cuota Avg>2) para diferentes niveles.</p>';
+        function generarTablaRangosO25() {
+            let htmlTabla = '<h3>Desglose de Rentabilidad: Over 2.5 Goles por Rango de Cuotas</h3>';
+            htmlTabla += '<p>Analiza si la estrategia de apostar al O2.5 es más rentable en cuotas bajas o altas.</p>';
             htmlTabla += '<table>';
             htmlTabla += '<tr><th>Rango de Cuotas</th><th>Apuestas</th><th>Ganancia Neta (u)</th><th>ROI (%)</th><th>Acierto (%)</th></tr>';
 
-            for (const rango in analisisRangos) {
-                const stats = analisisRangos[rango];
+            for (const rango in analisisRangosO25) {
+                const stats = analisisRangosO25[rango];
                 const totalApuestas = stats.victorias + stats.perdidas;
                 const roi = totalApuestas > 0 ? ((stats.gananciaNeta / totalApuestas) * 100).toFixed(2) : 0;
                 const acierto = totalApuestas > 0 ? ((stats.victorias / totalApuestas) * 100).toFixed(1) : 0;
@@ -164,6 +191,34 @@
             htmlTabla += '</table>';
             return htmlTabla;
         }
+        
+        function generarTablaMercados() {
+            let htmlTabla = '<h3>Rentabilidad Global por Mercado (Stake Fijo de 1u)</h3>';
+            htmlTabla += '<table>';
+            htmlTabla += '<tr><th>Mercado</th><th>Apuestas</th><th>Cuota Media</th><th>Ganancia Neta (u)</th><th>ROI (%)</th><th>Acierto (%)</th></tr>';
+            
+            const mercadosOrdenados = Object.keys(analisisMercados).sort();
+
+            mercadosOrdenados.forEach(mercado => {
+                const stats = analisisMercados[mercado];
+                const totalApuestas = stats.apuestas;
+                const roi = totalApuestas > 0 ? ((stats.gananciaNeta / totalApuestas) * 100).toFixed(2) : 0;
+                const acierto = totalApuestas > 0 ? ((stats.victorias / totalApuestas) * 100).toFixed(1) : 0;
+                const cssClass = stats.gananciaNeta >= 0 ? 'success' : 'failure';
+
+                htmlTabla += `<tr>
+                    <td>${mercado}</td>
+                    <td>${totalApuestas}</td>
+                    <td>${stats.cuotaMedia.toFixed(2)}</td>
+                    <td class="${cssClass}">${stats.gananciaNeta.toFixed(2)}</td>
+                    <td class="${cssClass}">${roi}</td>
+                    <td>${acierto}%</td>
+                </tr>`;
+            });
+
+            htmlTabla += '</table>';
+            return htmlTabla;
+        }
 
         // --- FUNCIÓN PRINCIPAL DE BACKTESTING ---
 
@@ -173,86 +228,107 @@
                 return;
             }
 
-            // Reiniciar contadores y análisis
-            let victoriasEstrategia = 0;
-            let perdidasEstrategia = 0;
-            let totalApostado = 0;
-            let gananciaNeta = 0;
+            // Reiniciar análisis
             analisisEquipos = {}; 
-            analisisRangos = {
-                '1.00-1.25': { apuestas: 0, gananciaNeta: 0, victorias: 0, perdidas: 0 },
-                '1.26-1.50': { apuestas: 0, gananciaNeta: 0, victorias: 0, perdidas: 0 },
-                '1.51-1.75': { apuestas: 0, gananciaNeta: 0, victorias: 0, perdidas: 0 },
-                '1.76-2.00': { apuestas: 0, gananciaNeta: 0, victorias: 0, perdidas: 0 },
+            analisisRangosO25 = {
+                '1.00-1.50': { apuestas: 0, gananciaNeta: 0, victorias: 0, perdidas: 0 },
+                '1.51-2.00': { apuestas: 0, gananciaNeta: 0, victorias: 0, perdidas: 0 },
                 '2.01-2.50': { apuestas: 0, gananciaNeta: 0, victorias: 0, perdidas: 0 },
                 '2.51+':     { apuestas: 0, gananciaNeta: 0, victorias: 0, perdidas: 0 }
             };
-            let resultadosHTML = '<h3>Reporte Global de Estrategia</h3>';
-
+            analisisMercados = {
+                '1X2_H': { apuestas: 0, gananciaNeta: 0, victorias: 0, perdidas: 0, cuotaMedia: 0, totalCuota: 0 },
+                '1X2_D': { apuestas: 0, gananciaNeta: 0, victorias: 0, perdidas: 0, cuotaMedia: 0, totalCuota: 0 },
+                '1X2_A': { apuestas: 0, gananciaNeta: 0, victorias: 0, perdidas: 0, cuotaMedia: 0, totalCuota: 0 },
+                'O2.5': { apuestas: 0, gananciaNeta: 0, victorias: 0, perdidas: 0, cuotaMedia: 0, totalCuota: 0 },
+                'U2.5': { apuestas: 0, gananciaNeta: 0, victorias: 0, perdidas: 0, cuotaMedia: 0, totalCuota: 0 }
+            };
+            
             // --- BUCLE DE BACKTESTING ---
             datosPartidos.forEach((partido) => {
                 const homeTeam = partido.HomeTeam;
                 const awayTeam = partido.AwayTeam;
                 
-                // Asegurar que las variables de goles sean números
+                // Resultados
                 const fthg = parseInt(partido.FTHG) || 0; 
                 const ftag = parseInt(partido.FTAG) || 0; 
-                const ftr = partido.FTR;             
+                const ftr = partido.FTR;
+                const golesTotales = fthg + ftag;
                 
                 // Análisis de Rendimiento de Equipos (Para tabla general)
                 actualizarEstadisticasEquipo(homeTeam, true, fthg, ftag, ftr);
                 actualizarEstadisticasEquipo(awayTeam, false, ftag, fthg, ftr);
 
-                // Ejecución de Estrategia de Backtesting (EJEMPLO: Over 2.5)
-                // Se accede al elemento 5 del array 'Avg>2' como se identificó en el JSON de ejemplo
-                const cuotaMas2_5 = parseFloat(partido['Avg>2'] ? partido['Avg>2'][5] : null); 
-                const cuotaMinima = 1.00; // Mínimo para asegurar que se analiza en algún rango
-                const apuesta = 1; 
+                // =========================================================
+                // 1. ANÁLISIS DEL MERCADO 1X2 (Resultado Final)
+                // =========================================================
+                const cuotas1X2 = {
+                    'H': parseFloat(partido.AvgH) || 0,
+                    'D': parseFloat(partido.AvgD) || 0,
+                    'A': parseFloat(partido.AvgA) || 0
+                };
 
-                if (cuotaMas2_5 && cuotaMas2_5 >= cuotaMinima) {
-                    const rango = obtenerRangoCuota(cuotaMas2_5);
+                // Apostamos al Local (H)
+                if (cuotas1X2.H > 0) {
+                    actualizarAnalisisMercados('1X2_H', cuotas1X2.H, ftr === 'H');
+                }
+                // Apostamos al Empate (D)
+                if (cuotas1X2.D > 0) {
+                    actualizarAnalisisMercados('1X2_D', cuotas1X2.D, ftr === 'D');
+                }
+                // Apostamos al Visitante (A)
+                if (cuotas1X2.A > 0) {
+                    actualizarAnalisisMercados('1X2_A', cuotas1X2.A, ftr === 'A');
+                }
+
+                // =========================================================
+                // 2. ANÁLISIS DEL MERCADO OVER/UNDER 2.5
+                // =========================================================
+                // NOTA: Se sigue usando la clave anidada de tu JSON de ejemplo
+                const cuotaO2_5 = parseFloat(partido['Avg>2'] ? partido['Avg>2'][5] : null) || 0; 
+                const cuotaU2_5 = parseFloat(partido['Avg<2'] ? partido['Avg<2'][5] : null) || 0;
+
+                const ganaO2_5 = golesTotales >= 3;
+                const ganaU2_5 = golesTotales <= 2;
+
+                // Apostamos al Over 2.5 (O2.5)
+                if (cuotaO2_5 > 0) {
+                    actualizarAnalisisMercados('O2.5', cuotaO2_5, ganaO2_5);
                     
+                    // Actualizar Rangos O2.5
+                    const rango = obtenerRangoCuotaO25(cuotaO2_5);
                     if (rango) {
-                        
-                        const golesTotales = fthg + ftag;
-                        const esGanadora = golesTotales >= 3; // Gana si hay 3 o más goles
-                        
-                        totalApostado += apuesta; 
-
-                        if (esGanadora) {
-                            const ganancia = (cuotaMas2_5 - 1) * apuesta;
-                            gananciaNeta += ganancia;
-                            victoriasEstrategia++;
-                            
-                            // ACTUALIZAR RANGOS
-                            analisisRangos[rango].gananciaNeta += ganancia;
-                            analisisRangos[rango].victorias++;
+                        const statsRango = analisisRangosO25[rango];
+                        const apuesta = 1;
+                        statsRango.apuestas++;
+                        if (ganaO2_5) {
+                            statsRango.gananciaNeta += (cuotaO2_5 - 1) * apuesta;
+                            statsRango.victorias++;
                         } else {
-                            gananciaNeta -= apuesta;
-                            perdidasEstrategia++;
-
-                            // ACTUALIZAR RANGOS
-                            analisisRangos[rango].gananciaNeta -= apuesta;
-                            analisisRangos[rango].perdidas++;
+                            statsRango.gananciaNeta -= apuesta;
+                            statsRango.perdidas++;
                         }
-                        analisisRangos[rango].apuestas++;
                     }
                 }
+
+                // Apostamos al Under 2.5 (U2.5)
+                if (cuotaU2_5 > 0) {
+                    actualizarAnalisisMercados('U2.5', cuotaU2_5, ganaU2_5);
+                }
+                
             });
             // --- FIN DEL BUCLE ---
 
-            // --- Resumen de Estrategia ---
-            const totalApuestas = victoriasEstrategia + perdidasEstrategia;
-            const porcentajeAcierto = totalApuestas > 0 ? ((victoriasEstrategia / totalApuestas) * 100).toFixed(2) : 0;
-            const rendimiento = totalApostado > 0 ? ((gananciaNeta / totalApostado) * 100).toFixed(2) : 0;
-
-            resultadosHTML += `<h4>Resumen Global de la Estrategia Over 2.5</h4>`;
-            resultadosHTML += `<p>Total de Apuestas Procesadas: <span class="neutral">${totalApuestas}</span></p>`;
-            resultadosHTML += `<p>Ganancia/Pérdida Neta (Profit/Loss): <span class="${gananciaNeta >= 0 ? 'success' : 'failure'}">${gananciaNeta.toFixed(2)} unidades</span></p>`;
-            resultadosHTML += `<p>Rendimiento (ROI): <span class="${rendimiento >= 0 ? 'success' : 'failure'}">${rendimiento}%</span></p>`;
-
-            // --- Agrega Tablas ---
-            resultadosHTML += generarTablaRangos();
+            // --- Generar Reporte ---
+            let resultadosHTML = '';
+            
+            // 1. Tabla de Mercados
+            resultadosHTML += generarTablaMercados();
+            
+            // 2. Desglose de Rangos O2.5
+            resultadosHTML += generarTablaRangosO25();
+            
+            // 3. Tabla de Equipos
             resultadosHTML += generarTablaEquipos();
             
             document.getElementById('resultados').innerHTML = resultadosHTML;
