@@ -1,141 +1,212 @@
-import requests
-import pandas as pd
-from bs4 import BeautifulSoup
-import re
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Herramienta de Análisis de Fútbol Avanzado</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f4f7f6;
+            color: #333;
+        }
+        h1, h2 {
+            color: #004d40;
+            border-bottom: 2px solid #004d40;
+            padding-bottom: 5px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 20px;
+            background-color: #ffffff;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+        }
+        th, td {
+            border: 1px solid #dddddd;
+            padding: 8px 12px;
+            text-align: center;
+        }
+        th {
+            background-color: #e0f2f1;
+            color: #004d40;
+            cursor: help;
+        }
+        tr:nth-child(even) {
+            background-color: #f9f9f9;
+        }
+        .positive {
+            color: #2e7d32; /* Verde oscuro */
+            font-weight: bold;
+        }
+        .negative {
+            color: #c62828; /* Rojo oscuro */
+        }
+        .neutral {
+            color: #333;
+        }
+        .analysis-section {
+            background-color: #e8f5e9;
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 20px;
+            border-left: 5px solid #004d40;
+        }
+        .analysis-section p {
+            margin: 5px 0;
+        }
+        .legend span {
+            display: inline-block;
+            margin-right: 15px;
+            font-size: 0.9em;
+            color: #555;
+        }
+    </style>
+</head>
+<body>
 
-# URL de las estadísticas de jugadores de La Liga que deseas scrapear
-LA_LIGA_URL = "https://fbref.com/en/comps/12/La-Liga-Stats"
-
-def get_fbref_table(url, table_id, header_row=1):
-    """
-    Función para extraer una tabla específica de FBref.
-    :param url: La URL de la página.
-    :param table_id: El ID HTML de la tabla a extraer (ej. 'stats_standard').
-    :param header_row: El índice de la fila que contiene los nombres de las columnas.
-    :return: Un DataFrame de pandas con los datos.
-    """
-    try:
-        # 1. Obtener el contenido de la página
-        print(f"Obteniendo datos de: {url}...")
-        response = requests.get(url)
-        response.raise_for_status()  # Lanza un error para códigos de estado HTTP malos
-
-        # 2. Parsear el HTML
-        soup = BeautifulSoup(response.content, 'html.parser')
-        
-        # 3. Encontrar el contenedor de la tabla
-        # FBref a menudo oculta la tabla principal en un comentario HTML, 
-        # por lo que primero buscamos la tabla en el HTML normal y luego en los comentarios.
-        table_container = soup.find('div', {'id': table_id + '_container'})
-        if not table_container:
-            print(f"Contenedor {table_id} no encontrado. Intentando buscar en comentarios...")
-            # Búsqueda en comentarios para tablas avanzadas
-            comments = soup.find_all(string=lambda text: isinstance(text, re.Comment))
-            comment_content = None
-            for comment in comments:
-                if table_id in str(comment):
-                    comment_content = str(comment)
-                    break
-            
-            if comment_content:
-                soup_comment = BeautifulSoup(comment_content, 'html.parser')
-                table = soup_comment.find('table', {'id': table_id})
-            else:
-                print(f"Error: No se pudo encontrar la tabla con ID '{table_id}'.")
-                return pd.DataFrame()
-        else:
-             table = table_container.find('table', {'id': table_id})
-
-        if not table:
-             print(f"Error: La tabla con ID '{table_id}' no está presente en el HTML.")
-             return pd.DataFrame()
-
-        # 4. Usar pandas para leer la tabla directamente
-        # FBref usa filas de encabezado doble. Leemos dos, luego corregimos.
-        df_list = pd.read_html(str(table), header=[0, header_row])
-        df = df_list[0]
-        
-        # 5. Limpiar y estandarizar los nombres de las columnas
-        df.columns = ['_'.join(col).strip() for col in df.columns.values]
-        
-        # Renombrar columnas clave y eliminar filas de encabezado duplicadas
-        df = df.rename(columns={'Unnamed: 0_level_0_Rk': 'Rank'})
-        df = df[df['Rk_Rk'] != 'Rk'] # Elimina las filas de encabezado que aparecen a mitad de tabla
-        
-        # Eliminar columnas irrelevantes
-        df = df.drop(columns=['Rk_Rk', 'Matches_Matches', 'Player_Player'], errors='ignore')
-        
-        # 6. Estandarizar el nombre de las columnas después de la limpieza
-        new_cols = []
-        for col in df.columns:
-            # Elimina el prefijo duplicado si existe (ej. 'Standard Stats_Gls' a 'Gls')
-            parts = col.split('_')
-            if len(parts) > 1 and parts[-2] == parts[-1]:
-                new_cols.append(parts[-1])
-            else:
-                 # Conserva la estructura para diferenciar estadísticas (ej. 'Standard Stats_Gls')
-                new_cols.append(col)
-
-        df.columns = new_cols
-        print(f"Tabla '{table_id}' extraída con {len(df)} filas.")
-        return df
-
-    except requests.exceptions.HTTPError as e:
-        print(f"Error HTTP al acceder a la URL: {e}")
-        return pd.DataFrame()
-    except Exception as e:
-        print(f"Ocurrió un error inesperado: {e}")
-        return pd.DataFrame()
-
-if __name__ == '__main__':
-    # Las tablas de estadísticas de jugadores de La Liga tienen los siguientes IDs:
-    # 'stats_standard' -> Estadísticas Estándar
-    # 'stats_shooting' -> Disparos
-    # 'stats_passing'  -> Pases
+    <h1>⚽ Herramienta de Análisis de Fútbol Avanzado</h1>
     
-    # 1. Extraer las estadísticas estándar
-    stats_standard_df = get_fbref_table(LA_LIGA_URL, 'stats_standard')
+    <div class="legend">
+        <h2>Leyenda de Columnas Adicionales</h2>
+        <span>**Att_Perf:** Rendimiento de Ataque ($\text{GF} - \text{xG}$). Positivo = Sobre-rendimiento.</span>
+        <span>**Def_Perf:** Rendimiento Defensivo ($\text{xGA} - \text{GA}$). Positivo = Sobre-rendimiento.</span>
+        <span>**Overall_Perf:** Rendimiento General ($\text{GD} - \text{xGD}$). Positivo = Sobre-rendimiento.</span>
+    </div>
+
+    <script>
+        const data = [
+            {"Rk":"1","Squad":"Real Madrid","MP":"4","W":"3","D":"0","L":"1","GF":"11","GA":"7","GD":"4","Pts":"9","Pts/MP":"2.25","xG":"9.6","xGA":"6.5","xGD":"3.0","xGD/90":"0.76"},
+            {"Rk":"2","Squad":"Barcelona","MP":"5","W":"3","D":"1","L":"1","GF":"11","GA":"8","GD":"3","Pts":"10","Pts/MP":"2.00","xG":"10.0","xGA":"7.7","xGD":"2.3","xGD/90":"0.46"},
+            {"Rk":"3","Squad":"Villarreal","MP":"4","W":"1","D":"1","L":"2","GF":"4","GA":"7","GD":"-3","Pts":"4","Pts/MP":"1.00","xG":"5.0","xGA":"6.4","xGD":"-1.4","xGD/90":"-0.34"},
+            {"Rk":"4","Squad":"Betis","MP":"4","W":"1","D":"3","L":"0","GF":"6","GA":"5","GD":"1","Pts":"6","Pts/MP":"1.50","xG":"5.6","xGA":"4.5","xGD":"1.1","xGD/90":"0.27"},
+            {"Rk":"5","Squad":"Atlético Madrid","MP":"4","W":"0","D":"3","L":"1","GF":"4","GA":"5","GD":"-1","Pts":"3","Pts/MP":"0.75","xG":"4.7","xGA":"4.7","xGD":"0.0","xGD/90":"-0.01"},
+            {"Rk":"6","Squad":"Sevilla","MP":"4","W":"3","D":"0","L":"1","GF":"7","GA":"4","GD":"3","Pts":"9","Pts/MP":"2.25","xG":"3.3","xGA":"7.6","xGD":"-4.2","xGD/90":"-1.06"},
+            {"Rk":"7","Squad":"Elche","MP":"4","W":"0","D":"3","L":"1","GF":"5","GA":"7","GD":"-2","Pts":"3","Pts/MP":"0.75","xG":"2.7","xGA":"5.3","xGD":"-2.5","xGD/90":"-0.63"},
+            {"Rk":"8","Squad":"Athletic Club","MP":"3","W":"1","D":"0","L":"2","GF":"2","GA":"4","GD":"-2","Pts":"3","Pts/MP":"1.00","xG":"2.9","xGA":"3.7","xGD":"-0.8","xGD/90":"-0.27"},
+            {"Rk":"9","Squad":"Espanyol","MP":"3","W":"0","D":"2","L":"1","GF":"2","GA":"4","GD":"-2","Pts":"2","Pts/MP":"0.67","xG":"3.8","xGA":"3.3","xGD":"0.5","xGD/90":"0.18"},
+            {"Rk":"10","Squad":"Alavés","MP":"4","W":"1","D":"1","L":"2","GF":"2","GA":"3","GD":"-1","Pts":"4","Pts/MP":"1.00","xG":"2.6","xGA":"4.0","xGD":"-1.4","xGD/90":"-0.35"},
+            {"Rk":"11","Squad":"Getafe","MP":"5","W":"2","D":"0","L":"3","GF":"5","GA":"9","GD":"-4","Pts":"6","Pts/MP":"1.20","xG":"4.0","xGA":"4.7","xGD":"-0.7","xGD/90":"-0.15"},
+            {"Rk":"12","Squad":"Osasuna","MP":"4","W":"0","D":"0","L":"4","GF":"1","GA":"6","GD":"-5","Pts":"0","Pts/MP":"0.00","xG":"4.2","xGA":"6.0","xGD":"-1.8","xGD/90":"-0.45"},
+            {"Rk":"13","Squad":"Levante","MP":"5","W":"2","D":"1","L":"2","GF":"8","GA":"5","GD":"3","Pts":"7","Pts/MP":"1.40","xG":"7.6","xGA":"4.6","xGD":"3.0","xGD/90":"0.60"},
+            {"Rk":"14","Squad":"Rayo Vallecano","MP":"5","W":"2","D":"0","L":"3","GF":"6","GA":"7","GD":"-1","Pts":"6","Pts/MP":"1.20","xG":"7.2","xGA":"8.0","xGD":"-0.8","xGD/90":"-0.16"},
+            {"Rk":"15","Squad":"Valencia","MP":"4","W":"0","D":"1","L":"3","GF":"3","GA":"11","GD":"-8","Pts":"1","Pts/MP":"0.25","xG":"2.5","xGA":"8.2","xGD":"-5.7","xGD/90":"-1.43"},
+            {"Rk":"16","Squad":"Celta Vigo","MP":"3","W":"0","D":"2","L":"1","GF":"3","GA":"4","GD":"-1","Pts":"2","Pts/MP":"0.67","xG":"2.4","xGA":"5.3","xGD":"-2.9","xGD/90":"-0.95"},
+            {"Rk":"17","Squad":"Oviedo","MP":"4","W":"1","D":"0","L":"3","GF":"2","GA":"6","GD":"-4","Pts":"3","Pts/MP":"0.75","xG":"3.1","xGA":"6.1","xGD":"-3.0","xGD/90":"-0.75"},
+            {"Rk":"18","Squad":"Girona","MP":"3","W":"0","D":"2","L":"1","GF":"2","GA":"7","GD":"-5","Pts":"2","Pts/MP":"0.67","xG":"1.6","xGA":"6.2","xGD":"-4.6","xGD/90":"-1.54"},
+            {"Rk":"19","Squad":"Real Sociedad","MP":"4","W":"0","D":"1","L":"3","GF":"3","GA":"7","GD":"-4","Pts":"1","Pts/MP":"0.25","xG":"3.7","xGA":"6.9","xGD":"-3.2","xGD/90":"-0.81"},
+            {"Rk":"20","Squad":"Mallorca","MP":"4","W":"0","D":"0","L":"4","GF":"4","GA":"8","GD":"-4","Pts":"0","Pts/MP":"0.00","xG":"4.0","xGA":"8.9","xGD":"-4.9","xGD/90":"-1.23"}
+        ];
+
+        function calculatePerformance(team) {
+            const gf = parseFloat(team.GF);
+            const xg = parseFloat(team.xG);
+            const ga = parseFloat(team.GA);
+            const xga = parseFloat(team.xGA);
+            const gd = parseFloat(team.GD);
+            const xgd = parseFloat(team.xGD);
+
+            const attPerf = (gf - xg).toFixed(2);
+            const defPerf = (xga - ga).toFixed(2);
+            const overallPerf = (gd - xgd).toFixed(2);
+
+            return { attPerf, defPerf, overallPerf };
+        }
+
+        function formatValue(value) {
+            const num = parseFloat(value);
+            let className = 'neutral';
+            if (num > 0) {
+                className = 'positive';
+            } else if (num < 0) {
+                className = 'negative';
+            }
+            return `<span class="${className}">${value}</span>`;
+        }
+
+        const table = document.createElement('table');
+        const headerRow = table.insertRow();
+        const headers = ["Rk", "Squad", "MP", "W", "D", "L", "GF", "GA", "GD", "Pts", "Pts/MP", "xG", "xGA", "xGD", "xGD/90", "Att_Perf", "Def_Perf", "Overall_Perf"];
+        const tooltips = {
+            "Rk": "Clasificación.",
+            "Squad": "Equipo.",
+            "MP": "Partidos Jugados.",
+            "W": "Victorias.",
+            "D": "Empates.",
+            "L": "Derrotas.",
+            "GF": "Goles a Favor.",
+            "GA": "Goles en Contra.",
+            "GD": "Diferencia de Goles.",
+            "Pts": "Puntos.",
+            "Pts/MP": "Puntos por Partido.",
+            "xG": "Goles Esperados (Expected Goals).",
+            "xGA": "Goles Esperados en Contra (Expected Goals Allowed).",
+            "xGD": "Diferencia de Goles Esperados ($\text{xG} - \text{xGA}$).",
+            "xGD/90": "Diferencia de Goles Esperados por 90 minutos.",
+            "Att_Perf": "Rendimiento de Ataque ($\text{GF} - \text{xG}$).",
+            "Def_Perf": "Rendimiento Defensivo ($\text{xGA} - \text{GA}$).",
+            "Overall_Perf": "Rendimiento General ($\text{GD} - \text{xGD}$).",
+        };
+
+        headers.forEach(header => {
+            const th = document.createElement('th');
+            th.textContent = header;
+            th.setAttribute('title', tooltips[header]);
+            headerRow.appendChild(th);
+        });
+
+        data.forEach(team => {
+            const perf = calculatePerformance(team);
+            const row = table.insertRow();
+            row.insertCell().textContent = team.Rk;
+            row.insertCell().textContent = team.Squad;
+            row.insertCell().textContent = team.MP;
+            row.insertCell().textContent = team.W;
+            row.insertCell().textContent = team.D;
+            row.insertCell().textContent = team.L;
+            row.insertCell().textContent = team.GF;
+            row.insertCell().textContent = team.GA;
+            row.insertCell().textContent = team.GD;
+            row.insertCell().textContent = team.Pts;
+            row.insertCell().textContent = team['Pts/MP'];
+            row.insertCell().textContent = team.xG;
+            row.insertCell().textContent = team.xGA;
+            row.insertCell().insertCell().innerHTML = formatValue(team.xGD);
+            row.insertCell().innerHTML = formatValue(team['xGD/90']);
+            row.insertCell().innerHTML = formatValue(perf.attPerf);
+            row.insertCell().innerHTML = formatValue(perf.defPerf);
+            row.insertCell().innerHTML = formatValue(perf.overallPerf);
+        });
+
+        document.body.appendChild(table);
+    </script>
     
-    # 2. Extraer las estadísticas de disparos
-    # Nota: Si el ID de la tabla es diferente o la estructura cambia, este paso fallará.
-    # El ID 'stats_shooting' a menudo requiere buscar dentro de un comentario HTML.
-    stats_shooting_df = get_fbref_table(LA_LIGA_URL, 'stats_shooting')
-
-    # --- Procesamiento y Uso de la Herramienta ---
-
-    if not stats_standard_df.empty:
-        # Renombrar las columnas de unión antes de combinar para evitar conflictos
-        stats_standard_df = stats_standard_df.rename(columns={'Player': 'Player_Name', 'Squad': 'Team'})
+    <div class="analysis-section">
+        <h2>📊 Resumen del Análisis Avanzado</h2>
         
-        # Si la tabla de disparos también se extrajo
-        if not stats_shooting_df.empty:
-            stats_shooting_df = stats_shooting_df.rename(columns={'Player': 'Player_Name', 'Squad': 'Team'})
-            
-            # Combinar las tablas utilizando 'Player_Name', 'Team' y 'Born' como claves de unión
-            # Usamos un sufijo para diferenciar columnas que puedan tener el mismo nombre
-            combined_df = pd.merge(
-                stats_standard_df, 
-                stats_shooting_df, 
-                on=['Player_Name', 'Team', 'Born'], 
-                how='inner',
-                suffixes=('_Std', '_Shot')
-            )
-            
-            print("\n✅ Datos Combinados con Éxito (Estándar + Disparos).")
-            # Mostrar las primeras 5 filas y algunas columnas clave
-            print(combined_df[['Player_Name', 'Team', 'Pos', 'Gls_Std', 'PK_Shot', 'xG_Shot', 'Min_Std']].head())
+        <p>El análisis combina las estadísticas tradicionales (Puntos, $\text{GD}$) con las métricas de Goles Esperados ($\text{xG}$, $\text{xGA}$, $\text{xGD}$) para identificar el **rendimiento real** frente al **rendimiento subyacente** (la calidad de las oportunidades).</p>
+        
+        <h3>Equipos Clave por Rendimiento General ($\text{Overall\_Perf}$):</h3>
+        
+        <p>🥇 **Mayor Sobre-rendimiento (Mayor Eficiencia Real que $\text{xG}$):**</p>
+        <ul>
+            <li>**Sevilla** ($\text{Overall\_Perf} = +7.20$): Es el equipo más eficiente de la liga. Su $\text{GD}$ de $+3$ es muchísimo mejor que su $\text{xGD}$ de $-4.2$, lo que indica una **definición excelente** en ataque y/o una **defensa/portería excepcional** en defensa. Es probable que sus resultados no sean sostenibles a largo plazo sin mejorar sus $\text{xGD}$.</li>
+            <li>**Real Madrid** ($\text{Overall\_Perf} = +1.00$): Resultados ligeramente mejores que lo que sugiere la calidad de su juego.</li>
+        </ul>
 
-            # Guardar el resultado final en un archivo CSV
-            output_file = 'LaLiga_Stats_Combinadas.csv'
-            combined_df.to_csv(output_file, index=False, encoding='utf-8-sig')
-            print(f"\n✨ ¡Herramienta completada! Los datos se han guardado en: {output_file}")
-            
-        else:
-            # Si solo se extrajo la tabla estándar
-            output_file = 'LaLiga_Stats_Estandar.csv'
-            stats_standard_df.to_csv(output_file, index=False, encoding='utf-8-sig')
-            print(f"\n✨ ¡Herramienta completada! Solo se guardaron las Estadísticas Estándar en: {output_file}")
-    
-    else:
-        print("\n❌ Fallo en la extracción de datos. Revisa la URL y los IDs de las tablas.")
+        <p>📉 **Mayor Sub-rendimiento (Peor Resultado Real que $\text{xG}$):**</p>
+        <ul>
+            <li>**Valencia** ($\text{Overall\_Perf} = -2.30$): Es el equipo más 'desafortunado' o ineficaz. Su $\text{GD}$ de $-8$ es peor que su $\text{xGD}$ de $-5.7$. Sugiere **falta de puntería** en ataque y/o **errores defensivos/de portería** costosos.</li>
+            <li>**Villarreal** ($\text{Overall\_Perf} = -1.60$): Sus resultados (4 puntos, $\text{GD} = -3$) son peores de lo que su calidad de juego subyacente ($\text{xGD} = -1.4$) indica. Hay margen de mejora en la conversión de oportunidades.</li>
+        </ul>
 
+        <h3>Poder Ofensivo y Defensivo:</h3>
+        <ul>
+            <li>**Mejor Ataque por $\text{xG}$:** **Barcelona** ($\text{xG} = 10.0$) y **Real Madrid** ($\text{xG} = 9.6$). Ambos generan las mejores ocasiones.</li>
+            <li>**Peor Defensa por $\text{xGA}$ (más $\text{xGA}$ permitidos):** **Mallorca** ($\text{xGA} = 8.9$) y **Valencia** ($\text{xGA} = 8.2$). Ambos permiten las ocasiones más peligrosas.</li>
+        </ul>
+    </div>
+
+</body>
+</html>
