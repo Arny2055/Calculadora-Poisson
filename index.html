@@ -116,7 +116,9 @@
             element.textContent = option;
             select.appendChild(element);
         });
-        select.disabled = false;
+        // Enable dropdown only if options exist
+        select.disabled = optionsSet.length === 0;
+        console.log(`Populated ${selectId} with ${optionsSet.length} options:`, optionsSet);
     }
 
     // Construye el mapa de ligas y equipos
@@ -131,6 +133,7 @@
             if (match.Home) teams.add(match.Home.trim());
             if (match.Away) teams.add(match.Away.trim());
         });
+        console.log('League Teams Map:', Array.from(leagueTeamsMap.entries()));
     }
 
     // Analiza TODAS las ligas y llena el selector de liga
@@ -139,6 +142,7 @@
             const match = history.find(m => normalizeString(m.League) === normalized);
             return match ? match.League.trim() : normalized;
         }).sort();
+        console.log('Populating leagues:', leagues);
         populateSelect('liga', leagues, '-- Selecciona una liga --');
     }
 
@@ -160,10 +164,12 @@
         if (!selectedLeague) {
             localSelect.innerHTML = '<option value="">Selecciona una liga...</option>';
             visitaSelect.innerHTML = '<option value="">Selecciona una liga...</option>';
+            console.log('No league selected, team dropdowns reset.');
             return;
         }
 
         const teams = Array.from(leagueTeamsMap.get(normalizedLeague) || []).sort();
+        console.log('Teams for league', selectedLeague, ':', teams);
 
         if (teams.length > 0) {
             populateSelect('local', teams.filter(team => team !== selectedVisita), '-- Selecciona Local --');
@@ -171,6 +177,9 @@
         } else {
             localSelect.innerHTML = '<option value="">No hay equipos para esta liga</option>';
             visitaSelect.innerHTML = '<option value="">No hay equipos para esta liga</option>';
+            localSelect.disabled = true;
+            visitaSelect.disabled = true;
+            console.log('No teams found for league:', selectedLeague);
         }
     }
 
@@ -179,19 +188,37 @@
     // Validar estructura JSON
     function validateJSON(history) {
         const requiredKeys = ['League', 'Match', 'Result FT'];
-        return history.every(match => 
-            requiredKeys.every(key => key in match && match[key] != null) &&
-            typeof match['Result FT'] === 'string' &&
-            match['Result FT'].match(/^\d+-\d+$/) &&
-            typeof match['Match'] === 'string' &&
-            match['Match'].includes(' - ')
-        );
+        return history.every(match => {
+            if (!requiredKeys.every(key => key in match && match[key] != null)) {
+                console.error('Missing required keys in match:', match);
+                return false;
+            }
+            if (typeof match['Result FT'] !== 'string' || !match['Result FT'].match(/^\d+-\d+$/)) {
+                console.error('Invalid Result FT format:', match['Result FT']);
+                return false;
+            }
+            if (typeof match['Match'] !== 'string') {
+                console.error('Match is not a string:', match['Match']);
+                return false;
+            }
+            const matchStr = match['Match'].replace(/\s*-\s*/g, ' - ').trim();
+            const teams = matchStr.split(' - ');
+            if (teams.length !== 2 || !teams[0] || !teams[1]) {
+                console.error('Invalid Match format:', match['Match']);
+                return false;
+            }
+            return true;
+        });
     }
 
     // Procesar el partido para extraer Home, Away, GolesLocal, GolesVisita
     function processMatch(match) {
-        const [home, away] = match['Match'].split(' - ').map(team => team.trim());
+        const matchStr = match['Match'].replace(/\s*-\s*/g, ' - ').trim();
+        const [home, away] = matchStr.split(' - ').map(team => team.trim());
         const [golesLocal, golesVisita] = match['Result FT'].split('-').map(Number);
+        if (!home || !away) {
+            throw new Error(`Formato inválido en el campo Match: ${match['Match']}`);
+        }
         return {
             League: match.League,
             Home: home,
@@ -266,6 +293,7 @@
                 errorMsg.style.display = 'block';
                 document.getElementById('liga').disabled = true;
                 globalHistory = [];
+                leagueTeamsMap.clear();
             }
         };
         reader.onerror = () => {
