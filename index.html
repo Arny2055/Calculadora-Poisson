@@ -1,186 +1,250 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Análisis Over 2.5 — Últimos 8–10 Partidos</title>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Análisis Over 2.5 — Últimos 8–10 Partidos (Robusto)</title>
 <style>
-  body {
-    font-family: 'Segoe UI', sans-serif;
-    background: #121212;
-    color: #eee;
-    padding: 30px;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-  }
-  h1 {
-    color: #00e676;
-  }
-  .container {
-    background: #1e1e1e;
-    padding: 25px 30px;
-    border-radius: 10px;
-    width: 95%;
-    max-width: 950px;
-    box-shadow: 0 0 10px rgba(0,0,0,0.5);
-  }
-  input[type="file"] {
-    background: #2a2a2a;
-    border: none;
-    padding: 10px;
-    border-radius: 6px;
-    color: #fff;
-    cursor: pointer;
-    width: 100%;
-    margin-bottom: 20px;
-  }
-  table {
-    width: 100%;
-    border-collapse: collapse;
-    margin-top: 20px;
-  }
-  th, td {
-    border-bottom: 1px solid #333;
-    padding: 8px;
-    text-align: center;
-  }
-  th {
-    background: #00e676;
-    color: #111;
-  }
-  tr:hover {
-    background: #222;
-  }
+  body { font-family: "Segoe UI", Roboto, Arial, sans-serif; background:#0f0f0f; color:#eee; padding:24px; display:flex; flex-direction:column; align-items:center; }
+  h1 { color:#00e676; margin-bottom:8px; }
+  .container { width:95%; max-width:980px; background:#111; padding:18px; border-radius:10px; box-shadow:0 6px 20px rgba(0,0,0,0.6); }
+  input[type=file] { width:100%; padding:10px; border-radius:6px; border:1px solid #222; background:#121212; color:#eee; }
+  .msg { margin-top:12px; padding:10px; border-radius:6px; background:#151515; color:#ddd; }
+  table { width:100%; border-collapse:collapse; margin-top:14px; }
+  th,td { padding:8px 6px; border-bottom:1px solid #222; text-align:center; font-size:13px; }
+  th { background:#00e676; color:#06110b; }
+  .error { background:#3b1a1a; color:#ffdede; padding:8px; border-radius:6px; margin-top:10px; }
+  .hint { font-size:13px; color:#bdbdbd; margin-top:8px; }
 </style>
 </head>
 <body>
-
-<h1>📊 Análisis Over 2.5 (Últimos 8–10 Partidos)</h1>
-
-<div class="container">
-  <input type="file" id="fileInput" accept=".json">
-  <div id="tabla-container"></div>
-</div>
+  <h1>📈 Over 2.5 — Últimos 8/9/10 partidos (robusto)</h1>
+  <div class="container">
+    <input id="fileInput" type="file" accept=".json,.txt" />
+    <div id="status" class="msg">Selecciona el archivo JSON (puede ser un array, un objeto, o NDJSON).</div>
+    <div id="error" class="error" style="display:none;"></div>
+    <div id="tabla-container"></div>
+    <div class="hint">
+      Formatos soportados: archivo JSON con array de objetos, un solo objeto, o NDJSON (una JSON por línea).<br>
+      Campos requeridos por partido: <code>Match</code> y <code>Result FT</code> (ej. "1-2" o "1 - 2" o "1:2"). Si tu JSON usa comillas simples o tiene comas finales, el parser intentará corregirlo.
+    </div>
+  </div>
 
 <script>
-document.getElementById('fileInput').addEventListener('change', function(e) {
-  const file = e.target.files[0];
+const fileInput = document.getElementById('fileInput');
+const statusDiv = document.getElementById('status');
+const errorDiv = document.getElementById('error');
+const tablaContainer = document.getElementById('tabla-container');
+
+fileInput.addEventListener('change', async (e) => {
+  resetUI();
+  const file = e.target.files && e.target.files[0];
   if (!file) return;
+  status('Leyendo archivo...');
+  try {
+    const text = await file.text();
+    const parsed = tryParseFlexibleJSON(text);
+    if (!parsed) throw new Error('No se pudo parsear el archivo como JSON válido.');
 
-  const reader = new FileReader();
-  reader.onload = function(event) {
-    try {
-      let data = JSON.parse(event.target.result);
-      if (!Array.isArray(data)) data = [data];
+    // Asegurar array
+    const data = Array.isArray(parsed) ? parsed : [parsed];
 
-      // Filtrar partidos válidos con resultado final
-      data = data.filter(item => item["Result FT"] && item["Match"]);
-
-      // Ordenar por fecha si existe el campo Date
-      data.sort((a, b) => new Date(a.Date) - new Date(b.Date));
-
-      const stats = calcularProbabilidades(data);
-      mostrarTabla(stats);
-    } catch (err) {
-      alert("Error al leer el archivo JSON. Verifica su formato.");
+    // Filtrar registros con Match y Result FT
+    const valid = data.filter(item => item && item.Match && item["Result FT"]);
+    if (valid.length === 0) {
+      throw new Error('No se encontraron registros con los campos "Match" y "Result FT". Verifica el JSON.');
     }
-  };
-  reader.readAsText(file);
+
+    // No dependemos de Date para ordenar: asumimos que el archivo está en orden cronológico.
+    const stats = calcularProbabilidadesUltimos(data);
+    mostrarTabla(stats);
+    status(`Procesados ${data.length} entradas. Mostrando equipos con al menos 8 partidos en rol (tomando últimos 8-10).`);
+  } catch (err) {
+    fallo(err.message || String(err));
+  }
 });
 
-function calcularProbabilidades(data) {
+function resetUI() {
+  statusDiv.style.display = 'block';
+  errorDiv.style.display = 'none';
+  errorDiv.textContent = '';
+  tablaContainer.innerHTML = '';
+}
+
+function status(text) {
+  statusDiv.textContent = text;
+}
+function fallo(msg) {
+  errorDiv.style.display = 'block';
+  errorDiv.textContent = 'Error: ' + msg;
+  statusDiv.textContent = 'Carga fallida.';
+}
+
+/*
+ * Intentos de parseo robusto:
+ *  - Quitar BOM
+ *  - Intentar JSON.parse directo
+ *  - Intentar envolver en array si parece un objeto (startsWith { and endsWith })
+ *  - Intentar NDJSON: parsear cada línea como JSON
+ *  - Corregir comillas simples -> dobles (con cuidado)
+ *  - Quitar comas finales en objetos/arrays
+ */
+function tryParseFlexibleJSON(text) {
+  if (!text || typeof text !== 'string') return null;
+
+  // quitar BOM
+  let s = text.replace(/^\uFEFF/, '').trim();
+
+  // intento 1: json.parse directo
+  try { return JSON.parse(s); } catch (e) { /* continue */ }
+
+  // intento 2: NDJSON (una JSON por línea)
+  const lines = s.split(/\r?\n/).map(l => l.trim()).filter(l => l.length>0);
+  if (lines.length > 1) {
+    const parsedLines = [];
+    let ndjsonFailed = false;
+    for (const L of lines) {
+      try {
+        parsedLines.push(JSON.parse(L));
+      } catch (e) { ndjsonFailed = true; break; }
+    }
+    if (!ndjsonFailed) return parsedLines;
+  }
+
+  // intento 3: arreglar comas finales (remove trailing commas in objects/arrays)
+  try {
+    const noTrailingCommas = s
+      .replace(/,\s*([}\]])/g, '$1')        // elimina comas antes de } ]
+      .replace(/,\s*(\n|\r|\s)*]/g, ']')    // por si acaso
+      .replace(/,\s*(\n|\r|\s)*}/g, '}');
+    try { return JSON.parse(noTrailingCommas); } catch(e) {}
+  } catch(e){}
+
+  // intento 4: cambiar comillas simples por dobles (solo si parece necesario)
+  // CUIDADO: esto puede romper strings que contienen comillas; lo intentamos solo como último recurso.
+  try {
+    const possible = s.replace(/'/g, '"');
+    // quitar comas finales también
+    const possible2 = possible.replace(/,\s*([}\]])/g, '$1');
+    try { return JSON.parse(possible2); } catch(e) {}
+  } catch(e){}
+
+  // intento 5: si comienza con { y termina con } devolver objeto parseando manualmente con Function (muy arriesgado)
+  // No usamos eval por seguridad. Devolvemos null.
+  return null;
+}
+
+// Extrae goles de "Result FT" con patrones comunes.
+// Retorna [golesLocal, golesVisita] o null si no se puede parsear.
+function parseResultFT(str) {
+  if (!str || typeof str !== 'string') return null;
+  // limpiar texto (ej "FT 1-2", "1 : 2", "1 - 2 (a.e.t.)")
+  const cleaned = str.replace(/[^\d:\-]/g, ' ').replace(/\s+/g, ' ').trim();
+  // buscar dos números separados por - or :
+  const m = cleaned.match(/(\d+)\s*[:\-]\s*(\d+)/);
+  if (m) return [parseInt(m[1],10), parseInt(m[2],10)];
+  // buscar dos números aislados (últimos dos)
+  const nums = cleaned.match(/\d+/g);
+  if (nums && nums.length >= 2) {
+    const a = parseInt(nums[nums.length-2],10);
+    const b = parseInt(nums[nums.length-1],10);
+    return [a,b];
+  }
+  return null;
+}
+
+/*
+ * data: array de objetos (en orden cronológico - si no, se toma el orden del archivo)
+ * Para cada equipo y rol guardamos el historial de overs (1/0) en orden
+ * Luego tomamos los últimos hasta 10 y requiere mínimo 8
+ */
+function calcularProbabilidadesUltimos(allData) {
   const equipos = {};
 
-  data.forEach(item => {
-    const match = item.Match.split(" - ");
-    if (match.length < 2) return;
+  // recorrer en orden: asumimos que el archivo viene en orden cronológico.
+  for (const item of allData) {
+    if (!item || !item.Match || !item["Result FT"]) continue;
+    const parts = item.Match.split(/\s*-\s*/);
+    if (parts.length < 2) continue;
+    const local = parts[0].trim();
+    const visita = parts[1].trim();
 
-    const local = match[0].trim();
-    const visita = match[1].trim();
-    const resultado = item["Result FT"].split("-");
-    const golesLocal = parseInt(resultado[0]);
-    const golesVisita = parseInt(resultado[1]);
-    const totalGoles = golesLocal + golesVisita;
-    const esOver = totalGoles > 2.5 ? 1 : 0;
+    const goles = parseResultFT(item["Result FT"]);
+    if (!goles) continue;
+    const total = goles[0] + goles[1];
+    const isOver = (total > 2) ? 1 : 0; // total > 2 significa >2.5 en goles enteros
 
-    // Agregar partido a historial de local y visita
-    equipos[local] = equipos[local] || { local: [] };
-    equipos[local].local.push(esOver);
+    // push al historial
+    if (!equipos[local]) equipos[local] = { local: [] , visita: [] };
+    if (!equipos[visita]) equipos[visita] = { local: [] , visita: [] };
 
-    equipos[visita] = equipos[visita] || { visita: [] };
-    equipos[visita].visita.push(esOver);
-  });
+    equipos[local].local.push(isOver);    // como local
+    equipos[visita].visita.push(isOver); // como visitante
+  }
 
   const resultados = [];
-
   for (const equipo in equipos) {
-    for (const rol in equipos[equipo]) {
-      const partidos = equipos[equipo][rol];
-      if (!partidos || partidos.length < 8) continue;
+    const obj = equipos[equipo];
+    for (const rol of ['local','visita']) {
+      const historial = obj[rol] || [];
+      if (historial.length < 8) continue; // necesita mínimo 8 partidos en ese rol
 
-      // Tomar los últimos 8, 9 o 10 (si hay más)
-      const ultimos = partidos.slice(-10);
-      if (ultimos.length < 8) continue; // descartar si no alcanza 8
+      // tomar últimos hasta 10
+      const ultimos = historial.slice(-10);
+      // requerimos al menos 8 de esos ultimos (si ultimos <8, ya filtramos antes)
+      if (ultimos.length < 8) continue;
 
       const jugados = ultimos.length;
-      const ganados = ultimos.reduce((a, b) => a + b, 0);
+      const ganados = ultimos.reduce((s,v) => s+v, 0);
       const prob = ganados / jugados;
-      const cuota = 1 / prob;
+      const cuota = prob > 0 ? (1/prob) : null;
 
       resultados.push({
         equipo,
         rol,
         jugados,
         ganados,
-        probabilidad: (prob * 100).toFixed(1) + "%",
-        cuota: cuota.toFixed(2)
+        probabilidad: (prob*100),
+        cuota: cuota
       });
     }
   }
 
-  return resultados.sort((a, b) => parseFloat(b.probabilidad) - parseFloat(a.probabilidad));
+  // ordenar por probabilidad descendente
+  resultados.sort((a,b) => b.probabilidad - a.probabilidad);
+  return resultados;
 }
 
 function mostrarTabla(datos) {
-  const container = document.getElementById('tabla-container');
-  if (datos.length === 0) {
-    container.innerHTML = "<p>No hay equipos con al menos 8 partidos recientes.</p>";
+  tablaContainer.innerHTML = '';
+  if (!datos || datos.length === 0) {
+    tablaContainer.innerHTML = '<p>No hay equipos con al menos 8 partidos en su rol (o no se pudo extraer Result FT).</p>';
     return;
   }
 
-  let html = `
-    <table>
-      <thead>
-        <tr>
-          <th>Equipo</th>
-          <th>Rol</th>
-          <th>Partidos (últimos)</th>
-          <th>Overs 2.5</th>
-          <th>Probabilidad</th>
-          <th>Cuota Justa</th>
-        </tr>
-      </thead>
-      <tbody>
-  `;
+  let html = `<table><thead><tr>
+    <th>Equipo</th><th>Rol</th><th>Partidos (ult.)</th><th>Overs 2.5</th><th>Probabilidad (%)</th><th>Cuota justa</th>
+    </tr></thead><tbody>`;
 
-  datos.forEach(d => {
-    html += `
-      <tr>
-        <td>${d.equipo}</td>
-        <td>${d.rol}</td>
-        <td>${d.jugados}</td>
-        <td>${d.ganados}</td>
-        <td>${d.probabilidad}</td>
-        <td>${d.cuota}</td>
-      </tr>
-    `;
-  });
+  for (const d of datos) {
+    html += `<tr>
+      <td>${escapeHtml(d.equipo)}</td>
+      <td>${d.rol}</td>
+      <td>${d.jugados}</td>
+      <td>${d.ganados}</td>
+      <td>${(d.probabilidad).toFixed(1)}%</td>
+      <td>${d.cuota ? d.cuota.toFixed(2) : 'N/A'}</td>
+    </tr>`;
+  }
 
-  html += "</tbody></table>";
-  container.innerHTML = html;
+  html += '</tbody></table>';
+  tablaContainer.innerHTML = html;
+}
+
+// helper para escapar HTML
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (m) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
 }
 </script>
-
 </body>
 </html>
