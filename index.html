@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Modelo de Poisson: Selectores Dinámicos Corregidos (Normalización)</title>
+    <title>Modelo de Poisson: Selectores Dinámicos para O2.5</title>
     <script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></script>
     <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
     <style>
@@ -37,11 +37,10 @@
         <pre>
 [
     {
-        "League": "NombreLiga",
-        "Home": "EquipoLocal",
-        "Away": "EquipoVisitante",
-        "GolesLocal": 2,
-        "GolesVisita": 1
+        "League": "Brazil Serie B",
+        "Match": "ABC - Mirassol",
+        "Result FT": "1-2",
+        ...
     },
     ...
 ]
@@ -92,7 +91,7 @@
         return str ? String(str).trim().toLowerCase() : '';
     }
 
-    // --- Funciones Matemáticas (Sin cambios) ---
+    // --- Funciones Matemáticas ---
     function factorial(n) {
         if (n === 0 || n === 1) return 1;
         let result = 1;
@@ -106,14 +105,13 @@
         return (Math.pow(lambda, k) * Math.exp(-lambda)) / factorial(k);
     }
 
-    // --- Funciones de Llenado Dinámico (Modificadas con Normalización) ---
+    // --- Funciones de Llenado Dinámico ---
 
     function populateSelect(selectId, optionsSet, defaultText = "-- Selecciona --") {
         const select = document.getElementById(selectId);
         select.innerHTML = `<option value="">${defaultText}</option>`; 
         optionsSet.forEach(option => {
             const element = document.createElement('option');
-            // Usamos el nombre original (no normalizado) como valor visible
             element.value = option; 
             element.textContent = option;
             select.appendChild(element);
@@ -154,7 +152,6 @@
         const localSelect = document.getElementById('local');
         const visitaSelect = document.getElementById('visita');
 
-        // Resetear selectores de equipo
         localSelect.innerHTML = '<option value="">Cargando equipos...</option>';
         visitaSelect.innerHTML = '<option value="">Cargando equipos...</option>';
         localSelect.disabled = true;
@@ -181,21 +178,36 @@
 
     // Validar estructura JSON
     function validateJSON(history) {
-        const requiredKeys = ['League', 'Home', 'Away', 'GolesLocal', 'GolesVisita'];
+        const requiredKeys = ['League', 'Match', 'Result FT'];
         return history.every(match => 
-            requiredKeys.every(key => key in match && match[key] != null)
+            requiredKeys.every(key => key in match && match[key] != null) &&
+            typeof match['Result FT'] === 'string' &&
+            match['Result FT'].match(/^\d+-\d+$/) &&
+            typeof match['Match'] === 'string' &&
+            match['Match'].includes(' - ')
         );
+    }
+
+    // Procesar el partido para extraer Home, Away, GolesLocal, GolesVisita
+    function processMatch(match) {
+        const [home, away] = match['Match'].split(' - ').map(team => team.trim());
+        const [golesLocal, golesVisita] = match['Result FT'].split('-').map(Number);
+        return {
+            League: match.League,
+            Home: home,
+            Away: away,
+            GolesLocal: golesLocal,
+            GolesVisita: golesVisita
+        };
     }
 
     // Filtra y limita los datos históricos al rango de 8 a 10 partidos.
     function filterAndLimitData(history, team, role, maxCount = 10, minCount = 8) {
-        // Normalizamos el equipo seleccionado para la comparación
         const normalizedTeam = normalizeString(team); 
 
         const filtered = history
             .filter(match => {
                 const teamToMatch = role === 'Home' ? match.Home : match.Away;
-                // Comparamos el nombre del equipo normalizado en el historial con el nombre seleccionado normalizado
                 return normalizeString(teamToMatch) === normalizedTeam;
             });
         
@@ -227,19 +239,20 @@
         reader.onload = function(event) {
             try {
                 const jsonText = event.target.result;
-                const history = JSON.parse(jsonText);
+                const rawHistory = JSON.parse(jsonText);
 
-                if (!Array.isArray(history) || history.length < 1) {
+                if (!Array.isArray(rawHistory) || rawHistory.length < 1) {
                     throw new Error("El archivo JSON debe contener un array de partidos.");
                 }
 
-                if (!validateJSON(history)) {
-                    throw new Error("El archivo JSON debe contener las claves: League, Home, Away, GolesLocal, GolesVisita.");
+                if (!validateJSON(rawHistory)) {
+                    throw new Error("El archivo JSON debe contener las claves: League, Match, Result FT. 'Match' debe estar en formato 'EquipoLocal - EquipoVisitante' y 'Result FT' en formato 'X-Y'.");
                 }
-                
-                globalHistory = history;
-                buildLeagueTeamsMap(history);
-                loadLeagues(history);
+
+                // Procesar el JSON para que coincida con el formato interno esperado
+                globalHistory = rawHistory.map(processMatch);
+                buildLeagueTeamsMap(globalHistory);
+                loadLeagues(globalHistory);
                 
                 document.getElementById('local').innerHTML = '<option value="">Selecciona una liga...</option>';
                 document.getElementById('visita').innerHTML = '<option value="">Selecciona una liga...</option>';
@@ -300,7 +313,6 @@
             return;
         }
 
-
         try {
             // Filtrar los datos por la liga seleccionada usando normalización
             const normalizedLeague = normalizeString(league);
@@ -328,10 +340,8 @@
 
             for (let i = 0; i <= 2; i++) { 
                 for (let j = 0; j <= 2 - i; j++) { 
-                    
                     const P_Home = poisson_prob(i, lambda_Home);
                     const P_Away = poisson_prob(j, lambda_Away);
-                    
                     P_Less_Equal_2 += P_Home * P_Away;
                 }
             }
