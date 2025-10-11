@@ -5,30 +5,44 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Herramienta de Backtesting de Fútbol Avanzada</title>
     <style>
-        body { font-family: Arial, sans-serif; margin: 20px; }
-        #resultados { margin-top: 20px; padding: 10px; border: 1px solid #ccc; white-space: pre-wrap; background-color: #f9f9f9; }
-        .success { color: green; font-weight: bold; }
-        .failure { color: red; }
-        .neutral { color: orange; }
+        body { font-family: Arial, sans-serif; margin: 20px; background-color: #f4f4f9; color: #333; }
+        h1 { color: #0056b3; }
+        h2, h3, h4 { border-bottom: 2px solid #ccc; padding-bottom: 5px; margin-top: 25px; }
+        #resultados { margin-top: 20px; padding: 15px; border: 1px solid #ccc; background-color: #fff; box-shadow: 0 4px 8px rgba(0,0,0,0.1); }
+        .success { color: #28a745; font-weight: bold; }
+        .failure { color: #dc3545; font-weight: bold; }
+        .neutral { color: #ffc107; font-weight: bold; }
         table { width: 100%; border-collapse: collapse; margin-top: 15px; }
-        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
-        th { background-color: #f2f2f2; }
+        th, td { border: 1px solid #ddd; padding: 10px; text-align: left; }
+        th { background-color: #007bff; color: white; }
+        tr:nth-child(even) { background-color: #f2f2f2; }
     </style>
 </head>
 <body>
 
     <h1>Herramienta de Backtesting de Fútbol ⚽</h1>
+    <p>Carga tu archivo JSON (debe ser un array de objetos de partido) y haz clic en Iniciar Backtesting.</p>
 
     <input type="file" id="jsonFile" accept=".json">
     <button onclick="iniciarBacktesting()">Iniciar Backtesting</button>
 
-    <h2>Resultados</h2>
+    <h2>Resultados del Análisis</h2>
     <div id="resultados">Carga un archivo JSON para comenzar...</div>
 
     <script>
         let datosPartidos = []; 
-        let analisisEquipos = {}; // Estructura para almacenar el análisis por equipo
+        let analisisEquipos = {}; 
+        
+        let analisisRangos = {
+            '1.00-1.25': { apuestas: 0, gananciaNeta: 0, victorias: 0, perdidas: 0 },
+            '1.26-1.50': { apuestas: 0, gananciaNeta: 0, victorias: 0, perdidas: 0 },
+            '1.51-1.75': { apuestas: 0, gananciaNeta: 0, victorias: 0, perdidas: 0 },
+            '1.76-2.00': { apuestas: 0, gananciaNeta: 0, victorias: 0, perdidas: 0 },
+            '2.01-2.50': { apuestas: 0, gananciaNeta: 0, victorias: 0, perdidas: 0 },
+            '2.51+':     { apuestas: 0, gananciaNeta: 0, victorias: 0, perdidas: 0 }
+        };
 
+        // --- MANEJO DE ARCHIVOS ---
         document.getElementById('jsonFile').addEventListener('change', function(event) {
             const file = event.target.files[0];
             if (!file) return;
@@ -36,7 +50,6 @@
             const reader = new FileReader();
             reader.onload = function(e) {
                 try {
-                    // El JSON cargado debe ser un ARRAY de objetos de partido.
                     datosPartidos = JSON.parse(e.target.result);
                     if (!Array.isArray(datosPartidos) || datosPartidos.length === 0) {
                         throw new Error("El archivo JSON debe ser un array de partidos.");
@@ -50,19 +63,13 @@
             reader.readAsText(file);
         });
 
-        // Función para inicializar o actualizar las estadísticas de un equipo
+        // --- FUNCIONES AUXILIARES DE ANÁLISIS ---
+
         function actualizarEstadisticasEquipo(equipo, esLocal, golesFavor, golesContra, resultadoFTR) {
             if (!analisisEquipos[equipo]) {
-                // Inicializar si es la primera vez que se ve el equipo
                 analisisEquipos[equipo] = {
-                    jugados: 0,
-                    victorias: 0,
-                    empates: 0,
-                    derrotas: 0,
-                    gf: 0, // Goles a Favor
-                    gc: 0, // Goles en Contra
-                    loc_jugados: 0, // Como local
-                    vis_jugados: 0  // Como visitante
+                    jugados: 0, victorias: 0, empates: 0, derrotas: 0, 
+                    gf: 0, gc: 0, loc_jugados: 0, vis_jugados: 0
                 };
             }
 
@@ -70,27 +77,31 @@
             stats.jugados++;
             stats.gf += golesFavor;
             stats.gc += golesContra;
-            
-            if (esLocal) {
-                stats.loc_jugados++;
-            } else {
-                stats.vis_jugados++;
-            }
+            stats[esLocal ? 'loc_jugados' : 'vis_jugados']++;
 
-            // FTR (Full Time Result): H=Home Win, D=Draw, A=Away Win
             if (resultadoFTR === 'H') {
-                if (esLocal) stats.victorias++;
-                else stats.derrotas++;
+                if (esLocal) stats.victorias++; else stats.derrotas++;
             } else if (resultadoFTR === 'A') {
-                if (esLocal) stats.derrotas++;
-                else stats.victorias++;
-            } else { // resultadoFTR === 'D'
+                if (esLocal) stats.derrotas++; else stats.victorias++;
+            } else { 
                 stats.empates++;
             }
         }
 
+        function obtenerRangoCuota(cuota) {
+            if (cuota >= 1.00 && cuota <= 1.25) return '1.00-1.25';
+            if (cuota >= 1.26 && cuota <= 1.50) return '1.26-1.50';
+            if (cuota >= 1.51 && cuota <= 1.75) return '1.51-1.75';
+            if (cuota >= 1.76 && cuota <= 2.00) return '1.76-2.00';
+            if (cuota >= 2.01 && cuota <= 2.50) return '2.01-2.50';
+            if (cuota > 2.50) return '2.51+';
+            return null;
+        }
+        
+        // --- FUNCIONES DE GENERACIÓN DE TABLAS ---
+
         function generarTablaEquipos() {
-            let htmlTabla = '<h3>Análisis de Rendimiento por Equipo</h3>';
+            let htmlTabla = '<h3>Análisis de Rendimiento General por Equipo (Todos los partidos)</h3>';
             htmlTabla += '<table>';
             htmlTabla += '<tr><th>Equipo</th><th>PJ</th><th>V</th><th>E</th><th>D</th><th>GF</th><th>GC</th><th>Dif</th><th>%V</th></tr>';
 
@@ -118,72 +129,119 @@
             return htmlTabla;
         }
 
+        function generarTablaRangos() {
+            let htmlTabla = '<h3>Rentabilidad por Rango de Cuotas (Estrategia O2.5)</h3>';
+            htmlTabla += '<p>Muestra el rendimiento de la estrategia de Over 2.5 para diferentes niveles de cuotas.</p>';
+            htmlTabla += '<table>';
+            htmlTabla += '<tr><th>Rango de Cuotas</th><th>Apuestas</th><th>Ganancia Neta (u)</th><th>ROI (%)</th><th>Acierto (%)</th></tr>';
+
+            for (const rango in analisisRangos) {
+                const stats = analisisRangos[rango];
+                const totalApuestas = stats.victorias + stats.perdidas;
+                // El ROI se calcula sobre el total apostado (igual a totalApuestas en este caso)
+                const roi = totalApuestas > 0 ? ((stats.gananciaNeta / totalApuestas) * 100).toFixed(2) : 0;
+                const acierto = totalApuestas > 0 ? ((stats.victorias / totalApuestas) * 100).toFixed(1) : 0;
+                const cssClass = stats.gananciaNeta >= 0 ? 'success' : 'failure';
+
+                htmlTabla += `<tr>
+                    <td>${rango}</td>
+                    <td>${totalApuestas}</td>
+                    <td class="${cssClass}">${stats.gananciaNeta.toFixed(2)}</td>
+                    <td class="${cssClass}">${roi}</td>
+                    <td>${acierto}</td>
+                </tr>`;
+            }
+
+            htmlTabla += '</table>';
+            return htmlTabla;
+        }
+
+        // --- FUNCIÓN PRINCIPAL DE BACKTESTING ---
+
         function iniciarBacktesting() {
             if (datosPartidos.length === 0) {
                 document.getElementById('resultados').innerHTML = '<p class="failure">Por favor, primero carga un archivo JSON.</p>';
                 return;
             }
 
-            // Reiniciar contadores y análisis de equipos
+            // Reiniciar contadores y análisis
             let victoriasEstrategia = 0;
             let perdidasEstrategia = 0;
             let totalApostado = 0;
             let gananciaNeta = 0;
             analisisEquipos = {}; 
-            let resultadosHTML = '<h3>Reporte de Backtesting de Estrategia:</h3>';
+            analisisRangos = {
+                '1.00-1.25': { apuestas: 0, gananciaNeta: 0, victorias: 0, perdidas: 0 },
+                '1.26-1.50': { apuestas: 0, gananciaNeta: 0, victorias: 0, perdidas: 0 },
+                '1.51-1.75': { apuestas: 0, gananciaNeta: 0, victorias: 0, perdidas: 0 },
+                '1.76-2.00': { apuestas: 0, gananciaNeta: 0, victorias: 0, perdidas: 0 },
+                '2.01-2.50': { apuestas: 0, gananciaNeta: 0, victorias: 0, perdidas: 0 },
+                '2.51+':     { apuestas: 0, gananciaNeta: 0, victorias: 0, perdidas: 0 }
+            };
+            let resultadosHTML = '<h3>Reporte Global de Estrategia</h3>';
 
-            // --- Lógica de Backtesting y Análisis de Equipos ---
+            // --- BUCLE DE BACKTESTING ---
             datosPartidos.forEach((partido) => {
                 const homeTeam = partido.HomeTeam;
                 const awayTeam = partido.AwayTeam;
-                const fthg = parseInt(partido.FTHG); // Goles local
-                const ftag = parseInt(partido.FTAG); // Goles visitante
-                const ftr = partido.FTR;             // Resultado final (H, D, A)
+                const fthg = parseInt(partido.FTHG); 
+                const ftag = parseInt(partido.FTAG); 
+                const ftr = partido.FTR;             
                 
-                // 1. **Análisis de Rendimiento de Equipos** (se ejecuta para CADA partido)
+                // Análisis de Rendimiento de Equipos (Para tabla general)
                 actualizarEstadisticasEquipo(homeTeam, true, fthg, ftag, ftr);
                 actualizarEstadisticasEquipo(awayTeam, false, ftag, fthg, ftr);
 
-
-                // 2. **Ejecución de Estrategia de Backtesting** (EJEMPLO: Más de 2.5 Goles, cuota promedio)
-                
-                // NOTA: Ajusta la clave para Over 2.5. Basado en tu JSON, asumiremos la clave 'Avg>2' del array anidado.
-                // Si la estructura del JSON es correcta, la clave para el promedio de Over 2.5 es el elemento 5 del array.
+                // Ejecución de Estrategia de Backtesting (EJEMPLO: Over 2.5)
+                // NOTA IMPORTANTE: Ajustar 'Avg>2'[5] según la estructura real de tu JSON si es diferente.
                 const cuotaMas2_5 = parseFloat(partido['Avg>2'] ? partido['Avg>2'][5] : null); 
-                const cuotaMinima = 1.35;
-                const apuesta = 1; // Apuesta fija por partido (unidad)
+                const cuotaMinima = 1.00; // Mínimo para asegurar que se analiza en algún rango
+                const apuesta = 1; 
 
                 if (cuotaMas2_5 && cuotaMas2_5 >= cuotaMinima) {
-                    totalApostado += apuesta;
+                    const rango = obtenerRangoCuota(cuotaMas2_5);
                     
-                    const golesTotales = fthg + ftag;
-                    const esGanadora = golesTotales >= 3; 
+                    if (rango) {
+                        
+                        const golesTotales = fthg + ftag;
+                        const esGanadora = golesTotales >= 3; 
+                        
+                        // Solo contamos como "apuesta" las que se procesan.
+                        totalApostado += apuesta; 
 
-                    if (esGanadora) {
-                        const ganancia = (cuotaMas2_5 - 1) * apuesta;
-                        gananciaNeta += ganancia;
-                        victoriasEstrategia++;
-                    } else {
-                        gananciaNeta -= apuesta;
-                        perdidasEstrategia++;
+                        if (esGanadora) {
+                            const ganancia = (cuotaMas2_5 - 1) * apuesta;
+                            gananciaNeta += ganancia;
+                            victoriasEstrategia++;
+                            
+                            // ACTUALIZAR RANGOS
+                            analisisRangos[rango].gananciaNeta += ganancia;
+                            analisisRangos[rango].victorias++;
+                        } else {
+                            gananciaNeta -= apuesta;
+                            perdidasEstrategia++;
+
+                            // ACTUALIZAR RANGOS
+                            analisisRangos[rango].gananciaNeta -= apuesta;
+                            analisisRangos[rango].perdidas++;
+                        }
+                        analisisRangos[rango].apuestas++;
                     }
                 }
             });
-            // --- Fin de Lógica ---
+            // --- FIN DEL BUCLE ---
 
             // --- Resumen de Estrategia ---
             const totalApuestas = victoriasEstrategia + perdidasEstrategia;
             const porcentajeAcierto = totalApuestas > 0 ? ((victoriasEstrategia / totalApuestas) * 100).toFixed(2) : 0;
             const rendimiento = totalApostado > 0 ? ((gananciaNeta / totalApostado) * 100).toFixed(2) : 0;
 
-            resultadosHTML += `<p>Total de Apuestas (Que cumplen estrategia): <span class="neutral">${totalApuestas}</span></p>`;
-            resultadosHTML += `<p>Victorias de Estrategia: <span class="success">${victoriasEstrategia}</span></p>`;
-            resultadosHTML += `<p>Pérdidas de Estrategia: <span class="failure">${perdidasEstrategia}</span></p>`;
-            resultadosHTML += `<p>Porcentaje de Acierto: <span class="${porcentajeAcierto >= 50 ? 'success' : 'failure'}">${porcentajeAcierto}%</span></p>`;
+            resultadosHTML += `<p>Total de Apuestas Procesadas (Cumplen Criterio O2.5 y están en rango): <span class="neutral">${totalApuestas}</span></p>`;
             resultadosHTML += `<p>Ganancia/Pérdida Neta (Profit/Loss): <span class="${gananciaNeta >= 0 ? 'success' : 'failure'}">${gananciaNeta.toFixed(2)} unidades</span></p>`;
             resultadosHTML += `<p>Rendimiento (ROI): <span class="${rendimiento >= 0 ? 'success' : 'failure'}">${rendimiento}%</span></p>`;
 
-            // --- Agregar Tabla de Análisis de Equipos ---
+            // --- Agrega Tablas ---
+            resultadosHTML += generarTablaRangos();
             resultadosHTML += generarTablaEquipos();
             
             document.getElementById('resultados').innerHTML = resultadosHTML;
