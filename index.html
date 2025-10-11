@@ -3,12 +3,16 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Herramienta de Backtesting de Fútbol</title>
+    <title>Herramienta de Backtesting de Fútbol Avanzada</title>
     <style>
         body { font-family: Arial, sans-serif; margin: 20px; }
         #resultados { margin-top: 20px; padding: 10px; border: 1px solid #ccc; white-space: pre-wrap; background-color: #f9f9f9; }
         .success { color: green; font-weight: bold; }
         .failure { color: red; }
+        .neutral { color: orange; }
+        table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+        th { background-color: #f2f2f2; }
     </style>
 </head>
 <body>
@@ -22,19 +26,21 @@
     <div id="resultados">Carga un archivo JSON para comenzar...</div>
 
     <script>
-        let datosPartidos = []; // Aquí se almacenarán los datos del JSON
+        let datosPartidos = []; 
+        let analisisEquipos = {}; // Estructura para almacenar el análisis por equipo
 
         document.getElementById('jsonFile').addEventListener('change', function(event) {
             const file = event.target.files[0];
-            if (!file) {
-                return;
-            }
+            if (!file) return;
 
             const reader = new FileReader();
             reader.onload = function(e) {
                 try {
-                    // Intenta parsear el contenido como JSON
+                    // El JSON cargado debe ser un ARRAY de objetos de partido.
                     datosPartidos = JSON.parse(e.target.result);
+                    if (!Array.isArray(datosPartidos) || datosPartidos.length === 0) {
+                        throw new Error("El archivo JSON debe ser un array de partidos.");
+                    }
                     document.getElementById('resultados').innerHTML = `<p class="success">Archivo JSON cargado correctamente. Se encontraron ${datosPartidos.length} partidos.</p>`;
                 } catch (error) {
                     document.getElementById('resultados').innerHTML = `<p class="failure">Error al leer o parsear el archivo JSON: ${error.message}</p>`;
@@ -44,66 +50,142 @@
             reader.readAsText(file);
         });
 
+        // Función para inicializar o actualizar las estadísticas de un equipo
+        function actualizarEstadisticasEquipo(equipo, esLocal, golesFavor, golesContra, resultadoFTR) {
+            if (!analisisEquipos[equipo]) {
+                // Inicializar si es la primera vez que se ve el equipo
+                analisisEquipos[equipo] = {
+                    jugados: 0,
+                    victorias: 0,
+                    empates: 0,
+                    derrotas: 0,
+                    gf: 0, // Goles a Favor
+                    gc: 0, // Goles en Contra
+                    loc_jugados: 0, // Como local
+                    vis_jugados: 0  // Como visitante
+                };
+            }
+
+            const stats = analisisEquipos[equipo];
+            stats.jugados++;
+            stats.gf += golesFavor;
+            stats.gc += golesContra;
+            
+            if (esLocal) {
+                stats.loc_jugados++;
+            } else {
+                stats.vis_jugados++;
+            }
+
+            // FTR (Full Time Result): H=Home Win, D=Draw, A=Away Win
+            if (resultadoFTR === 'H') {
+                if (esLocal) stats.victorias++;
+                else stats.derrotas++;
+            } else if (resultadoFTR === 'A') {
+                if (esLocal) stats.derrotas++;
+                else stats.victorias++;
+            } else { // resultadoFTR === 'D'
+                stats.empates++;
+            }
+        }
+
+        function generarTablaEquipos() {
+            let htmlTabla = '<h3>Análisis de Rendimiento por Equipo</h3>';
+            htmlTabla += '<table>';
+            htmlTabla += '<tr><th>Equipo</th><th>PJ</th><th>V</th><th>E</th><th>D</th><th>GF</th><th>GC</th><th>Dif</th><th>%V</th></tr>';
+
+            const equiposOrdenados = Object.keys(analisisEquipos).sort();
+
+            equiposOrdenados.forEach(equipo => {
+                const stats = analisisEquipos[equipo];
+                const diferencia = stats.gf - stats.gc;
+                const porcentajeVictoria = stats.jugados > 0 ? ((stats.victorias / stats.jugados) * 100).toFixed(1) : 0;
+                
+                htmlTabla += `<tr>
+                    <td>${equipo}</td>
+                    <td>${stats.jugados}</td>
+                    <td>${stats.victorias}</td>
+                    <td>${stats.empates}</td>
+                    <td>${stats.derrotas}</td>
+                    <td>${stats.gf}</td>
+                    <td>${stats.gc}</td>
+                    <td class="${diferencia >= 0 ? 'success' : 'failure'}">${diferencia}</td>
+                    <td>${porcentajeVictoria}%</td>
+                </tr>`;
+            });
+
+            htmlTabla += '</table>';
+            return htmlTabla;
+        }
+
         function iniciarBacktesting() {
             if (datosPartidos.length === 0) {
                 document.getElementById('resultados').innerHTML = '<p class="failure">Por favor, primero carga un archivo JSON.</p>';
                 return;
             }
 
-            let victorias = 0;
-            let perdidas = 0;
+            // Reiniciar contadores y análisis de equipos
+            let victoriasEstrategia = 0;
+            let perdidasEstrategia = 0;
             let totalApostado = 0;
             let gananciaNeta = 0;
-            let resultadosHTML = '<h3>Reporte de Backtesting:</h3>';
+            analisisEquipos = {}; 
+            let resultadosHTML = '<h3>Reporte de Backtesting de Estrategia:</h3>';
 
-            // --- Lógica de Backtesting ---
-            datosPartidos.forEach((partido, index) => {
-                // Supongamos que tu estrategia es apostar al "Más de 2.5 Goles"
-                // usando la cuota promedio de pre-partido (Avg>2)
+            // --- Lógica de Backtesting y Análisis de Equipos ---
+            datosPartidos.forEach((partido) => {
+                const homeTeam = partido.HomeTeam;
+                const awayTeam = partido.AwayTeam;
+                const fthg = parseInt(partido.FTHG); // Goles local
+                const ftag = parseInt(partido.FTAG); // Goles visitante
+                const ftr = partido.FTR;             // Resultado final (H, D, A)
+                
+                // 1. **Análisis de Rendimiento de Equipos** (se ejecuta para CADA partido)
+                actualizarEstadisticasEquipo(homeTeam, true, fthg, ftag, ftr);
+                actualizarEstadisticasEquipo(awayTeam, false, ftag, fthg, ftr);
 
-                // 1. Definir la Regla de la Estrategia (Ejemplo: Apostar si la cuota es >= 1.35)
-                const cuotaMas2_5 = parseFloat(partido.AvgB365_2_5_G); // Ajusta esta clave a la que uses para "Over 2.5"
+
+                // 2. **Ejecución de Estrategia de Backtesting** (EJEMPLO: Más de 2.5 Goles, cuota promedio)
+                
+                // NOTA: Ajusta la clave para Over 2.5. Basado en tu JSON, asumiremos la clave 'Avg>2' del array anidado.
+                // Si la estructura del JSON es correcta, la clave para el promedio de Over 2.5 es el elemento 5 del array.
+                const cuotaMas2_5 = parseFloat(partido['Avg>2'] ? partido['Avg>2'][5] : null); 
                 const cuotaMinima = 1.35;
                 const apuesta = 1; // Apuesta fija por partido (unidad)
 
                 if (cuotaMas2_5 && cuotaMas2_5 >= cuotaMinima) {
                     totalApostado += apuesta;
+                    
+                    const golesTotales = fthg + ftag;
+                    const esGanadora = golesTotales >= 3; 
 
-                    // 2. Determinar el Resultado Real
-                    // FTHG (Full Time Home Goals) + FTAG (Full Time Away Goals)
-                    const golesTotales = parseInt(partido.FTHG) + parseInt(partido.FTAG);
-                    const esGanadora = golesTotales > 2.5; // Gana si hay 3 o más goles
-
-                    // 3. Calcular Ganancias/Pérdidas
                     if (esGanadora) {
                         const ganancia = (cuotaMas2_5 - 1) * apuesta;
                         gananciaNeta += ganancia;
-                        victorias++;
-                        resultadosHTML += `<p>Partido #${index + 1}: ✅ Gana. Goles: ${golesTotales}. Cuota: ${cuotaMas2_5}. Ganancia: +${ganancia.toFixed(2)}</p>`;
+                        victoriasEstrategia++;
                     } else {
                         gananciaNeta -= apuesta;
-                        perdidas++;
-                        resultadosHTML += `<p>Partido #${index + 1}: ❌ Pierde. Goles: ${golesTotales}. Cuota: ${cuotaMas2_5}. Pérdida: -${apuesta.toFixed(2)}</p>`;
+                        perdidasEstrategia++;
                     }
-                } else {
-                    //resultadosHTML += `<p>Partido #${index + 1}: - No cumple estrategia (Cuota ${cuotaMas2_5 || 'N/A'})</p>`;
                 }
             });
-            // --- Fin de Lógica de Backtesting ---
+            // --- Fin de Lógica ---
 
-            // --- Resumen de Resultados ---
-            const porcentajeAcierto = totalApostado > 0 ? ((victorias / (victorias + perdidas)) * 100).toFixed(2) : 0;
+            // --- Resumen de Estrategia ---
+            const totalApuestas = victoriasEstrategia + perdidasEstrategia;
+            const porcentajeAcierto = totalApuestas > 0 ? ((victoriasEstrategia / totalApuestas) * 100).toFixed(2) : 0;
             const rendimiento = totalApostado > 0 ? ((gananciaNeta / totalApostado) * 100).toFixed(2) : 0;
 
-            resultadosHTML += '<hr>';
-            resultadosHTML += `<h4>RESUMEN FINAL</h4>`;
-            resultadosHTML += `<p>Total de Apuestas (Que cumplen estrategia): <span class="success">${victorias + perdidas}</span></p>`;
-            resultadosHTML += `<p>Victorias: <span class="success">${victorias}</span></p>`;
-            resultadosHTML += `<p>Pérdidas: <span class="failure">${perdidas}</span></p>`;
+            resultadosHTML += `<p>Total de Apuestas (Que cumplen estrategia): <span class="neutral">${totalApuestas}</span></p>`;
+            resultadosHTML += `<p>Victorias de Estrategia: <span class="success">${victoriasEstrategia}</span></p>`;
+            resultadosHTML += `<p>Pérdidas de Estrategia: <span class="failure">${perdidasEstrategia}</span></p>`;
             resultadosHTML += `<p>Porcentaje de Acierto: <span class="${porcentajeAcierto >= 50 ? 'success' : 'failure'}">${porcentajeAcierto}%</span></p>`;
             resultadosHTML += `<p>Ganancia/Pérdida Neta (Profit/Loss): <span class="${gananciaNeta >= 0 ? 'success' : 'failure'}">${gananciaNeta.toFixed(2)} unidades</span></p>`;
             resultadosHTML += `<p>Rendimiento (ROI): <span class="${rendimiento >= 0 ? 'success' : 'failure'}">${rendimiento}%</span></p>`;
 
+            // --- Agregar Tabla de Análisis de Equipos ---
+            resultadosHTML += generarTablaEquipos();
+            
             document.getElementById('resultados').innerHTML = resultadosHTML;
         }
 
