@@ -2,27 +2,126 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <title>Calculadora Poisson Simplificada</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Calculadora Poisson de Apuestas</title>
     <style>
-        body { font-family: Arial, sans-serif; margin: 20px; }
-        .container { max-width: 400px; margin: auto; padding: 20px; border: 1px solid #ccc; border-radius: 5px; }
-        label, input, button { display: block; margin-bottom: 10px; width: 100%; box-sizing: border-box; }
-        input[type="number"] { padding: 8px; border: 1px solid #ddd; border-radius: 3px; }
-        button { padding: 10px; background-color: #4CAF50; color: white; border: none; border-radius: 3px; cursor: pointer; }
-        .resultado { margin-top: 15px; font-weight: bold; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 20px; background-color: #f4f7f6; color: #333; }
+        .container { max-width: 450px; margin: auto; padding: 25px; background-color: #ffffff; border-radius: 10px; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1); }
+        h2 { text-align: center; color: #007bff; margin-bottom: 20px; }
+        label { display: block; margin-bottom: 5px; font-weight: 600; }
+        input[type="number"] { padding: 10px; margin-bottom: 15px; width: 100%; box-sizing: border-box; border: 1px solid #ccc; border-radius: 5px; transition: border-color 0.3s; }
+        input[type="number"]:focus { border-color: #007bff; outline: none; }
+        button { padding: 12px; background-color: #28a745; color: white; border: none; border-radius: 5px; width: 100%; cursor: pointer; font-size: 16px; transition: background-color 0.3s; }
+        button:hover { background-color: #218838; }
+        .resultado { margin-top: 20px; padding: 15px; border: 1px dashed #007bff; border-radius: 5px; background-color: #e9f5ff; }
+        .resultado p { margin: 8px 0; font-size: 1.1em; }
+        .resultado strong { color: #007bff; }
     </style>
 </head>
 <body>
     <div class="container">
-        <h2>Calculadora Poisson (Simplificada)</h2>
-        <label for="lambda">Goles Esperados Totales ($\lambda$):</label>
-        <input type="number" id="lambda" value="2.7" step="0.01">
-        <button onclick="calcularPoisson()">Calcular Probabilidades</button>
+        <h2>⚽ Calculadora Poisson (Over 2.5 y BTTS)</h2>
+        <label for="lambda_local">Goles Esperados (Media) Equipo Local ($\lambda_L$):</label>
+        <input type="number" id="lambda_local" value="1.5" step="0.01" min="0">
+        
+        <label for="lambda_visitante">Goles Esperados (Media) Equipo Visitante ($\lambda_V$):</label>
+        <input type="number" id="lambda_visitante" value="1.2" step="0.01" min="0">
+        
+        <button onclick="calcularProbabilidades()">Calcular</button>
+        
         <div class="resultado">
-            <p>Probabilidad Over 2.5 Goles: <span id="over25Prob">...</span></p>
-            <p>Probabilidad BTTS (Simplificada): <span id="bttsProb">...</span></p>
+            <p>Probabilidad Over 2.5 Goles: <strong id="over25Prob">...</strong></p>
+            <p>Probabilidad BTTS Yes: <strong id="bttsProb">...</strong></p>
         </div>
     </div>
-    <script src="poisson.js"></script>
+
+    <script>
+        // *** El código JavaScript se incluye directamente aquí para facilidad de uso ***
+        
+        // Función auxiliar para calcular el factorial (k!)
+        function factorial(n) {
+            if (n === 0 || n === 1) return 1;
+            let result = 1;
+            for (let i = 2; i <= n; i++) {
+                result *= i;
+            }
+            return result;
+        }
+
+        // Función de masa de probabilidad de Poisson: P(X=k)
+        // P(X=k) = (e^-lambda * lambda^k) / k!
+        function poisson_prob(k, lambda) {
+            if (lambda < 0 || k < 0) return 0;
+            return (Math.exp(-lambda) * Math.pow(lambda, k)) / factorial(k);
+        }
+
+        function calcularProbabilidades() {
+            const lambda_L = parseFloat(document.getElementById('lambda_local').value);
+            const lambda_V = parseFloat(document.getElementById('lambda_visitante').value);
+
+            // 1. Validación
+            if (isNaN(lambda_L) || isNaN(lambda_V) || lambda_L < 0 || lambda_V < 0) {
+                alert("Por favor, introduce valores numéricos positivos válidos para los Goles Esperados.");
+                document.getElementById('over25Prob').textContent = 'Error';
+                document.getElementById('bttsProb').textContent = 'Error';
+                return;
+            }
+
+            // ----------------------------------------------------
+            // 2. CÁLCULO BTTS (Ambos Equipos Anotan - Sí)
+            // P(BTTS Yes) = P(Local >= 1) * P(Visitante >= 1)
+            // P(X >= 1) = 1 - P(X = 0)
+            // ----------------------------------------------------
+            
+            // Probabilidad de que el local NO anote (P(L=0))
+            const p_local_0 = poisson_prob(0, lambda_L); 
+            // Probabilidad de que el local SÍ anote (P(L >= 1))
+            const p_local_anota = 1 - p_local_0; 
+
+            // Probabilidad de que el visitante NO anote (P(V=0))
+            const p_visitante_0 = poisson_prob(0, lambda_V); 
+            // Probabilidad de que el visitante SÍ anote (P(V >= 1))
+            const p_visitante_anota = 1 - p_visitante_0; 
+
+            // P(BTTS Yes) = P(L >= 1) * P(V >= 1)
+            const p_btts_yes = p_local_anota * p_visitante_anota; 
+
+            // ----------------------------------------------------
+            // 3. CÁLCULO OVER 2.5 GOLES
+            // P(Total >= 3) = 1 - P(Total < 3)
+            // P(Total < 3) = P(0-0) + P(1-0) + P(0-1) + P(1-1) + P(2-0) + P(0-2)
+            // ----------------------------------------------------
+            
+            // Probabilidades de goles individuales necesarios (Local)
+            const p_L0 = p_local_0; // Ya calculado
+            const p_L1 = poisson_prob(1, lambda_L);
+            const p_L2 = poisson_prob(2, lambda_L);
+
+            // Probabilidades de goles individuales necesarios (Visitante)
+            const p_V0 = p_visitante_0; // Ya calculado
+            const p_V1 = poisson_prob(1, lambda_V);
+            const p_V2 = poisson_prob(2, lambda_V);
+
+            // Calcular las probabilidades de resultados exactos (Suma < 3)
+            const p_00 = p_L0 * p_V0; // 0-0
+            const p_10 = p_L1 * p_V0; // 1-0
+            const p_01 = p_L0 * p_V1; // 0-1
+            const p_11 = p_L1 * p_V1; // 1-1
+            const p_20 = p_L2 * p_V0; // 2-0
+            const p_02 = p_L0 * p_V2; // 0-2
+
+            // P(Goles Totales < 3)
+            const p_under_2_5 = p_00 + p_10 + p_01 + p_11 + p_20 + p_02;
+            
+            // P(Goles Totales >= 3)
+            const p_over_2_5 = 1 - p_under_2_5;
+            
+            // ----------------------------------------------------
+            // 4. Mostrar Resultados
+            // ----------------------------------------------------
+            document.getElementById('over25Prob').textContent = `${(p_over_2_5 * 100).toFixed(2)}%`;
+            document.getElementById('bttsProb').textContent = `${(p_btts_yes * 100).toFixed(2)}%`;
+        }
+    </script>
 </body>
 </html>
