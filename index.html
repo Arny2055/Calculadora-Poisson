@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Poisson • Probabilidad y Cuota Implícita (Solo Modelo)</title>
+<title>Poisson • Probabilidad y Cuota Implícita (Persistencia de Datos)</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet" />
@@ -30,6 +30,7 @@
   .btn{display:inline-flex; align-items:center; gap:8px; border:1px solid var(--border); background:#111827; color:var(--text);
        padding:10px 12px; border-radius:10px; cursor:pointer; text-decoration:none; font-size:14px; user-select:none}
   .btn.primary{background:linear-gradient(90deg,#2647ff,#1fa37e); border-color:transparent}
+  .btn.danger{background:var(--danger); border-color:transparent}
   .btn.ghost{background:transparent}
   .btn[disabled]{opacity:.5; cursor:not-allowed}
   .muted{color:var(--muted)}
@@ -40,7 +41,7 @@
   .sep{height:1px; background:var(--border); margin:12px 0}
   .hint{font-size:12px; color:var(--muted)}
   .success{color:var(--accent2)}
-  .danger{color:var(--danger)}
+  .danger-text{color:var(--danger)}
   .tiny{font-size:11px}
   table{width:100%; border-collapse:separate; border-spacing:0}
   th,td{padding:10px 12px; border-bottom:1px solid var(--border); text-align:left; font-size:14px}
@@ -55,11 +56,11 @@
   }
 </style>
 </head>
-<body>
+<body onload="loadJSONFromStorage()">
   <header>
     <div class="wrap">
       <div class="topbar">
-        <h1>Poisson • Probabilidad y Cuota Implícita (Solo Modelo)</h1>
+        <h1>Poisson • Probabilidad y Cuota Implícita (Persistencia de Datos)</h1>
       </div>
     </div>
   </header>
@@ -73,10 +74,13 @@
           <input type="file" id="file" accept=".json,application/json,.txt" />
         </div>
       </div>
-      <div class="hint tiny" style="margin-top:8px">
-        Al seleccionar el archivo se procesará automáticamente. Después elige liga y equipos.
+      <div class="flex" style="margin-top:10px; justify-content:space-between">
+          <div id="ingestStatus" class="hint"></div>
+          <button class="btn danger" id="clearDataBtn">🗑️ Borrar Datos Guardados</button>
       </div>
-      <div id="ingestStatus" class="hint" style="margin-top:8px"></div>
+      <div class="hint tiny" style="margin-top:8px">
+        El archivo cargado se guarda automáticamente en tu navegador (`localStorage`) para persistencia.
+      </div>
     </section>
 
     <section class="card" aria-labelledby="seleccion">
@@ -165,27 +169,17 @@
 (() => {
   "use strict";
 
+  const STORAGE_KEY = 'poisson_data_matches';
   let DATA = [];
   let CURRENT = { league:null, home:null, away:null, lambdas:null, probs:null, samples:{nH:0,nA:0} };
 
   const $ = sel => document.querySelector(sel);
   const setText = (id, txt) => { const el = typeof id==="string" ? document.getElementById(id) : id; if(el) el.textContent = txt; };
 
+  // --- Funciones Matemáticas ---
   const factorialCache = [1];
   const fact = (n) => { for(let i=factorialCache.length;i<=n;i++) factorialCache[i] = factorialCache[i-1]*i; return factorialCache[n]; };
   const pois = (lambda,k)=> Math.exp(-lambda)*Math.pow(lambda,k)/fact(k);
-
-  const parseFT = (ft) => {
-    if(!ft || typeof ft!=="string") return {h:0,a:0,ok:false};
-    const m = ft.match(/(-?\d+)\s*[-:]\s*(-?\d+)/);
-    if(!m) return {h:0,a:0,ok:false};
-    return {h: Number(m[1]), a: Number(m[2]), ok:true};
-  };
-  const splitTeams = (matchStr) => {
-    if(!matchStr) return {home:null, away:null};
-    const parts = String(matchStr).split(" - ");
-    return {home: (parts[0]||"").trim(), away: (parts[1]||"").trim()};
-  };
   const mean = arr => arr.length ? arr.reduce((s,x)=>s+x,0)/arr.length : 0;
 
   function pTotalLE(lambdaH, lambdaA, kMax, thr){
@@ -208,6 +202,18 @@
     return {yes:1-pNo, no:pNo};
   }
 
+  // --- Funciones de Utilidad y Normalización ---
+  const parseFT = (ft) => {
+    if(!ft || typeof ft!=="string") return {h:0,a:0,ok:false};
+    const m = ft.match(/(-?\d+)\s*[-:]\s*(-?\d+)/);
+    if(!m) return {h:0,a:0,ok:false};
+    return {h: Number(m[1]), a: Number(m[2]), ok:true};
+  };
+  const splitTeams = (matchStr) => {
+    if(!matchStr) return {home:null, away:null};
+    const parts = String(matchStr).split(" - ");
+    return {home: (parts[0]||"").trim(), away: (parts[1]||"").trim()};
+  };
   function normalize(obj){
     const {League, Match, "Result FT":RFT, Date, "Home Team":HTX, "Away Team":ATX} = obj;
     const mTeams = splitTeams(Match || "");
@@ -220,60 +226,6 @@
       Date: Date || obj.Date || "",
       raw: obj
     };
-  }
-
-  async function parseInput(){
-    const status = $("#ingestStatus");
-    status.textContent = "Procesando...";
-    let rows = [];
-    const file = $("#file").files[0];
-
-    if(file){
-      try{
-        const content = await file.text();
-        rows = rows.concat(readFlexJSON(content));
-      }catch(e){
-        status.innerHTML = '<span class="danger">Error leyendo archivo.</span>';
-        return;
-      }
-    } else {
-      status.innerHTML = '<span class="danger">Selecciona un archivo para procesar.</span>';
-      return;
-    }
-
-    if(!rows.length){
-      status.innerHTML = '<span class="danger">No se detectó JSON válido.</span>';
-      return;
-    }
-
-    DATA = rows.map(normalize).filter(r=>r.Match && (r.Home||"") && (r.Away||""));
-
-    if(!DATA.length){
-      status.innerHTML = '<span class="danger">No se pudieron normalizar partidos.</span>';
-      return;
-    }
-
-    const leagues = [...new Set(DATA.map(r=>r.League))].sort((a,b)=>a.localeCompare(b));
-    fillSelect($("#selLeague"), leagues, "— Selecciona liga —");
-    fillSelect($("#selHome"), [], "— Local —");
-    fillSelect($("#selAway"), [], "— Visitante —");
-
-    status.innerHTML = `<span class="success">OK:</span> ${DATA.length} partidos cargados · ${leagues.length} ligas.`;
-
-    if(leagues.length===1){
-      $("#selLeague").value = leagues[0];
-      CURRENT.league = leagues[0];
-      const teams = getLeagueTeams(leagues[0]);
-      fillSelect($("#selHome"), teams, "— Local —");
-      fillSelect($("#selAway"), teams, "— Visitante —");
-      if(teams.length>=2){
-        $("#selHome").value = teams[0];
-        $("#selAway").value = teams[1];
-        CURRENT.home = teams[0];
-        CURRENT.away = teams[1];
-        autoCalcPoisson(false);
-      }
-    }
   }
 
   function readFlexJSON(text){
@@ -310,6 +262,118 @@
     return [...set].sort((a,b)=>a.localeCompare(b));
   }
 
+  // --- Funciones de Persistencia y Carga ---
+  function saveJSONToStorage(dataArray){
+      try{
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(dataArray));
+      } catch(e) {
+          console.error("Error guardando datos en localStorage:", e);
+          alert("Error: No se pudieron guardar los datos del archivo en el navegador.");
+      }
+  }
+
+  window.loadJSONFromStorage = function(){
+      const status = $("#ingestStatus");
+      try{
+          const storedData = localStorage.getItem(STORAGE_KEY);
+          if (storedData) {
+              DATA = JSON.parse(storedData);
+              if (DATA.length) {
+                  processLoadedData(DATA);
+                  status.innerHTML = `<span class="success">OK:</span> ${DATA.length} partidos cargados (Guardados en navegador).`;
+                  return true;
+              }
+          }
+      } catch(e) {
+          console.error("Error cargando o parseando datos guardados:", e);
+      }
+      status.textContent = "No hay datos guardados. Selecciona un archivo JSON.";
+      return false;
+  }
+  
+  function processLoadedData(dataToProcess){
+    const leagues = [...new Set(dataToProcess.map(r=>r.League))].sort((a,b)=>a.localeCompare(b));
+    fillSelect($("#selLeague"), leagues, "— Selecciona liga —");
+    fillSelect($("#selHome"), [], "— Local —");
+    fillSelect($("#selAway"), [], "— Visitante —");
+
+    if(leagues.length===1){
+      $("#selLeague").value = leagues[0];
+      CURRENT.league = leagues[0];
+      const teams = getLeagueTeams(leagues[0]);
+      fillSelect($("#selHome"), teams, "— Local —");
+      fillSelect($("#selAway"), teams, "— Visitante —");
+      if(teams.length>=2){
+        $("#selHome").value = teams[0];
+        $("#selAway").value = teams[1];
+        CURRENT.home = teams[0];
+        CURRENT.away = teams[1];
+        autoCalcPoisson(false);
+      }
+    }
+    // Asegurarse de renderizar incluso si no hay selección automática
+    renderModel(); 
+  }
+
+  async function parseInput(){
+    const file = $("#file").files[0];
+    const status = $("#ingestStatus");
+    status.textContent = "Procesando...";
+
+    if(!file){
+      status.innerHTML = '<span class="danger-text">Selecciona un archivo para procesar.</span>';
+      return;
+    }
+
+    let rows = [];
+    try{
+        const content = await file.text();
+        rows = rows.concat(readFlexJSON(content));
+    }catch(e){
+        status.innerHTML = '<span class="danger-text">Error leyendo archivo.</span>';
+        return;
+    }
+
+    if(!rows.length){
+        status.innerHTML = '<span class="danger-text">No se detectó JSON válido.</span>';
+        return;
+    }
+
+    const normalizedData = rows.map(normalize).filter(r=>r.Match && (r.Home||"") && (r.Away||""));
+
+    if(!normalizedData.length){
+        status.innerHTML = '<span class="danger-text">No se pudieron normalizar partidos.</span>';
+        return;
+    }
+
+    DATA = normalizedData;
+    saveJSONToStorage(DATA); // GUARDAR EN LOCAL STORAGE
+    processLoadedData(DATA);
+
+    const leagues = [...new Set(DATA.map(r=>r.League))];
+    status.innerHTML = `<span class="success">OK:</span> ${DATA.length} partidos cargados · ${leagues.length} ligas. Datos **guardados** en navegador.`;
+    
+    // Limpiar input de archivo para poder cargar el mismo de nuevo si es necesario
+    $("#file").value = ""; 
+  }
+  
+  function clearSavedData(){
+      if(confirm("¿Estás seguro de que quieres borrar el JSON guardado de tu navegador? Necesitarás recargar el archivo después.")){
+          localStorage.removeItem(STORAGE_KEY);
+          DATA = [];
+          CURRENT = { league:null, home:null, away:null, lambdas:null, probs:null, samples:{nH:0,nA:0} };
+          $("#selLeague").innerHTML = "";
+          $("#selHome").innerHTML = "";
+          $("#selAway").innerHTML = "";
+          $("#probTable").innerHTML = "";
+          setText("lamH", "—"); setText("lamA", "—"); 
+          setText("nHA", "—");
+          $("#ingestStatus").textContent = "Datos borrados. Recarga la página o carga un nuevo archivo JSON.";
+      }
+  }
+
+
+  // --- Funciones de Cálculo de Poisson ---
   function lastMatchesTeam(league, team, side, limit=10){
     const arr = [];
     for(const r of DATA){
@@ -360,24 +424,26 @@
     return { ou:{over:pOver, under:pUnder}, btts:{yes:b.yes, no:b.no} };
   }
 
+  // --- Funciones de Formato y Renderizado ---
   function fmtPct(x){ return isFinite(x) ? (100*x).toFixed(2)+"%" : "—"; }
   function fmtDec(x){ return isFinite(x) ? x.toFixed(3) : "—"; }
   function fmtOdd(p){ return (p && isFinite(p) && p > 0) ? (1/p).toFixed(3) : "—"; }
 
   function renderModel(){
     const { lambdas, probs, samples } = CURRENT;
+    
     if(!lambdas || !probs){ 
         setText("lamH", "—"); setText("lamA", "—"); 
         setText("nHA", "—");
-        $("#probTable").innerHTML = "";
+        $("#probTable").innerHTML = `<tr><td colspan="4" style="text-align:center; color:var(--muted)">Selecciona liga y equipos.</td></tr>`;
         return; 
     }
+    
     const line = Number($("#ouLine").value || 2.5);
     setText("lamH", fmtDec(lambdas.lamH));
     setText("lamA", fmtDec(lambdas.lamA));
     setText("nHA", `${samples.nH}/${samples.nA}`);
 
-    // Construir la tabla de probabilidades y cuotas implícitas
     const data = [
       { group: "Over/Under", label: `Over ${line}`, prob: probs.ou.over },
       { group: "Over/Under", label: `Under ${line}`, prob: probs.ou.under },
@@ -401,45 +467,18 @@
     }
   }
 
-  // Se eliminaron todas las funciones de rachas.
-
-  // ====== Eventos UI ======
-  $("#file").addEventListener("change", parseInput);
-
-  $("#selLeague").addEventListener("change", (e)=>{
-    const lg = e.target.value;
-    CURRENT.league = lg || null;
-    if(!lg){
-      fillSelect($("#selHome"), [], "— Local —");
-      fillSelect($("#selAway"), [], "— Visitante —");
-      renderModel();
-      return;
-    }
-    const teams = getLeagueTeams(lg);
-    fillSelect($("#selHome"), teams, "— Local —");
-    fillSelect($("#selAway"), teams, "— Visitante —");
-    if(teams.length>=2){
-      $("#selHome").value = teams[0];
-      $("#selAway").value = teams[1];
-      CURRENT.home = teams[0];
-      CURRENT.away = teams[1];
-      autoCalcPoisson(false);
-    }
-  });
-
-  $("#selHome").addEventListener("change", (e)=>{ CURRENT.home = e.target.value || null; autoCalcPoisson(false); });
-  $("#selAway").addEventListener("change", (e)=>{ CURRENT.away = e.target.value || null; autoCalcPoisson(false); });
-
-  $("#ouLine").addEventListener("input", ()=>{ autoCalcPoisson(false); });
-  $("#maxGoals").addEventListener("input", ()=>{ autoCalcPoisson(false); });
-
-  // Se eliminaron todos los listeners de cuotas y bankroll
-
-  function autoCalcPoisson(alsoRefreshEV=false){
+  // --- Lógica Principal de Cálculo ---
+  function autoCalcPoisson(){
     const league = $("#selLeague").value;
     const home = $("#selHome").value;
     const away = $("#selAway").value;
-    if(!league || !home || !away || home===away) { renderModel(); return; }
+    
+    if(!league || !home || !away || home===away) { 
+        CURRENT.lambdas = null; 
+        CURRENT.probs = null;
+        renderModel(); 
+        return; 
+    }
     
     const { lamH, lamA } = computeLambdas(league, home, away);
     const line = Number($("#ouLine").value || 2.5);
@@ -451,6 +490,45 @@
     CURRENT.probs = probs;
     renderModel();
   }
+
+  // --- Eventos UI ---
+  $("#file").addEventListener("change", parseInput);
+  $("#clearDataBtn").addEventListener("click", clearSavedData);
+
+  $("#selLeague").addEventListener("change", (e)=>{
+    const lg = e.target.value;
+    CURRENT.league = lg || null;
+    if(!lg){
+      fillSelect($("#selHome"), [], "— Local —");
+      fillSelect($("#selAway"), [], "— Visitante —");
+      autoCalcPoisson();
+      return;
+    }
+    const teams = getLeagueTeams(lg);
+    fillSelect($("#selHome"), teams, "— Local —");
+    fillSelect($("#selAway"), teams, "— Visitante —");
+    
+    // Intenta seleccionar equipos si hay suficientes
+    if(teams.length>=2){
+      const homeVal = teams[0];
+      const awayVal = (teams.length > 1) ? teams[1] : "";
+      
+      $("#selHome").value = homeVal;
+      $("#selAway").value = awayVal;
+      CURRENT.home = homeVal;
+      CURRENT.away = awayVal;
+    } else {
+        CURRENT.home = null;
+        CURRENT.away = null;
+    }
+    autoCalcPoisson();
+  });
+
+  $("#selHome").addEventListener("change", (e)=>{ CURRENT.home = e.target.value || null; autoCalcPoisson(); });
+  $("#selAway").addEventListener("change", (e)=>{ CURRENT.away = e.target.value || null; autoCalcPoisson(); });
+
+  $("#ouLine").addEventListener("input", autoCalcPoisson);
+  $("#maxGoals").addEventListener("input", autoCalcPoisson);
 
 })();
 </script>
