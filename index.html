@@ -9,7 +9,6 @@
         .container { max-width: 450px; margin: auto; padding: 25px; background-color: #ffffff; border-radius: 10px; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1); }
         h2 { text-align: center; color: #007bff; margin-bottom: 20px; }
         label { display: block; margin-bottom: 5px; font-weight: 600; }
-        /* Usamos placeholder para guiar al usuario, y un estilo de input limpio */
         input[type="number"] { padding: 10px; margin-bottom: 15px; width: 100%; box-sizing: border-box; border: 1px solid #ccc; border-radius: 5px; transition: border-color 0.3s; }
         input[type="number"]:focus { border-color: #007bff; outline: none; }
         button { padding: 12px; background-color: #28a745; color: white; border: none; border-radius: 5px; width: 100%; cursor: pointer; font-size: 16px; transition: background-color 0.3s; }
@@ -21,7 +20,7 @@
 </head>
 <body>
     <div class="container">
-        <h2>⚽ Calculadora Poisson (Over 2.5 y BTTS)</h2>
+        <h2>⚽ Calculadora Poisson Ampliada</h2>
         
         <label for="lambda_local">Goles Esperados (Media) Equipo Local ($\lambda_L$):</label>
         <input type="number" id="lambda_local" placeholder="Ej: 1.5" step="0.01" min="0" onfocus="this.select()">
@@ -29,16 +28,18 @@
         <label for="lambda_visitante">Goles Esperados (Media) Equipo Visitante ($\lambda_V$):</label>
         <input type="number" id="lambda_visitante" placeholder="Ej: 1.2" step="0.01" min="0" onfocus="this.select()">
         
-        <button onclick="calcularProbabilidades()">Calcular</button>
+        <button onclick="calcularProbabilidades()">Calcular Probabilidades</button>
         
         <div class="resultado">
+            <p>Probabilidad Over 1.5 Goles: <strong id="over15Prob">...</strong></p>
             <p>Probabilidad Over 2.5 Goles: <strong id="over25Prob">...</strong></p>
+            <p>Probabilidad Over 3.5 Goles: <strong id="over35Prob">...</strong></p>
             <p>Probabilidad BTTS Yes: <strong id="bttsProb">...</strong></p>
         </div>
     </div>
 
     <script>
-        // Funciones de cálculo de Poisson (sin cambios)
+        // Funciones de cálculo
         function factorial(n) {
             if (n === 0 || n === 1) return 1;
             let result = 1;
@@ -48,11 +49,34 @@
             return result;
         }
 
+        // Distribución de Poisson: P(X=k) = (e^-lambda * lambda^k) / k!
         function poisson_prob(k, lambda) {
             if (lambda < 0 || k < 0) return 0;
-            // Aseguramos que k sea entero para el factorial
             k = Math.round(k);
             return (Math.exp(-lambda) * Math.pow(lambda, k)) / factorial(k);
+        }
+
+        /**
+         * Calcula la probabilidad de que el total de goles sea menor o igual a un límite (X).
+         * P(Total <= X)
+         * @param {number} limit - El valor máximo de goles (ej. 1 para Under 2.5, 2 para Under 3.5)
+         * @param {number} lambda_L - Goles esperados del local
+         * @param {number} lambda_V - Goles esperados del visitante
+         * @returns {number} Probabilidad P(Total <= limit)
+         */
+        function calculateUnderProbability(limit, lambda_L, lambda_V) {
+            let p_under = 0;
+            // Iterar sobre todas las combinaciones L+V <= limit
+            for (let local_goles = 0; local_goles <= limit; local_goles++) {
+                for (let visitante_goles = 0; visitante_goles <= limit; visitante_goles++) {
+                    if (local_goles + visitante_goles <= limit) {
+                        const p_local = poisson_prob(local_goles, lambda_L);
+                        const p_visitante = poisson_prob(visitante_goles, lambda_V);
+                        p_under += p_local * p_visitante;
+                    }
+                }
+            }
+            return p_under;
         }
 
         function calcularProbabilidades() {
@@ -62,7 +86,9 @@
             // 1. Validación
             if (isNaN(lambda_L) || isNaN(lambda_V) || lambda_L < 0 || lambda_V < 0) {
                 alert("Por favor, introduce valores numéricos positivos válidos para los Goles Esperados.");
+                document.getElementById('over15Prob').textContent = 'Inválido';
                 document.getElementById('over25Prob').textContent = 'Inválido';
+                document.getElementById('over35Prob').textContent = 'Inválido';
                 document.getElementById('bttsProb').textContent = 'Inválido';
                 return;
             }
@@ -79,39 +105,28 @@
             const p_btts_yes = p_local_anota * p_visitante_anota; 
 
             // ----------------------------------------------------
-            // 3. CÁLCULO OVER 2.5 GOLES
-            // P(Total >= 3) = 1 - P(Total < 3)
-            // P(Total < 3) = P(0-0) + P(1-0) + P(0-1) + P(1-1) + P(2-0) + P(0-2)
+            // 3. CÁLCULO DE OVERS
+            // P(Over X.5) = 1 - P(Total <= X)
             // ----------------------------------------------------
             
-            // Probabilidades de goles individuales (Local)
-            const p_L0 = poisson_prob(0, lambda_L); 
-            const p_L1 = poisson_prob(1, lambda_L);
-            const p_L2 = poisson_prob(2, lambda_L);
-
-            // Probabilidades de goles individuales (Visitante)
-            const p_V0 = poisson_prob(0, lambda_V); 
-            const p_V1 = poisson_prob(1, lambda_V);
-            const p_V2 = poisson_prob(2, lambda_V);
-
-            // Probabilidades de resultados exactos (Suma < 3)
-            const p_00 = p_L0 * p_V0; // 0-0
-            const p_10 = p_L1 * p_V0; // 1-0
-            const p_01 = p_L0 * p_V1; // 0-1
-            const p_11 = p_L1 * p_V1; // 1-1
-            const p_20 = p_L2 * p_V0; // 2-0
-            const p_02 = p_L0 * p_V2; // 0-2
-
-            // P(Goles Totales < 3)
-            const p_under_2_5 = p_00 + p_10 + p_01 + p_11 + p_20 + p_02;
+            // P(Over 1.5) = 1 - P(Total <= 1)
+            const p_under_1_5 = calculateUnderProbability(1, lambda_L, lambda_V);
+            const p_over_1_5 = 1 - p_under_1_5;
             
-            // P(Goles Totales >= 3)
+            // P(Over 2.5) = 1 - P(Total <= 2)
+            const p_under_2_5 = calculateUnderProbability(2, lambda_L, lambda_V);
             const p_over_2_5 = 1 - p_under_2_5;
+            
+            // P(Over 3.5) = 1 - P(Total <= 3)
+            const p_under_3_5 = calculateUnderProbability(3, lambda_L, lambda_V);
+            const p_over_3_5 = 1 - p_under_3_5;
             
             // ----------------------------------------------------
             // 4. Mostrar Resultados
             // ----------------------------------------------------
+            document.getElementById('over15Prob').textContent = `${(p_over_1_5 * 100).toFixed(2)}%`;
             document.getElementById('over25Prob').textContent = `${(p_over_2_5 * 100).toFixed(2)}%`;
+            document.getElementById('over35Prob').textContent = `${(p_over_3_5 * 100).toFixed(2)}%`;
             document.getElementById('bttsProb').textContent = `${(p_btts_yes * 100).toFixed(2)}%`;
         }
     </script>
