@@ -102,15 +102,16 @@
             font-weight: bold;
         }
         
-        /* Estilos para la selección recomendada */
+        /* Estilos para la selección recomendada (DEFAULT) */
         .selection-box {
             background-color: #4a4e69; 
-            border: 2px solid #ffeb3b;
+            border: 2px solid #ffeb3b; /* Borde amarillo por defecto */
             padding: 15px;
             border-radius: 10px;
             margin-top: 15px;
             font-size: 1.4em;
             text-align: center;
+            transition: border-color 0.3s, box-shadow 0.3s; /* Para suavizar el cambio al destello */
         }
         .selection-box span {
             color: #ffeb3b;
@@ -118,23 +119,26 @@
             margin-left: 10px;
         }
 
-        /* ESTILOS DE DESTELLO (BLINK) */
-        @keyframes blink {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.3; }
+        /* ESTILOS DE DESTELLO (BLINK) PARA LA MEJOR SELECCIÓN GLOBAL */
+        @keyframes blink-green {
+            0%, 100% { 
+                border-color: #00ff00; /* Verde Chillón */
+                box-shadow: 0 0 15px #00ff00;
+            }
+            50% { 
+                border-color: #3a3a5e; /* Color oscuro para el efecto de parpadeo */
+                box-shadow: none;
+            }
         }
 
         .global-best {
-            border-color: #ff6b6b !important;
-            box-shadow: 0 0 10px #ff6b6b;
-            animation: blink 0.8s ease-in-out infinite;
-        }
-        .global-best span {
-             color: #ff6b6b !important;
+            /* Mantiene el color del texto y fondo sin cambios */
+            border-color: #00ff00 !important; /* Inicia en verde */
+            animation: blink-green 0.8s ease-in-out infinite;
         }
         
         /* Estilos del Historial (Mantenidos) */
-        #historialContainer { /* ... (Mantener estilos del historial) ... */ }
+        #historialContainer { /* ... */ }
         .beneficio-pos { color: #92e6a7; font-weight: bold; }
         .beneficio-neg { color: #ff6b6b; font-weight: bold; }
         .total-row { background-color: #4a4e69; font-weight: bold; }
@@ -373,14 +377,18 @@
         function displaySelection(elementId, selection, isGlobalBest) {
             const element = document.getElementById(elementId);
             
-            // Remover la clase global-best de todos los elementos primero
+            // 1. Limpiar clase de destello
             element.classList.remove('global-best');
 
             element.style.display = 'block';
             
-            // Aplicar la clase de destello solo si es la mejor selección global
+            // 2. Aplicar la clase de destello solo si es la mejor selección global
             if (isGlobalBest) {
                  element.classList.add('global-best');
+            } else {
+                 // Si no es la mejor, asegurar el borde default (amarillo)
+                 element.style.borderColor = '#ffeb3b';
+                 element.style.boxShadow = 'none';
             }
 
             element.innerHTML = `
@@ -403,8 +411,21 @@
 
             // 1. Validación
             if (isNaN(lambda_L) || isNaN(lambda_V) || lambda_L < 0 || lambda_V < 0 || lambda1 < 0 || lambda2 < 0) {
-                // ... (Manejo de errores y limpieza de campos, simplificado aquí) ...
-                alert("Valores inválidos. Asegúrate que los Goles Esperados (Lambda L y V) sean mayores a la correlación (0.2).");
+                const errorText = 'Inválido (Cuota: ---)';
+                
+                if (lambda_L < lambda3 || lambda_V < lambda3) {
+                     alert("Valores inválidos. Asegúrate que los Goles Esperados (Lambda L y V) sean mayores a la correlación (0.2).");
+                }
+                
+                // Limpiar resultados y ocultar selecciones
+                document.getElementById('localGanaProb').textContent = errorText;
+                document.getElementById('empateProb').textContent = errorText;
+                document.getElementById('visitanteGanaProb').textContent = errorText;
+                document.getElementById('over15Prob').textContent = errorText;
+                document.getElementById('seleccion1X2').style.display = 'none';
+                document.getElementById('seleccionOverUnder').style.display = 'none';
+                document.getElementById('seleccionBTTS').style.display = 'none';
+
                 return;
             }
 
@@ -412,34 +433,28 @@
             const results = calculateAllProbabilities(lambda1, lambda2, lambda3);
             
             // 3. ENCONTRAR LAS TRES SELECCIONES INDIVIDUALES
-            
-            // --- 1X2 ---
             const selection1X2 = findBestSelection(
                 [results.p_1, results.p_x, results.p_2],
                 ["Local Gana (1)", "Empate (X)", "Visitante Gana (2)"]
             );
 
-            // --- Over/Under 2.5 ---
             const selectionOverUnder = findBestSelection(
                 [results.p_over_2_5, results.p_under_2_5],
                 ["Over 2.5 Goles", "Under 2.5 Goles"]
             );
             
-            // --- BTTS ---
             const selectionBTTS = findBestSelection(
                 [results.p_btts_yes, results.p_btts_no],
                 ["BTTS Yes (Sí)", "BTTS No (No)"]
             );
 
             // 4. IDENTIFICAR LA SELECCIÓN GLOBAL MÁS PROBABLE (CUOTA MÁS BAJA)
-            
             const allSelections = [
                 { id: 'seleccion1X2', ...selection1X2 },
                 { id: 'seleccionOverUnder', ...selectionOverUnder },
                 { id: 'seleccionBTTS', ...selectionBTTS }
             ];
 
-            // Encontrar la selección con la probabilidad más alta
             let globalBestSelection = null;
             let maxGlobalProb = -1;
 
