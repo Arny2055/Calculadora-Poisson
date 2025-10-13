@@ -120,6 +120,8 @@
         }
 
         /* ESTILOS DE DESTELLO (BLINK) */
+        
+        /* 1. VERDE CHILLÓN (TOP 1) */
         @keyframes blink-green {
             0%, 100% { 
                 border-color: #00ff00; 
@@ -130,11 +132,44 @@
                 box-shadow: none;
             }
         }
-
-        .global-best {
+        .global-best-1 {
             border-color: #00ff00 !important; 
             animation: blink-green 0.8s ease-in-out infinite;
         }
+
+        /* 2. AMARILLO (TOP 2) */
+        @keyframes blink-yellow {
+            0%, 100% { 
+                border-color: #ffff00; 
+                box-shadow: 0 0 15px #ffff00;
+            }
+            50% { 
+                border-color: #3a3a5e; 
+                box-shadow: none;
+            }
+        }
+        .global-best-2 {
+            border-color: #ffff00 !important; 
+            animation: blink-yellow 1.2s ease-in-out infinite;
+        }
+
+        /* 3. AZUL (TOP 3) */
+        @keyframes blink-blue {
+            0%, 100% { 
+                border-color: #00bfff; 
+                box-shadow: 0 0 15px #00bfff;
+            }
+            50% { 
+                border-color: #3a3a5e; 
+                box-shadow: none;
+            }
+        }
+        .global-best-3 {
+            border-color: #00bfff !important; 
+            animation: blink-blue 1.5s ease-in-out infinite;
+        }
+
+
         
         /* Estilos del Historial */
         #historialContainer {
@@ -384,7 +419,6 @@
             const p_under_3_5 = (p_total_0 + p_total_1 + p_total_2 + p_total_3) / p_suma_total;
 
             // CÁLCULO DNB
-            // Probabilidad Local Gana (DNB) = P(Local Gana) / (1 - P(Empate))
             const p_local_dnb = p_local_gana / (1 - p_empate);
             const p_visitante_dnb = p_visitante_gana / (1 - p_empate);
 
@@ -404,7 +438,7 @@
             };
         }
 
-        // --- FUNCIONES DE SELECCIÓN Y VISUALIZACIÓN ---
+        // --- FUNCIÓN DE SELECCIÓN Y VISUALIZACIÓN ---
 
         function findBestSelection(probabilities, labels) {
             let maxProb = 0;
@@ -416,25 +450,53 @@
                     bestLabel = labels[i];
                 }
             }
-            return { label: bestLabel, probability: maxProb, odds: calculateOdds(maxProb) };
+            // Agregamos el ID de la caja donde se muestra para poder referenciarla
+            let boxId = "";
+            if (labels.includes("Local Gana (1)")) boxId = "seleccion1X2";
+            else if (labels.includes("Local Gana (DNB)")) boxId = "seleccionDNB";
+            else if (labels.includes("Over 2.5 Goles")) boxId = "seleccionOverUnder";
+            else if (labels.includes("BTTS Yes (Sí)")) boxId = "seleccionBTTS";
+
+
+            return { 
+                label: bestLabel, 
+                probability: maxProb, 
+                odds: calculateOdds(maxProb),
+                boxId: boxId
+            };
         }
 
-        function displaySelection(elementId, selection, isGlobalBest) {
-            const element = document.getElementById(elementId);
+        function displaySelection(selection, rank) {
+            const element = document.getElementById(selection.boxId);
             
-            element.classList.remove('global-best');
-
-            element.style.display = 'block';
+            // 1. Limpiar todas las clases de destello
+            element.classList.remove('global-best-1', 'global-best-2', 'global-best-3');
             
-            if (isGlobalBest) {
-                 element.classList.add('global-best');
+            // 2. Ocultar si no está en el Top 3, sino darle su clase
+            if (rank === 1) {
+                element.classList.add('global-best-1');
+            } else if (rank === 2) {
+                element.classList.add('global-best-2');
+            } else if (rank === 3) {
+                element.classList.add('global-best-3');
             } else {
+                 // Si no es Top 3, restablecer a un borde estándar
                  element.style.borderColor = '#ffeb3b';
                  element.style.boxShadow = 'none';
             }
+            
+            // Texto del marcador (Top 1, Top 2, Top 3)
+            let rankMarker = "";
+            if (rank === 1) rankMarker = '🔥 TOP 1';
+            else if (rank === 2) rankMarker = '🟡 TOP 2';
+            else if (rank === 3) rankMarker = '🔵 TOP 3';
+            else rankMarker = '⭐ Recomendada';
+
+
+            element.style.display = 'block';
 
             element.innerHTML = `
-                ${isGlobalBest ? '🔥' : '⭐'} **Selección Recomendada:** <span>${selection.label}</span>
+                ${rankMarker} **Selección Recomendada:** <span>${selection.label}</span>
                 (Prob: ${(selection.probability * 100).toFixed(2)}%)
                 (Cuota: ${selection.odds})
             `;
@@ -459,55 +521,45 @@
             const results = calculateAllProbabilities(lambda1, lambda2, lambda3);
             
             // 3. ENCONTRAR LAS CUATRO SELECCIONES INDIVIDUALES
-
-            // 1X2
+            
             const selection1X2 = findBestSelection(
                 [results.p_1, results.p_x, results.p_2],
                 ["Local Gana (1)", "Empate (X)", "Visitante Gana (2)"]
             );
             
-            // DNB (Solo comparamos Local DNB vs Visitante DNB)
             const selectionDNB = findBestSelection(
                 [results.p_local_dnb, results.p_visitante_dnb],
                 ["Local Gana (DNB)", "Visitante Gana (DNB)"]
             );
 
-            // Over/Under 2.5
             const selectionOverUnder = findBestSelection(
                 [results.p_over_2_5, results.p_under_2_5],
                 ["Over 2.5 Goles", "Under 2.5 Goles"]
             );
             
-            // BTTS
             const selectionBTTS = findBestSelection(
                 [results.p_btts_yes, results.p_btts_no],
                 ["BTTS Yes (Sí)", "BTTS No (No)"]
             );
 
-            // 4. IDENTIFICAR LA SELECCIÓN GLOBAL MÁS PROBABLE (CUOTA MÁS BAJA)
+            // 4. IDENTIFICAR EL TOP 3 GLOBAL
             const allSelections = [
-                { id: 'seleccion1X2', ...selection1X2 },
-                { id: 'seleccionDNB', ...selectionDNB }, // Añadido
-                { id: 'seleccionOverUnder', ...selectionOverUnder },
-                { id: 'seleccionBTTS', ...selectionBTTS }
+                selection1X2,
+                selectionDNB, 
+                selectionOverUnder,
+                selectionBTTS
             ];
 
-            let globalBestSelection = null;
-            let maxGlobalProb = -1;
+            // Ordenar por probabilidad de mayor a menor
+            allSelections.sort((a, b) => b.probability - a.probability);
 
-            allSelections.forEach(sel => {
-                if (sel.probability > maxGlobalProb) {
-                    maxGlobalProb = sel.probability;
-                    globalBestSelection = sel;
-                }
-            });
+            const top3 = allSelections.slice(0, 3);
             
             // 5. MOSTRAR RESULTADOS
             document.getElementById('localGanaProb').textContent = formatOutput(results.p_1);
             document.getElementById('empateProb').textContent = formatOutput(results.p_x);
             document.getElementById('visitanteGanaProb').textContent = formatOutput(results.p_2);
             
-            // Mostrar DNB
             document.getElementById('localDNBProb').textContent = formatOutput(results.p_local_dnb);
             document.getElementById('visitanteDNBProb').textContent = formatOutput(results.p_visitante_dnb);
 
@@ -519,14 +571,14 @@
             document.getElementById('bttsNoProb').textContent = formatOutput(results.p_btts_no);
 
 
-            // Mostrar las 4 selecciones recomendadas, aplicando 'isGlobalBest'
-            displaySelection('seleccion1X2', selection1X2, globalBestSelection.id === 'seleccion1X2');
-            displaySelection('seleccionDNB', selectionDNB, globalBestSelection.id === 'seleccionDNB'); // DNB
-            displaySelection('seleccionOverUnder', selectionOverUnder, globalBestSelection.id === 'seleccionOverUnder');
-            displaySelection('seleccionBTTS', selectionBTTS, globalBestSelection.id === 'seleccionBTTS');
+            // 6. ASIGNAR CLASES DE DESTELLO
+            displaySelection(selection1X2, top3.findIndex(s => s.boxId === selection1X2.boxId) + 1);
+            displaySelection(selectionDNB, top3.findIndex(s => s.boxId === selectionDNB.boxId) + 1);
+            displaySelection(selectionOverUnder, top3.findIndex(s => s.boxId === selectionOverUnder.boxId) + 1);
+            displaySelection(selectionBTTS, top3.findIndex(s => s.boxId === selectionBTTS.boxId) + 1);
         }
         
-        // --- FUNCIONES DE HISTORIAL DINÁMICO (No modificadas) ---
+        // --- FUNCIONES DE HISTORIAL DINÁMICO (Sin cambios) ---
 
         function mostrarPanelAgregarApuesta() {
             const panel = document.getElementById('panelAgregarApuesta');
