@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0"> 
-    <title>Calculadora Poisson Bivariante (Auto-Selección Global)</title>
+    <title>Calculadora Poisson Bivariante (EH y Métricas)</title>
     <style>
         /* Estilos Modo Oscuro y MÁXIMA VISIBILIDAD */
         body { 
@@ -204,18 +204,27 @@
             border: 1px solid #79d70f;
             cursor: pointer;
         }
-        .delete-btn {
+        .action-btn {
             background: none;
             border: none;
-            color: #ff6b6b;
             cursor: pointer;
             font-size: 1.2em;
             padding: 0 5px;
             transition: color 0.2s;
         }
+        .delete-btn {
+            color: #ff6b6b;
+        }
         .delete-btn:hover {
             color: #ff0000;
         }
+        .edit-btn {
+            color: #ffeb3b;
+        }
+        .edit-btn:hover {
+            color: #ffff00;
+        }
+
 
         /* Estilos de las métricas añadidas */
         .metrics-summary {
@@ -229,6 +238,7 @@
             text-align: center;
             font-size: 1.1em;
             border: 2px solid #79d70f;
+            margin-bottom: 20px;
         }
         .metrics-summary div {
             padding: 5px 0;
@@ -272,6 +282,11 @@
             <p>Local Gana (DNB): <strong id="localDNBProb">...</strong></p>
             <p>Visitante Gana (DNB): <strong id="visitanteDNBProb">...</strong></p>
             <div id="seleccionDNB" class="selection-box" style="display:none;"></div>
+
+            <div class="section-title">Hándicap Europeo (EH)</div>
+            <p>Local EH -1.0 (1:0): <strong id="localEH_1Prob">...</strong></p>
+            <p>Visitante EH +1.0 (X:1): <strong id="visitanteEH_1Prob">...</strong></p>
+            <div id="seleccionEH" class="selection-box" style="display:none;"></div>
             
             <div class="section-title">Mercados de Goles</div>
             <p>Over 1.5 Goles: <strong id="over15Prob">...</strong></p>
@@ -356,7 +371,7 @@
         const CORRELATION_LAMBDA3 = 0.2; 
         let apuestas = []; 
         const STAKE_UNIT = 1; 
-        const INITIAL_BALANCE = 100; // Balance inicial ficticio para el ROI
+        const INITIAL_BALANCE = 100;
 
         window.onload = function() {
             const storedApuestas = localStorage.getItem('apuestasHistorial');
@@ -366,7 +381,7 @@
             }
         };
 
-        // --- FUNCIONES DE CÁLCULO BIVARIANTE POISSON (Omitidas por brevedad, no modificadas) ---
+        // --- FUNCIONES DE CÁLCULO BIVARIANTE POISSON (Omitidas por brevedad) ---
 
         function factorial(n) {
             if (n === 0 || n === 1) return 1;
@@ -412,12 +427,17 @@
             let p_local_gana = 0;
             let p_visitante_gana = 0;
             let p_empate = 0;
+            
             let p_total_0 = 0;
             let p_total_1 = 0;
             let p_total_2 = 0;
             let p_total_3 = 0;
+            
             let p_btts = 0;
             let p_suma_total = 0; 
+
+            let p_local_eh_win = 0; 
+            let p_visitante_eh_win = 0; 
 
             for (let L = 0; L <= MAX_GOALS; L++) {
                 for (let V = 0; V <= MAX_GOALS; V++) {
@@ -441,6 +461,17 @@
                     if (L > 0 && V > 0) {
                         p_btts += P_LV;
                     }
+                    
+                    // EH -1 (Local gana por 2 o más)
+                    if (L > V + 1) {
+                        p_local_eh_win += P_LV;
+                    }
+
+                    // EH +1 (Visitante gana o empata)
+                    if (V >= L) {
+                        p_visitante_eh_win += P_LV;
+                    }
+
                 }
             }
             
@@ -448,6 +479,9 @@
             p_visitante_gana /= p_suma_total;
             p_empate /= p_suma_total;
             p_btts /= p_suma_total;
+            
+            p_local_eh_win /= p_suma_total; 
+            p_visitante_eh_win /= p_suma_total;
 
             const p_under_1_5 = (p_total_0 + p_total_1) / p_suma_total;
             const p_under_2_5 = (p_total_0 + p_total_1 + p_total_2) / p_suma_total;
@@ -463,6 +497,8 @@
                 p_2: p_visitante_gana,
                 p_local_dnb: p_local_dnb,
                 p_visitante_dnb: p_visitante_dnb,
+                p_local_eh_1: p_local_eh_win, 
+                p_visitante_eh_1: p_visitante_eh_win, 
                 p_over_1_5: 1 - p_under_1_5,
                 p_under_2_5: p_under_2_5,
                 p_over_2_5: 1 - p_under_2_5,
@@ -472,7 +508,7 @@
             };
         }
 
-        // --- FUNCIONES DE SELECCIÓN Y VISUALIZACIÓN ---
+        // --- FUNCIONES DE SELECCIÓN Y VISUALIZACIÓN (Omitidas por brevedad) ---
 
         function findBestSelection(probabilities, labels) {
             let maxProb = 0;
@@ -487,6 +523,7 @@
             let boxId = "";
             if (labels.includes("Local Gana (1)")) boxId = "seleccion1X2";
             else if (labels.includes("Local Gana (DNB)")) boxId = "seleccionDNB";
+            else if (labels.includes("Local EH -1.0")) boxId = "seleccionEH";
             else if (labels.includes("Over 2.5 Goles")) boxId = "seleccionOverUnder";
             else if (labels.includes("BTTS Yes (Sí)")) boxId = "seleccionBTTS";
 
@@ -531,8 +568,6 @@
             `;
         }
 
-        // --- FUNCIÓN PRINCIPAL DE CÁLCULO (No modificada) ---
-
         function calcularProbabilidades() {
             const lambda_L = parseFloat(document.getElementById('lambda_L').value);
             const lambda_V = parseFloat(document.getElementById('lambda_V').value);
@@ -558,6 +593,11 @@
                 [results.p_local_dnb, results.p_visitante_dnb],
                 ["Local Gana (DNB)", "Visitante Gana (DNB)"]
             );
+            
+            const selectionEH = findBestSelection(
+                [results.p_local_eh_1, results.p_visitante_eh_1],
+                ["Local EH -1.0", "Visitante EH +1.0"]
+            );
 
             const selectionOverUnder = findBestSelection(
                 [results.p_over_2_5, results.p_under_2_5],
@@ -572,6 +612,7 @@
             const allSelections = [
                 selection1X2,
                 selectionDNB, 
+                selectionEH, 
                 selectionOverUnder,
                 selectionBTTS
             ];
@@ -587,6 +628,9 @@
             document.getElementById('localDNBProb').textContent = formatOutput(results.p_local_dnb);
             document.getElementById('visitanteDNBProb').textContent = formatOutput(results.p_visitante_dnb);
 
+            document.getElementById('localEH_1Prob').textContent = formatOutput(results.p_local_eh_1);
+            document.getElementById('visitanteEH_1Prob').textContent = formatOutput(results.p_visitante_eh_1);
+
             document.getElementById('over15Prob').textContent = formatOutput(results.p_over_1_5);
             document.getElementById('over25Prob').textContent = formatOutput(results.p_over_2_5);
             document.getElementById('under25Prob').textContent = formatOutput(results.p_under_2_5);
@@ -597,16 +641,16 @@
 
             displaySelection(selection1X2, top3.findIndex(s => s.boxId === selection1X2.boxId) + 1);
             displaySelection(selectionDNB, top3.findIndex(s => s.boxId === selectionDNB.boxId) + 1);
+            displaySelection(selectionEH, top3.findIndex(s => s.boxId === selectionEH.boxId) + 1);
             displaySelection(selectionOverUnder, top3.findIndex(s => s.boxId === selectionOverUnder.boxId) + 1);
             displaySelection(selectionBTTS, top3.findIndex(s => s.boxId === selectionBTTS.boxId) + 1);
         }
         
         // ----------------------------------------------------------------------
-        // --- FUNCIONES DE HISTORIAL MODIFICADAS PARA CALCULAR MÉTRICAS ---
+        // --- FUNCIONES DE HISTORIAL Y MÉTRICAS (MODIFICADAS) ---
         // ----------------------------------------------------------------------
 
         function calcularMetricas() {
-            // Filtrar solo las apuestas que ya no están pendientes
             const resueltas = apuestas.filter(a => a.resultado !== 'pendiente');
             const totalApuestasResueltas = resueltas.length;
             
@@ -624,25 +668,18 @@
             resueltas.forEach(apuesta => {
                 const beneficio = parseFloat(apuesta.beneficio);
                 beneficioTotal += beneficio;
-                stakeTotal += parseFloat(apuesta.apuesta); // Stake es 1.00 por defecto
+                stakeTotal += parseFloat(apuesta.apuesta);
                 
                 if (apuesta.resultado === 'ganada') {
                     apuestasGanadas++;
                 }
             });
 
-            // 1. Porcentaje de Aciertos (Win Rate o Yoel)
             const winRate = (apuestasGanadas / totalApuestasResueltas) * 100;
-            
-            // 2. Yield (Rendimiento sobre el stake total)
             const yieldValue = (beneficioTotal / stakeTotal) * 100;
-
-            // 3. ROI (Retorno de Inversión sobre el balance inicial)
-            // Balance Final = Balance Inicial (100) + Beneficio Total
             const roiValue = (beneficioTotal / INITIAL_BALANCE) * 100;
 
 
-            // Actualizar la interfaz
             document.getElementById('winRateMetric').textContent = `${winRate.toFixed(2)}%`;
             document.getElementById('yieldMetric').textContent = `${yieldValue.toFixed(2)}%`;
             document.getElementById('roiMetric').textContent = `${roiValue.toFixed(2)}%`;
@@ -697,6 +734,45 @@
             localStorage.setItem('apuestasHistorial', JSON.stringify(apuestas));
             renderHistorial();
         }
+        
+        // --- NUEVA FUNCIÓN DE EDICIÓN ---
+        function editarApuesta(index) {
+            const apuesta = apuestas[index];
+            
+            // 1. Pedir nuevos valores usando prompt
+            const nuevoPartido = prompt("Editar Partido:", apuesta.partido);
+            if (nuevoPartido === null) return; // Cancelar
+            
+            const nuevoMercado = prompt("Editar Mercado:", apuesta.mercado);
+            if (nuevoMercado === null) return; // Cancelar
+
+            const nuevaCuotaStr = prompt("Editar Cuota (@):", apuesta.cuota);
+            if (nuevaCuotaStr === null) return; // Cancelar
+            
+            const nuevaCuota = parseFloat(nuevaCuotaStr);
+
+            if (isNaN(nuevaCuota) || nuevaCuota < 1.00) {
+                alert("Cuota inválida. Debe ser un número mayor o igual a 1.00.");
+                return;
+            }
+
+            // 2. Actualizar el objeto apuesta
+            apuesta.partido = nuevoPartido.trim();
+            apuesta.mercado = nuevoMercado.trim();
+            apuesta.cuota = nuevaCuota.toFixed(2);
+
+            // 3. Recalcular beneficio si ya estaba resuelta
+            if (apuesta.resultado !== 'pendiente') {
+                const nuevoBeneficio = calcularBeneficio(apuesta.cuota, apuesta.resultado);
+                apuesta.beneficio = nuevoBeneficio.toFixed(2);
+            }
+
+            // 4. Guardar y renderizar
+            localStorage.setItem('apuestasHistorial', JSON.stringify(apuestas));
+            renderHistorial();
+            alert("Apuesta editada con éxito.");
+        }
+        // --- FIN NUEVA FUNCIÓN DE EDICIÓN ---
 
         function eliminarApuesta(index) {
             if (confirm(`¿Estás seguro de que quieres eliminar la apuesta "${apuestas[index].mercado}" del partido ${apuestas[index].partido}?`)) {
@@ -709,7 +785,7 @@
         function renderHistorial() {
             const body = document.getElementById('historialBody');
             body.innerHTML = '';
-            let balanceTotal = INITIAL_BALANCE; // Inicia en 100 U
+            let balanceTotal = INITIAL_BALANCE; 
             
             apuestas.forEach((apuesta, index) => {
                 const tr = document.createElement('tr');
@@ -725,7 +801,8 @@
                     </select>
                 `;
                 
-                const deleteButton = `<button class="delete-btn" onclick="eliminarApuesta(${index})" title="Eliminar apuesta">🗑️</button>`;
+                const editButton = `<button class="action-btn edit-btn" onclick="editarApuesta(${index})" title="Editar apuesta">✏️</button>`;
+                const deleteButton = `<button class="action-btn delete-btn" onclick="eliminarApuesta(${index})" title="Eliminar apuesta">🗑️</button>`;
 
                 tr.innerHTML = `
                     <td>${apuesta.fecha}</td>
@@ -735,15 +812,13 @@
                     <td>${apuesta.apuesta}</td>
                     <td class="${beneficioFloat > 0 ? 'beneficio-pos' : beneficioFloat < 0 ? 'beneficio-neg' : ''}">${apuesta.beneficio} U</td>
                     <td>${resultadoSelect}</td>
-                    <td>${deleteButton}</td>
+                    <td>${editButton}${deleteButton}</td>
                 `;
                 body.appendChild(tr);
             });
 
-            // Actualizar balance total
             document.getElementById('balanceTotal').textContent = `${balanceTotal.toFixed(2)} U`;
             
-            // Recalcular y mostrar métricas
             calcularMetricas();
         }
         
