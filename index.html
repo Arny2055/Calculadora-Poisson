@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0"> 
-    <title>Calculadora Poisson Bivariante (Cuotas en Top 1, 2 y 3)</title>
+    <title>Calculadora Poisson Bivariante (Marcador Más Probable)</title>
     <style>
         /* Estilos Modo Oscuro y MÁXIMA VISIBILIDAD */
         body { 
@@ -175,6 +175,22 @@
             animation: blink-orange 1.5s ease-in-out infinite;
             background-color: #4a4e69 !important;
         }
+
+        /* Estilo específico para el Marcador Más Probable (no Top 3) */
+        #seleccionMarcadorExacto {
+            background-color: #4a4e69; 
+            border: 2px solid #17a2b8; /* Borde azul/cian para diferenciar */
+            padding: 15px;
+            border-radius: 10px;
+            margin-top: 20px;
+            font-size: 1.4em;
+            text-align: center;
+        }
+        #seleccionMarcadorExacto span {
+            color: #17a2b8;
+            font-weight: bold;
+            margin-left: 10px;
+        }
     </style>
 </head>
 <body>
@@ -198,6 +214,9 @@
         <button onclick="calcularProbabilidades()">CALCULAR PROBABILIDADES</button>
         
         <div class="resultado" id="resultados_totales">
+            
+            <div class="section-title">Marcador Exacto Más Probable</div>
+            <div id="seleccionMarcadorExacto" style="display:none;"></div>
             
             <div class="section-title">Mercado 1X2 (Tiempo Completo)</div>
             <p>Local Gana (1): <strong id="localGanaProb">...</strong></p>
@@ -279,7 +298,6 @@
         };
         
         function calculateAllProbabilities(L_FT, V_FT, L3_FT) {
-            // CÁLCULOS PARA TIEMPO COMPLETO (FT)
             let p_local_gana = 0;
             let p_visitante_gana = 0;
             let p_empate = 0;
@@ -291,12 +309,22 @@
             
             let p_btts_ft = 0;
             let p_suma_total_ft = 0; 
+            
+            let maxProbExact = 0;
+            let bestScore = "0-0";
+
 
             for (let L = 0; L <= MAX_GOALS; L++) {
                 for (let V = 0; V <= MAX_GOALS; V++) {
                     const P_LV = bivariate_poisson_prob(L, V, L_FT, V_FT, L3_FT);
                     p_suma_total_ft += P_LV; 
                     
+                    // Encontrar el Marcador Exacto más probable
+                    if (P_LV > maxProbExact) {
+                        maxProbExact = P_LV;
+                        bestScore = `${L}-${V}`;
+                    }
+
                     if (L > V) p_local_gana += P_LV;
                     else if (L < V) p_visitante_gana += P_LV;
                     else p_empate += P_LV;
@@ -372,6 +400,7 @@
                 p_under_2_5: p_under_2_5_ft, p_over_2_5: 1 - p_under_2_5_ft,
                 p_over_3_5: 1 - p_under_3_5_ft,
                 p_btts_yes: p_btts_ft, p_btts_no: 1 - p_btts_ft,
+                best_score: bestScore, max_prob_exact: maxProbExact,
                 
                 // HT
                 p_over_0_5_ht: p_over_0_5_ht,
@@ -398,13 +427,27 @@
             else if (labels.includes("Over 2.5 Goles")) boxId = "seleccionOverUnder";
             else if (labels.includes("BTTS Yes (Sí)")) boxId = "seleccionBTTS";
             else if (labels.includes("Over 0.5 Goles HT")) boxId = "seleccionHT"; 
-
+            
             return { 
                 label: bestLabel, 
                 probability: maxProb, 
                 odds: calculateOdds(maxProb),
                 boxId: boxId
             };
+        }
+        
+        function displayMarcadorExacto(score, probability) {
+            const element = document.getElementById('seleccionMarcadorExacto');
+            
+            const odds = calculateOdds(probability);
+            const percentage = (probability * 100).toFixed(2);
+
+            element.style.display = 'block';
+
+            element.innerHTML = `
+                **Marcardor Exacto Más Probable:** <span>${score}</span>
+                (Prob: ${percentage}%) (Cuota: ${odds})
+            `;
         }
 
         function displaySelection(selection, rank) {
@@ -538,6 +581,9 @@
             document.getElementById('over05HTProb').textContent = formatOutput(results.p_over_0_5_ht);
             document.getElementById('over15HTProb').textContent = formatOutput(results.p_over_1_5_ht);
             document.getElementById('bttsYesHTProb').textContent = formatOutput(results.p_btts_yes_ht);
+            
+            // MOSTRAR MARCADOR EXACTO
+            displayMarcadorExacto(results.best_score, results.max_prob_exact);
 
 
             // 6. ASIGNAR CLASES DE DESTELLO Y BORDE
