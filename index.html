@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0"> 
-    <title>Calculadora Poisson Bivariante (Solo Top 1 con Contorno Destellante)</title>
+    <title>Calculadora Poisson Bivariante (Con Valor de Apuesta)</title>
     <style>
         /* Estilos Modo Oscuro y MÁXIMA VISIBILIDAD */
         body { 
@@ -102,16 +102,15 @@
             font-weight: bold;
         }
         
-        /* Estilos para la selección recomendada (DEFAULT) */
+        /* Estilos para la selección recomendada (BASE) */
         .selection-box {
             background-color: #4a4e69; 
-            border: 2px solid #555; /* Borde más sutil por defecto */
+            border: 2px solid #555; /* Borde sutil por defecto */
             padding: 15px;
             border-radius: 10px;
             margin-top: 15px;
             font-size: 1.4em;
             text-align: center;
-            transition: border-color 0.3s, box-shadow 0.3s;
         }
         .selection-box.no-border {
             border: none;
@@ -123,14 +122,14 @@
             margin-left: 10px;
         }
 
-        /* ESTILO PARA EL TOP 1: VERDE CHILLÓN CON DESTELLO */
+        /* ESTILO PARA EL MEJOR: VERDE CHILLÓN CON DESTELLO (Solo rank 1) */
         @keyframes blink-green {
             0%, 100% { 
                 border-color: #00ff00; 
                 box-shadow: 0 0 15px #00ff00;
             }
             50% { 
-                border-color: #3a3a5e; /* Vuelve a un color más oscuro en el medio */
+                border-color: #3a3a5e; 
                 box-shadow: none;
             }
         }
@@ -140,15 +139,7 @@
             background-color: #4a4e69 !important; 
         }
 
-        /* Estilo para Top 2 y Top 3 (sin destello, borde sutil) */
-        .global-best-2, .global-best-3 {
-            border-color: #777 !important; /* Borde ligeramente más claro que el default */
-            background-color: #4a4e69 !important;
-            box-shadow: none !important; /* Asegura que no haya sombra */
-            animation: none !important; /* Deshabilita cualquier animación */
-        }
-        
-        /* Estilo específico para el Marcador Más Probable (no Top 3, borde azul) */
+        /* Estilo específico para el Marcador (No recomendación de apuesta) */
         #seleccionMarcadorExacto {
             background-color: #4a4e69; 
             border: 2px solid #17a2b8; /* Borde azul/cian para diferenciar */
@@ -162,6 +153,36 @@
             color: #17a2b8;
             font-weight: bold;
             margin-left: 10px;
+        }
+
+        /* Estilos de Input y Alerta de Valor */
+        .bookie-input-group {
+            margin-top: 15px;
+            padding-top: 15px;
+            border-top: 1px dashed #555;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .bookie-input-group label {
+            font-size: 1.1em;
+            margin-bottom: 0;
+            white-space: nowrap;
+        }
+        .bookie-input-group input {
+            padding: 10px;
+            margin-bottom: 0;
+            width: 100%;
+            font-size: 1.1em;
+        }
+        .value-alert {
+            margin-top: 10px;
+            padding: 10px;
+            border-radius: 8px;
+            background-color: #ffc107; /* Amarillo */
+            color: #1a1a2e;
+            font-weight: bold;
+            font-size: 1.1em;
         }
     </style>
 </head>
@@ -214,7 +235,7 @@
             <p>BTTS No: <strong id="bttsNoProb">...</strong></p>
             <div id="seleccionBTTS" class="selection-box" style="display:none;"></div>
             
-            <div class="section-title">⚽ Primera Mitad (HT) - ¡NO INCLUIDO EN TOP 3! ⏱️</div>
+            <div class="section-title">⚽ Primera Mitad (HT) - (No Recomendación Principal) ⏱️</div>
             <p>Over 0.5 Goles HT: <strong id="over05HTProb">...</strong></p>
             <p>Over 1.5 Goles HT: <strong id="over15HTProb">...</strong></p>
             <p>BTTS Yes HT: <strong id="bttsYesHTProb">...</strong></p>
@@ -273,15 +294,12 @@
             let p_local_gana = 0;
             let p_visitante_gana = 0;
             let p_empate = 0;
-            
             let p_total_0 = 0;
             let p_total_1 = 0;
             let p_total_2 = 0;
             let p_total_3 = 0;
-            
             let p_btts_ft = 0;
             let p_suma_total_ft = 0; 
-            
             let maxProbExact = 0;
             let bestScore = "0-0";
 
@@ -291,7 +309,6 @@
                     const P_LV = bivariate_poisson_prob(L, V, L_FT, V_FT, L3_FT);
                     p_suma_total_ft += P_LV; 
                     
-                    // Encontrar el Marcador Exacto más probable
                     if (P_LV > maxProbExact) {
                         maxProbExact = P_LV;
                         bestScore = `${L}-${V}`;
@@ -381,6 +398,49 @@
             };
         }
 
+        // --- FUNCIÓN DE CÁLCULO DE VALOR (OVER-ROUND) ---
+
+        function checkValue(inputElement, selectionId) {
+            const bookieOdds = parseFloat(inputElement.value);
+            const selectionBox = document.getElementById(selectionId);
+            const marketId = selectionId.replace('seleccion', '');
+            const calculatedProb = parseFloat(selectionBox.getAttribute('data-prob'));
+            const valueAlert = document.getElementById(`value_alert_${marketId}`);
+            
+            // Ocultar alerta por defecto
+            valueAlert.style.display = 'none';
+
+            if (isNaN(bookieOdds) || bookieOdds <= 1.0 || isNaN(calculatedProb) || calculatedProb <= 0) {
+                return;
+            }
+            
+            // Implied Bookie Probability
+            const impliedProb = 1 / bookieOdds;
+            
+            // Diferencia (Probabilidad Modelo - Probabilidad Implícita del Bookie)
+            const valueDifference = calculatedProb - impliedProb;
+            
+            // Condición de Valor: Si la probabilidad del modelo es 5% o más superior a la implícita del bookie
+            if (valueDifference >= 0.05) {
+                valueAlert.style.display = 'block';
+                valueAlert.innerHTML = `⚠️ **¡VALOR ENCONTRADO!** Over-round del ${(valueDifference * 100).toFixed(2)}%`;
+            }
+        }
+
+        // --- FUNCIÓN PARA GENERAR HTML DE INPUT/ALERTA ---
+        function generateInputHtml(selectionId) {
+            const marketId = selectionId.replace('seleccion', '');
+            return `
+                <div class="bookie-input-group">
+                    <label for="cuota_bookie_${marketId}">Cuota de Bookie:</label>
+                    <input type="number" id="cuota_bookie_${marketId}" step="0.01" min="1.01" 
+                           onchange="checkValue(this, '${selectionId}')" onkeyup="checkValue(this, '${selectionId}')">
+                </div>
+                <div id="value_alert_${marketId}" class="value-alert" style="display:none;"></div>
+            `;
+        }
+
+
         // --- FUNCIONES DE SELECCIÓN Y VISUALIZACIÓN ---
 
         function findBestSelection(probabilities, labels) {
@@ -417,7 +477,7 @@
             element.style.display = 'block';
 
             element.innerHTML = `
-                **Marcardor Exacto Más Probable:** <span>${score}</span>
+                **Marcador Más Probable:** <span>${score}</span>
                 (Prob: ${percentage}%) (Cuota: ${odds})
             `;
         }
@@ -426,43 +486,42 @@
             const element = document.getElementById(selection.boxId);
             
             // 1. Limpiar clases de destello y borde
-            element.classList.remove('global-best-1', 'global-best-2', 'global-best-3', 'no-border');
-            element.style.borderColor = '#555'; // Borde sutil por defecto
+            element.classList.remove('global-best-1');
+            element.style.borderColor = '#555'; 
             element.style.boxShadow = 'none';
             element.style.backgroundColor = '#4a4e69';
-            element.style.animation = 'none'; // Deshabilita animaciones por defecto
+            element.style.animation = 'none'; 
+            
+            // 2. Establecer el atributo de dato para el cálculo de valor
+            element.setAttribute('data-prob', selection.probability);
 
-            // 2. Aplicar estilos según el rank
-            let rankMarker = '⭐ Recomendada';
-            let oddsDisplay = ''; 
-            let defaultOddsText = `(Cuota: ${selection.odds})`; 
+            // 3. Aplicar estilos y texto según el rank
+            let rankMarker = '⭐ Recomendación';
+            let oddsDisplay = `(Cuota: ${selection.odds})`; 
 
             if (rank === 1) {
-                element.classList.add('global-best-1'); // Añade la clase de destello para Top 1
-                rankMarker = '🔥 TOP 1';
-                oddsDisplay = `(Cuota: ${selection.odds} - **CUOTA MÁS BAJA**)`;
-            } else if (rank === 2) {
-                element.classList.add('global-best-2'); // Para Top 2, solo el estilo de borde sutil
-                rankMarker = '🟡 TOP 2';
-                oddsDisplay = defaultOddsText;
-            } else if (rank === 3) {
-                element.classList.add('global-best-3'); // Para Top 3, solo el estilo de borde sutil
-                rankMarker = '🟠 TOP 3'; 
-                oddsDisplay = defaultOddsText;
-            } else {
-                // Si NO es TOP 3 (ej. HT), eliminamos el borde predefinido y ajustamos el fondo
-                element.classList.add('no-border'); 
-                element.style.backgroundColor = '#3e3e6b';
-            }
-            
-            // 3. Mostrar el elemento con el contenido
+                element.classList.add('global-best-1'); 
+                rankMarker = '🔥 Mejor Recomendación (Máxima Probabilidad)';
+                // El marcador especial de cuota más baja no se usa para no confundir con el input del bookie
+            } 
+            // Para rank 2, 3 y otros principales, se usa el estilo base/sutil
+
+            // 4. Mostrar el elemento con el contenido (incluye input de bookie)
             element.style.display = 'block';
 
-            element.innerHTML = `
-                ${rankMarker} **Selección Recomendada:** <span>${selection.label}</span>
+            let contentHTML = `
+                ${rankMarker}: <span>${selection.label}</span>
                 (Prob: ${(selection.probability * 100).toFixed(2)}%)
                 ${oddsDisplay} 
             `;
+
+            // Agregar input de Bookie solo si es una de las 4 secciones principales
+            if (selection.boxId !== 'seleccionHT') {
+                contentHTML += generateInputHtml(selection.boxId);
+            }
+
+
+            element.innerHTML = contentHTML;
         }
 
         // --- FUNCIÓN PRINCIPAL DE CÁLCULO ---
@@ -507,13 +566,13 @@
                 ["BTTS Yes (Sí)", "BTTS No (No)"]
             );
             
-            // HT (No se incluye en el Top 3, pero se calcula para su visualización)
+            // HT 
             const selectionHT = findBestSelection(
                 [results.p_over_0_5_ht, results.p_over_1_5_ht, results.p_btts_yes_ht],
                 ["Over 0.5 Goles HT", "Over 1.5 Goles HT", "BTTS Yes HT"]
             );
 
-            // 4. IDENTIFICAR EL TOP 3 GLOBAL (SOLO MERCADOS FT)
+            // 4. IDENTIFICAR EL MEJOR GLOBAL (RANK 1)
             const allSelectionsFT = [
                 selection1X2,
                 selectionDNB, 
@@ -524,24 +583,21 @@
             // Ordenar por probabilidad de mayor a menor
             allSelectionsFT.sort((a, b) => b.probability - a.probability);
 
-            const top3 = allSelectionsFT.slice(0, 3);
-            
-            // 5. MOSTRAR RESULTADOS (FT)
+            // Determinar cuál es el rank 1, 2, 3... para cada box
+            const getRank = (selection) => allSelectionsFT.findIndex(s => s.boxId === selection.boxId) + 1;
+
+            // 5. MOSTRAR RESULTADOS
             document.getElementById('localGanaProb').textContent = formatOutput(results.p_1);
             document.getElementById('empateProb').textContent = formatOutput(results.p_x);
             document.getElementById('visitanteGanaProb').textContent = formatOutput(results.p_2);
-            
             document.getElementById('localDNBProb').textContent = formatOutput(results.p_local_dnb);
             document.getElementById('visitanteDNBProb').textContent = formatOutput(results.p_visitante_dnb);
-
             document.getElementById('over15Prob').textContent = formatOutput(results.p_over_1_5);
             document.getElementById('over25Prob').textContent = formatOutput(results.p_over_2_5);
             document.getElementById('under25Prob').textContent = formatOutput(results.p_under_2_5);
             document.getElementById('over35Prob').textContent = formatOutput(results.p_over_3_5);
             document.getElementById('bttsYesProb').textContent = formatOutput(results.p_btts_yes);
             document.getElementById('bttsNoProb').textContent = formatOutput(results.p_btts_no);
-            
-            // 5. MOSTRAR RESULTADOS (HT)
             document.getElementById('over05HTProb').textContent = formatOutput(results.p_over_0_5_ht);
             document.getElementById('over15HTProb').textContent = formatOutput(results.p_over_1_5_ht);
             document.getElementById('bttsYesHTProb').textContent = formatOutput(results.p_btts_yes_ht);
@@ -550,16 +606,12 @@
             displayMarcadorExacto(results.best_score, results.max_prob_exact);
 
 
-            // 6. ASIGNAR CLASES DE DESTELLO Y BORDE
-            // Encontrar el rank en la lista Top 3 (si no está, devuelve 0)
-            const getRank = (selection) => top3.findIndex(s => s.boxId === selection.boxId) + 1;
-
+            // 6. VISUALIZAR RECOMENDACIONES Y ASIGNAR DATA-PROB
             displaySelection(selection1X2, getRank(selection1X2));
             displaySelection(selectionDNB, getRank(selectionDNB));
             displaySelection(selectionOverUnder, getRank(selectionOverUnder));
             displaySelection(selectionBTTS, getRank(selectionBTTS));
-            
-            // Los mercados HT se visualizan con rank 0, asegurando que no tienen destello ni borde
+            // HT siempre rank 0 (sin marcadores especiales)
             displaySelection(selectionHT, 0); 
         }
 
