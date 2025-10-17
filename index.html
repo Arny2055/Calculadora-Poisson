@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0"> 
-    <title>Calculadora Poisson Bivariante (Todos con Cuota de Bookie)</title>
+    <title>Calculadora Poisson Bivariante (Con Apuesta Sugerida Kelly)</title>
     <style>
         /* Estilos Modo Oscuro y MÁXIMA VISIBILIDAD */
         body { 
@@ -112,10 +112,6 @@
             font-size: 1.4em;
             text-align: center;
         }
-        .selection-box.no-border {
-            border: none;
-            background-color: #3e3e6b; 
-        }
         .selection-box span {
             color: #ffeb3b;
             font-weight: bold;
@@ -185,11 +181,28 @@
             font-size: 1.1em;
             text-align: center;
         }
+        .kelly-suggestion {
+            margin-top: 10px;
+            padding: 10px;
+            border-radius: 8px;
+            background-color: #3c096c; /* Morado Oscuro */
+            color: #fff;
+            font-weight: bold;
+            font-size: 1.2em;
+            text-align: center;
+            border: 2px solid #a361ff;
+        }
+        .kelly-suggestion span {
+            color: #a361ff;
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <h2>⚽ Calculadora Bivariante Poisson</h2>
+        <p style="text-align: center; color: #ffeb3b; font-size: 1.1em; margin-bottom: 10px;">
+            **Bankroll Total:** $100 | **Fracción de Kelly:** 25% (0.25)
+        </p>
         <p style="text-align: center; color: #ffeb3b; font-size: 1.1em; margin-bottom: 40px;">
             Correlación ($\lambda_3$) fijada automáticamente en **0.2**
         </p>
@@ -248,7 +261,9 @@
     <script>
         const MAX_GOALS = 6; 
         const CORRELATION_LAMBDA3 = 0.2; 
-        
+        const BANKROLL = 100; // Bankroll fijo en $100
+        const KELLY_FRACTION = 0.25; // 25% de Kelly
+
         // --- FUNCIONES DE CÁLCULO BIVARIANTE POISSON ---
 
         function factorial(n) {
@@ -399,46 +414,76 @@
             };
         }
 
-        // --- FUNCIÓN DE CÁLCULO DE VALOR (OVER-ROUND) ---
+        // --- FUNCIÓN DE CÁLCULO DE KELLY ---
+        function calculateKelly(prob_model, odds_bookie) {
+            if (prob_model <= 0 || odds_bookie <= 1.0) return 0;
+            
+            const b = odds_bookie - 1; // Beneficio neto
+            const p = prob_model;      // Probabilidad de éxito
+            const q = 1 - p;           // Probabilidad de fracaso
 
-        function checkValue(inputElementId, selectionId, isExactScore = false) {
+            // Fracción Kelly (f)
+            const f = (p * b - q) / b;
+            
+            if (f <= 0) return 0; // No hay valor positivo
+            
+            // Apuesta sugerida (25% Kelly)
+            const suggestedStake = KELLY_FRACTION * f * BANKROLL;
+
+            return suggestedStake > 0 ? suggestedStake : 0;
+        }
+
+
+        // --- FUNCIÓN DE CÁLCULO DE VALOR (OVER-ROUND) Y KELLY ---
+
+        function checkValueAndKelly(inputElementId, selectionId, isExactScore = false) {
             const inputElement = document.getElementById(inputElementId);
             const bookieOdds = parseFloat(inputElement.value);
             const selectionBox = document.getElementById(selectionId);
             const marketId = isExactScore ? 'MarcadorExacto' : selectionId.replace('seleccion', '');
             
-            // La probabilidad se obtiene del atributo data-prob, ya sea del contenedor de mercado o de un elemento específico para el marcador
             const calculatedProb = isExactScore 
                 ? parseFloat(selectionBox.getAttribute('data-prob-exact'))
                 : parseFloat(selectionBox.getAttribute('data-prob'));
 
             const valueAlert = document.getElementById(`value_alert_${marketId}`);
+            const kellySuggestion = document.getElementById(`kelly_sug_${marketId}`);
             
-            // Ocultar alerta por defecto
+            // Ocultar alertas por defecto
             valueAlert.style.display = 'none';
+            kellySuggestion.style.display = 'none';
+            kellySuggestion.textContent = '$0.00'; // Reset Kelly text
+
 
             if (isNaN(bookieOdds) || bookieOdds <= 1.0 || isNaN(calculatedProb) || calculatedProb <= 0) {
                 return;
             }
             
-            // Implied Bookie Probability
+            // 1. Detección de Valor (Over-Round)
             const impliedProb = 1 / bookieOdds;
-            
-            // Diferencia (Probabilidad Modelo - Probabilidad Implícita del Bookie)
             const valueDifference = calculatedProb - impliedProb;
             
-            // Condición de Valor: Si la probabilidad del modelo es 5% o más superior a la implícita del bookie
+            let hasValue = false;
             if (valueDifference >= 0.05) {
                 valueAlert.style.display = 'block';
                 valueAlert.innerHTML = `⚠️ **¡VALOR ENCONTRADO!** Over-round del ${(valueDifference * 100).toFixed(2)}%`;
+                hasValue = true;
+            }
+
+            // 2. Cálculo de Kelly (Solo si hay valor positivo, aunque sea menor a 5%)
+            const suggestedStake = calculateKelly(calculatedProb, bookieOdds);
+            
+            if (suggestedStake > 0) {
+                kellySuggestion.style.display = 'block';
+                kellySuggestion.innerHTML = `Apuesta Sugerida (25% Kelly): <span>$${suggestedStake.toFixed(2)}</span>`;
             }
         }
 
-        // --- FUNCIÓN PARA GENERAR HTML DE INPUT/ALERTA ---
+        // --- FUNCIÓN PARA GENERAR HTML DE INPUT/ALERTA/KELLY ---
         function generateInputHtml(selectionId, isExactScore = false) {
             const marketId = isExactScore ? 'MarcadorExacto' : selectionId.replace('seleccion', '');
             const inputId = `cuota_bookie_${marketId}`;
-            const checkValueCall = `checkValue('${inputId}', '${selectionId}', ${isExactScore})`;
+            const checkValueCall = `checkValueAndKelly('${inputId}', '${selectionId}', ${isExactScore})`;
 
             return `
                 <div class="bookie-input-group">
@@ -447,6 +492,7 @@
                            onchange="${checkValueCall}" onkeyup="${checkValueCall}">
                 </div>
                 <div id="value_alert_${marketId}" class="value-alert" style="display:none;"></div>
+                <div id="kelly_sug_${marketId}" class="kelly-suggestion" style="display:none;"></div>
             `;
         }
 
@@ -456,13 +502,11 @@
         function findBestSelection(probabilities, labels) {
             let maxProb = 0;
             let bestLabel = "";
-            let bestIndex = -1;
 
             for (let i = 0; i < probabilities.length; i++) {
                 if (probabilities[i] > maxProb) {
                     maxProb = probabilities[i];
                     bestLabel = labels[i];
-                    bestIndex = i;
                 }
             }
             let boxId = "";
@@ -470,15 +514,13 @@
             else if (labels.includes("Local Gana (DNB)")) boxId = "seleccionDNB";
             else if (labels.includes("Over 2.5 Goles")) boxId = "seleccionOverUnder";
             else if (labels.includes("BTTS Yes (Sí)")) boxId = "seleccionBTTS";
-            else if (labels.includes("Over 0.5 Goles HT")) boxId = "seleccionOver05HT"; // Nuevo ID para HT
-
+            else if (labels.includes("Over 0.5 Goles HT")) boxId = "seleccionOver05HT"; 
+            
             return { 
                 label: bestLabel, 
                 probability: maxProb, 
                 odds: calculateOdds(maxProb),
                 boxId: boxId,
-                // Si la selección es Over 0.5 HT, guardamos su probabilidad para el input
-                prob_HT: (bestLabel === "Over 0.5 Goles HT" ? maxProb : 0)
             };
         }
         
@@ -511,7 +553,6 @@
             element.style.animation = 'none'; 
             
             // 2. Establecer el atributo de dato para el cálculo de valor
-            // Si es un mercado principal, usa la prob del selection. Si es el Over 0.5 HT, usa la prob específica.
             element.setAttribute('data-prob', selection.probability);
 
             // 3. Aplicar estilos y texto según el rank
@@ -523,7 +564,7 @@
                 rankMarker = '🔥 Mejor Recomendación (Máxima Probabilidad)';
             } 
             
-            // 4. Mostrar el elemento con el contenido (incluye input de bookie)
+            // 4. Mostrar el elemento con el contenido (incluye input de bookie y Kelly)
             element.style.display = 'block';
 
             let contentHTML = `
@@ -533,16 +574,16 @@
                 ${generateInputHtml(selection.boxId)}
             `;
             
-            // Para mercados secundarios (como BTTS Yes HT), no mostrar el input, excepto el Over 0.5 HT que es el que queremos destacar.
-            if (selection.boxId !== 'seleccionOver05HT' && rank === 0) {
-                 element.classList.add('no-border'); 
-                 element.style.backgroundColor = '#3e3e6b';
-                 contentHTML = `
-                    **Mejor Opción:** <span>${selection.label}</span>
-                    (Prob: ${(selection.probability * 100).toFixed(2)}%)
-                    ${oddsDisplay} 
-                 `;
-            } else {
+            // Si no es una de las 6 principales, no se muestra la caja de recomendación
+            if (rank === 0 && selection.boxId !== 'seleccionOver05HT') {
+                 element.style.display = 'none';
+                 return;
+            } else if (rank !== 0 && selection.boxId !== 'seleccionOver05HT') {
+                 // FT principal
+                 element.classList.remove('no-border'); 
+                 element.style.backgroundColor = '#4a4e69';
+            } else if (selection.boxId === 'seleccionOver05HT') {
+                // Over 0.5 HT (se muestra siempre)
                  element.classList.remove('no-border'); 
                  element.style.backgroundColor = '#4a4e69';
             }
@@ -594,7 +635,7 @@
                 ["BTTS Yes (Sí)", "BTTS No (No)"]
             );
             
-            // HT (Ahora solo necesitamos la prob del Over 0.5 HT para la caja dedicada)
+            // Over 0.5 HT (Lo manejamos como una selección principal para el input de cuota)
             const selectionOver05HT = {
                 label: "Over 0.5 Goles HT",
                 probability: results.p_over_0_5_ht,
@@ -602,21 +643,13 @@
                 boxId: "seleccionOver05HT"
             };
 
-            // HT para los otros dos campos, solo para mostrar sin input de cuota
-            const selectionHT = findBestSelection(
-                [results.p_over_1_5_ht, results.p_btts_yes_ht],
-                ["Over 1.5 Goles HT", "BTTS Yes HT"]
-            );
-            selectionHT.boxId = "seleccionHT"; // Asignar un ID temporal para que displaySelection lo maneje como 'otro'
-
-
-            // 4. IDENTIFICAR EL MEJOR GLOBAL (RANK 1)
+            // 4. IDENTIFICAR EL MEJOR GLOBAL (RANK 1) - Incluyendo Over 0.5 HT
             const allSelectionsFT = [
                 selection1X2,
                 selectionDNB, 
                 selectionOverUnder,
                 selectionBTTS,
-                selectionOver05HT // Incluir HT en el ranking para que pueda ser TOP 1
+                selectionOver05HT 
             ];
 
             // Ordenar por probabilidad de mayor a menor
@@ -646,16 +679,27 @@
             displayMarcadorExacto(results.best_score, results.max_prob_exact);
 
 
-            // 6. VISUALIZAR RECOMENDACIONES 
+            // 6. VISUALIZAR RECOMENDACIONES (con sus respectivos ranks)
             displaySelection(selection1X2, getRank(selection1X2));
             displaySelection(selectionDNB, getRank(selectionDNB));
             displaySelection(selectionOverUnder, getRank(selectionOverUnder));
             displaySelection(selectionBTTS, getRank(selectionBTTS));
-            
-            // Over 0.5 HT
             displaySelection(selectionOver05HT, getRank(selectionOver05HT));
-            
-            // Los otros mercados HT no necesitan un box, el usuario solo los ve en el listado
+
+            // Para que la re-ejecución del cálculo no pierda la cuota/apuesta ya ingresada,
+            // forzamos la re-ejecución del checkValueAndKelly después de 100ms
+            setTimeout(() => {
+                const markets = ['1X2', 'DNB', 'OverUnder', 'BTTS', 'MarcadorExacto', 'Over05HT'];
+                markets.forEach(m => {
+                    const inputId = `cuota_bookie_${m}`;
+                    const selectionId = (m === 'MarcadorExacto') ? 'seleccionMarcadorExacto' : `seleccion${m}`;
+                    const isExact = m === 'MarcadorExacto';
+                    const input = document.getElementById(inputId);
+                    if (input && input.value) {
+                         checkValueAndKelly(inputId, selectionId, isExact);
+                    }
+                });
+            }, 100);
         }
 
     </script>
