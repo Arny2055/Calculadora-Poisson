@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0"> 
-    <title>Calculadora Poisson Bivariante (Con Valor de Apuesta)</title>
+    <title>Calculadora Poisson Bivariante (Todos con Cuota de Bookie)</title>
     <style>
         /* Estilos Modo Oscuro y MÁXIMA VISIBILIDAD */
         body { 
@@ -139,7 +139,7 @@
             background-color: #4a4e69 !important; 
         }
 
-        /* Estilo específico para el Marcador (No recomendación de apuesta) */
+        /* Estilo específico para el Marcador (Borde azul) */
         #seleccionMarcadorExacto {
             background-color: #4a4e69; 
             border: 2px solid #17a2b8; /* Borde azul/cian para diferenciar */
@@ -183,6 +183,7 @@
             color: #1a1a2e;
             font-weight: bold;
             font-size: 1.1em;
+            text-align: center;
         }
     </style>
 </head>
@@ -235,11 +236,11 @@
             <p>BTTS No: <strong id="bttsNoProb">...</strong></p>
             <div id="seleccionBTTS" class="selection-box" style="display:none;"></div>
             
-            <div class="section-title">⚽ Primera Mitad (HT) - (No Recomendación Principal) ⏱️</div>
+            <div class="section-title">⚽ Primera Mitad (HT) ⏱️</div>
             <p>Over 0.5 Goles HT: <strong id="over05HTProb">...</strong></p>
             <p>Over 1.5 Goles HT: <strong id="over15HTProb">...</strong></p>
             <p>BTTS Yes HT: <strong id="bttsYesHTProb">...</strong></p>
-            <div id="seleccionHT" class="selection-box" style="display:none;"></div>
+            <div id="seleccionOver05HT" class="selection-box" style="display:none;"></div>
         </div>
 
     </div>
@@ -400,11 +401,17 @@
 
         // --- FUNCIÓN DE CÁLCULO DE VALOR (OVER-ROUND) ---
 
-        function checkValue(inputElement, selectionId) {
+        function checkValue(inputElementId, selectionId, isExactScore = false) {
+            const inputElement = document.getElementById(inputElementId);
             const bookieOdds = parseFloat(inputElement.value);
             const selectionBox = document.getElementById(selectionId);
-            const marketId = selectionId.replace('seleccion', '');
-            const calculatedProb = parseFloat(selectionBox.getAttribute('data-prob'));
+            const marketId = isExactScore ? 'MarcadorExacto' : selectionId.replace('seleccion', '');
+            
+            // La probabilidad se obtiene del atributo data-prob, ya sea del contenedor de mercado o de un elemento específico para el marcador
+            const calculatedProb = isExactScore 
+                ? parseFloat(selectionBox.getAttribute('data-prob-exact'))
+                : parseFloat(selectionBox.getAttribute('data-prob'));
+
             const valueAlert = document.getElementById(`value_alert_${marketId}`);
             
             // Ocultar alerta por defecto
@@ -428,13 +435,16 @@
         }
 
         // --- FUNCIÓN PARA GENERAR HTML DE INPUT/ALERTA ---
-        function generateInputHtml(selectionId) {
-            const marketId = selectionId.replace('seleccion', '');
+        function generateInputHtml(selectionId, isExactScore = false) {
+            const marketId = isExactScore ? 'MarcadorExacto' : selectionId.replace('seleccion', '');
+            const inputId = `cuota_bookie_${marketId}`;
+            const checkValueCall = `checkValue('${inputId}', '${selectionId}', ${isExactScore})`;
+
             return `
                 <div class="bookie-input-group">
-                    <label for="cuota_bookie_${marketId}">Cuota de Bookie:</label>
-                    <input type="number" id="cuota_bookie_${marketId}" step="0.01" min="1.01" 
-                           onchange="checkValue(this, '${selectionId}')" onkeyup="checkValue(this, '${selectionId}')">
+                    <label for="${inputId}">Cuota de Bookie:</label>
+                    <input type="number" id="${inputId}" step="0.01" min="1.01" 
+                           onchange="${checkValueCall}" onkeyup="${checkValueCall}">
                 </div>
                 <div id="value_alert_${marketId}" class="value-alert" style="display:none;"></div>
             `;
@@ -446,11 +456,13 @@
         function findBestSelection(probabilities, labels) {
             let maxProb = 0;
             let bestLabel = "";
+            let bestIndex = -1;
 
             for (let i = 0; i < probabilities.length; i++) {
                 if (probabilities[i] > maxProb) {
                     maxProb = probabilities[i];
                     bestLabel = labels[i];
+                    bestIndex = i;
                 }
             }
             let boxId = "";
@@ -458,13 +470,15 @@
             else if (labels.includes("Local Gana (DNB)")) boxId = "seleccionDNB";
             else if (labels.includes("Over 2.5 Goles")) boxId = "seleccionOverUnder";
             else if (labels.includes("BTTS Yes (Sí)")) boxId = "seleccionBTTS";
-            else if (labels.includes("Over 0.5 Goles HT")) boxId = "seleccionHT"; 
-            
+            else if (labels.includes("Over 0.5 Goles HT")) boxId = "seleccionOver05HT"; // Nuevo ID para HT
+
             return { 
                 label: bestLabel, 
                 probability: maxProb, 
                 odds: calculateOdds(maxProb),
-                boxId: boxId
+                boxId: boxId,
+                // Si la selección es Over 0.5 HT, guardamos su probabilidad para el input
+                prob_HT: (bestLabel === "Over 0.5 Goles HT" ? maxProb : 0)
             };
         }
         
@@ -475,11 +489,15 @@
             const percentage = (probability * 100).toFixed(2);
 
             element.style.display = 'block';
+            element.setAttribute('data-prob-exact', probability); // Guardar prob para checkValue
 
-            element.innerHTML = `
+            let contentHTML = `
                 **Marcador Más Probable:** <span>${score}</span>
                 (Prob: ${percentage}%) (Cuota: ${odds})
+                ${generateInputHtml('seleccionMarcadorExacto', true)}
             `;
+
+            element.innerHTML = contentHTML;
         }
 
         function displaySelection(selection, rank) {
@@ -493,6 +511,7 @@
             element.style.animation = 'none'; 
             
             // 2. Establecer el atributo de dato para el cálculo de valor
+            // Si es un mercado principal, usa la prob del selection. Si es el Over 0.5 HT, usa la prob específica.
             element.setAttribute('data-prob', selection.probability);
 
             // 3. Aplicar estilos y texto según el rank
@@ -502,10 +521,8 @@
             if (rank === 1) {
                 element.classList.add('global-best-1'); 
                 rankMarker = '🔥 Mejor Recomendación (Máxima Probabilidad)';
-                // El marcador especial de cuota más baja no se usa para no confundir con el input del bookie
             } 
-            // Para rank 2, 3 y otros principales, se usa el estilo base/sutil
-
+            
             // 4. Mostrar el elemento con el contenido (incluye input de bookie)
             element.style.display = 'block';
 
@@ -513,16 +530,27 @@
                 ${rankMarker}: <span>${selection.label}</span>
                 (Prob: ${(selection.probability * 100).toFixed(2)}%)
                 ${oddsDisplay} 
+                ${generateInputHtml(selection.boxId)}
             `;
-
-            // Agregar input de Bookie solo si es una de las 4 secciones principales
-            if (selection.boxId !== 'seleccionHT') {
-                contentHTML += generateInputHtml(selection.boxId);
+            
+            // Para mercados secundarios (como BTTS Yes HT), no mostrar el input, excepto el Over 0.5 HT que es el que queremos destacar.
+            if (selection.boxId !== 'seleccionOver05HT' && rank === 0) {
+                 element.classList.add('no-border'); 
+                 element.style.backgroundColor = '#3e3e6b';
+                 contentHTML = `
+                    **Mejor Opción:** <span>${selection.label}</span>
+                    (Prob: ${(selection.probability * 100).toFixed(2)}%)
+                    ${oddsDisplay} 
+                 `;
+            } else {
+                 element.classList.remove('no-border'); 
+                 element.style.backgroundColor = '#4a4e69';
             }
 
 
             element.innerHTML = contentHTML;
         }
+
 
         // --- FUNCIÓN PRINCIPAL DE CÁLCULO ---
 
@@ -566,11 +594,21 @@
                 ["BTTS Yes (Sí)", "BTTS No (No)"]
             );
             
-            // HT 
+            // HT (Ahora solo necesitamos la prob del Over 0.5 HT para la caja dedicada)
+            const selectionOver05HT = {
+                label: "Over 0.5 Goles HT",
+                probability: results.p_over_0_5_ht,
+                odds: calculateOdds(results.p_over_0_5_ht),
+                boxId: "seleccionOver05HT"
+            };
+
+            // HT para los otros dos campos, solo para mostrar sin input de cuota
             const selectionHT = findBestSelection(
-                [results.p_over_0_5_ht, results.p_over_1_5_ht, results.p_btts_yes_ht],
-                ["Over 0.5 Goles HT", "Over 1.5 Goles HT", "BTTS Yes HT"]
+                [results.p_over_1_5_ht, results.p_btts_yes_ht],
+                ["Over 1.5 Goles HT", "BTTS Yes HT"]
             );
+            selectionHT.boxId = "seleccionHT"; // Asignar un ID temporal para que displaySelection lo maneje como 'otro'
+
 
             // 4. IDENTIFICAR EL MEJOR GLOBAL (RANK 1)
             const allSelectionsFT = [
@@ -578,6 +616,7 @@
                 selectionDNB, 
                 selectionOverUnder,
                 selectionBTTS,
+                selectionOver05HT // Incluir HT en el ranking para que pueda ser TOP 1
             ];
 
             // Ordenar por probabilidad de mayor a menor
@@ -598,6 +637,7 @@
             document.getElementById('over35Prob').textContent = formatOutput(results.p_over_3_5);
             document.getElementById('bttsYesProb').textContent = formatOutput(results.p_btts_yes);
             document.getElementById('bttsNoProb').textContent = formatOutput(results.p_btts_no);
+            
             document.getElementById('over05HTProb').textContent = formatOutput(results.p_over_0_5_ht);
             document.getElementById('over15HTProb').textContent = formatOutput(results.p_over_1_5_ht);
             document.getElementById('bttsYesHTProb').textContent = formatOutput(results.p_btts_yes_ht);
@@ -606,13 +646,16 @@
             displayMarcadorExacto(results.best_score, results.max_prob_exact);
 
 
-            // 6. VISUALIZAR RECOMENDACIONES Y ASIGNAR DATA-PROB
+            // 6. VISUALIZAR RECOMENDACIONES 
             displaySelection(selection1X2, getRank(selection1X2));
             displaySelection(selectionDNB, getRank(selectionDNB));
             displaySelection(selectionOverUnder, getRank(selectionOverUnder));
             displaySelection(selectionBTTS, getRank(selectionBTTS));
-            // HT siempre rank 0 (sin marcadores especiales)
-            displaySelection(selectionHT, 0); 
+            
+            // Over 0.5 HT
+            displaySelection(selectionOver05HT, getRank(selectionOver05HT));
+            
+            // Los otros mercados HT no necesitan un box, el usuario solo los ve en el listado
         }
 
     </script>
