@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0"> 
-    <title>Calculadora Poisson Bivariante (Goles/Partido)</title>
+    <title>Calculadora Poisson Bivariante (Goles/Partido 1X2)</title>
     <style>
         /* Estilos Modo Oscuro y MÁXIMA VISIBILIDAD */
         body { 
@@ -197,7 +197,7 @@
 </head>
 <body>
     <div class="container">
-        <h2>⚽ Poisson Bivariante (Goles/Partido)</h2>
+        <h2>⚽ Poisson Bivariante (Goles/Partido 1X2)</h2>
         <small>Ingresa las Tasas de Goles por Partido para calcular FA/FD y los Lambdas Ponderados.</small>
         
         <div class="section-title" style="margin-top: 10px;">Promedios de Goles de la Liga</div>
@@ -238,10 +238,11 @@
         
         <div class="resultado" id="resultados_totales">
             
-            <div class="section-title">Mercado Draw No Bet (DNB)</div>
-            <p>Local Gana (DNB): <strong id="localDNBProb">...</strong></p>
-            <p>Visitante Gana (DNB): <strong id="visitanteDNBProb">...</strong></p>
-            <div id="seleccionDNB" class="selection-box" style="display:none;"></div>
+            <div class="section-title">Mercado 1X2 (Resultado Final)</div>
+            <p>1 (Local Gana): <strong id="localWinProb">...</strong></p>
+            <p>X (Empate): <strong id="drawProb">...</strong></p>
+            <p>2 (Visitante Gana): <strong id="visitorWinProb">...</strong></p>
+            <div id="seleccion1X2" class="selection-box" style="display:none;"></div>
             
             <div class="section-title">Mercados de Goles (Tiempo Completo)</div>
             
@@ -266,23 +267,16 @@
         const KELLY_FRACTION = 0.25; 
 
         // =======================================================
-        // 1. CÁLCULO DE LAMBDAS PONDERADAS (FUNCIÓN CENTRAL)
+        // 1. CÁLCULO DE LAMBDAS PONDERADAS
         // =======================================================
 
         function getPonderedLambdas(mediaL, mediaV, tasa_gf_L, tasa_gc_L, tasa_gf_V, tasa_gc_V) {
             
             // 1. Calcular Fuerzas de Ataque (FA) y Defensa (FD)
-            // FA Local = Tasa GF Local / Media Goles Liga Local
-            const FA_L = tasa_gf_L / mediaL;
-            
-            // FD Local = Tasa GC Local / Media Goles Liga Visitante (Defensa L contra ataque V)
-            const FD_L = tasa_gc_L / mediaV; 
-            
-            // FA Visitante = Tasa GF Visitante / Media Goles Liga Visitante
-            const FA_V = tasa_gf_V / mediaV;
-            
-            // FD Visitante = Tasa GC Visitante / Media Goles Liga Local (Defensa V contra ataque L)
-            const FD_V = tasa_gc_V / mediaL; 
+            const FA_L = tasa_gf_L / mediaL; // Fuerza Ataque Local
+            const FD_L = tasa_gc_L / mediaV; // Fuerza Defensa Local
+            const FA_V = tasa_gf_V / mediaV; // Fuerza Ataque Visitante
+            const FD_V = tasa_gc_V / mediaL; // Fuerza Defensa Visitante
 
             // 2. Calcular Lambdas Ponderados
             // lambda_L = Media Liga L * FA Local * FD Visitante
@@ -360,14 +354,14 @@
                     
                     if (L > V) p_local_gana += P_LV;
                     else if (L < V) p_visitante_gana += P_LV;
-                    else p_empate += P_LV;
+                    else p_empate += P_LV; // El marcador es un empate
                     
                     const total = L + V;
                     if (total === 0) p_total_0 += P_LV;
                     if (total === 1) p_total_1 += P_LV;
                     if (total === 2) p_total_2 += P_LV;
                     
-                    if (L > 0 && V > 0) p_btts_ft += P_LV;
+                    if (L > 0 && V > 0) p_btts_ft += P_LV; // Ambos Anotan
                 }
             }
             
@@ -378,15 +372,9 @@
             p_btts_ft /= p_suma_total_ft;
             
             const p_under_2_5_ft = (p_total_0 + p_total_1 + p_total_2) / p_suma_total_ft;
-
-            // DNB: Probabilidad de ganar dado que no hay empate
-            const non_draw_prob = p_local_gana + p_visitante_gana;
-            const p_local_dnb = non_draw_prob > 0 ? p_local_gana / non_draw_prob : 0;
-            const p_visitante_dnb = non_draw_prob > 0 ? p_visitante_gana / non_draw_prob : 0;
-
-
+            
             return {
-                p_local_dnb: p_local_dnb, p_visitante_dnb: p_visitante_dnb,
+                p_local_win: p_local_gana, p_visitante_win: p_visitante_gana, p_draw: p_empate,
                 p_under_2_5: p_under_2_5_ft, p_over_2_5: 1 - p_under_2_5_ft,
                 p_btts_yes: p_btts_ft, p_btts_no: 1 - p_btts_ft,
             };
@@ -463,7 +451,7 @@
                 }
             }
             let boxId = "";
-            if (labels.includes("Local Gana (DNB)")) boxId = "seleccionDNB";
+            if (labels.includes("1 (Local Gana)")) boxId = "seleccion1X2";
             else if (labels.includes("Over 2.5 Goles")) boxId = "seleccionOverUnder";
             else if (labels.includes("BTTS Yes (Sí)")) boxId = "seleccionBTTS";
             
@@ -508,7 +496,7 @@
 
 
         // =======================================================
-        // 3. FUNCIÓN PRINCIPAL (Calcula FA/FD, luego Poisson Bivariante)
+        // 3. FUNCIÓN PRINCIPAL
         // =======================================================
 
         function calcularProbabilidadesPonderadas() {
@@ -546,17 +534,17 @@
             document.getElementById('lambdaDisplay').style.display = 'block';
             document.getElementById('lambdaDisplay').innerHTML = 
                 `**Fuerzas FA/FD:** Local (${FA_L.toFixed(2)} / ${FD_L.toFixed(2)}) | Visitante (${FA_V.toFixed(2)} / ${FD_V.toFixed(2)})<br>
-                **Goles Esperados Ponderados:** **$\lambda_L$: ${lambda_L.toFixed(2)}** | 
-                **$\lambda_V$: ${lambda_V.toFixed(2)}**`;
+                **Goles Esperados Ponderados ($\lambda$):** **L: ${lambda_L.toFixed(2)}** | 
+                **V: ${lambda_V.toFixed(2)}**`;
 
 
             // D. Bivariante: Calcular Probabilidades
             const results = calculateAllProbabilities(lambda1, lambda2, lambda3);
             
             // E. Selección y Visualización
-            const selectionDNB = findBestSelection(
-                [results.p_local_dnb, results.p_visitante_dnb],
-                ["Local Gana (DNB)", "Visitante Gana (DNB)"]
+            const selection1X2 = findBestSelection(
+                [results.p_local_win, results.p_draw, results.p_visitante_win],
+                ["1 (Local Gana)", "X (Empate)", "2 (Visitante Gana)"]
             );
             
             const selectionOverUnder = findBestSelection(
@@ -570,7 +558,7 @@
             );
             
             const allSelectionsFT = [
-                selectionDNB, 
+                selection1X2, 
                 selectionOverUnder,
                 selectionBTTS,
             ];
@@ -578,20 +566,21 @@
             const getRank = (selection) => allSelectionsFT.findIndex(s => s.boxId === selection.boxId) + 1;
 
             // Mostrar Resultados
-            document.getElementById('localDNBProb').textContent = formatOutput(results.p_local_dnb);
-            document.getElementById('visitanteDNBProb').textContent = formatOutput(results.p_visitante_dnb);
+            document.getElementById('localWinProb').textContent = formatOutput(results.p_local_win);
+            document.getElementById('drawProb').textContent = formatOutput(results.p_draw);
+            document.getElementById('visitorWinProb').textContent = formatOutput(results.p_visitante_win);
             document.getElementById('over25Prob').textContent = formatOutput(results.p_over_2_5);
             document.getElementById('under25Prob').textContent = formatOutput(results.p_under_2_5);
             document.getElementById('bttsYesProb').textContent = formatOutput(results.p_btts_yes);
             document.getElementById('bttsNoProb').textContent = formatOutput(results.p_btts_no);
             
-            displaySelection(selectionDNB, getRank(selectionDNB));
+            displaySelection(selection1X2, getRank(selection1X2));
             displaySelection(selectionOverUnder, getRank(selectionOverUnder));
             displaySelection(selectionBTTS, getRank(selectionBTTS));
 
             // Re-ejecutar Kelly/Valor si ya había cuotas ingresadas
             setTimeout(() => {
-                const markets = ['DNB', 'OverUnder', 'BTTS'];
+                const markets = ['1X2', 'OverUnder', 'BTTS'];
                 markets.forEach(m => {
                     const inputId = `cuota_bookie_${m}`;
                     const selectionId = `seleccion${m}`;
