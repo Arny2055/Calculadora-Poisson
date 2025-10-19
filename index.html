@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0"> 
-    <title>Calculadora Poisson Bivariante Puro (Stake Kelly)</title>
+    <title>Calculadora Poisson Bivariante Puro (Stake Fijo)</title>
     <style>
         /* Estilos Modo Oscuro y MÁXIMA VISIBILIDAD */
         body { 
@@ -180,18 +180,18 @@
             border: 2px solid;
             background-color: #3c096c; 
         }
-        .stake-1 { background-color: #a83232; border-color: #ff8080; } /* Rojo/Alto Riesgo */
-        .stake-2 { background-color: #a88d32; border-color: #ffe180; } /* Amarillo/Medio Riesgo */
-        .stake-3 { background-color: #32a83e; border-color: #80ff8c; } /* Verde/Bajo Riesgo */
+        .stake-1 { background-color: #a83232; border-color: #ff8080; } /* Rojo/1% */
+        .stake-2 { background-color: #a88d32; border-color: #ffe180; } /* Amarillo/2% */
+        .stake-3 { background-color: #32a83e; border-color: #80ff8c; } /* Verde/3% */
         .kelly-suggestion span {
-            color: #a361ff;
+            color: #fff; /* Asegurar que el texto dentro del span sea blanco o claro */
         }
     </style>
 </head>
 <body>
     <div class="container">
-        <h2>🔢 Modelo Poisson Bivariante Puro (Stake Kelly)</h2>
-        <small>Introduce tus $\lambda$ de confianza. Kelly sugerirá el Stake (1, 2, o 3) según el riesgo.</small>
+        <h2>🔢 Modelo Poisson Bivariante Puro (Stake Fijo)</h2>
+        <small>Stake 1=1%, Stake 2=2%, Stake 3=3%. Asignado por el margen de valor encontrado.</small>
         
         <div class="section-title" style="margin-top: 10px;">Goles Esperados por Equipo ($\lambda$)</div>
         <div class="input-group">
@@ -246,8 +246,7 @@
 
     <script>
         const MAX_GOALS = 6; 
-        const BANKROLL = 100; // Asumimos un capital inicial de $100 para los cálculos de Stake
-        const KELLY_FRACTION = 1.0; // Usamos el Kelly completo para calcular el 'f' (fracción)
+        const BANKROLL_SIZE = 100; // Capital de ejemplo para calcular la cantidad en $
 
         // =======================================================
         // 1. FUNCIONES DE CÁLCULO BIVARIANTE POISSON
@@ -337,43 +336,46 @@
         }
 
         // =======================================================
-        // 2. LÓGICA DE STAKE KELLY MODIFICADA
+        // 2. LÓGICA DE STAKE FIJO POR VALOR
         // =======================================================
 
         /**
-         * Calcula el Fraccional Kelly (f) y devuelve un objeto con el Stake y el porcentaje.
-         * Retorna un objeto con { stake: number, percentage: number }
+         * Calcula el Fraccional Kelly (f) y el Valor (Delta P) para determinar el Stake fijo.
+         * Retorna un objeto con { stake: number, value: number }
          */
-        function calculateKelly(prob_model, odds_bookie) {
-            if (prob_model <= 0 || odds_bookie <= 1.0) return { stake: 0, percentage: 0 };
-            const b = odds_bookie - 1; 
-            const p = prob_model;      
-            const q = 1 - p;           
-            const f = (p * b - q) / b; // Fraccional Kelly (f)
+        function calculateStakeByValue(prob_model, odds_bookie) {
+            if (prob_model <= 0 || odds_bookie <= 1.0) return { stake: 0, value: 0 };
             
-            if (f <= 0) return { stake: 0, percentage: 0 }; 
+            const impliedProb = 1 / odds_bookie;
+            const valueDifference = prob_model - impliedProb; // El valor real (Delta P)
             
-            const percentage = Math.min(f, 1.0) * 100; // Porcentaje de la banca (máximo 100%)
-
+            // Si hay valor negativo, no hay stake.
+            if (valueDifference <= 0) return { stake: 0, value: 0 };
+            
             let stake;
+            let percentage;
+
+            const valuePercentage = valueDifference * 100;
             
-            // Mapeo del porcentaje de Kelly al Stake de Riesgo:
-            if (percentage > 5.0) {
-                // Alto valor/Bajo riesgo: Kelly recomienda más del 5% de la banca.
+            // Asignación de Stake basado en el umbral de valor encontrado
+            if (valuePercentage >= 5.0) {
                 stake = 3;
-            } else if (percentage > 2.5) {
-                // Valor medio/Riesgo medio: Kelly recomienda entre 2.5% y 5%.
+                percentage = 3.0;
+            } else if (valuePercentage >= 2.5) {
                 stake = 2;
-            } else {
-                // Bajo valor/Alto riesgo: Kelly recomienda entre 0% y 2.5%.
+                percentage = 2.0;
+            } else { // Si valuePercentage > 0
                 stake = 1;
+                percentage = 1.0;
             }
 
-            return { stake: stake, percentage: percentage };
+            const amount = BANKROLL_SIZE * (percentage / 100);
+
+            return { stake: stake, percentage: percentage, amount: amount };
         }
 
         /**
-         * Verifica el valor con el Kelly y actualiza la visualización del Stake.
+         * Verifica el valor con la Cuota del Bookie y actualiza la visualización del Stake.
          */
         function checkValueAndKelly(inputElementId, selectionId) {
             const inputElement = document.getElementById(inputElementId);
@@ -394,20 +396,21 @@
             const impliedProb = 1 / bookieOdds;
             const valueDifference = calculatedProb - impliedProb;
             
-            const kellyResult = calculateKelly(calculatedProb, bookieOdds);
-            const stake = kellyResult.stake;
-            const percentage = kellyResult.percentage;
+            const stakeResult = calculateStakeByValue(calculatedProb, bookieOdds);
+            const stake = stakeResult.stake;
+            const percentage = stakeResult.percentage;
+            const amount = stakeResult.amount;
 
-            if (valueDifference >= 0.05) {
+            if (valueDifference > 0) {
                 valueAlert.style.display = 'block';
-                valueAlert.innerHTML = `⚠️ **¡VALOR ENCONTRADO!** Over-round del ${(valueDifference * 100).toFixed(2)}%`;
+                valueAlert.innerHTML = `⚠️ **¡VALOR ENCONTRADO!** Margen: ${(valueDifference * 100).toFixed(2)}%`;
             }
 
             if (stake > 0) {
                 kellySuggestion.style.display = 'block';
                 kellySuggestion.innerHTML = `
-                    Stake Sugerido: <span>${stake}/3</span> 
-                    (Kelly: ${percentage.toFixed(2)}% de la Banca)`;
+                    Stake Sugerido: <span>${stake}/3</span>
+                    ($${amount.toFixed(2)} que es el ${percentage.toFixed(0)}% de la Banca)`;
                 
                 // Aplicar clase de estilo basada en el Stake
                 if (stake === 1) kellySuggestion.classList.add('stake-1');
