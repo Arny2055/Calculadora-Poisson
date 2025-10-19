@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0"> 
-    <title>Calculadora Poisson Bivariante Puro (Stake Fijo)</title>
+    <title>Calculadora Poisson Bivariante (xG Múltiple y Stake Fijo)</title>
     <style>
         /* Estilos Modo Oscuro y MÁXIMA VISIBILIDAD */
         body { 
@@ -186,25 +186,46 @@
         .kelly-suggestion span {
             color: #fff; /* Asegurar que el texto dentro del span sea blanco o claro */
         }
+        /* Estilo para los nuevos campos de xG */
+        .xg-source-input {
+            margin-bottom: 10px;
+        }
+        .xg-source-input label {
+            font-size: 1.1em;
+            margin-bottom: 5px;
+        }
     </style>
 </head>
 <body>
     <div class="container">
-        <h2>🔢 Modelo Poisson Bivariante Puro (Stake Fijo)</h2>
-        <small>Stake 1=1%, Stake 2=2%, Stake 3=3%. Asignado por el margen de valor encontrado.</small>
+        <h2>🔢 Modelo Poisson Bivariante (xG Múltiple)</h2>
+        <small>Promedio de 2 fuentes de xG para mayor precisión. Stake 1=1%, 2=2%, 3=3%.</small>
         
         <div class="section-title" style="margin-top: 10px;">Goles Esperados por Equipo ($\lambda$)</div>
         <div class="input-group">
+            
             <div class="input-manual-data">
                 <div class="manual-data-title">Equipo Local ($\lambda_L$)</div>
-                <label for="lambda_L">Goles Esperados Local:</label>
-                <input type="number" id="lambda_L" placeholder="Ej: 1.75" step="0.01" min="0" value="1.75" onfocus="this.select()">
+                <div class="xg-source-input">
+                    <label for="lambda_L_1">xG Local (Fuente 1):</label>
+                    <input type="number" id="lambda_L_1" placeholder="Ej: 1.80" step="0.01" min="0" value="1.80" onfocus="this.select()">
+                </div>
+                <div class="xg-source-input">
+                    <label for="lambda_L_2">xG Local (Fuente 2):</label>
+                    <input type="number" id="lambda_L_2" placeholder="Ej: 1.70" step="0.01" min="0" value="1.70" onfocus="this.select()">
+                </div>
             </div>
 
             <div class="input-manual-data">
                 <div class="manual-data-title">Equipo Visitante ($\lambda_V$)</div>
-                <label for="lambda_V">Goles Esperados Visitante:</label>
-                <input type="number" id="lambda_V" placeholder="Ej: 0.95" step="0.01" min="0" value="0.95" onfocus="this.select()">
+                <div class="xg-source-input">
+                    <label for="lambda_V_1">xG Visitante (Fuente 1):</label>
+                    <input type="number" id="lambda_V_1" placeholder="Ej: 0.90" step="0.01" min="0" value="0.90" onfocus="this.select()">
+                </div>
+                <div class="xg-source-input">
+                    <label for="lambda_V_2">xG Visitante (Fuente 2):</label>
+                    <input type="number" id="lambda_V_2" placeholder="Ej: 1.00" step="0.01" min="0" value="1.00" onfocus="this.select()">
+                </div>
             </div>
         </div>
         
@@ -326,6 +347,7 @@
             p_empate /= p_suma_total_ft;
             p_btts_ft /= p_suma_total_ft;
             
+            // Se asume Under 2.5 = P(0) + P(1) + P(2) / SumaTotal
             const p_under_2_5_ft = (p_total_0 + p_total_1 + p_total_2) / p_suma_total_ft;
             
             return {
@@ -491,27 +513,33 @@
 
 
         // =======================================================
-        // 3. FUNCIÓN PRINCIPAL
+        // 3. FUNCIÓN PRINCIPAL MODIFICADA
         // =======================================================
 
         function calcularProbabilidadesBivariantes() {
-            // A. Obtener Inputs
-            const lambda_L = parseFloat(document.getElementById('lambda_L').value);
-            const lambda_V = parseFloat(document.getElementById('lambda_V').value);
+            // A. Obtener Inputs de xG de DOBLE FUENTE
+            const lambda_L_1 = parseFloat(document.getElementById('lambda_L_1').value);
+            const lambda_L_2 = parseFloat(document.getElementById('lambda_L_2').value);
+            const lambda_V_1 = parseFloat(document.getElementById('lambda_V_1').value);
+            const lambda_V_2 = parseFloat(document.getElementById('lambda_V_2').value);
             const lambda_3 = parseFloat(document.getElementById('lambda_3').value);
             
-            if (isNaN(lambda_L) || isNaN(lambda_V) || isNaN(lambda_3) || lambda_L <= 0 || lambda_V <= 0) {
-                 alert("Por favor, ingresa valores numéricos positivos válidos para los Goles Esperados ($\lambda$).");
+            if (isNaN(lambda_L_1) || isNaN(lambda_L_2) || isNaN(lambda_V_1) || isNaN(lambda_V_2) || isNaN(lambda_3) || lambda_L_1 <= 0 || lambda_V_1 <= 0) {
+                 alert("Por favor, ingresa valores numéricos positivos válidos para todas las fuentes de Goles Esperados ($\lambda$).");
                  return;
             }
 
-            // B. Ajuste Bivariante (Cálculo de Lambda1 y Lambda2)
-            const lambda1 = lambda_L - lambda_3;
-            const lambda2 = lambda_V - lambda_3;
+            // B. Calcular PROMEDIO de Goles Esperados (NUEVA LÓGICA)
+            const lambda_L_Avg = (lambda_L_1 + lambda_L_2) / 2;
+            const lambda_V_Avg = (lambda_V_1 + lambda_V_2) / 2;
+
+            // C. Ajuste Bivariante (Cálculo de Lambda1 y Lambda2 usando el promedio)
+            const lambda1 = lambda_L_Avg - lambda_3;
+            const lambda2 = lambda_V_Avg - lambda_3;
 
 
             if (lambda1 < 0 || lambda2 < 0) {
-                 alert(`Error: La Correlación ($\lambda_3$: ${lambda_3.toFixed(2)}) es mayor que uno de los Goles Esperados. $\lambda_1$ o $\lambda_2$ son negativos. Ajusta tus inputs.`);
+                 alert(`Error: La Correlación ($\lambda_3$: ${lambda_3.toFixed(2)}) es mayor que el promedio de Goles Esperados de uno de los equipos. $\lambda_1$ (${lambda1.toFixed(2)}) o $\lambda_2$ (${lambda2.toFixed(2)}) son negativos. Ajusta tus inputs.`);
                  return;
             }
 
@@ -568,7 +596,6 @@
                 });
             }, 100);
         }
-    
 
     </script>
 </body>
