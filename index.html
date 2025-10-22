@@ -202,6 +202,10 @@
             gap: 15px;
             margin-bottom: 20px;
         }
+        /* Nuevo estilo para el campo de Liga que ocupa todo el ancho */
+        .apuestas-inputs .full-width {
+            grid-column: 1 / -1; 
+        }
         .apuestas-inputs label {
             font-size: 1.1em;
             margin-bottom: 5px;
@@ -348,6 +352,10 @@
             <div class="section-title" style="color:#00ffff; border-color:#00ffff;">📝 Registro Manual de Apuestas</div>
             
             <div class="apuestas-inputs">
+                <div class="full-width">
+                    <label for="bet_league">Liga/Torneo (Ej: LaLiga, Premier League):</label>
+                    <input type="text" id="bet_league" placeholder="Nombre de la Liga/Torneo">
+                </div>
                 <div>
                     <label for="bet_match">Partido (Ej: Barcelona vs Madrid):</label>
                     <input type="text" id="bet_match" placeholder="Nombre del partido">
@@ -691,12 +699,14 @@
             
             bets.filter(bet => bet.result === 'won' || bet.result === 'lost').forEach(bet => {
                 const amount = bet.amount;
-                // Verificar que amount y odds sean números válidos
-                if (typeof amount !== 'number' || isNaN(amount) || typeof bet.odds !== 'string') {
+                // Intentar convertir odds a número, si no es string, usar 1 para evitar errores
+                const odds = parseFloat(bet.odds || 1); 
+                
+                if (typeof amount !== 'number' || isNaN(amount) || isNaN(odds)) {
                     console.error("Error de datos en apuesta para cálculo de bankroll:", bet);
                     return; 
                 }
-                const odds = parseFloat(bet.odds);
+                
 
                 if (bet.result === 'won') {
                     // Ganancia Neta = (Monto * Cuota) - Monto
@@ -747,8 +757,8 @@
                                 : bet.result === 'lost' ? 'PERDIDA' 
                                 : 'PENDIENTE';
                 
+                const amount = bet.amount || (BANKROLL_SIZE * (bet.stake / 100)); // Fallback 
                 let profit = 'N/A';
-                const amount = bet.amount || (BANKROLL_SIZE * (bet.stake / 100)); // Fallback para datos antiguos
                 
                 if (bet.result === 'won') {
                     profit = `+${((amount * parseFloat(bet.odds)) - amount).toFixed(2)}`;
@@ -760,6 +770,7 @@
                 li.innerHTML = `
                     <div>
                         ${modelTag} <strong>Partido:</strong> ${bet.match}<br>
+                        <strong>Liga:</strong> ${bet.league || 'N/A'}<br>
                         <strong>Selección:</strong> ${bet.selection}<br>
                         <div class="bet-info">
                             Cuota: <strong>${bet.odds}</strong> | 
@@ -800,29 +811,31 @@
         function clearAllBets() {
             if (confirm("¿Estás seguro de que quieres REINICIAR el bankroll a $100 y eliminar TODAS las apuestas registradas?")) {
                 localStorage.removeItem(STORAGE_KEY);
-                displayAllBets(); // Esto reinicia el bankroll a $100
+                displayAllBets(); 
             }
         }
         
         function addManualBet() {
+            // Nuevo campo:
+            const league = document.getElementById('bet_league').value.trim();
+
             const match = document.getElementById('bet_match').value.trim();
             const selection = document.getElementById('bet_selection').value.trim();
             const odds = parseFloat(document.getElementById('bet_odds').value);
             const stake = parseInt(document.getElementById('bet_stake').value);
             
-            if (!match || !selection || isNaN(odds) || odds <= 1.01 || isNaN(stake) || stake < 1 || stake > 3) {
-                alert("Por favor, rellena todos los campos de registro correctamente.");
+            if (!match || !league || !selection || isNaN(odds) || odds <= 1.01 || isNaN(stake) || stake < 1 || stake > 3) {
+                alert("Por favor, rellena todos los campos de registro (incluyendo Liga, Partido, Selección, Cuota y Stake) correctamente.");
                 return;
             }
 
             let bets = loadAllBets();
             const model = activeModel === 'neg_bin' ? 'NB' : (activeModel === 'bivariate_poisson' ? 'BP' : 'Manual');
             
-            // --- CORRECCIÓN CLAVE: Cálculo del monto basado en Stake manual ---
-            // Stake 1, 2, 3 corresponden a 1%, 2%, 3% de BANKROLL_SIZE (100)
             const amount = BANKROLL_SIZE * (stake / 100); 
 
             const newBet = {
+                league, // Agregado
                 match,
                 selection,
                 odds: odds.toFixed(2),
@@ -838,13 +851,14 @@
             saveAllBets(bets);
             
             // Limpiar inputs después de guardar
+            document.getElementById('bet_league').value = ''; // Limpiar campo de liga
             document.getElementById('bet_match').value = '';
             document.getElementById('bet_selection').value = '';
             document.getElementById('bet_odds').value = '';
             document.getElementById('bet_stake').value = '';
 
             displayAllBets();
-            alert(`¡Apuesta registrada exitosamente como [${model}]!`);
+            alert(`¡Apuesta registrada exitosamente en ${league}!`);
         }
 
         function quickRegisterBet(selectionId, marketId, modelPrefix) {
@@ -869,6 +883,13 @@
                 return;
             }
 
+            // Nuevo prompt para la liga
+            const league = prompt("Ingresa el nombre de la Liga/Torneo (Ej: LaLiga):");
+            if (!league || league.trim() === "") {
+                alert("Registro cancelado. El nombre de la liga es obligatorio.");
+                return;
+            }
+
             const match = prompt("Ingresa el nombre del Partido (Ej: Local vs Visitante):");
             if (!match || match.trim() === "") {
                 alert("Registro cancelado. El nombre del partido es obligatorio.");
@@ -879,12 +900,12 @@
             
             let bets = loadAllBets();
             const newBet = {
+                league: league.trim(), // Agregado
                 match: match.trim(),
                 selection: selectionLabel,
                 odds: bookieOdds.toFixed(2),
                 stake: result.stake,
                 value: result.value,
-                // --- CORRECCIÓN CLAVE: Asignación correcta del monto ---
                 amount: result.amount, 
                 model: modelPrefix,
                 result: 'pending', 
@@ -895,7 +916,7 @@
             saveAllBets(bets);
             
             displayAllBets();
-            alert(`Apuesta registrada: [${modelPrefix}] ${selectionLabel} @ ${bookieOdds} (Stake ${result.stake}/3)`);
+            alert(`Apuesta registrada: [${modelPrefix}] ${league} - ${selectionLabel} @ ${bookieOdds} (Stake ${result.stake}/3)`);
         }
 
 
