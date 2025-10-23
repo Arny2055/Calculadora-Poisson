@@ -741,7 +741,7 @@
 
 
         // =======================================================
-        // 3. LÓGICA DE REGISTRO DE APUESTAS
+        // 3. LÓGICA DE REGISTRO DE APUESTAS (CORREGIDA)
         // =======================================================
         function loadAllBets() {
             const bets = localStorage.getItem(STORAGE_KEY);
@@ -801,15 +801,19 @@
                 return;
             }
 
+            // Clonar la lista para ordenar solo la visualización
+            const displayBets = [...bets];
+
             // Ordenar: pendientes primero, luego ganadas, luego perdidas.
-            bets.sort((a, b) => {
+            displayBets.sort((a, b) => {
                 if (a.result === 'pending' && b.result !== 'pending') return -1;
                 if (a.result !== 'pending' && b.result === 'pending') return 1;
+                // Si ambos son del mismo estado, se mantiene el orden de inserción (gracias al ID)
                 return 0;
             });
 
 
-            bets.forEach((bet, index) => {
+            displayBets.forEach(bet => {
                 const modelTag = bet.model === 'NB' 
                     ? `<span class="tag-nb">[NB]</span>` 
                     : bet.model === 'BP' ? `<span class="tag-bp">[BP]</span>`
@@ -832,6 +836,8 @@
                 }
                              
                 const li = document.createElement('li');
+                // IMPORTANTE: El ID de la apuesta se adjunta al elemento de lista para la eliminación/actualización
+                li.setAttribute('data-bet-id', bet.id);
                 li.innerHTML = `
                     <div>
                         ${modelTag} <strong>Partido:</strong> ${bet.match}<br>
@@ -847,57 +853,42 @@
                         </div>
                     </div>
                     <div class="control-group">
-                        <select class="result-select" onchange="updateBetResult(${index}, this.value)">
+                        <select class="result-select" onchange="updateBetResult('${bet.id}', this.value)">
                             <option value="pending" ${bet.result === 'pending' ? 'selected' : ''}>Pendiente</option>
                             <option value="won" ${bet.result === 'won' ? 'selected' : ''}>Ganada (Win)</option>
                             <option value="lost" ${bet.result === 'lost' ? 'selected' : ''}>Perdida (Loss)</option>
                         </select>
-                        <button onclick="removeBet(${index})">Eliminar</button>
+                        <button onclick="removeBet('${bet.id}')">Eliminar</button>
                     </div>
                 `;
                 list.appendChild(li);
             });
         }
 
-        function updateBetResult(index, result) {
+        // CORREGIDO: Actualiza por ID
+        function updateBetResult(betId, result) {
             let bets = loadAllBets();
+            const indexToUpdate = bets.findIndex(bet => bet.id === betId);
             
-            // Encuentra el índice original antes de ordenar para la visualización
-            const originalIndex = loadAllBets().findIndex(bet => bet.date === bets[index].date && bet.match === bets[index].match);
-            
-            let originalBets = loadAllBets();
-            if (originalIndex !== -1) {
-                 originalBets[originalIndex].result = result;
-                 saveAllBets(originalBets);
-            } else {
-                 // Fallback: usar el índice en la lista ordenada
-                 bets[index].result = result;
+            if (indexToUpdate !== -1) {
+                 bets[indexToUpdate].result = result;
                  saveAllBets(bets);
             }
-
+            
             displayAllBets(); 
         }
 
-        function removeBet(index) {
-            let bets = loadAllBets();
-            
-            // Es necesario encontrar el elemento a eliminar en la lista *sin ordenar*
-            const betToRemove = document.getElementById('bets_list').children[index];
-            const matchName = betToRemove.querySelector('strong').textContent.replace('Partido: ', '');
+        // CORREGIDO: Elimina por ID
+        function removeBet(betId) {
+            if (!confirm("¿Estás seguro de eliminar esta apuesta del log?")) return;
 
-            let originalBets = loadAllBets();
-            // Esto es imperfecto, pero si no se guarda la ID única, es la mejor manera de encontrarlo
-            const indexToRemove = originalBets.findIndex(bet => bet.match === matchName && bet.result === bets[index].result);
+            let bets = loadAllBets();
+            const indexToRemove = bets.findIndex(bet => bet.id === betId);
 
             if (indexToRemove !== -1) {
-                originalBets.splice(indexToRemove, 1);
-                saveAllBets(originalBets);
-            } else {
-                // Último recurso: si el anterior falla
-                originalBets.splice(index, 1);
-                saveAllBets(originalBets);
+                bets.splice(indexToRemove, 1);
+                saveAllBets(bets);
             }
-
             displayAllBets();
         }
 
@@ -928,6 +919,7 @@
             const amount = BANKROLL_SIZE * (stake / 100); 
 
             const newBet = {
+                id: Date.now().toString() + Math.random().toString(36).substring(2, 5), // ID ÚNICO
                 league, 
                 match,
                 selection,
@@ -937,7 +929,7 @@
                 amount: amount, 
                 model: model,
                 result: 'pending', 
-                date: new Date().toLocaleString() // Usar la fecha como identificador (imperfecto pero funciona)
+                date: new Date().toLocaleString() 
             };
 
             bets.push(newBet);
@@ -1007,6 +999,7 @@
             
             let bets = loadAllBets();
             const newBet = {
+                id: Date.now().toString() + Math.random().toString(36).substring(2, 5), // ID ÚNICO
                 league, 
                 match,
                 selection: selectionLabel,
@@ -1032,6 +1025,7 @@
         // =======================================================
         
         function updateDualSelection() {
+            // NOTA: Esta función se ejecuta al cambiar inputs en un entorno que soporta JS (un navegador).
             const model = document.getElementById('dual_model_select').value;
             const marketCode = document.getElementById('dual_market_select').value;
             const bookieOdds = parseFloat(document.getElementById('dual_odds_input').value);
@@ -1133,8 +1127,10 @@
                     if (isNaN(theta_L_dual) || isNaN(theta_V_dual) || theta_L_dual <= 0 || theta_V_dual <= 0) {
                         throw new Error("Error DUAL: Los parámetros de Dispersión NB (θ) no son válidos.");
                     }
+                    // La correlación no debe ser mayor al menor de los lambdas individuales (lambda1 o lambda2), 
+                    // donde lambda1 = mu_L - lambda_3, por lo que lambda_3 < mu_L.
                     if (isNaN(lambda_3_dual) || lambda_3_dual < 0 || lambda_3_dual >= mu_L_dual || lambda_3_dual >= mu_V_dual) {
-                        throw new Error("Error DUAL: El parámetro de Correlación BP (λ3) no es válido (Debe ser ≥ 0 y menor a λL y λV).");
+                        throw new Error("Error DUAL: El parámetro de Correlación BP (λ3) no es válido (Debe ser ≥ 0 y menor que ambos Goles Esperados (μL/μV)).");
                     }
                     
                     // Calcular ambos
@@ -1161,10 +1157,10 @@
             let label2 = prob2Label;
 
             if (prob1 >= prob2) {
-                label1 = `<span class="${highlightClass}">${prob1Label} (${(prob1 * 100).toFixed(2)}%)</span>`;
+                label1 = `<span class="${highlightClass}">${prob1Label}</span>`;
                 label2 = `${prob2Label}`;
             } else {
-                label2 = `<span class="${highlightClass}">${prob2Label} (${(prob2 * 100).toFixed(2)}%)</span>`;
+                label2 = `<span class="${highlightClass}">${prob2Label}</span>`;
                 label1 = `${prob1Label}`;
             }
 
