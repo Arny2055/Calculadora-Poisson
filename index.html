@@ -228,6 +228,29 @@
             font-weight: bold;
             color: #00ffff;
         }
+        /* Estilos para el Alerta de Valor */
+        .value-alert {
+            font-size: 1.2em;
+            margin-top: 10px;
+            padding: 10px;
+            border-radius: 8px;
+            background-color: #4CAF50; /* Base verde para indicar algo positivo */
+            color: #1a1a2e;
+            font-weight: bold;
+            text-align: center;
+        }
+        .kelly-suggestion {
+            font-size: 1.1em;
+            margin-top: 10px;
+            padding: 10px;
+            border-radius: 8px;
+            border: 2px solid;
+            text-align: center;
+        }
+        .kelly-suggestion span {
+            font-size: 1.3em;
+            font-weight: bold;
+        }
 
         /* Estilos de Log */
         #bet_log {
@@ -407,7 +430,8 @@
                         </div>
                         <div class="full-width">
                             <label for="dual_odds_input">Cuota de Bookie (para Valor):</label>
-                            <input type="number" id="dual_odds_input" step="0.01" min="1.01" placeholder="Ej: 2.10" onchange="updateDualSelection()" onkeyup="updateDualSelection()">
+                            <input type="number" id="dual_odds_input" step="0.01" min="1.01" placeholder="Ej: 2.10" 
+                                   onchange="updateDualSelection()" onkeyup="updateDualSelection()" onfocus="this.select()">
                         </div>
                     </div>
                     
@@ -627,12 +651,13 @@
         // =======================================================
 
         function calculateStakeByValue(prob_model, odds_bookie) {
-            if (prob_model <= 0 || odds_bookie <= 1.0) return { stake: 0, value: 0, amount: 0 };
+            if (prob_model <= 0 || odds_bookie <= 1.0) return { stake: 0, percentage: 0, amount: 0, value: 0 };
             
             const impliedProb = 1 / odds_bookie;
             const valueDifference = prob_model - impliedProb; 
             
-            if (valueDifference <= 0) return { stake: 0, value: 0, amount: 0 };
+            // Si no hay valor positivo
+            if (valueDifference <= 0) return { stake: 0, percentage: 0, amount: 0, value: valueDifference * 100 };
             
             let stake;
             let percentage;
@@ -660,13 +685,22 @@
             const valueAlert = document.getElementById(valueAlertId);
             const kellySuggestion = document.getElementById(kellySugId);
             
-            if (valueAlert) valueAlert.style.display = 'none';
+            if (valueAlert) {
+                valueAlert.style.display = 'none';
+                valueAlert.className = 'value-alert'; // Reset color
+                valueAlert.style.backgroundColor = '#4a4e69';
+                valueAlert.innerHTML = 'Introduce la cuota del Bookie para calcular el Valor';
+            }
             if (kellySuggestion) {
                 kellySuggestion.style.display = 'none';
                 kellySuggestion.className = 'kelly-suggestion'; 
+                kellySuggestion.innerHTML = '';
             }
             
-            if (isNaN(bookieOdds) || bookieOdds <= 1.0 || isNaN(calculatedProb) || calculatedProb <= 0) return;
+            if (isNaN(bookieOdds) || bookieOdds <= 1.01 || isNaN(calculatedProb) || calculatedProb <= 0) {
+                 if (valueAlert) valueAlert.style.display = 'block';
+                 return;
+            }
             
             const stakeResult = calculateStakeByValue(calculatedProb, bookieOdds);
             const stake = stakeResult.stake;
@@ -674,13 +708,23 @@
             const amount = stakeResult.amount;
             const valueDifference = stakeResult.value;
 
-            if (valueDifference > 0) {
-                if (valueAlert) {
-                    valueAlert.style.display = 'block';
-                    valueAlert.innerHTML = `⚠️ **¡VALOR ENCONTRADO!** Margen: ${valueDifference.toFixed(2)}%`;
+            // Mostrar el margen de valor
+            if (valueAlert) {
+                valueAlert.style.display = 'block';
+                valueAlert.innerHTML = `Margen de Valor (Edge): **${valueDifference.toFixed(2)}%**`;
+                
+                if (valueDifference > 0) {
+                    valueAlert.style.backgroundColor = '#79d70f'; // Verde para valor
+                    valueAlert.style.color = '#1a1a2e';
+                    valueAlert.innerHTML = `✅ **¡VALOR ENCONTRADO!** Margen: ${valueDifference.toFixed(2)}%`;
+                } else {
+                    valueAlert.style.backgroundColor = '#a83232'; // Rojo para Sin Valor
+                    valueAlert.style.color = '#fff';
+                    valueAlert.innerHTML = `❌ **SIN VALOR** (Margen: ${valueDifference.toFixed(2)}%)`;
                 }
             }
 
+            // Mostrar sugerencia de Stake
             if (stake > 0) {
                 if (kellySuggestion) {
                     kellySuggestion.style.display = 'block';
@@ -721,9 +765,11 @@
                 }
                 
                 if (bet.result === 'won') {
+                    // Cálculo de ganancia neta: (Apuesta * Cuota) - Apuesta
                     const profit = (amount * odds) - amount; 
                     totalProfit += profit;
                 } else if (bet.result === 'lost') {
+                    // Pérdida neta: -Apuesta
                     totalProfit -= amount;
                 }
             });
@@ -755,6 +801,14 @@
                 return;
             }
 
+            // Ordenar: pendientes primero, luego ganadas, luego perdidas.
+            bets.sort((a, b) => {
+                if (a.result === 'pending' && b.result !== 'pending') return -1;
+                if (a.result !== 'pending' && b.result === 'pending') return 1;
+                return 0;
+            });
+
+
             bets.forEach((bet, index) => {
                 const modelTag = bet.model === 'NB' 
                     ? `<span class="tag-nb">[NB]</span>` 
@@ -768,7 +822,7 @@
                                 : bet.result === 'lost' ? 'PERDIDA' 
                                 : 'PENDIENTE';
                 
-                const amount = bet.amount || (BANKROLL_SIZE * (bet.stake / 100)); // Fallback 
+                const amount = bet.amount; 
                 let profit = 'N/A';
                 
                 if (bet.result === 'won') {
@@ -807,17 +861,46 @@
 
         function updateBetResult(index, result) {
             let bets = loadAllBets();
-            bets[index].result = result;
-            saveAllBets(bets);
+            
+            // Encuentra el índice original antes de ordenar para la visualización
+            const originalIndex = loadAllBets().findIndex(bet => bet.date === bets[index].date && bet.match === bets[index].match);
+            
+            let originalBets = loadAllBets();
+            if (originalIndex !== -1) {
+                 originalBets[originalIndex].result = result;
+                 saveAllBets(originalBets);
+            } else {
+                 // Fallback: usar el índice en la lista ordenada
+                 bets[index].result = result;
+                 saveAllBets(bets);
+            }
+
             displayAllBets(); 
         }
 
         function removeBet(index) {
             let bets = loadAllBets();
-            bets.splice(index, 1);
-            saveAllBets(bets);
+            
+            // Es necesario encontrar el elemento a eliminar en la lista *sin ordenar*
+            const betToRemove = document.getElementById('bets_list').children[index];
+            const matchName = betToRemove.querySelector('strong').textContent.replace('Partido: ', '');
+
+            let originalBets = loadAllBets();
+            // Esto es imperfecto, pero si no se guarda la ID única, es la mejor manera de encontrarlo
+            const indexToRemove = originalBets.findIndex(bet => bet.match === matchName && bet.result === bets[index].result);
+
+            if (indexToRemove !== -1) {
+                originalBets.splice(indexToRemove, 1);
+                saveAllBets(originalBets);
+            } else {
+                // Último recurso: si el anterior falla
+                originalBets.splice(index, 1);
+                saveAllBets(originalBets);
+            }
+
             displayAllBets();
         }
+
 
         function clearAllBets() {
             if (confirm("¿Estás seguro de que quieres REINICIAR el bankroll a $100 y eliminar TODAS las apuestas registradas?")) {
@@ -854,7 +937,7 @@
                 amount: amount, 
                 model: model,
                 result: 'pending', 
-                date: new Date().toLocaleString()
+                date: new Date().toLocaleString() // Usar la fecha como identificador (imperfecto pero funciona)
             };
 
             bets.push(newBet);
@@ -954,7 +1037,8 @@
             const bookieOdds = parseFloat(document.getElementById('dual_odds_input').value);
             const infoDisplay = document.getElementById('dual_selection_info');
 
-            if (!lastDualResults.NB || !lastDualResults.BP) {
+            // 1. Mostrar mensaje de error si no hay resultados previos
+            if (!lastDualResults.NB && !lastDualResults.BP) {
                 infoDisplay.innerHTML = 'Selección: <span class="dual-prob-display">...</span> (Calcula primero)';
                 updateValueDisplay(0, bookieOdds, 'dual_value_alert', 'dual_kelly_sug');
                 return;
@@ -964,6 +1048,7 @@
             let calculatedProb = 0;
             let selectionLabel = '';
             
+            // 2. Obtener la probabilidad del modelo y mercado seleccionados
             switch (marketCode) {
                 case 'O25':
                     calculatedProb = results.p_over_2_5;
@@ -986,6 +1071,7 @@
             const formattedProb = (calculatedProb * 100).toFixed(2);
             const impliedOdds = calculateOdds(calculatedProb);
 
+            // 3. Actualizar la información de la selección
             infoDisplay.innerHTML = `
                 Modelo **[${model}]** | Selección: 
                 <span class="dual-prob-display">${selectionLabel}</span>
@@ -993,6 +1079,7 @@
                 Probabilidad: ${formattedProb}% | Cuota Implícita: ${impliedOdds}
             `;
 
+            // 4. Calcular y mostrar el valor y stake
             updateValueDisplay(calculatedProb, bookieOdds, 'dual_value_alert', 'dual_kelly_sug');
         }
 
@@ -1044,10 +1131,10 @@
                         throw new Error("Error DUAL: Los Goles Esperados (Comunes) no son válidos.");
                     }
                     if (isNaN(theta_L_dual) || isNaN(theta_V_dual) || theta_L_dual <= 0 || theta_V_dual <= 0) {
-                        throw new Error("Error DUAL: Los parámetros de Dispersión NB ($\theta$) no son válidos.");
+                        throw new Error("Error DUAL: Los parámetros de Dispersión NB (θ) no son válidos.");
                     }
                     if (isNaN(lambda_3_dual) || lambda_3_dual < 0 || lambda_3_dual >= mu_L_dual || lambda_3_dual >= mu_V_dual) {
-                        throw new Error("Error DUAL: El parámetro de Correlación BP ($\lambda_3$) no es válido (Debe ser $\ge 0$ y menor a $\lambda_L$ y $\lambda_V$).");
+                        throw new Error("Error DUAL: El parámetro de Correlación BP (λ3) no es válido (Debe ser ≥ 0 y menor a λL y λV).");
                     }
                     
                     // Calcular ambos
@@ -1125,6 +1212,8 @@
                 document.getElementById('dual_calc').style.display = 'block';
                 dualButton.classList.add('active');
             }
+            // Mostrar los mensajes iniciales en el registro rápido DUAL
+            updateDualSelection();
         });
 
     </script>
