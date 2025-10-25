@@ -171,9 +171,11 @@
             text-align: center;
         }
         
+        /* Colores del stake de Kelly */
         .stake-1 { background-color: #a83232; border-color: #ff8080; } 
         .stake-2 { background-color: #a88d32; border-color: #ffe180; } 
         .stake-3 { background-color: #32a83e; border-color: #80ff8c; } 
+
         .value-alert {
             margin-top: 10px;
             padding: 8px;
@@ -234,6 +236,24 @@
         .guide-table td:nth-child(3) {
             font-weight: bold;
             color: #92e62c;
+        }
+        .market-1x2 {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 15px;
+            margin-top: 15px;
+        }
+        .market-1x2 p {
+            margin: 0;
+            padding: 10px 0;
+            text-align: center;
+            border: 1px solid #4a4e69;
+            border-radius: 8px;
+            font-size: 1.1em;
+        }
+        .market-1x2 strong {
+            display: block;
+            font-size: 1.2em;
         }
 
     </style>
@@ -333,6 +353,14 @@
 
         <div class="resultado" id="resultados_totales" style="border-color:#79d70f;">
 
+            <div class="section-title" style="color:#79d70f; border-color:#79d70f;">Resultado Final (1X2)</div>
+            <div class="market-1x2">
+                <p>Local (1): <strong id="prob_1">...</strong></p>
+                <p>Empate (X): <strong id="prob_X">...</strong></p>
+                <p>Visitante (2): <strong id="prob_2">...</strong></p>
+            </div>
+            <div id="seleccion1X2" class="selection-box" style="display:none;"></div>
+
             <div class="section-title" style="color:#79d70f; border-color:#79d70f;">Mercados de Goles (Tiempo Completo)</div>
             
             <p>Over 2.5 Goles: <strong id="over25Prob">...</strong></p>
@@ -391,18 +419,41 @@
             return (Math.pow(lambda, k) * Math.exp(-lambda)) / factorial(k);
         }
 
-        // --- POISSON ESTÁNDAR (SP) ---
-        function calculateStandardPoissonProbabilities(L_FT, V_FT) {
+        // --- CÁLCULO GENERAL DE PROBABILIDADES DE MARCADOR ---
+        // Retorna un objeto con todas las probabilidades de marcador 
+        // y las probabilidades sumadas (1X2, O/U, BTTS).
+        function calculateAllProbabilities(L_FT, V_FT, L3_FT = 0, isBivariate = false) {
+            let p_win_L = 0;
+            let p_draw = 0;
+            let p_win_V = 0;
             let p_total_0 = 0;
             let p_total_1 = 0;
             let p_total_2 = 0;
             let p_btts_ft = 0;
             let p_suma_total_ft = 0;
+            let P_LV_Function;
+
+            if (isBivariate) {
+                const lambda1 = L_FT - L3_FT;
+                const lambda2 = V_FT - L3_FT;
+
+                if (lambda1 < 0 || lambda2 < 0) {
+                     throw new Error(`Error BP: Correlación ($\lambda_3$: ${L3_FT.toFixed(2)}) es demasiado alta. $\lambda_1$ o $\lambda_2$ son negativos.`);
+                }
+                P_LV_Function = (L, V) => bivariate_poisson_prob(L, V, lambda1, lambda2, L3_FT);
+            } else {
+                P_LV_Function = (L, V) => poisson_prob(L, L_FT) * poisson_prob(V, V_FT);
+            }
+
 
             for (let L = 0; L <= MAX_GOALS; L++) {
                 for (let V = 0; V <= MAX_GOALS; V++) {
-                    const P_LV = poisson_prob(L, L_FT) * poisson_prob(V, V_FT);
+                    const P_LV = P_LV_Function(L, V);
                     p_suma_total_ft += P_LV; 
+                    
+                    if (L > V) p_win_L += P_LV;
+                    else if (L === V) p_draw += P_LV;
+                    else p_win_V += P_LV;
                     
                     const total = L + V;
                     if (total === 0) p_total_0 += P_LV;
@@ -413,20 +464,26 @@
                 }
             }
             
-            if (p_suma_total_ft === 0) throw new Error("Error de cálculo SP: La suma total de probabilidades es cero.");
+            if (p_suma_total_ft === 0) throw new Error("Error de cálculo: La suma total de probabilidades es cero.");
             
-            p_btts_ft /= p_suma_total_ft;
-            
-            const p_under_2_5_ft = (p_total_0 + p_total_1 + p_total_2) / p_suma_total_ft;
-            
+            // Normalizar las probabilidades (dividir por la suma total para compensar el truncamiento)
+            const factor = 1.0 / p_suma_total_ft;
+
+            p_win_L *= factor;
+            p_draw *= factor;
+            p_win_V *= factor;
+            p_btts_ft *= factor;
+            const p_under_2_5_ft = (p_total_0 + p_total_1 + p_total_2) * factor;
+
             return {
+                p_win_L: p_win_L, p_draw: p_draw, p_win_V: p_win_V,
                 p_under_2_5: p_under_2_5_ft, p_over_2_5: 1 - p_under_2_5_ft,
                 p_btts_yes: p_btts_ft, p_btts_no: 1 - p_btts_ft,
-                modelName: 'SP'
             };
         }
-        
-        // --- POISSON BIVARIANTE (BP) ---
+
+
+        // --- POISSON BIVARIANTE (BP) (Función auxiliar) ---
         function bivariate_poisson_prob(x, y, lambda1, lambda2, lambda3) {
             x = Math.round(x);
             y = Math.round(y);
@@ -445,47 +502,6 @@
             }
             
             return c * sumatoria;
-        }
-
-        function calculateBPProbabilities(L_FT, V_FT, L3_FT) {
-            let p_total_0 = 0;
-            let p_total_1 = 0;
-            let p_total_2 = 0;
-            let p_btts_ft = 0;
-            let p_suma_total_ft = 0; 
-
-            const lambda1 = L_FT - L3_FT;
-            const lambda2 = V_FT - L3_FT;
-
-            if (lambda1 < 0 || lambda2 < 0) {
-                 throw new Error(`Error BP: Correlación ($\lambda_3$: ${L3_FT.toFixed(2)}) es demasiado alta. $\lambda_1$ o $\lambda_2$ son negativos.`);
-            }
-
-            for (let L = 0; L <= MAX_GOALS; L++) {
-                for (let V = 0; V <= MAX_GOALS; V++) {
-                    const P_LV = bivariate_poisson_prob(L, V, lambda1, lambda2, L3_FT);
-                    p_suma_total_ft += P_LV; 
-                    
-                    const total = L + V;
-                    if (total === 0) p_total_0 += P_LV;
-                    if (total === 1) p_total_1 += P_LV;
-                    if (total === 2) p_total_2 += P_LV;
-                    
-                    if (L > 0 && V > 0) p_btts_ft += P_LV; 
-                }
-            }
-            
-            if (p_suma_total_ft === 0) throw new Error("Error de cálculo BP: La suma total de probabilidades es cero.");
-            
-            p_btts_ft /= p_suma_total_ft;
-            
-            const p_under_2_5_ft = (p_total_0 + p_total_1 + p_total_2) / p_suma_total_ft;
-            
-            return {
-                p_under_2_5: p_under_2_5_ft, p_over_2_5: 1 - p_under_2_5_ft,
-                p_btts_yes: p_btts_ft, p_btts_no: 1 - p_btts_ft,
-                modelName: 'BP'
-            };
         }
 
 
@@ -524,49 +540,38 @@
             if (prob_model <= 0 || odds_bookie <= 1.0) return { stake: 0, kelly_fraction: 0, amount: 0, value: 0 };
             
             const impliedProb = 1 / odds_bookie;
-            // B = odds - 1
             const odds_minus_one = odds_bookie - 1;
             
-            // Edge (Ventaja)
             const edge = prob_model - impliedProb;
             
             if (edge <= 0) return { stake: 0, kelly_fraction: 0, amount: 0, value: 0 };
             
-            // Kelly Fraccional (f = (p * B - q) / B)
-            // p = prob_model
-            // q = 1 - p
-            // B = odds_minus_one
             let kelly_full_fraction = (prob_model * odds_minus_one - (1 - prob_model)) / odds_minus_one;
             
-            // Aseguramos que no se exceda el 100% de la banca si Kelly es muy grande
             kelly_full_fraction = Math.min(1.0, kelly_full_fraction);
             
-            // Aplicamos la fracción de Kelly deseada (1/4 = 0.25)
             const kelly_final_fraction = kelly_full_fraction * KELLY_FRACTION;
             
-            // Cálculo del monto a apostar en unidades
             const amount = BANKROLL_SIZE * kelly_final_fraction; 
             
-            // Determinación del Stake 1, 2, 3 basado en la FRACCIÓN FINAL (para la representación visual)
             let stake;
             let percentage = kelly_final_fraction * 100;
 
-            if (percentage >= 2.5) { // 2.5% de Banca (1/4 de 10%)
+            if (percentage >= 2.5) { 
                 stake = 3;
-            } else if (percentage >= 1.0) { // 1.0% de Banca (1/4 de 4%)
+            } else if (percentage >= 1.0) { 
                 stake = 2;
             } else if (percentage > 0.1) {
-                stake = 1; // Menos de 1%
+                stake = 1; 
             } else {
                 stake = 0;
             }
-
 
             return { 
                 stake: stake, 
                 percentage: percentage, 
                 amount: amount, 
-                value: edge * 100 // Margen de valor en porcentaje
+                value: edge * 100 
             };
         }
 
@@ -597,7 +602,6 @@
                 valueAlert.innerHTML = `⚠️ **¡VALOR ENCONTRADO!** Margen: ${valueDifference.toFixed(2)}%`;
             }
 
-            // Solo mostramos la sugerencia si hay un stake asignado (es decir, kelly > 0)
             if (stake > 0 && amount > 0.01) { 
                 kellySuggestion.style.display = 'block';
                 kellySuggestion.innerHTML = `
@@ -633,27 +637,31 @@
         
         function calculateProbabilities() {
             try {
-                let results;
+                let lambda_L, lambda_V, lambda_3, isBivariate;
                 
                 if (activeModel === 'SP') {
-                    const lambda_L = parseFloat(document.getElementById('lambda_L_SP').value);
-                    const lambda_V = parseFloat(document.getElementById('lambda_V_SP').value);
+                    lambda_L = parseFloat(document.getElementById('lambda_L_SP').value);
+                    lambda_V = parseFloat(document.getElementById('lambda_V_SP').value);
+                    lambda_3 = 0;
+                    isBivariate = false;
                     
                     if (isNaN(lambda_L) || isNaN(lambda_V) || lambda_L < 0 || lambda_V < 0) {
-                         throw new Error("Error SP: Por favor, ingresa valores numéricos válidos ($\lambda \\ge 0$).");
+                         throw new Error("Error SP: Por favor, ingresa valores numéricos válidos ($\lambda \ge 0$).");
                     }
-                    results = calculateStandardPoissonProbabilities(lambda_L, lambda_V);
                     
                 } else if (activeModel === 'BP') {
-                    const lambda_L = parseFloat(document.getElementById('lambda_L_BP').value);
-                    const lambda_V = parseFloat(document.getElementById('lambda_V_BP').value);
-                    const lambda_3 = parseFloat(document.getElementById('lambda_3').value);
+                    lambda_L = parseFloat(document.getElementById('lambda_L_BP').value);
+                    lambda_V = parseFloat(document.getElementById('lambda_V_BP').value);
+                    lambda_3 = parseFloat(document.getElementById('lambda_3').value);
+                    isBivariate = true;
                     
                     if (isNaN(lambda_L) || isNaN(lambda_V) || isNaN(lambda_3) || lambda_L < 0 || lambda_V < 0 || lambda_3 < 0) {
-                         throw new Error("Error BP: Por favor, ingresa valores numéricos válidos ($\lambda \\ge 0$).");
+                         throw new Error("Error BP: Por favor, ingresa valores numéricos válidos ($\lambda \ge 0$).");
                     }
-                    results = calculateBPProbabilities(lambda_L, lambda_V, lambda_3);
                 }
+                
+                const results = calculateAllProbabilities(lambda_L, lambda_V, lambda_3, isBivariate);
+                results.modelName = activeModel; // Adjuntar el nombre del modelo
                 
                 updateResultsDisplay(results);
 
@@ -666,15 +674,18 @@
         function findBestSelectionInMarket(probabilities, labels) {
             let maxProb = 0;
             let bestLabel = "";
+            let bestIndex = -1;
 
             for (let i = 0; i < probabilities.length; i++) {
                 if (probabilities[i] > maxProb) {
                     maxProb = probabilities[i];
                     bestLabel = labels[i];
+                    bestIndex = i;
                 }
             }
             let boxId = "";
-            if (labels.includes("Over 2.5 Goles")) boxId = "seleccionOverUnder";
+            if (labels.includes("Local (1)")) boxId = "seleccion1X2";
+            else if (labels.includes("Over 2.5 Goles")) boxId = "seleccionOverUnder";
             else if (labels.includes("BTTS Yes (Sí)")) boxId = "seleccionBTTS";
             
             return { 
@@ -748,10 +759,14 @@
 
         function updateResultsDisplay(results) {
             if (!results) {
+                document.getElementById('prob_1').textContent = '...';
+                document.getElementById('prob_X').textContent = '...';
+                document.getElementById('prob_2').textContent = '...';
                 document.getElementById('over25Prob').textContent = '...';
                 document.getElementById('under25Prob').textContent = '...';
                 document.getElementById('bttsYesProb').textContent = '...';
                 document.getElementById('bttsNoProb').textContent = '...';
+                document.getElementById('seleccion1X2').style.display = 'none';
                 document.getElementById('seleccionOverUnder').style.display = 'none';
                 document.getElementById('seleccionBTTS').style.display = 'none';
                 document.getElementById('seleccionGlobal').style.display = 'none';
@@ -760,27 +775,48 @@
 
             const modelName = results.modelName;
 
+            // 1X2
+            document.getElementById('prob_1').textContent = formatOutput(results.p_win_L);
+            document.getElementById('prob_X').textContent = formatOutput(results.p_draw);
+            document.getElementById('prob_2').textContent = formatOutput(results.p_win_V);
+
+            // O/U & BTTS
             document.getElementById('over25Prob').textContent = formatOutput(results.p_over_2_5);
             document.getElementById('under25Prob').textContent = formatOutput(results.p_under_2_5);
             document.getElementById('bttsYesProb').textContent = formatOutput(results.p_btts_yes);
             document.getElementById('bttsNoProb').textContent = formatOutput(results.p_btts_no);
             
+            // ----------------------------------------------------
+            // 1. MEJOR SELECCIÓN 1X2
+            // ----------------------------------------------------
+            const selection1X2 = findBestSelectionInMarket(
+                [results.p_win_L, results.p_draw, results.p_win_V],
+                ["Local (1)", "Empate (X)", "Visitante (2)"]
+            );
             
+            // ----------------------------------------------------
+            // 2. MEJOR SELECCIÓN O/U
+            // ----------------------------------------------------
             const selectionOverUnder = findBestSelectionInMarket(
                 [results.p_over_2_5, results.p_under_2_5],
                 ["Over 2.5 Goles", "Under 2.5 Goles"]
             );
             
+            // ----------------------------------------------------
+            // 3. MEJOR SELECCIÓN BTTS
+            // ----------------------------------------------------
             const selectionBTTS = findBestSelectionInMarket(
                 [results.p_btts_yes, results.p_btts_no],
                 ["BTTS Yes (Sí)", "BTTS No (No)"]
             );
             
+            // ----------------------------------------------------
+            // 4. MEJOR SELECCIÓN GLOBAL
+            // ----------------------------------------------------
             const allOptions = [
-                { label: 'Over 2.5 Goles', prob: results.p_over_2_5, boxId: 'seleccionOverUnder' },
-                { label: 'Under 2.5 Goles', prob: results.p_under_2_5, boxId: 'seleccionOverUnder' },
-                { label: 'BTTS Yes (Sí)', prob: results.p_btts_yes, boxId: 'seleccionBTTS' },
-                { label: 'BTTS No (No)', prob: results.p_btts_no, boxId: 'seleccionBTTS' }
+                { label: selection1X2.label, prob: selection1X2.probability, boxId: 'seleccion1X2' },
+                { label: selectionOverUnder.label, prob: selectionOverUnder.probability, boxId: 'seleccionOverUnder' },
+                { label: selectionBTTS.label, prob: selectionBTTS.probability, boxId: 'seleccionBTTS' }
             ];
             
             allOptions.sort((a, b) => b.prob - a.prob);
@@ -791,6 +827,10 @@
                 boxId: allOptions[0].boxId
             };
             
+            // Mostrar resultados y el mejor de cada mercado
+            const is1X2EqualsGlobal = selection1X2.label === globalBest.label;
+            displaySelection(selection1X2, is1X2EqualsGlobal, modelName);
+
             const isOUEqualsGlobal = selectionOverUnder.label === globalBest.label;
             displaySelection(selectionOverUnder, isOUEqualsGlobal, modelName);
 
@@ -800,8 +840,9 @@
             displayGlobalBest(globalBest, modelName);
 
 
+            // Recargar el cálculo de Kelly si las cuotas del bookie ya estaban ingresadas
             setTimeout(() => {
-                const markets = ['OverUnder', 'BTTS'];
+                const markets = ['1X2', 'OverUnder', 'BTTS'];
                 markets.forEach(m => {
                     const inputId = `cuota_bookie_${m}`;
                     const selectionId = `seleccion${m}`;
