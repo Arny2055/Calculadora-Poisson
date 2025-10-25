@@ -244,8 +244,8 @@
         <small>Modelos: **Poisson Estándar (SP)** vs. **Poisson Bivariante (BP)**</small>
         
         <div class="tabs">
-            <button class="tab-button active" onclick="openTab('standard_poisson', 'SP')">Poisson Estándar (SP)</button>
-            <button class="tab-button" onclick="openTab('bivariate_poisson', 'BP')">Poisson Bivariante (BP)</button>
+            <button class="tab-button active" onclick="openTab('standard_poisson', 'SP', event)">Poisson Estándar (SP)</button>
+            <button class="tab-button" onclick="openTab('bivariate_poisson', 'BP', event)">Poisson Bivariante (BP)</button>
         </div>
         
         <div id="standard_poisson" class="tab-content active" style="border-color:#79d70f;">
@@ -358,8 +358,9 @@
 
     <script>
         const MAX_GOALS = 6; 
-        const BANKROLL_SIZE = 100.00;
-        let activeModel = 'SP'; // Controla el modelo activo
+        const BANKROLL_SIZE = 100.00; // Banca total en unidades
+        const KELLY_FRACTION = 0.25; // 1/4 de Kelly
+        let activeModel = 'SP';
 
         // =======================================================
         // 1. FUNCIONES DE CÁLCULO
@@ -396,11 +397,10 @@
             let p_total_1 = 0;
             let p_total_2 = 0;
             let p_btts_ft = 0;
-            let p_suma_total_ft = 0; // Para la normalización, aunque no debería ser estrictamente necesario si MAX_GOALS es grande.
+            let p_suma_total_ft = 0;
 
             for (let L = 0; L <= MAX_GOALS; L++) {
                 for (let V = 0; V <= MAX_GOALS; V++) {
-                    // P(L, V) = P_L(L) * P_V(V)
                     const P_LV = poisson_prob(L, L_FT) * poisson_prob(V, V_FT);
                     p_suma_total_ft += P_LV; 
                     
@@ -413,7 +413,6 @@
                 }
             }
             
-            // Normalización (en caso de que MAX_GOALS no capture toda la probabilidad)
             if (p_suma_total_ft === 0) throw new Error("Error de cálculo SP: La suma total de probabilidades es cero.");
             
             p_btts_ft /= p_suma_total_ft;
@@ -427,24 +426,20 @@
             };
         }
         
-        // --- POISSON BIVARIANTE (BP) (Función original) ---
+        // --- POISSON BIVARIANTE (BP) ---
         function bivariate_poisson_prob(x, y, lambda1, lambda2, lambda3) {
             x = Math.round(x);
             y = Math.round(y);
             
             if (lambda1 < 0 || lambda2 < 0 || lambda3 < 0) return 0; 
 
-            // C = e^-(λ1 + λ2 + λ3)
             const c = Math.exp(-(lambda1 + lambda2 + lambda3));
             const min_xy = Math.min(x, y);
             
             let sumatoria = 0;
             for (let i = 0; i <= min_xy; i++) {
-                // Término 1: (λ1)^(x-i) / (x-i)!
                 const term1 = Math.pow(lambda1, x - i) / factorial(x - i);
-                // Término 2: (λ2)^(y-i) / (y-i)!
                 const term2 = Math.pow(lambda2, y - i) / factorial(y - i);
-                // Término 3: (λ3)^i / i!
                 const term3 = Math.pow(lambda3, i) / factorial(i);
                 sumatoria += term1 * term2 * term3;
             }
@@ -459,7 +454,6 @@
             let p_btts_ft = 0;
             let p_suma_total_ft = 0; 
 
-            // Componentes independientes: λ1 = E(Local) - λ3, λ2 = E(Visitante) - λ3
             const lambda1 = L_FT - L3_FT;
             const lambda2 = V_FT - L3_FT;
 
@@ -481,7 +475,6 @@
                 }
             }
             
-            // Normalización
             if (p_suma_total_ft === 0) throw new Error("Error de cálculo BP: La suma total de probabilidades es cero.");
             
             p_btts_ft /= p_suma_total_ft;
@@ -499,7 +492,7 @@
         // =======================================================
         // 2. LÓGICA DE TABS
         // =======================================================
-        function openTab(tabName, model) {
+        function openTab(tabName, model, event) {
             let i, tabcontent, tablinks;
             
             tabcontent = document.getElementsByClassName("tab-content");
@@ -516,47 +509,62 @@
             document.getElementById(tabName).style.display = "block";
             document.getElementById(tabName).classList.add("active");
             
-            // Marca el botón como activo
             event.currentTarget.classList.add("active");
             
-            // Actualiza el modelo activo global
             activeModel = model;
             
-            // Limpia los resultados cuando se cambia de pestaña
             updateResultsDisplay(null);
         }
 
         // =======================================================
-        // 3. LÓGICA DE STAKE, VALOR Y DISPLAY
+        // 3. LÓGICA DE STAKE (Kelly Fraccional 1/4)
         // =======================================================
         
-        function calculateStakeByValue(prob_model, odds_bookie) {
-            if (prob_model <= 0 || odds_bookie <= 1.0) return { stake: 0, value: 0, amount: 0 };
+        function calculateStakeByKelly(prob_model, odds_bookie) {
+            if (prob_model <= 0 || odds_bookie <= 1.0) return { stake: 0, kelly_fraction: 0, amount: 0, value: 0 };
             
             const impliedProb = 1 / odds_bookie;
-            const valueDifference = prob_model - impliedProb; 
+            // B = odds - 1
+            const odds_minus_one = odds_bookie - 1;
             
-            if (valueDifference <= 0) return { stake: 0, value: 0, amount: 0 };
+            // Edge (Ventaja)
+            const edge = prob_model - impliedProb;
             
+            if (edge <= 0) return { stake: 0, kelly_fraction: 0, amount: 0, value: 0 };
+            
+            // Kelly Fraccional (f = (p * B - q) / B)
+            // p = prob_model
+            // q = 1 - p
+            // B = odds_minus_one
+            let kelly_full_fraction = (prob_model * odds_minus_one - (1 - prob_model)) / odds_minus_one;
+            
+            // Aseguramos que no se exceda el 100% de la banca si Kelly es muy grande
+            kelly_full_fraction = Math.min(1.0, kelly_full_fraction);
+            
+            // Aplicamos la fracción de Kelly deseada (1/4 = 0.25)
+            const kelly_final_fraction = kelly_full_fraction * KELLY_FRACTION;
+            
+            // Cálculo del monto a apostar en unidades
+            const amount = BANKROLL_SIZE * kelly_final_fraction; 
+            
+            // Determinación del Stake 1, 2, 3 basado en la FRACCIÓN FINAL (para la representación visual)
             let stake;
-            let percentage;
+            let percentage = kelly_final_fraction * 100;
 
-            const valuePercentage = valueDifference * 100;
-            
-            if (valuePercentage >= 5.0) {
+            if (percentage >= 2.5) { // 2.5% de Banca (1/4 de 10%)
                 stake = 3;
-                percentage = 3.0; 
-            } else if (valuePercentage >= 2.5) {
+            } else if (percentage >= 1.0) { // 1.0% de Banca (1/4 de 4%)
                 stake = 2;
-                percentage = 2.0; 
             } else { 
-                stake = 1;
-                percentage = 1.0; 
+                stake = 1; // Menos de 1%
             }
 
-            const amount = BANKROLL_SIZE * (percentage / 100); 
-
-            return { stake: stake, percentage: percentage, amount: amount, value: valuePercentage };
+            return { 
+                stake: stake, 
+                percentage: percentage, 
+                amount: amount, 
+                value: edge * 100 // Margen de valor en porcentaje
+            };
         }
 
         function checkValueAndKelly(inputElementId, selectionId) {
@@ -575,22 +583,23 @@
 
             if (isNaN(bookieOdds) || bookieOdds <= 1.0 || isNaN(calculatedProb) || calculatedProb <= 0) return;
             
-            const stakeResult = calculateStakeByValue(calculatedProb, bookieOdds);
+            const stakeResult = calculateStakeByKelly(calculatedProb, bookieOdds);
             const stake = stakeResult.stake;
-            const percentage = stakeResult.percentage;
             const amount = stakeResult.amount;
             const valueDifference = stakeResult.value;
+            const percentage = stakeResult.percentage;
 
             if (valueDifference > 0) {
                 valueAlert.style.display = 'block';
                 valueAlert.innerHTML = `⚠️ **¡VALOR ENCONTRADO!** Margen: ${valueDifference.toFixed(2)}%`;
             }
 
-            if (stake > 0) {
+            // Solo mostramos la sugerencia si hay un stake asignado (es decir, kelly > 0)
+            if (stake > 0 && amount > 0.01) { 
                 kellySuggestion.style.display = 'block';
                 kellySuggestion.innerHTML = `
                     Stake Sugerido: <span>${stake}/3</span>
-                    (Apostar **${amount.toFixed(2)} Unidades**, ${percentage.toFixed(0)}% de Banca)`;
+                    (Apostar **${amount.toFixed(2)} Unidades**, ${percentage.toFixed(2)}% de Banca | ${KELLY_FRACTION * 100}% de Kelly)`;
                 
                 kellySuggestion.classList.remove('stake-1', 'stake-2', 'stake-3');
                 if (stake === 1) kellySuggestion.classList.add('stake-1');
@@ -604,8 +613,6 @@
             const inputId = `cuota_bookie_${marketId}`;
             const checkValueCall = `checkValueAndKelly('${inputId}', '${selectionId}')`;
             
-            const color = '#79d70f'; 
-
             return `
                 <div class="bookie-input-group">
                     <label for="${inputId}">Cuota de Casa de Apuestas:</label>
