@@ -57,7 +57,24 @@
         }
         .input-group select { appearance: none; }
         
-        /* Estilos del Botón */
+        /* Estilo específico para los campos de unidad */
+        .input-with-unit input { 
+            flex: 1.5; /* Reduce el campo de entrada */
+            border-right: none;
+            border-top-right-radius: 0;
+            border-bottom-right-radius: 0;
+        }
+        .input-with-unit select {
+            flex: 0.5; /* Ajusta el selector */
+            background-color: #00aaff; 
+            color: #1c2630; 
+            font-weight: bold;
+            border-top-left-radius: 0;
+            border-bottom-left-radius: 0;
+            text-align-last: center; /* Centrar texto en select */
+        }
+
+        /* Estilos del Botón, Resultados y Diagnóstico (Sin cambios) */
         button { 
             width: 100%;
             padding: 12px 20px; 
@@ -73,8 +90,6 @@
         }
         button:hover { background-color: #0088cc; }
         button:active { transform: scale(0.99); }
-        
-        /* Estilos de la Sección de Resultados */
         .resultado, .diagnostico { 
             margin-top: 20px; 
             padding: 15px; 
@@ -86,14 +101,11 @@
             background-color: #3a4753; 
         }
         .resultado strong { color: #00aaff; }
-        
-        /* Estilos de Diagnóstico con códigos de color de mantenimiento */
         .diagnostico { 
             font-weight: bold; 
             border-left: 5px solid;
             padding-left: 15px;
         }
-        
         .alerta-normal { 
             background-color: #14492d; 
             color: #90ee90; 
@@ -114,7 +126,6 @@
             color: #e1bee7; 
             border-color: #9c27b0; 
         }
-
         .sugerencia {
             display: block;
             margin-top: 10px;
@@ -160,11 +171,17 @@
             <label for="r-nominal">Resistencia Nominal (R):</label>
             <input type="number" id="r-nominal" placeholder="Ej: 32" title="Ohmiaje esperado de la carga.">
         </div>
+        
         <div class="input-group" id="group-p-nominal" style="display: none;">
             <label for="p-nominal">Potencia Nominal (P):</label>
-            <input type="number" id="p-nominal" placeholder="Ej: 7200" title="Potencia (Watts) de diseño esperada.">
+            <div class="input-with-unit" style="display: flex; flex: 2;">
+                <input type="number" id="p-nominal" placeholder="Ej: 7.2" title="Potencia de diseño esperada.">
+                <select id="p-nominal-unit">
+                    <option value="W">W</option>
+                    <option value="kW" selected>kW</option>
+                </select>
+            </div>
         </div>
-
         <hr style="border-color: #444; margin: 20px 0;">
         <h3>Valor Medido (Lectura en Sitio)</h3>
         <div class="input-group">
@@ -189,7 +206,7 @@
         document.addEventListener('DOMContentLoaded', () => {
             const selector = document.getElementById('metodo-calculo');
             selector.addEventListener('change', actualizarCampos);
-            actualizarCampos(); // Configura el estado inicial
+            actualizarCampos(); 
         });
 
         // ====================================================================
@@ -214,13 +231,14 @@
 
             const variableDiagnostico = metodo.split('-')[0]; // Ej: 'I'
 
-            // Ajustar etiquetas de unidad
+            // Ajustar etiquetas de unidad y unidades de medida
             let labelText, unitText;
             switch (variableDiagnostico) {
                 case 'I': labelText = 'Corriente Real (I) [A]:'; unitText = 'I (Amperios)'; break;
                 case 'R': labelText = 'Resistencia Real (R) [Ω]:'; unitText = 'R (Ohmios)'; break;
                 case 'V': labelText = 'Voltaje Real (V) [V]:'; unitText = 'V (Voltios)'; break;
-                case 'P': labelText = 'Potencia Real (P) [W]:'; unitText = 'P (Watts)'; break;
+                // Si la variable a diagnosticar es P, el valor esperado siempre debe estar en W
+                case 'P': labelText = 'Potencia Real (P) [W/kW]:'; unitText = 'P (Watts)'; break; 
             }
             document.getElementById('label-real').textContent = labelText;
             document.getElementById('unidad-esperada').textContent = unitText;
@@ -240,11 +258,12 @@
             const metodo = document.getElementById('metodo-calculo').value;
             const variable = metodo.split('-')[0]; // Variable a diagnosticar (I, R, V, P)
 
-            // Obtener valores nominales (uso || 0 para evitar NaN si el campo está oculto o vacío)
+            // Obtener valores nominales
             let vNominal = parseFloat(document.getElementById('v-nominal').value) || 0;
             let iNominal = parseFloat(document.getElementById('i-nominal').value) || 0;
             let rNominal = parseFloat(document.getElementById('r-nominal').value) || 0;
             let pNominal = parseFloat(document.getElementById('p-nominal').value) || 0;
+            const pNominalUnit = document.getElementById('p-nominal-unit').value;
             let valorReal = parseFloat(document.getElementById('valor-real').value) || 0;
 
             let valorEsperado;
@@ -258,6 +277,11 @@
             const mensajeDiagnosticoElement = document.getElementById('mensaje-diagnostico');
             const sugerenciaDiagnosticoElement = document.getElementById('sugerencia-diagnostico');
 
+            // Convertir Potencia Nominal a Watts para el cálculo estándar
+            let pNominalWatts = pNominal;
+            if (pNominalUnit === 'kW') {
+                pNominalWatts = pNominal * 1000;
+            }
 
             // 1. Validar entradas REALES
             if (valorReal <= 0) {
@@ -273,28 +297,25 @@
             
             // 2. Cálculo del Valor Esperado y Validación de entradas NOMINALES
             try {
-                if (metodo === 'I-VR') { // I = V / R
-                    if (vNominal <= 0 || rNominal <= 0) throw new Error("V y R Nominal deben ser > 0. R es divisor.");
-                    valorEsperado = vNominal / rNominal;
-                } else if (metodo === 'R-VI') { // R = V / I
-                    if (vNominal <= 0 || iNominal <= 0) throw new Error("V e I Nominal deben ser > 0. I es divisor.");
-                    valorEsperado = vNominal / iNominal;
-                } else if (metodo === 'V-IR') { // V = I * R
-                    if (iNominal <= 0 || rNominal <= 0) throw new Error("I y R Nominal deben ser > 0.");
-                    valorEsperado = iNominal * rNominal;
-                } else if (metodo === 'P-VI') { // P = V * I
-                    if (vNominal <= 0 || iNominal <= 0) throw new Error("V e I Nominal deben ser > 0.");
-                    valorEsperado = vNominal * iNominal;
-                } else if (metodo === 'I-PV') { // I = P / V
-                    if (pNominal <= 0 || vNominal <= 0) throw new Error("P y V Nominal deben ser > 0. V es divisor.");
-                    valorEsperado = pNominal / vNominal;
-                } else if (metodo === 'P-IR') { // P = I² * R
-                    if (iNominal <= 0 || rNominal <= 0) throw new Error("I y R Nominal deben ser > 0.");
-                    valorEsperado = iNominal * iNominal * rNominal;
-                } else if (metodo === 'R-PV') { // R = V² / P
-                    if (vNominal <= 0 || pNominal <= 0) throw new Error("V y P Nominal deben ser > 0. P es divisor.");
-                    valorEsperado = (vNominal * vNominal) / pNominal;
+                // Todas las fórmulas ahora usan pNominalWatts (Watts) para la potencia
+                if (metodo === 'I-VR') { valorEsperado = vNominal / rNominal; } 
+                else if (metodo === 'R-VI') { valorEsperado = vNominal / iNominal; } 
+                else if (metodo === 'V-IR') { valorEsperado = iNominal * rNominal; } 
+                else if (metodo === 'P-VI') { valorEsperado = vNominal * iNominal; } 
+                else if (metodo === 'I-PV') { valorEsperado = pNominalWatts / vNominal; } 
+                else if (metodo === 'P-IR') { valorEsperado = iNominal * iNominal * rNominal; } 
+                else if (metodo === 'R-PV') { valorEsperado = (vNominal * vNominal) / pNominalWatts; }
+                
+                // Validaciones (Asegurar que los divisores no son cero)
+                const divisors = ['R-VI', 'I-VR', 'I-PV', 'R-PV'];
+                if (divisors.includes(metodo)) {
+                    const denominator = (metodo === 'R-VI' || metodo === 'I-PV') ? iNominal : 
+                                        (metodo === 'I-VR' || metodo === 'R-PV') ? rNominal : pNominalWatts;
+                    if (denominator <= 0) {
+                        throw new Error("El divisor (I, R, o P) debe ser positivo (> 0).");
+                    }
                 }
+                
             } catch (e) {
                 claseDiagnostico = 'alerta-error';
                 mensaje = 'ERROR: Datos de Referencia Inválidos.';
@@ -309,7 +330,7 @@
             // 3. Diagnóstico (Comparación Real vs. Esperado)
             
             const diferencia = Math.abs(valorReal - valorEsperado);
-            const porcentajeDiferencia = valorEsperado > 0 ? diferencia / valorEsperado : 1; // Si esperado es 0, forzar el 100% de error (excepto si son iguales, lo cual se valida arriba)
+            const porcentajeDiferencia = valorEsperado > 0 ? diferencia / valorEsperado : 1; 
 
             if (porcentajeDiferencia <= tolerancia) {
                 mensaje = `OPERACIÓN NORMAL (Tolerancia ±${Math.round(tolerancia * 100)}%)`;
@@ -318,22 +339,18 @@
             } else if (valorReal > valorEsperado) {
                 claseDiagnostico = 'alerta-alto';
                 if (variable === 'I' || variable === 'P') {
-                    // I y P altas significan sobrecarga o corto
                     mensaje = `ALARMA CRÍTICA: Valor Real (${variable}) MUY ALTO (Sobreconsumo/Sobrecarga).`;
-                    sugerencia = 'Causa Probable: **Cortocircuito** o **Carga en Paralelo** inesperada. Esto implica una **Resistencia (R) más baja** de lo normal. **Acción**: Verificar aislamiento.';
+                    sugerencia = 'Causa Probable: **Cortocircuito** o **Carga en Paralelo**. Implica **Resistencia (R) más baja** (R↓). **Acción**: Verificar aislamiento.';
                 } else if (variable === 'R' || variable === 'V') {
-                    // R y V altas significan resistencia o fuente excesiva
                     mensaje = `PRECAUCIÓN: Valor Real (${variable}) MUY ALTO.`;
-                    sugerencia = 'Causa Probable: Si es R, **Conexión Abierta Parcial** o componente defectuoso (R↑). Si es V, **Sobretensión de Fuente**. **Acción**: Revisar la carga o la regulación de voltaje.';
+                    sugerencia = 'Causa Probable: Si es R, **Conexión Abierta Parcial** (R↑). Si es V, **Sobretensión de Fuente**. **Acción**: Revisar la carga o la regulación de voltaje.';
                 }
             } else { // valorReal < valorEsperado
                 claseDiagnostico = 'alerta-bajo';
                 if (variable === 'I' || variable === 'P') {
-                    // I y P bajas significan subconsumo o circuito abierto
                     mensaje = `PRECAUCIÓN: Valor Real (${variable}) MUY BAJO (Subconsumo/Subcarga).`;
-                    sugerencia = 'Causa Probable: **Circuito Abierto Total/Parcial** o **Alta Resistencia de Contacto**. Esto implica una **Resistencia (R) más alta** de lo normal. **Acción**: Revisar cableado, fusibles y contactos.';
+                    sugerencia = 'Causa Probable: **Circuito Abierto Total/Parcial** (falla de continuidad). Implica **Resistencia (R) más alta** (R↑). **Acción**: Revisar cableado, fusibles y contactos.';
                 } else if (variable === 'R' || variable === 'V') {
-                    // R y V bajas significan corto o caída de tensión
                     mensaje = `ALARMA CRÍTICA: Valor Real (${variable}) MUY BAJO.`;
                     sugerencia = 'Causa Probable: Si es R, **Cortocircuito** o componente incorrecto (R↓). Si es V, **Caída de Tensión** excesiva. **Acción**: Si es R, desenergizar. Si es V, revisar capacidad de la fuente/cableado.';
                 }
