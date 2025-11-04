@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Herramienta de Diagnóstico Eléctrico Industrial con Potencia (P)</title>
+    <title>Herramienta de Diagnóstico Eléctrico Industrial con Conversión de Potencia</title>
     <style>
         /* Estilos Industriales (Manteniendo el formato profesional) */
         body { 
@@ -140,8 +140,8 @@
 <body>
 
     <div class="container">
-        <h1>⚡ Diagnóstico de Cargas con Potencia (P)</h1>
-        <p>Seleccione los dos parámetros nominales que conoce para calcular y diagnosticar el tercer valor.</p>
+        <h1>⚡ Diagnóstico de Cargas con Conversión Automática (W / kW)</h1>
+        <p>Seleccione los dos parámetros nominales que conoce para calcular y diagnosticar el tercer valor. La unidad de Potencia se maneja automáticamente.</p>
 
         <div class="input-group">
             <label for="metodo-calculo">Método de Cálculo/Diagnóstico:</label>
@@ -160,15 +160,15 @@
 
         <h3>Valores Nominales (Base de Referencia)</h3>
         <div class="input-group" id="group-v-nominal">
-            <label for="v-nominal">Voltaje Nominal (V):</label>
+            <label for="v-nominal">Voltaje Nominal (V) [V]:</label>
             <input type="number" id="v-nominal" placeholder="Ej: 480" title="Voltaje de alimentación esperado.">
         </div>
         <div class="input-group" id="group-i-nominal" style="display: none;">
-            <label for="i-nominal">Corriente Nominal (I):</label>
+            <label for="i-nominal">Corriente Nominal (I) [A]:</label>
             <input type="number" id="i-nominal" placeholder="Ej: 15" title="Corriente de diseño esperada.">
         </div>
         <div class="input-group" id="group-r-nominal" style="display: none;">
-            <label for="r-nominal">Resistencia Nominal (R):</label>
+            <label for="r-nominal">Resistencia Nominal (R) [Ω]:</label>
             <input type="number" id="r-nominal" placeholder="Ej: 32" title="Ohmiaje esperado de la carga.">
         </div>
         
@@ -233,12 +233,14 @@
 
             // Ajustar etiquetas de unidad y unidades de medida
             let labelText, unitText;
+            const pUnit = document.getElementById('p-nominal-unit').value; // Obtener unidad seleccionada
+            
             switch (variableDiagnostico) {
                 case 'I': labelText = 'Corriente Real (I) [A]:'; unitText = 'I (Amperios)'; break;
                 case 'R': labelText = 'Resistencia Real (R) [Ω]:'; unitText = 'R (Ohmios)'; break;
                 case 'V': labelText = 'Voltaje Real (V) [V]:'; unitText = 'V (Voltios)'; break;
-                // Si la variable a diagnosticar es P, el valor esperado siempre debe estar en W
-                case 'P': labelText = 'Potencia Real (P) [W/kW]:'; unitText = 'P (Watts)'; break; 
+                // Si P es la variable a diagnosticar, la unidad de salida será la misma que la de entrada nominal.
+                case 'P': labelText = `Potencia Real (P) [${pUnit}]:`; unitText = `P (${pUnit})`; break; 
             }
             document.getElementById('label-real').textContent = labelText;
             document.getElementById('unidad-esperada').textContent = unitText;
@@ -277,11 +279,21 @@
             const mensajeDiagnosticoElement = document.getElementById('mensaje-diagnostico');
             const sugerenciaDiagnosticoElement = document.getElementById('sugerencia-diagnostico');
 
-            // Convertir Potencia Nominal a Watts para el cálculo estándar
-            let pNominalWatts = pNominal;
+            // ⚡ CONVERSIÓN DE ENTRADA NOMINAL A WATTS (Unidad base para el cálculo)
+            let pNominalBase = pNominal;
             if (pNominalUnit === 'kW') {
-                pNominalWatts = pNominal * 1000;
+                pNominalBase = pNominal * 1000;
             }
+            
+            // ⚡ CONVERSIÓN DE ENTRADA REAL (Solo si se está midiendo Potencia)
+            let valorRealBase = valorReal;
+            if (variable === 'P') {
+                const pRealUnit = document.getElementById('p-nominal-unit').value; // Usamos la misma unidad seleccionada para la entrada real
+                if (pRealUnit === 'kW') {
+                    valorRealBase = valorReal * 1000;
+                }
+            }
+
 
             // 1. Validar entradas REALES
             if (valorReal <= 0) {
@@ -297,24 +309,20 @@
             
             // 2. Cálculo del Valor Esperado y Validación de entradas NOMINALES
             try {
-                // Todas las fórmulas ahora usan pNominalWatts (Watts) para la potencia
+                // Todas las fórmulas de Potencia usan pNominalBase (Watts)
                 if (metodo === 'I-VR') { valorEsperado = vNominal / rNominal; } 
                 else if (metodo === 'R-VI') { valorEsperado = vNominal / iNominal; } 
                 else if (metodo === 'V-IR') { valorEsperado = iNominal * rNominal; } 
                 else if (metodo === 'P-VI') { valorEsperado = vNominal * iNominal; } 
-                else if (metodo === 'I-PV') { valorEsperado = pNominalWatts / vNominal; } 
+                else if (metodo === 'I-PV') { valorEsperado = pNominalBase / vNominal; } 
                 else if (metodo === 'P-IR') { valorEsperado = iNominal * iNominal * rNominal; } 
-                else if (metodo === 'R-PV') { valorEsperado = (vNominal * vNominal) / pNominalWatts; }
-                
-                // Validaciones (Asegurar que los divisores no son cero)
-                const divisors = ['R-VI', 'I-VR', 'I-PV', 'R-PV'];
-                if (divisors.includes(metodo)) {
-                    const denominator = (metodo === 'R-VI' || metodo === 'I-PV') ? iNominal : 
-                                        (metodo === 'I-VR' || metodo === 'R-PV') ? rNominal : pNominalWatts;
-                    if (denominator <= 0) {
-                        throw new Error("El divisor (I, R, o P) debe ser positivo (> 0).");
-                    }
-                }
+                else if (metodo === 'R-PV') { valorEsperado = (vNominal * vNominal) / pNominalBase; }
+
+                // Validaciones
+                if (metodo === 'I-VR' && rNominal <= 0) throw new Error("R (Resistencia) Nominal debe ser > 0.");
+                if (metodo === 'R-VI' && iNominal <= 0) throw new Error("I (Corriente) Nominal debe ser > 0.");
+                if (metodo === 'I-PV' && vNominal <= 0) throw new Error("V (Voltaje) Nominal debe ser > 0.");
+                if (metodo === 'R-PV' && pNominalBase <= 0) throw new Error("P (Potencia) Nominal debe ser > 0.");
                 
             } catch (e) {
                 claseDiagnostico = 'alerta-error';
@@ -329,14 +337,17 @@
             
             // 3. Diagnóstico (Comparación Real vs. Esperado)
             
-            const diferencia = Math.abs(valorReal - valorEsperado);
+            // Usar valorRealBase si la variable es P, sino usar valorReal directo (para V, I, R)
+            const valorComparacionReal = (variable === 'P') ? valorRealBase : valorReal;
+
+            const diferencia = Math.abs(valorComparacionReal - valorEsperado);
             const porcentajeDiferencia = valorEsperado > 0 ? diferencia / valorEsperado : 1; 
 
             if (porcentajeDiferencia <= tolerancia) {
                 mensaje = `OPERACIÓN NORMAL (Tolerancia ±${Math.round(tolerancia * 100)}%)`;
                 sugerencia = 'El equipo opera dentro de los parámetros. La falla debe buscarse en el control o mecánica.';
                 claseDiagnostico = 'alerta-normal';
-            } else if (valorReal > valorEsperado) {
+            } else if (valorComparacionReal > valorEsperado) {
                 claseDiagnostico = 'alerta-alto';
                 if (variable === 'I' || variable === 'P') {
                     mensaje = `ALARMA CRÍTICA: Valor Real (${variable}) MUY ALTO (Sobreconsumo/Sobrecarga).`;
@@ -356,12 +367,21 @@
                 }
             }
 
-
             // 4. Mostrar Resultados
-            resultadoEsperadoElement.textContent = valorEsperado.toFixed(3);
+            
+            // ⚡ CONVERSIÓN DE SALIDA (Si la variable es P, convertir el resultado esperado de vuelta a la unidad seleccionada)
+            let valorEsperadoFinal = valorEsperado;
+            if (variable === 'P' && pNominalUnit === 'kW') {
+                valorEsperadoFinal = valorEsperado / 1000;
+            }
+
+            resultadoEsperadoElement.textContent = valorEsperadoFinal.toFixed(3);
             areaDiagnosticoElement.className = `diagnostico ${claseDiagnostico}`;
             mensajeDiagnosticoElement.textContent = mensaje;
             sugerenciaDiagnosticoElement.textContent = sugerencia;
+            
+            // ⚡ Actualizar la etiqueta de unidad del resultado al finalizar el diagnóstico
+            document.getElementById('unidad-esperada').textContent = (variable === 'P') ? `P (${pNominalUnit})` : document.getElementById('unidad-esperada').textContent;
         }
     </script> 
 </body>
