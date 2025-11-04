@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Diagnóstico Eléctrico Ley de Ohm</title>
     <style>
-        /* Incluye el CSS directamente aquí para simplificar el archivo */
+        /* CSS se mantiene para la presentación */
         body { font-family: Arial, sans-serif; margin: 20px; background-color: #f4f4f9; }
         .container { max-width: 600px; margin: auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); }
         h1 { color: #333; text-align: center; }
@@ -20,6 +20,7 @@
         .alerta-alto { background-color: #ffcccc; color: #cc0000; border-color: #cc0000; }
         .alerta-bajo { background-color: #ffedcc; color: #cc6600; border-color: #cc6600; }
         .alerta-normal { background-color: #ccffcc; color: #008000; border-color: #008000; }
+        .alerta-error { background-color: #ffe0b2; color: #ff6f00; border-color: #ff6f00; }
     </style>
 </head>
 <body>
@@ -31,27 +32,27 @@
         <div class="input-group">
             <label for="variable-medida">Variable a Medir/Diagnosticar:</label>
             <select id="variable-medida">
-                <option value="I">Corriente (I)</option>
-                <option value="R">Resistencia (R)</option>
-                <option value="V">Voltaje (V)</option>
+                <option value="I">Corriente (I) - Fórmulas: I=V/R</option>
+                <option value="R">Resistencia (R) - Fórmulas: R=V/I</option>
+                <option value="V">Voltaje (V) - Fórmulas: V=I*R</option>
             </select>
         </div>
 
-        <div class="input-group">
+        <div class="input-group" id="group-v-nominal">
             <label for="v-nominal">Voltaje Nominal (V):</label>
             <input type="number" id="v-nominal" placeholder="Ej: 12">
         </div>
-        <div class="input-group">
-            <label for="i-nominal">Corriente Nominal (I) - Oculto:</label>
-            <input type="number" id="i-nominal" placeholder="Ej: 2" style="display: none;">
+        <div class="input-group" id="group-i-nominal" style="display: none;">
+            <label for="i-nominal">Corriente Nominal (I):</label>
+            <input type="number" id="i-nominal" placeholder="Ej: 2">
         </div>
-        <div class="input-group">
+        <div class="input-group" id="group-r-nominal">
             <label for="r-nominal">Resistencia Nominal (R):</label>
             <input type="number" id="r-nominal" placeholder="Ej: 6">
         </div>
 
         <div class="input-group">
-            <label for="valor-real"><span id="label-real">Corriente Real (I)</span>:</label>
+            <label for="valor-real"><span id="label-real">Corriente Real (I) [A]</span>:</label>
             <input type="number" id="valor-real" placeholder="Valor medido en el circuito">
         </div>
 
@@ -66,5 +67,160 @@
         </div>
     </div>
 
-    <script src="app.js"></script> </body>
+    <script>
+        // Incluir el JavaScript corregido aquí mismo para un código completo en un solo bloque.
+        // O manténlo en 'app.js' si prefieres archivos separados.
+        
+        document.addEventListener('DOMContentLoaded', () => {
+            const selector = document.getElementById('variable-medida');
+            selector.addEventListener('change', actualizarCampos);
+            actualizarCampos(); // Configura el estado inicial
+        });
+
+        /**
+         * Ajusta los campos de entrada nominales visibles según la variable a medir/diagnosticar.
+         */
+        function actualizarCampos() {
+            const variable = document.getElementById('variable-medida').value;
+            
+            // Oculta/Muestra los grupos de entradas nominales (V, I, R)
+            document.getElementById('group-v-nominal').style.display = 'flex'; 
+            document.getElementById('group-i-nominal').style.display = 'none';
+            document.getElementById('group-r-nominal').style.display = 'none';
+
+            // Ajusta la visibilidad y etiqueta
+            switch (variable) {
+                case 'I': // Calcular I esperado = V / R. Necesita V y R nominales.
+                    document.getElementById('group-r-nominal').style.display = 'flex';
+                    document.getElementById('label-real').textContent = 'Corriente Real (I) [A]:';
+                    document.getElementById('unidad-esperada').textContent = 'I (Amperios)';
+                    break;
+                case 'R': // Calcular R esperada = V / I. Necesita V e I nominales.
+                    document.getElementById('group-i-nominal').style.display = 'flex';
+                    document.getElementById('label-real').textContent = 'Resistencia Real (R) [Ω]:';
+                    document.getElementById('unidad-esperada').textContent = 'R (Ohmios)';
+                    break;
+                case 'V': // Calcular V esperado = I * R. Necesita I y R nominales.
+                    document.getElementById('group-i-nominal').style.display = 'flex';
+                    document.getElementById('group-r-nominal').style.display = 'flex';
+                    document.getElementById('label-real').textContent = 'Voltaje Real (V) [V]:';
+                    document.getElementById('unidad-esperada').textContent = 'V (Voltios)';
+                    break;
+            }
+            
+            // Limpiar resultados al cambiar la variable
+            document.getElementById('resultado-esperado').textContent = '';
+            document.getElementById('area-diagnostico').className = 'diagnostico';
+            document.getElementById('mensaje-diagnostico').textContent = '';
+            document.getElementById('sugerencia-diagnostico').textContent = '';
+        }
+
+        /**
+         * Función central que realiza el cálculo de Ley de Ohm y el diagnóstico.
+         */
+        function realizarDiagnostico() {
+            const variable = document.getElementById('variable-medida').value;
+            
+            // Usamos || 0 para asegurarnos de que el valor sea un número (0) si el campo está vacío, 
+            // evitando NaN. Luego la validación lógica se encarga de los ceros.
+            let vNominal = parseFloat(document.getElementById('v-nominal').value) || 0;
+            let iNominal = parseFloat(document.getElementById('i-nominal').value) || 0;
+            let rNominal = parseFloat(document.getElementById('r-nominal').value) || 0;
+            let valorReal = parseFloat(document.getElementById('valor-real').value) || 0;
+
+            let valorEsperado;
+            let mensaje = '';
+            let sugerencia = '';
+            let claseDiagnostico = 'alerta-normal'; 
+            const tolerancia = 0.05; // 5% de tolerancia
+
+            // 1. Validar entradas REALES
+            if (valorReal <= 0) {
+                claseDiagnostico = 'alerta-error';
+                mensaje = 'Error: El valor Real medido debe ser positivo. Verifica tus mediciones.';
+                sugerencia = 'Asegúrate de que el valor introducido no sea cero o negativo.';
+                
+                document.getElementById('resultado-esperado').textContent = 'N/A';
+                document.getElementById('area-diagnostico').className = `diagnostico ${claseDiagnostico}`;
+                document.getElementById('mensaje-diagnostico').textContent = mensaje;
+                document.getElementById('sugerencia-diagnostico').textContent = sugerencia;
+                return;
+            }
+            
+            // 2. Cálculo del Valor Esperado y Validación de entradas NOMINALES
+            try {
+                if (variable === 'I') { // I = V / R
+                    if (vNominal <= 0 || rNominal <= 0) throw new Error("V y R nominales deben ser > 0 para calcular I.");
+                    valorEsperado = vNominal / rNominal;
+                } else if (variable === 'R') { // R = V / I
+                    if (vNominal <= 0 || iNominal <= 0) throw new Error("V e I nominales deben ser > 0 para calcular R.");
+                    valorEsperado = vNominal / iNominal;
+                } else if (variable === 'V') { // V = I * R
+                    if (iNominal <= 0 || rNominal <= 0) throw new Error("I y R nominales deben ser > 0 para calcular V.");
+                    valorEsperado = iNominal * rNominal;
+                }
+            } catch (e) {
+                claseDiagnostico = 'alerta-error';
+                mensaje = 'Error de Cálculo: Valores nominales faltantes o son cero.';
+                sugerencia = e.message;
+                
+                document.getElementById('resultado-esperado').textContent = 'N/A';
+                document.getElementById('area-diagnostico').className = `diagnostico ${claseDiagnostico}`;
+                document.getElementById('mensaje-diagnostico').textContent = mensaje;
+                document.getElementById('sugerencia-diagnostico').textContent = sugerencia;
+                return;
+            }
+            
+            // 3. Diagnóstico (Comparación Real vs. Esperado)
+            
+            // Evitar división por cero si valorEsperado es 0 (lo cual no debería ocurrir con la validación, pero por seguridad)
+            if (valorEsperado === 0) {
+                 // Si el valor esperado es cero, no podemos hacer el diagnóstico porcentual.
+                 claseDiagnostico = 'alerta-error';
+                 mensaje = 'Error de Cálculo: El valor esperado es 0. Revisa las entradas nominales.';
+                 sugerencia = 'Esto sugiere que al menos uno de tus valores nominales es cero, lo cual se debe evitar.';
+            } else {
+                const diferencia = Math.abs(valorReal - valorEsperado);
+                const porcentajeDiferencia = diferencia / valorEsperado;
+
+                if (porcentajeDiferencia <= tolerancia) {
+                    mensaje = `¡Normal! El valor Real (${valorReal.toFixed(2)}) está dentro del ${Math.round(tolerancia * 100)}% de tolerancia.`;
+                    sugerencia = 'El circuito opera según lo diseñado. Verifica otras posibles causas si la falla persiste.';
+                    claseDiagnostico = 'alerta-normal';
+                } else if (valorReal > valorEsperado) {
+                    claseDiagnostico = 'alerta-alto';
+                    if (variable === 'I') {
+                        mensaje = `¡Falla! Corriente Real (${valorReal.toFixed(2)} A) es mucho MAYOR que la Esperada (${valorEsperado.toFixed(2)} A).`;
+                        sugerencia = 'Diagnóstico: Posible **Cortocircuito** o **Carga en paralelo**. Indica **Resistencia más baja** (R↓).';
+                    } else if (variable === 'R') {
+                        mensaje = `¡Falla! Resistencia Real (${valorReal.toFixed(2)} Ω) es mucho MAYOR que la Esperada (${valorEsperado.toFixed(2)} Ω).`;
+                        sugerencia = 'Diagnóstico: **Conexión deficiente (alta resistencia de contacto)** o componente **dañado/abierto parcialmente** (R↑).';
+                    } else if (variable === 'V') {
+                        mensaje = `¡Falla! Voltaje Real (${valorReal.toFixed(2)} V) es mucho MAYOR que el Esperado (${valorEsperado.toFixed(2)} V).`;
+                        sugerencia = 'Diagnóstico: **Sobretensión** o problema en la fuente de alimentación. **Riesgo de daño** para los componentes.';
+                    }
+                } else { // valorReal < valorEsperado
+                    claseDiagnostico = 'alerta-bajo';
+                    if (variable === 'I') {
+                        mensaje = `¡Falla! Corriente Real (${valorReal.toFixed(2)} A) es mucho MENOR que la Esperada (${valorEsperado.toFixed(2)} A).`;
+                        sugerencia = 'Diagnóstico: Posible **Circuito Abierto Parcial/Total** o **Alta Resistencia de Contacto**. Indica **Resistencia más alta** (R↑).';
+                    } else if (variable === 'R') {
+                        mensaje = `¡Falla! Resistencia Real (${valorReal.toFixed(2)} Ω) es mucho MENOR que la Esperada (${valorEsperado.toFixed(2)} Ω).`;
+                        sugerencia = 'Diagnóstico: **Cortocircuito** o componente con **Resistencia (R) muy baja** (R↓).';
+                    } else if (variable === 'V') {
+                        mensaje = `¡Falla! Voltaje Real (${valorReal.toFixed(2)} V) es mucho MENOR que el Esperado (${valorEsperado.toFixed(2)} V).`;
+                        sugerencia = 'Diagnóstico: **Caída de Tensión** excesiva o problemas en la fuente de alimentación (batería baja).';
+                    }
+                }
+            }
+
+
+            // 4. Mostrar Resultados
+            document.getElementById('resultado-esperado').textContent = valorEsperado.toFixed(2);
+            document.getElementById('area-diagnostico').className = `diagnostico ${claseDiagnostico}`;
+            document.getElementById('mensaje-diagnostico').textContent = mensaje;
+            document.getElementById('sugerencia-diagnostico').textContent = sugerencia;
+        }
+    </script> 
+</body>
 </html>
