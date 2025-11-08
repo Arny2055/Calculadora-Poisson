@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Calculadora de Sueldo Quincenal Neto (MX)</title>
+    <title>Calculadora de Sueldo Quincenal Neto (MX - Sueldo Diario)</title>
     <style>
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 700px; margin: 20px auto; padding: 20px; border: 1px solid #0072C6; border-radius: 12px; background-color: #f8f9fa; }
         h1, h2 { color: #0072C6; }
@@ -20,13 +20,13 @@
 <body>
 
     <h1>Calculadora de Nómina Quincenal - MX 🇲🇽</h1>
-    <p>Cálculo estimado basado en la LFT y Tablas del SAT (2025).</p>
+    <p>Cálculo estimado basado en **Sueldo Diario**, LFT y Tablas del SAT (2025).</p>
     <hr>
 
     <div id="formulario">
         <h2>Ingresos Base</h2>
-        <label for="salarioMensual">Salario Mensual Bruto (Gravado):</label>
-        <input type="number" id="salarioMensual" value="15000" min="0">
+        <label for="salarioDiario">Sueldo Diario Bruto (Gravado):</label>
+        <input type="number" id="salarioDiario" value="500.00" min="0">
 
         <label for="diasLaborablesQuincena">Días Pagados en la Quincena:</label>
         <input type="number" id="diasLaborablesQuincena" value="15" min="1" max="15">
@@ -41,8 +41,6 @@
         <label for="horasExtraSemana2">Horas Extra Trabajadas - Semana 2:</label>
         <input type="number" id="horasExtraSemana2" value="0" min="0">
         
-        <p><em>(Se considera la tarifa "Doble" por simplicidad; las horas extra son parcialmente exentas).</em></p>
-
         <label for="diasFestivosTrabajados">Días Festivos/Descanso Obligatorio Trabajados:</label>
         <input type="number" id="diasFestivosTrabajados" value="0" min="0">
         
@@ -56,6 +54,9 @@
     </div>
 
     <script>
+        // La fecha y ubicación actual es: Viernes, 7 de Noviembre de 2025 en Aguascalientes.
+        // Las tablas de ISR e IMSS se mantienen para 2025 (estimadas).
+
         // *** TABLA ISR QUINCENAL (Valores 2025 - Fuente SAT/Anexo 8) ***
         const ISR_QUINCENAL_TABLE = [
             { min: 0.01, max: 368.10, cuota: 0.00, excedente: 0.0192 },
@@ -72,90 +73,82 @@
         ];
 
         // *** SUBSIDIO PARA EL EMPLEO (SE - Fijo Quincenal 2025) ***
-        // Para ingresos hasta $5,085.50 quincenales (aproximado de 10,171.00/2)
         const SUBSIDIO_FIJO_QUINCENAL = 234.30; 
-        const LIMITE_INGRESO_SE_QUINCENAL = 5085.50; // $10,171.00/2 (Límite mensual es $10,171.00)
+        const LIMITE_INGRESO_SE_QUINCENAL = 5085.50; // $10,171.00/2
 
         // *** VALORES FIJOS (UMA 2025 Estimada / Otros) ***
         const UMA_DIARIA = 110.00; // Valor Estimado 2025
-        const UMA_MENSUAL = UMA_DIARIA * 30.4;
         const TASA_ISN_AGUASCALIENTES = 0.02; // 2.0%
-        const CUOTA_FIJA_IMSS_DIARIA = UMA_DIARIA * 0.2392; // 23.92% de la UMA diaria
 
         function calcularISR(sueldo_gravado) {
             if (sueldo_gravado <= 0) return 0;
             
-            // Buscar el rango en la tabla
             const tarifa = ISR_QUINCENAL_TABLE.find(r => sueldo_gravado >= r.min && sueldo_gravado <= r.max);
-
-            if (!tarifa) return 0; // Error o fuera de rango (aunque Infinity cubre todo)
+            if (!tarifa) return 0;
 
             const excedente = sueldo_gravado - tarifa.min;
-            const impuestoMarginal = excedente * tarifa.excedente;
-            const isr_causado = impuestoMarginal + tarifa.cuota;
+            const isr_causado = (excedente * tarifa.excedente) + tarifa.cuota;
 
             return isr_causado;
         }
 
-        function calcularIMSS(salario_diario) {
+        function calcularIMSS(salario_diario, dias_pagados) {
             // Se asume el cálculo básico de las cuotas Obrero-Patronales (solo la parte OBRERA)
-            const cuota_fija = 0; // La cuota fija la paga el patrón
-
+            
             // Excedente de 3 UMA's: 1.10% sobre el excedente (Solo si SDI > 3 UMAS)
             const tres_umas_diarias = UMA_DIARIA * 3;
-            let excedente_tres_umas = 0;
+            let excedente_tres_umas_pago = 0;
             if (salario_diario > tres_umas_diarias) {
-                excedente_tres_umas = (salario_diario - tres_umas_diarias) * 0.0110 * 15; // 1.10% * Días Quincenales
+                // Se aplica el 1.10% Obrero al excedente * los días pagados
+                excedente_tres_umas_pago = (salario_diario - tres_umas_diarias) * 0.0110 * dias_pagados; 
             }
             
-            // Prestaciones en dinero y Gastos Médicos (1% sobre Salario Diario Integrado, se usa SDI como Salario Diario)
-            const gastos_medicos = salario_diario * 0.004 * 15; // 0.4% * Días Quincenales
+            // Prestaciones en dinero y Gastos Médicos (0.4% sobre Salario Diario)
+            const gastos_medicos_pago = salario_diario * 0.004 * dias_pagados; 
 
-            // Invalidez y Vida (0.625% sobre Salario Diario Integrado)
-            const invalidez_vida = salario_diario * 0.00625 * 15; // 0.625% * Días Quincenales
+            // Invalidez y Vida (0.625% sobre Salario Diario)
+            const invalidez_vida_pago = salario_diario * 0.00625 * dias_pagados; 
             
-            // Cesantía en Edad Avanzada (1.125% sobre Salario Diario Integrado)
-            const cesantia_vejez = salario_diario * 0.01125 * 15; // 1.125% * Días Quincenales
+            // Cesantía en Edad Avanzada (1.125% sobre Salario Diario)
+            const cesantia_vejez_pago = salario_diario * 0.01125 * dias_pagados; 
 
             // Suma de la parte OBRERA
-            const total_imss = excedente_tres_umas + gastos_medicos + invalidez_vida + cesantia_vejez;
+            const total_imss = excedente_tres_umas_pago + gastos_medicos_pago + invalidez_vida_pago + cesantia_vejez_pago;
             return total_imss;
         }
 
         function calcularSueldo() {
             // 1. Obtener los valores de los inputs
-            const salarioMensual = parseFloat(document.getElementById('salarioMensual').value) || 0;
+            const salarioDiario = parseFloat(document.getElementById('salarioDiario').value) || 0;
             const diasLaborablesQuincena = parseFloat(document.getElementById('diasLaborablesQuincena').value) || 0;
             const horasExtraSemana1 = parseFloat(document.getElementById('horasExtraSemana1').value) || 0;
             const horasExtraSemana2 = parseFloat(document.getElementById('horasExtraSemana2').value) || 0;
             const diasFestivosTrabajados = parseFloat(document.getElementById('diasFestivosTrabajados').value) || 0;
 
-            if (salarioMensual <= 0 || diasLaborablesQuincena <= 0) {
-                document.getElementById('resultado').innerHTML = "Por favor, introduce un Salario Mensual y Días Laborables válidos.";
+            if (salarioDiario <= 0 || diasLaborablesQuincena <= 0) {
+                document.getElementById('resultado').innerHTML = "Por favor, introduce un Sueldo Diario y Días Pagados válidos.";
                 return;
             }
 
             // --- CÁLCULOS DE INGRESO BRUTO ---
-            const diasEnMes = 30.4; // Base más precisa para nómina
-            const salarioDiario = salarioMensual / diasEnMes;
             const valorHoraNormal = salarioDiario / 8; // Asumiendo 8 horas/día
             
-            // Sueldo Base
+            // Sueldo Base Quincenal
             const sueldoBaseQuincenal = salarioDiario * diasLaborablesQuincena;
 
-            // Horas Extra (Se asume tarifa doble para el cálculo, son parcialmente exentas, pero para simplicidad gravamos el pago doble)
+            // Horas Extra (Doble)
             const totalHorasExtra = horasExtraSemana1 + horasExtraSemana2;
             const pagoTotalHorasExtra = totalHorasExtra * (valorHoraNormal * 2); 
             
-            // Días Festivos (Se asume Pago Triple = Salario Diario Normal + Pago Doble Adicional. El pago doble es gravado)
+            // Días Festivos (Pago Adicional Doble - aparte del salario diario que ya se incluye en la base)
             const pagoTotalFestivosAdicional = diasFestivosTrabajados * (salarioDiario * 2); 
 
-            // Sueldo BRUTO Total (Gravable para ISR, asumiendo que todos los extras entran a la base gravada para ser conservadores)
+            // Sueldo BRUTO Total (Gravable para ISR)
             const sueldoBrutoEstimado = sueldoBaseQuincenal + pagoTotalHorasExtra + pagoTotalFestivosAdicional;
             
             // --- DEDUCCIONES FISCALES (MÉXICO) ---
             
-            // 2. Cálculo ISR (sobre el Ingreso Gravado)
+            // 2. Cálculo ISR (sobre el Ingreso Gravado Quincenal)
             const isr_causado = calcularISR(sueldoBrutoEstimado);
 
             // 3. Cálculo Subsidio para el Empleo (SE)
@@ -164,33 +157,31 @@
                 subsidio_a_entregar = SUBSIDIO_FIJO_QUINCENAL;
             }
 
-            // 4. ISR a Retener
-            let isr_retenido = isr_causado;
+            // 4. ISR a Retener (Compensación con Subsidio)
+            let isr_retenido = 0;
             if (isr_causado > subsidio_a_entregar) {
-                // El ISR a retener es la diferencia (ISR causado - Subsidio)
                 isr_retenido = isr_causado - subsidio_a_entregar;
+                subsidio_a_entregar = 0; // Si hay retención, no se entrega subsidio neto.
             } else {
-                // Si el Subsidio es mayor o igual al ISR causado, no se retiene ISR
-                isr_retenido = 0;
-                // Si el Subsidio es mayor, la diferencia se entrega al trabajador
+                // Si el Subsidio es mayor o igual, se entrega la diferencia al trabajador.
                 subsidio_a_entregar = subsidio_a_entregar - isr_causado;
             }
 
             // 5. Cálculo IMSS (Aporte Obrero)
-            const imss_obrero = calcularIMSS(salarioDiario);
+            const imss_obrero = calcularIMSS(salarioDiario, diasLaborablesQuincena);
 
             // --- CÁLCULO FINAL NETO ---
             const totalDeducciones = isr_retenido + imss_obrero;
             const sueldoNeto = sueldoBrutoEstimado - totalDeducciones + subsidio_a_entregar;
             
-            // --- CÁLCULO EXTRA PARA AGUASCALIENTES (Impuesto sobre Nómina - PAGA EL PATRÓN) ---
+            // --- CÁLCULO EXTRA PARA AGUASCALIENTES (ISN - PAGA EL PATRÓN) ---
             const isn_aguascalientes = sueldoBrutoEstimado * TASA_ISN_AGUASCALIENTES;
 
             // 6. Mostrar Resultados
             document.getElementById('resultado').innerHTML = `
                 <h3>💸 Desglose de Nómina Quincenal (MXN)</h3>
-                <p><strong>Salario Diario Integrado (SDI):</strong> $${salarioDiario.toFixed(2)}</p>
-                <p><strong>Sueldo Base Quincenal:</strong> $${sueldoBaseQuincenal.toFixed(2)}</p>
+                <p><strong>Sueldo Diario de Cálculo (SDI):</strong> $${salarioDiario.toFixed(2)}</p>
+                <p><strong>Sueldo Base Quincenal (${diasLaborablesQuincena} días):</strong> $${sueldoBaseQuincenal.toFixed(2)}</p>
                 <p><strong>Pago Extra por Horas/Festivos:</strong> $${(pagoTotalHorasExtra + pagoTotalFestivosAdicional).toFixed(2)}</p>
                 <hr>
                 <p style="font-size: 1.2em;"><strong>SUELDO BRUTO TOTAL: $${sueldoBrutoEstimado.toFixed(2)}</strong></p>
@@ -207,11 +198,10 @@
                 <p class="neto"><strong>SUELDO NETO A PAGAR: $${sueldoNeto.toFixed(2)}</strong></p>
                 <hr>
                 
-                <h4>Información Fiscal Adicional (Aguascalientes)</h4>
-                <p><strong>Impuesto Sobre Nómina (2.0%):</strong> $${isn_aguascalientes.toFixed(2)}</p>
-                <small>* Esta es la retención patronal para Aguascalientes y **no** se resta de tu sueldo neto.</small>
-                <br><br>
-                <small>⚠️ **AVISO LEGAL:** Este es un cálculo estimado. La nómina real es compleja y debe ser calculada por un sistema de nómina o contador, considerando variables como UMA/salario real, exenciones de ley (horas extra, PTU, etc.), y el factor de integración de salario.</small>
+                <h4>Información Patronal (Aguascalientes)</h4>
+                <p>Impuesto Sobre Nómina (2.0%): $${isn_aguascalientes.toFixed(2)} (Costo para el Patrón)</p>
+                <br>
+                <small>⚠️ Este cálculo es una estimación. Confirma con tu área de Recursos Humanos o contador. Se utiliza la UMA y las tablas de ISR estimadas para el año en curso (2025).</small>
             `;
         }
         
