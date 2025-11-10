@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Calculadora de Probabilidad de Goles (Poisson - xG) Mejorada</title>
+    <title>Calculadora de Probabilidad de Goles (Poisson - xG) Corregida</title>
     <style>
         body {
             font-family: 'Arial', sans-serif;
@@ -22,7 +22,7 @@
             border-radius: 10px;
             box-shadow: 0 6px 20px rgba(0, 0, 0, 0.15);
             width: 100%;
-            max-width: 800px; /* Aumentado el ancho */
+            max-width: 800px;
         }
         h1 {
             color: #007bff;
@@ -140,7 +140,6 @@
         }
         .score-matrix {
             display: grid;
-            /* La plantilla de columna se definirá en JS para ser dinámica */
             border: 1px solid #ccc;
             margin: 0 auto 20px auto;
             max-width: fit-content;
@@ -151,6 +150,7 @@
             text-align: center;
             font-size: 0.85em;
             min-width: 35px;
+            box-sizing: border-box; /* Asegurar que el padding se incluya en el ancho */
         }
         .header-cell {
             font-weight: bold;
@@ -176,7 +176,7 @@
 </head>
 <body>
     <div class="container">
-        <h1>⚽ Calculadora de Probabilidad (Poisson - xG) Mejorada</h1>
+        <h1>⚽ Calculadora de Probabilidad (Poisson - xG) Corregida</h1>
         <p>Introduce las **Tasas de Goles Esperados (xG)** para estimar las probabilidades de resultados del partido.</p>
         
         <div class="input-section">
@@ -258,6 +258,7 @@
         function factorial(n) {
             if (n === 0 || n === 1) return 1;
             let result = 1;
+            // Usamos un bucle en lugar de recursión para evitar Stack Overflow con números grandes
             for (let i = 2; i <= n; i++) {
                 result *= i;
             }
@@ -267,21 +268,12 @@
         // Función para calcular la probabilidad de Poisson P(k, lambda)
         function poissonProbability(k, lambda) {
             // P(k; λ) = (e^(-λ) * λ^k) / k!
-            if (k < 0) return 0;
-            // Uso de Math.pow y factorial para la fórmula
-            // Para valores grandes de k, puede haber problemas de precisión con float.
+            if (k < 0 || lambda < 0) return 0;
+            
+            // Nota: Para k grandes, factorial(k) puede desbordar el límite de precisión de JavaScript.
+            // Para las xG típicas y MAX_GOALS=6, esto es seguro.
             return (Math.exp(-lambda) * Math.pow(lambda, k)) / factorial(k);
         }
-
-        // Función para calcular la probabilidad acumulada de Poisson (hasta k)
-        function poissonCdf(k, lambda) {
-            let cdf = 0;
-            for (let i = 0; i <= k; i++) {
-                cdf += poissonProbability(i, lambda);
-            }
-            return cdf;
-        }
-
 
         // Función principal de cálculo
         function calculateProbabilities() {
@@ -293,11 +285,9 @@
                 return;
             }
 
-            // Tasa total de goles del partido
             const totalRate = homeRate + awayRate;
             document.getElementById('total_xg').textContent = totalRate.toFixed(2);
             
-            // Aumentamos el límite de goles para una mejor visualización y captura de probabilidad
             const MAX_GOALS = 6; 
 
             let totalProbMatrix = 0;
@@ -309,9 +299,11 @@
             let maxScore = "0-0";
 
             const matrixDiv = document.getElementById('score_matrix');
-            matrixDiv.innerHTML = ''; // Limpiar matriz anterior
-            // Configurar el grid de la matriz (ej. 7x7 + 1 de encabezado = 8 columnas)
-            matrixDiv.style.gridTemplateColumns = `repeat(${MAX_GOALS + 2}, 1fr)`;
+            matrixDiv.innerHTML = ''; 
+            
+            // 🐛 CORRECCIÓN CLAVE: Asegurar que el CSS Grid tenga la estructura de columna correcta.
+            // Número de columnas = 1 (Encabezado Local) + (MAX_GOALS + 1) (Goles Visitante 0 a 6)
+            matrixDiv.style.gridTemplateColumns = `repeat(${MAX_GOALS + 2}, auto)`;
 
             // Crear encabezados de columna (Goles Visitante)
             matrixDiv.innerHTML += '<div class="header-cell">L \\ V</div>';
@@ -319,12 +311,12 @@
                 matrixDiv.innerHTML += `<div class="header-cell">${j}</div>`;
             }
 
+            // Almacenar probabilidades para rellenar la matriz después de encontrar el máximo
+            const matrixProbabilities = []; 
+
             // Iterar y calcular la probabilidad de cada marcador exacto (Local vs Visitante)
-            const matrixProbabilities = [];
             for (let i = 0; i <= MAX_GOALS; i++) { // Goles Local (i)
                 matrixProbabilities[i] = [];
-                // Crear encabezado de fila (Goles Local)
-                matrixDiv.innerHTML += `<div class="home-header">${i}</div>`;
                 
                 for (let j = 0; j <= MAX_GOALS; j++) { // Goles Visitante (j)
                     // P(i, j) = P(i; λ_home) * P(j; λ_away)
@@ -341,7 +333,7 @@
                         probAwayWinMatrix += prob;
                     }
                     
-                    // Acumular Ambos Anotan de la matriz
+                    // Acumular Ambos Anotan de la matriz (aunque BTTS se recalculará con la fórmula exacta)
                     if (i > 0 && j > 0) {
                         probBTTsYesMatrix += prob;
                     }
@@ -351,31 +343,49 @@
                         maxProb = prob;
                         maxScore = `${i}-${j}`;
                     }
-                    
+                }
+            }
+            
+            // Rellenar la matriz con los valores y encabezados después de calcular
+            for (let i = 0; i <= MAX_GOALS; i++) { // Goles Local (i)
+                // Crear encabezado de fila (Goles Local)
+                matrixDiv.innerHTML += `<div class="home-header">${i}</div>`;
+                
+                for (let j = 0; j <= MAX_GOALS; j++) { // Goles Visitante (j)
+                    const prob = matrixProbabilities[i][j];
+                    const probDisplay = (prob * 100).toFixed(2);
+                    const isMax = `${i}-${j}` === maxScore;
+                    matrixDiv.innerHTML += `<div class="cell score-cell ${isMax ? 'highlight' : ''}" title="${i}-${j} = ${probDisplay}%">${probDisplay}</div>`;
                 }
             }
 
-            // --- APLICACIÓN DE MEJORAS ---
+
+            // --- LÓGICA DE AJUSTE Y CÁLCULOS FINALES ---
             
-            // 1. Probabilidad Residual (Long Tail)
+            // 1. Probabilidad 1X2 Ajustada (Distribución del Long Tail)
             const probRemaining = 1 - totalProbMatrix;
-            
-            // Distribuir la probabilidad residual proporcionalmente entre las categorías
-            // Nota: Esta distribución es una simplificación común. 
             const totalMatrix1X2 = probHomeWinMatrix + probDrawMatrix + probAwayWinMatrix;
             
-            // Factores de ajuste para el "long tail"
-            const factorHomeWin = probHomeWinMatrix / totalMatrix1X2;
-            const factorDraw = probDrawMatrix / totalMatrix1X2;
-            const factorAwayWin = probAwayWinMatrix / totalMatrix1X2;
+            let probHomeWin, probDraw, probAwayWin;
+            
+            if (totalMatrix1X2 > 0) {
+                // Distribuir la probabilidad restante proporcionalmente
+                const factorHomeWin = probHomeWinMatrix / totalMatrix1X2;
+                const factorDraw = probDrawMatrix / totalMatrix1X2;
+                // El factor AwayWin es 1 - factorHomeWin - factorDraw (por si acaso)
+                
+                probHomeWin = probHomeWinMatrix + (probRemaining * factorHomeWin);
+                probDraw = probDrawMatrix + (probRemaining * factorDraw);
+                probAwayWin = probAwayWinMatrix + (probRemaining * (1 - factorHomeWin - factorDraw));
+            } else {
+                // Caso extremo: Si las tasas son cercanas a cero, evitamos la división por cero
+                probHomeWin = probHomeWinMatrix;
+                probDraw = probDrawMatrix;
+                probAwayWin = probAwayWinMatrix;
+            }
 
-            // Probabilidades 1X2 ajustadas
-            const probHomeWin = probHomeWinMatrix + (probRemaining * factorHomeWin);
-            const probDraw = probDrawMatrix + (probRemaining * factorDraw);
-            const probAwayWin = probAwayWinMatrix + (probRemaining * factorAwayWin);
 
-            // 2. Cálculo de Totales (Over/Under 2.5) usando CDF de la Tasa Total
-            // Probabilidad de que el TOTAL de Goles sea K: P(Total=K) = P(K; λ_Total)
+            // 2. Cálculo de Totales (Over/Under 2.5) con Tasa Total
             // Under 2.5: P(Total=0) + P(Total=1) + P(Total=2)
             const probUnder2_5_calculated = poissonProbability(0, totalRate) + 
                                             poissonProbability(1, totalRate) + 
@@ -385,38 +395,26 @@
 
 
             // 3. Ambos Anotan (BTTS)
-            // P(NO BTTS) = P(Home=0) * P(Away>=0) + P(Away=0) * P(Home>0)
-            // P(Away>=0) y P(Home>=0) son 1 (probabilidad total), pero para precisión usamos:
+            // P(NO BTTS) = P(L=0) + P(V=0) - P(0-0)
             const probHomeZero = poissonProbability(0, homeRate);
             const probAwayZero = poissonProbability(0, awayRate);
+            const probZeroZero = probHomeZero * probAwayZero; // P(0-0)
             
-            // P(NO BTTS) = P(Local=0) + P(Visitante=0) - P(Local=0 y Visitante=0)
-            // P(L=0 y V=0) = P(L=0) * P(V=0)
-            const probBTTsNo = probHomeZero + probAwayZero - (probHomeZero * probAwayZero);
+            const probBTTsNo = probHomeZero + probAwayZero - probZeroZero;
             const probBTTsYes = 1 - probBTTsNo;
 
 
-            // Cálculos Finales y Formato
+            // --- FORMATO Y ACTUALIZACIÓN ---
+            
             const format = (p) => (p * 100).toFixed(2) + '%';
             const formatOdd = (p) => (p > 0 ? (1 / p).toFixed(2) : '∞');
             
-            // Actualizar matriz de resultados (incluyendo el resaltado)
-            for (let i = 0; i <= MAX_GOALS; i++) {
-                for (let j = 0; j <= MAX_GOALS; j++) {
-                    const prob = matrixProbabilities[i][j];
-                    const probDisplay = (prob * 100).toFixed(2);
-                    const isMax = `${i}-${j}` === maxScore;
-                    matrixDiv.innerHTML += `<div class="cell score-cell ${isMax ? 'highlight' : ''}" title="${i}-${j} = ${probDisplay}%">${probDisplay}</div>`;
-                }
-            }
-
-
-            // Actualizar resultados en la sección de resumen
+            // Actualizar resumen 1X2
             document.getElementById('prob_home_win').textContent = format(probHomeWin);
             document.getElementById('prob_draw').textContent = format(probDraw);
             document.getElementById('prob_away_win').textContent = format(probAwayWin);
 
-            // Actualizar resultados en la tabla secundaria
+            // Actualizar tabla adicional
             document.getElementById('prob_over_2_5_td').textContent = format(probOver2_5_calculated);
             document.getElementById('odd_over_2_5_td').textContent = formatOdd(probOver2_5_calculated);
             
