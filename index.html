@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Calculadora de Probabilidad (Poisson Ajustado por Fuerza)</title>
+    <title>Calculadora de Probabilidad (Poisson Puro)</title>
     <style>
         body {
             font-family: 'Arial', sans-serif;
@@ -22,7 +22,7 @@
             border-radius: 10px;
             box-shadow: 0 6px 20px rgba(0, 0, 0, 0.15);
             width: 100%;
-            max-width: 850px; /* Aumentado el ancho para los nuevos campos */
+            max-width: 850px;
         }
         h1 {
             color: #007bff;
@@ -42,6 +42,9 @@
             display: flex;
             flex-direction: column;
             gap: 10px;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
         }
         .input-group {
             margin-bottom: 0;
@@ -60,9 +63,20 @@
             box-sizing: border-box;
             font-size: 16px;
         }
+        .league-input-container {
+            grid-column: 1 / 3;
+            text-align: center;
+            margin-bottom: 15px;
+        }
+        .league-input {
+            width: 250px;
+            display: inline-block;
+            margin: 0 10px;
+        }
         .button-container {
             grid-column: 1 / 3;
             text-align: center;
+            margin-top: 10px;
         }
         button {
             width: 300px;
@@ -196,39 +210,38 @@
 </head>
 <body>
     <div class="container">
-        <h1>⚽ Calculadora de Probabilidad (Poisson Ajustado)</h1>
-        <p>Ajusta el $\lambda$ del Poisson usando el xG como base, multiplicado por las **Fuerzas de Ataque/Defensa** históricas.</p>
+        <h1>⚽ Calculadora de Probabilidad (Poisson Puro)</h1>
+        <p>Modelo basado **únicamente en promedios históricos** (Goles a Favor/En Contra) y la tasa promedio de la liga.</p>
         
+        <div class="league-input-container">
+            <div class="input-group league-input">
+                <label for="league_avg_goals">Tasa Promedio de Goles de la Liga (Base $\lambda$):</label>
+                <input type="number" id="league_avg_goals" value="1.45" step="0.01" min="0">
+            </div>
+        </div>
+
         <div class="input-grid">
             <div class="input-row">
-                <h3>Equipo Local (Ataque)</h3>
+                <h3>Equipo Local</h3>
                 <div class="input-group">
-                    <label for="home_rate">xG Base del Partido (Local):</label>
-                    <input type="number" id="home_rate" value="1.50" step="0.01" min="0">
+                    <label for="home_attack_strength">Fuerza de Ataque (Local / $\frac{\text{Goles Anotados}}{\text{Avg. Liga}}$):</label>
+                    <input type="number" id="home_attack_strength" value="1.45" step="0.01" min="0">
                 </div>
                 <div class="input-group">
-                    <label for="home_attack_strength">Fuerza de Ataque (Local - Multiplicador):</label>
-                    <input type="number" id="home_attack_strength" value="1.05" step="0.01" min="0">
-                </div>
-                <div class="input-group">
-                    <label for="away_defense_strength">Fuerza de Defensa (Visitante - Multiplicador):</label>
-                    <input type="number" id="away_defense_strength" value="0.95" step="0.01" min="0">
+                    <label for="away_defense_strength">Fuerza de Defensa del Oponente (Visitante / $\frac{\text{Goles Recibidos}}{\text{Avg. Liga}}$):</label>
+                    <input type="number" id="away_defense_strength" value="0.90" step="0.01" min="0">
                 </div>
             </div>
 
             <div class="input-row">
-                <h3>Equipo Visitante (Ataque)</h3>
+                <h3>Equipo Visitante</h3>
                 <div class="input-group">
-                    <label for="away_rate">xG Base del Partido (Visitante):</label>
-                    <input type="number" id="away_rate" value="1.20" step="0.01" min="0">
+                    <label for="away_attack_strength">Fuerza de Ataque (Visitante / $\frac{\text{Goles Anotados}}{\text{Avg. Liga}}$):</label>
+                    <input type="number" id="away_attack_strength" value="0.72" step="0.01" min="0">
                 </div>
                 <div class="input-group">
-                    <label for="away_attack_strength">Fuerza de Ataque (Visitante - Multiplicador):</label>
-                    <input type="number" id="away_attack_strength" value="0.98" step="0.01" min="0">
-                </div>
-                <div class="input-group">
-                    <label for="home_defense_strength">Fuerza de Defensa (Local - Multiplicador):</label>
-                    <input type="number" id="home_defense_strength" value="1.10" step="0.01" min="0">
+                    <label for="home_defense_strength">Fuerza de Defensa del Oponente (Local / $\frac{\text{Goles Recibidos}}{\text{Avg. Liga}}$):</label>
+                    <input type="number" id="home_defense_strength" value="0.59" step="0.01" min="0">
                 </div>
             </div>
 
@@ -237,7 +250,7 @@
             </div>
             
             <div class="rate-summary" id="calculated_rates_summary">
-                <strong>Tasas de Goles Ajustadas (Lambda - $\lambda$):</strong> Local: 0.00 | Visitante: 0.00
+                <strong>Tasas de Goles (Lambda - $\lambda$):</strong> Local: 0.00 | Visitante: 0.00
             </div>
         </div>
         
@@ -321,9 +334,8 @@
 
         // Función principal de cálculo
         function calculateProbabilities() {
-            // 1. Obtener xG base y factores de fuerza
-            const homeRateBase = parseFloat(document.getElementById('home_rate').value);
-            const awayRateBase = parseFloat(document.getElementById('away_rate').value);
+            // 1. Obtener la tasa base y los factores de fuerza
+            const leagueAvgGoals = parseFloat(document.getElementById('league_avg_goals').value);
             
             const homeAttackStrength = parseFloat(document.getElementById('home_attack_strength').value);
             const awayDefenseStrength = parseFloat(document.getElementById('away_defense_strength').value);
@@ -332,19 +344,19 @@
             const homeDefenseStrength = parseFloat(document.getElementById('home_defense_strength').value);
 
             // 2. Validación
-            if (isNaN(homeRateBase) || isNaN(awayRateBase) || isNaN(homeAttackStrength) || isNaN(awayDefenseStrength) || isNaN(awayAttackStrength) || isNaN(homeDefenseStrength) || homeRateBase < 0 || awayRateBase < 0) {
-                alert('Por favor, introduce Tasas de Goles y Factores de Fuerza válidos y positivos.');
+            if (isNaN(leagueAvgGoals) || isNaN(homeAttackStrength) || isNaN(awayDefenseStrength) || isNaN(awayAttackStrength) || isNaN(homeDefenseStrength) || leagueAvgGoals <= 0) {
+                alert('Por favor, introduce valores válidos y positivos (la Tasa Promedio de la Liga debe ser mayor que 0).');
                 return;
             }
 
-            // 3. FÓRMULA DE PRONÓSTICO: Calcular las tasas de Poisson ajustadas (Lambda)
-            // Se asume que el xG base ya representa el promedio de goles de la liga.
-            const lambdaHome = homeRateBase * homeAttackStrength * awayDefenseStrength;
-            const lambdaAway = awayRateBase * awayAttackStrength * homeDefenseStrength;
+            // 3. FÓRMULA DE PRONÓSTICO (Poisson Puro): Calcular las tasas de Poisson ajustadas (Lambda)
+            // lambda = Avg_Liga * FA * FD_Oponente
+            const lambdaHome = leagueAvgGoals * homeAttackStrength * awayDefenseStrength;
+            const lambdaAway = leagueAvgGoals * awayAttackStrength * homeDefenseStrength;
 
             // Actualizar el resumen de las tasas ajustadas
             document.getElementById('calculated_rates_summary').innerHTML = 
-                `<strong>Tasas de Goles Ajustadas (Lambda - $\lambda$):</strong> Local: ${lambdaHome.toFixed(2)} | Visitante: ${lambdaAway.toFixed(2)}`;
+                `<strong>Tasas de Goles ($\lambda$):</strong> Local: ${lambdaHome.toFixed(2)} | Visitante: ${lambdaAway.toFixed(2)}`;
 
             const totalRate = lambdaHome + lambdaAway;
             document.getElementById('total_xg').textContent = totalRate.toFixed(2);
@@ -373,12 +385,12 @@
             // Almacenar probabilidades para rellenar la matriz después de encontrar el máximo
             const matrixProbabilities = []; 
 
-            // Iterar y calcular la probabilidad de cada marcador exacto (Local vs Visitante)
-            for (let i = 0; i <= MAX_GOALS; i++) { // Goles Local (i)
+            // Iterar y calcular la probabilidad de cada marcador exacto
+            for (let i = 0; i <= MAX_GOALS; i++) { 
                 matrixProbabilities[i] = [];
                 
-                for (let j = 0; j <= MAX_GOALS; j++) { // Goles Visitante (j)
-                    // P(i, j) = P(i; λ_home_AJUSTADO) * P(j; λ_away_AJUSTADO)
+                for (let j = 0; j <= MAX_GOALS; j++) {
+                    // P(i, j) = P(i; λ_home) * P(j; λ_away)
                     const prob = poissonProbability(i, lambdaHome) * poissonProbability(j, lambdaAway);
                     matrixProbabilities[i][j] = prob;
                     totalProbMatrix += prob;
@@ -400,12 +412,11 @@
                 }
             }
             
-            // Rellenar la matriz con los valores y encabezados después de calcular
-            for (let i = 0; i <= MAX_GOALS; i++) { // Goles Local (i)
-                // Crear encabezado de fila (Goles Local)
+            // Rellenar la matriz con los valores y encabezados
+            for (let i = 0; i <= MAX_GOALS; i++) { 
                 matrixDiv.innerHTML += `<div class="home-header">${i}</div>`;
                 
-                for (let j = 0; j <= MAX_GOALS; j++) { // Goles Visitante (j)
+                for (let j = 0; j <= MAX_GOALS; j++) { 
                     const prob = matrixProbabilities[i][j];
                     const probDisplay = (prob * 100).toFixed(2);
                     const isMax = `${i}-${j}` === maxScore;
@@ -423,13 +434,12 @@
             let probHomeWin, probDraw, probAwayWin;
             
             if (totalMatrix1X2 > 0) {
-                // Distribuir la probabilidad restante proporcionalmente
                 const factorHomeWin = probHomeWinMatrix / totalMatrix1X2;
                 const factorDraw = probDrawMatrix / totalMatrix1X2;
                 
                 probHomeWin = probHomeWinMatrix + (probRemaining * factorHomeWin);
                 probDraw = probDrawMatrix + (probRemaining * factorDraw);
-                probAwayWin = 1 - probHomeWin - probDraw; // Asegura que la suma sea 1.0
+                probAwayWin = 1 - probHomeWin - probDraw; 
             } else {
                 probHomeWin = probHomeWinMatrix;
                 probDraw = probDrawMatrix;
@@ -448,7 +458,7 @@
             // 3. Ambos Anotan (BTTS) con Tasas AJUSTADAS
             const probHomeZero = poissonProbability(0, lambdaHome);
             const probAwayZero = poissonProbability(0, lambdaAway);
-            const probZeroZero = probHomeZero * probAwayZero; // P(0-0)
+            const probZeroZero = probHomeZero * probAwayZero; 
             
             const probBTTsNo = probHomeZero + probAwayZero - probZeroZero;
             const probBTTsYes = 1 - probBTTsNo;
