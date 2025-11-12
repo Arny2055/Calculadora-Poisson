@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Calculadora BTTS y O/U 2.5 (Modelo Simplificado)</title>
+    <title>Calculadora BTTS y O/U 2.5 (Modelo Completo)</title>
     <style>
         body {
             font-family: 'Arial', sans-serif;
@@ -26,20 +26,46 @@
             text-align: center;
         }
         h1 {
-            color: #dc3545; /* Color que indica que es simplificado/experimental */
-            margin-bottom: 15px;
-            border-bottom: 3px solid #dc3545;
+            color: #007bff;
+            margin-bottom: 25px;
+            border-bottom: 3px solid #007bff;
             padding-bottom: 10px;
             font-size: 1.8em;
         }
-        p.warning {
-            color: #dc3545;
-            background-color: #f8d7da;
-            border: 1px solid #f5c6cb;
-            padding: 10px;
-            border-radius: 5px;
+        p {
+            margin-bottom: 20px;
+            color: #555;
+            font-size: 0.95em;
+        }
+        .league-rate-input-container {
             margin-bottom: 25px;
+            background-color: #e6f7ff;
+            padding: 15px;
+            border-radius: 5px;
+            border: 1px dashed #007bff;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+        }
+        .league-rate-input-container .input-group {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        .league-rate-input-container label {
             font-weight: bold;
+            display: block;
+            color: #0056b3;
+            margin-bottom: 5px;
+            font-size: 0.9em;
+        }
+        .league-rate-input-container input {
+            padding: 8px;
+            border: 1px solid #007bff;
+            border-radius: 4px;
+            width: 120px;
+            text-align: center;
+            font-size: 16px;
         }
         .input-grid {
             display: grid;
@@ -177,18 +203,29 @@
 </head>
 <body>
     <div class="container">
-        <h1>🎯 Calculadora Simplificada (Solo GA/GC)</h1>
-        <p class="warning">⚠️ Este modelo no usa la media real de la liga. La media de la liga se estima como el promedio de los 4 datos de GA/GC.</p>
+        <h1>🎯 Probabilidad "Ambos Anotan" y Over/Under 2.5</h1>
+        <p>Modelo basado en **Factores de Ataque/Defensa de Poisson** con medias de liga ajustadas por localía.</p>
         
+        <div class="league-rate-input-container">
+            <div class="input-group">
+                <label for="league_avg_home">Avg Goles Totales del **Local** ($\lambda_{Liga\_H}$)</label>
+                <input type="number" id="league_avg_home" value="1.50" step="0.01" min="0">
+            </div>
+            <div class="input-group">
+                <label for="league_avg_away">Avg Goles Totales del **Visitante** ($\lambda_{Liga\_A}$)</label>
+                <input type="number" id="league_avg_away" value="1.20" step="0.01" min="0">
+            </div>
+        </div>
+
         <div class="input-grid">
             <div class="input-row">
                 <h3>Equipo Local</h3>
                 <div class="input-group">
-                    <label for="home_ga">Goles Anotados (GA) Promedio:</label>
+                    <label for="home_ga">Local Avg GF (Goles Anotados en casa):</label>
                     <input type="number" id="home_ga" value="1.80" step="0.01" min="0">
                 </div>
                 <div class="input-group">
-                    <label for="home_gc">Goles En Contra (GC) Promedio:</label>
+                    <label for="home_gc">Local Avg GC (Goles Recibidos en casa):</label>
                     <input type="number" id="home_gc" value="1.10" step="0.01" min="0">
                 </div>
             </div>
@@ -196,23 +233,22 @@
             <div class="input-row">
                 <h3>Equipo Visitante</h3>
                 <div class="input-group">
-                    <label for="away_ga">Goles Anotados (GA) Promedio:</label>
+                    <label for="away_ga">Visitante Avg GF (Goles Anotados fuera):</label>
                     <input type="number" id="away_ga" value="1.40" step="0.01" min="0">
                 </div>
                 <div class="input-group">
-                    <label for="away_gc">Goles En Contra (GC) Promedio:</label>
+                    <label for="away_gc">Visitante Avg GC (Goles Recibidos fuera):</label>
                     <input type="number" id="away_gc" value="1.60" step="0.01" min="0">
                 </div>
             </div>
         </div>
 
-        <button onclick="calculateBTTS()">Calcular Probabilidades</button>
+        <button onclick="calculateProbabilities()">Calcular Probabilidades</button>
         
         <div id="results">
             <h2>Resultados del Modelo</h2>
 
             <div class="rates-summary" id="calculated_rates_summary">
-                <strong>Tasa Media Estimada ($\lambda_{Liga}$):</strong> 0.00 | 
                 <strong>Tasas de Goles Esperadas ($\lambda$ Final):</strong> Local: 0.00 | Visitante: 0.00 | **Total ($\lambda_{Total}$):** 0.00
             </div>
             
@@ -301,42 +337,46 @@
         }
         
         // Función principal de cálculo
-        function calculateBTTS() {
-            // 1. Obtener entradas (Rendimiento de los equipos)
-            const homeGA = parseFloat(document.getElementById('home_ga').value);
-            const homeGC = parseFloat(document.getElementById('home_gc').value);
-            const awayGA = parseFloat(document.getElementById('away_ga').value);
-            const awayGC = parseFloat(document.getElementById('away_gc').value);
+        function calculateProbabilities() {
+            // 1. Obtener entradas (Medias de la Liga por Localía)
+            const lambdaLeagueHome = parseFloat(document.getElementById('league_avg_home').value); // Media de goles anotados por locales
+            const lambdaLeagueAway = parseFloat(document.getElementById('league_avg_away').value); // Media de goles anotados por visitantes
 
-            // 2. Validación
-            if (isNaN(homeGA) || isNaN(homeGC) || isNaN(awayGA) || isNaN(awayGC) || 
-                (homeGA + homeGC + awayGA + awayGC) <= 0) {
-                alert('Por favor, introduce valores válidos y positivos.');
+            // 2. Obtener entradas (Rendimiento de los equipos)
+            const homeGA = parseFloat(document.getElementById('home_ga').value); // Local Avg GF
+            const homeGC = parseFloat(document.getElementById('home_gc').value); // Local Avg GC
+            const awayGA = parseFloat(document.getElementById('away_ga').value); // Visitante Avg GF
+            const awayGC = parseFloat(document.getElementById('away_gc').value); // Visitante Avg GC
+
+            // 3. Validación
+            if (isNaN(lambdaLeagueHome) || isNaN(lambdaLeagueAway) || isNaN(homeGA) || isNaN(homeGC) || isNaN(awayGA) || isNaN(awayGC) || 
+                lambdaLeagueHome <= 0 || lambdaLeagueAway <= 0) {
+                alert('Por favor, introduce valores válidos y positivos. Las medias de la liga deben ser > 0.');
                 return;
             }
 
-            // 3. CÁLCULO DE LA MEDIA DE LA LIGA (SIMPLIFICADA)
-            const totalGoals = homeGA + homeGC + awayGA + awayGC;
-            const lambdaLeague = totalGoals / 4; // Estimación simple
+            // 4. CÁLCULO DE FACTORES DE ATAQUE Y DEFENSA (Ajustados por Localía)
+            
+            // F. Ataque Local: (Local GA) / (Media goles Liga Local)
+            const factorAttackHome = homeGA / lambdaLeagueHome;
+            
+            // F. Defensa Local: (Local GC) / (Media goles Liga Visitante)
+            const factorDefenseHome = homeGC / lambdaLeagueAway; 
 
-            // 4. CÁLCULO DE FACTORES DE ATAQUE Y DEFENSA (Usando la media simple)
-            // Se asume que GA y GC se calculan contra la misma media de la liga
+            // F. Ataque Visitante: (Visitante GA) / (Media goles Liga Visitante)
+            const factorAttackAway = awayGA / lambdaLeagueAway;
             
-            // Local
-            const factorAttackHome = homeGA / lambdaLeague;
-            const factorDefenseHome = homeGC / lambdaLeague; 
-            
-            // Visitante
-            const factorAttackAway = awayGA / lambdaLeague;
-            const factorDefenseAway = awayGC / lambdaLeague; 
+            // F. Defensa Visitante: (Visitante GC) / (Media goles Liga Local)
+            const factorDefenseAway = awayGC / lambdaLeagueHome; 
 
 
             // 5. CÁLCULO DE LAS TASAS DE POISSON PONDERADAS ($\lambda$ Final)
-            // Tasa Local: FA_H * FD_A * Lambda_Liga
-            const lambdaHome = factorAttackHome * factorDefenseAway * lambdaLeague;
             
-            // Tasa Visitante: FA_A * FD_H * Lambda_Liga
-            const lambdaAway = factorAttackAway * factorDefenseHome * lambdaLeague;
+            // Tasa Local: FA_H * FD_A * Lambda_Liga_H
+            const lambdaHome = factorAttackHome * factorDefenseAway * lambdaLeagueHome;
+            
+            // Tasa Visitante: FA_A * FD_H * Lambda_Liga_A
+            const lambdaAway = factorAttackAway * factorDefenseHome * lambdaLeagueAway;
             
             // Tasa total de goles esperados para el partido
             const lambdaTotal = lambdaHome + lambdaAway;
@@ -348,6 +388,7 @@
             const probAwayZero = poissonProbability(0, lambdaAway);
             const probZeroZero = probHomeZero * probAwayZero; 
             
+            // P(BTTS No) = P(Local=0) + P(Visitante=0) - P(0-0)
             const probBTTsNo = probHomeZero + probAwayZero - probZeroZero;
             const probBTTsYes = 1 - probBTTsNo;
 
@@ -370,8 +411,7 @@
             
             // Resumen de lambdas
             document.getElementById('calculated_rates_summary').innerHTML = 
-                `<strong>Tasa Media Estimada ($\lambda_{Liga}$):</strong> ${lambdaLeague.toFixed(2)} | 
-                <strong>Tasas de Goles Esperadas ($\lambda$ Final):</strong> Local: ${lambdaHome.toFixed(2)} | Visitante: ${lambdaAway.toFixed(2)} | **Total ($\lambda_{Total}$):** ${lambdaTotal.toFixed(2)}`;
+                `<strong>Tasas de Goles Esperadas ($\lambda$ Final):</strong> Local: ${lambdaHome.toFixed(2)} | Visitante: ${lambdaAway.toFixed(2)} | **Total ($\lambda_{Total}$):** ${lambdaTotal.toFixed(2)}`;
             
             // BTTS P(0)
             document.getElementById('prob_home_zero_td').textContent = format(probHomeZero);
@@ -390,7 +430,7 @@
         }
 
         // Ejecutar el cálculo al cargar la página con los valores por defecto
-        document.addEventListener('DOMContentLoaded', calculateBTTS);
+        document.addEventListener('DOMContentLoaded', calculateProbabilities);
     </script>
 </body>
 </html>
