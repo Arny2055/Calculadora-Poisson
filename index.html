@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Calculadora de Probabilidad (Poisson + Lógica IA)</title>
+    <title>⚽ Calculadora Poisson (Factores Ataque/Defensa)</title>
     <style>
         body {
             font-family: 'Arial', sans-serif;
@@ -70,7 +70,7 @@
             box-sizing: border-box;
             font-size: 16px;
         }
-        .weight-input-container {
+        .league-rate-input-container {
             grid-column: 1 / 3;
             text-align: center;
             margin-bottom: 15px;
@@ -79,7 +79,7 @@
             border-radius: 5px;
             border: 1px dashed #007bff;
         }
-        .weight-input-container p {
+        .league-rate-input-container p {
             margin: 5px 0;
             font-weight: bold;
             color: #0056b3;
@@ -222,45 +222,47 @@
 </head>
 <body>
     <div class="container">
-        <h1>⚽ Calculadora de Probabilidad (Poisson + Lógica IA)</h1>
-        <p>El modelo **ajusta automáticamente** el peso del xG ($\alpha$) basándose en la estabilidad de los datos (diferencia entre xG y el promedio histórico).</p>
+        <h1>⚽ Calculadora Poisson (Factores Ataque/Defensa)</h1>
+        <p>Introduce los promedios de Goles Anotados (GA) y Goles en Contra (GC) de cada equipo, y el promedio de goles de la liga. El modelo calculará las tasas $\lambda$ esperadas.</p>
         
-        <div class="weight-input-container">
-            <p><strong>Ajuste Dinámico de $\alpha$ (Peso del xG):</strong></p>
-            <p id="alpha_display">Calculando...</p>
+        <div class="league-rate-input-container">
+            <p><strong>Promedio de Goles de la Liga ($\lambda_{Liga}$):</strong></p>
+            <div class="input-group" style="width: 150px; margin: 0 auto;">
+                <input type="number" id="league_avg_goals" value="2.70" step="0.01" min="0">
+            </div>
         </div>
 
         <div class="input-grid">
             <div class="input-row">
                 <h3>Equipo Local</h3>
                 <div class="input-group">
-                    <label for="home_xg">xG del Partido (Fuente en Vivo):</label>
-                    <input type="number" id="home_xg" value="1.80" step="0.01" min="0">
+                    <label for="home_ga">Goles Anotados (GA) Promedio:</label>
+                    <input type="number" id="home_ga" value="1.80" step="0.01" min="0">
                 </div>
                 <div class="input-group">
-                    <label for="home_avg_goals">Promedio de Goles Anotados Históricos:</label>
-                    <input type="number" id="home_avg_goals" value="1.40" step="0.01" min="0">
+                    <label for="home_gc">Goles En Contra (GC) Promedio:</label>
+                    <input type="number" id="home_gc" value="1.10" step="0.01" min="0">
                 </div>
             </div>
 
             <div class="input-row">
                 <h3>Equipo Visitante</h3>
                 <div class="input-group">
-                    <label for="away_xg">xG del Partido (Fuente en Vivo):</label>
-                    <input type="number" id="away_xg" value="0.70" step="0.01" min="0">
+                    <label for="away_ga">Goles Anotados (GA) Promedio:</label>
+                    <input type="number" id="away_ga" value="1.40" step="0.01" min="0">
                 </div>
                 <div class="input-group">
-                    <label for="away_avg_goals">Promedio de Goles Anotados Históricos:</label>
-                    <input type="number" id="away_avg_goals" value="1.10" step="0.01" min="0">
+                    <label for="away_gc">Goles En Contra (GC) Promedio:</label>
+                    <input type="number" id="away_gc" value="1.60" step="0.01" min="0">
                 </div>
             </div>
 
             <div class="button-container">
-                <button onclick="calculateProbabilities()">Calcular Probabilidades Ponderadas</button>
+                <button onclick="calculateProbabilities()">Calcular Probabilidades por Factores</button>
             </div>
             
             <div class="rate-summary" id="calculated_rates_summary">
-                <strong>Tasas de Goles Ponderadas ($\lambda$ Final):</strong> Local: 0.00 | Visitante: 0.00
+                <strong>Tasas de Goles Esperadas ($\lambda$ Final):</strong> Local: 0.00 | Visitante: 0.00
             </div>
         </div>
         
@@ -270,7 +272,7 @@
             <div class="total-goals-section">
                 <div class="total-goals-item">
                     <strong>Tasa Total de Goles ($\lambda_{Total}$)</strong>
-                    <span id="total_xg">0.00</span>
+                    <span id="total_lambda">0.00</span>
                 </div>
                 <div class="total-goals-item">
                     <strong>Prob. Local Gana (1)</strong>
@@ -339,74 +341,53 @@
         function poissonProbability(k, lambda) {
             // P(k; λ) = (e^(-λ) * λ^k) / k!
             if (k < 0 || lambda < 0) return 0;
+            // Manejar un caso extremo si lambda es 0 para evitar Math.pow(0, 0) o -Infinity
+            if (lambda === 0 && k === 0) return 1; 
+            if (lambda === 0 && k > 0) return 0;
+
             return (Math.exp(-lambda) * Math.pow(lambda, k)) / factorial(k);
         }
         
-        // ** NUEVA FUNCIÓN: Lógica de IA para determinar el peso (alpha) **
-        function determineAlpha(homeXg, homeAvg, awayXg, awayAvg) {
-            // 1. Calcular la inestabilidad (diferencia absoluta entre xG y Avg)
-            const diffHome = Math.abs(homeXg - homeAvg);
-            const diffAway = Math.abs(awayXg - awayAvg);
-            
-            // 2. Promedio de la desviación
-            const avgDeviation = (diffHome + diffAway) / 2;
-            
-            // 3. Regla de "IA" (Ejemplo simplificado de regresión):
-            // Lógica: Si la desviación es alta, significa que el xG en vivo es inestable o anómalo
-            //         respecto al historial, por lo que reducimos el peso del xG (alpha).
-            
-            let alpha;
-            
-            if (avgDeviation < 0.10) {
-                // xG muy estable y alineado con el historial: Confiamos más en el xG
-                alpha = 0.85; 
-            } else if (avgDeviation < 0.30) {
-                // Desviación moderada: Mantenemos el peso estándar
-                alpha = 0.70; 
-            } else if (avgDeviation < 0.50) {
-                // Desviación alta: Reducimos un poco el peso del xG (nos basamos más en el promedio)
-                alpha = 0.55;
-            } else {
-                // Desviación muy alta: Reducimos mucho el peso del xG
-                alpha = 0.40; 
-            }
-            
-            return alpha;
-        }
-
-
         // Función principal de cálculo
         function calculateProbabilities() {
             // 1. Obtener entradas
-            const homeXg = parseFloat(document.getElementById('home_xg').value);
-            const homeAvgGoals = parseFloat(document.getElementById('home_avg_goals').value);
+            const lambdaLeague = parseFloat(document.getElementById('league_avg_goals').value);
             
-            const awayXg = parseFloat(document.getElementById('away_xg').value);
-            const awayAvgGoals = parseFloat(document.getElementById('away_avg_goals').value);
+            const homeGA = parseFloat(document.getElementById('home_ga').value);
+            const homeGC = parseFloat(document.getElementById('home_gc').value);
+            
+            const awayGA = parseFloat(document.getElementById('away_ga').value);
+            const awayGC = parseFloat(document.getElementById('away_gc').value);
 
             // 2. Validación
-            if (isNaN(homeXg) || isNaN(homeAvgGoals) || isNaN(awayXg) || isNaN(awayAvgGoals) || homeXg < 0 || homeAvgGoals < 0 || awayXg < 0 || awayAvgGoals < 0) {
-                alert('Por favor, introduce valores válidos y positivos.');
+            if (isNaN(lambdaLeague) || isNaN(homeGA) || isNaN(homeGC) || isNaN(awayGA) || isNaN(awayGC) || 
+                lambdaLeague <= 0 || homeGA < 0 || homeGC < 0 || awayGA < 0 || awayGC < 0) {
+                alert('Por favor, introduce valores válidos y positivos (la media de la liga debe ser > 0).');
                 return;
             }
 
-            // 3. ** CÁLCULO DINÁMICO DE ALPHA (LÓGICA IA) **
-            const weightAlpha = determineAlpha(homeXg, homeAvgGoals, awayXg, awayAvgGoals);
-            
-            // Actualizar la visualización de Alpha
-            document.getElementById('alpha_display').textContent = `α (Peso xG) seleccionado: ${weightAlpha.toFixed(2)}`;
+            // 3. ** CÁLCULO DE FACTORES DE ATAQUE Y DEFENSA **
+            // Factores Locales
+            const factorAttackHome = homeGA / lambdaLeague;
+            const factorDefenseHome = homeGC / lambdaLeague;
 
-            // 4. FÓRMULA CLAVE: Calcular las tasas de Poisson PONDERADAS (Lambda Final)
-            // lambda = (α * xG) + ((1 - α) * Avg_Goles)
-            const lambdaHome = (weightAlpha * homeXg) + ((1 - weightAlpha) * homeAvgGoals);
-            const lambdaAway = (weightAlpha * awayXg) + ((1 - weightAlpha) * awayAvgGoals);
+            // Factores Visitantes
+            const factorAttackAway = awayGA / lambdaLeague;
+            const factorDefenseAway = awayGC / lambdaLeague;
+
+            // 4. ** CÁLCULO DE LAS TASAS DE POISSON ($\lambda$ Final) **
+            // Tasa Local: Ataque Local * Defensa Visitante * Media Liga
+            const lambdaHome = factorAttackHome * factorDefenseAway * lambdaLeague;
+            
+            // Tasa Visitante: Ataque Visitante * Defensa Local * Media Liga
+            const lambdaAway = factorAttackAway * factorDefenseHome * lambdaLeague;
 
             // Actualizar el resumen de las tasas ajustadas
             document.getElementById('calculated_rates_summary').innerHTML = 
-                `<strong>Tasas de Goles Ponderadas ($\lambda$ Final):</strong> Local: ${lambdaHome.toFixed(2)} | Visitante: ${lambdaAway.toFixed(2)}`;
+                `<strong>Tasas de Goles Esperadas ($\lambda$ Final):</strong> Local: ${lambdaHome.toFixed(2)} | Visitante: ${lambdaAway.toFixed(2)}`;
 
             const totalRate = lambdaHome + lambdaAway;
-            document.getElementById('total_xg').textContent = totalRate.toFixed(2);
+            document.getElementById('total_lambda').textContent = totalRate.toFixed(2);
             
             const MAX_GOALS = 6; 
 
@@ -472,6 +453,7 @@
             // --- LÓGICA DE AJUSTE Y CÁLCULOS FINALES ---
             
             // 1. Probabilidad 1X2 Ajustada (Distribución del Long Tail)
+            // Esto redistribuye la probabilidad de más de 6 goles (el "long tail") proporcionalmente
             const probRemaining = 1 - totalProbMatrix;
             const totalMatrix1X2 = probHomeWinMatrix + probDrawMatrix + probAwayWinMatrix;
             
@@ -483,15 +465,23 @@
                 
                 probHomeWin = probHomeWinMatrix + (probRemaining * factorHomeWin);
                 probDraw = probDrawMatrix + (probRemaining * factorDraw);
+                // La probabilidad visitante restante es lo que queda
                 probAwayWin = 1 - probHomeWin - probDraw; 
             } else {
+                // Caso de borde si la suma es 0
                 probHomeWin = probHomeWinMatrix;
                 probDraw = probDrawMatrix;
                 probAwayWin = probAwayWinMatrix;
             }
 
+            // Asegurar que las probabilidades sumen 1 (con un margen de error pequeño)
+            const sum1X2 = probHomeWin + probDraw + probAwayWin;
+            if (sum1X2 < 0.999 || sum1X2 > 1.001) { 
+                probAwayWin = 1 - probHomeWin - probDraw; // Recalcular por si acaso
+            }
 
-            // 2. Cálculo de Totales (Over/Under 2.5) con Tasa Total AJUSTADA
+
+            // 2. Cálculo de Totales (Over/Under 2.5) con Tasa Total
             const probUnder2_5_calculated = poissonProbability(0, totalRate) + 
                                             poissonProbability(1, totalRate) + 
                                             poissonProbability(2, totalRate);
@@ -499,11 +489,13 @@
             const probOver2_5_calculated = 1 - probUnder2_5_calculated;
 
 
-            // 3. Ambos Anotan (BTTS) con Tasas AJUSTADAS
+            // 3. Ambos Anotan (BTTS)
             const probHomeZero = poissonProbability(0, lambdaHome);
             const probAwayZero = poissonProbability(0, lambdaAway);
+            // Prob. 0-0
             const probZeroZero = probHomeZero * probAwayZero; 
             
+            // Prob. BTTS No = Prob(Local marca 0) + Prob(Visitante marca 0) - Prob(0-0)
             const probBTTsNo = probHomeZero + probAwayZero - probZeroZero;
             const probBTTsYes = 1 - probBTTsNo;
 
@@ -511,7 +503,7 @@
             // --- FORMATO Y ACTUALIZACIÓN ---
             
             const format = (p) => (p * 100).toFixed(2) + '%';
-            const formatOdd = (p) => (p > 0 ? (1 / p).toFixed(2) : '∞');
+            const formatOdd = (p) => (p > 0.005 ? (1 / p).toFixed(2) : '∞');
             
             document.getElementById('prob_home_win').textContent = format(probHomeWin);
             document.getElementById('prob_draw').textContent = format(probDraw);
@@ -530,6 +522,7 @@
             document.getElementById('odd_btts_no_td').textContent = formatOdd(probBTTsNo);
         }
 
+        // Ejecutar el cálculo al cargar la página con los valores por defecto
         document.addEventListener('DOMContentLoaded', calculateProbabilities);
     </script>
 </body>
