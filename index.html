@@ -23,17 +23,20 @@
         #results { margin-top: 30px; border-top: 2px solid #eee; padding-top: 20px; }
         .rates-summary { background-color: #f3e5f5; border: 1px solid #ce93d8; color: #4a148c; padding: 10px; border-radius: 5px; margin-bottom: 20px; }
         
-        /* Tabla de Veredictos */
-        #verdict_table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-        #verdict_table th, #verdict_table td { border: 1px solid #ddd; padding: 12px; text-align: center; font-size: 1.1em; }
+        /* Tablas de Resultados */
+        #verdict_table, #coherence_table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        #verdict_table th, #verdict_table td, #coherence_table th, #coherence_table td { border: 1px solid #ddd; padding: 12px; text-align: center; font-size: 1.1em; }
         #verdict_table th { background-color: #8b008b; color: white; }
-        #verdict_table td:nth-child(1) { font-weight: bold; text-align: left; }
+        #coherence_table th { background-color: #007bff; color: white; }
+        #verdict_table td:nth-child(1), #coherence_table td:nth-child(1) { font-weight: bold; text-align: left; }
         
         /* Clases de Veredicto */
         .bet-cell { background-color: #e6ffe6; color: #388e3c; font-weight: bold; }
         .pass-cell { background-color: #ffeeee; color: #d32f2f; }
         .bet-text { font-size: 1.2em; font-weight: 900; }
-        
+        .high-coherence { background-color: #e6ffe6; }
+        .low-coherence { background-color: #ffeeee; }
+
         /* Análisis */
         #analysis_section { background-color: #fff8e1; border: 2px solid #ffd700; padding: 15px; border-radius: 8px; margin-top: 20px; text-align: left; }
         #analysis_section h3 { color: #b8860b; margin-top: 0; border-bottom: 1px dashed #ffeeba; padding-bottom: 5px; }
@@ -165,7 +168,38 @@
                     </tr>
                 </tbody>
             </table>
-            
+
+            <h2>📊 Análisis de Coherencia de Goles (SOT / S/G)</h2>
+            <table id="coherence_table">
+                <thead>
+                    <tr>
+                        <th>Equipo</th>
+                        <th>SOT (Disparos a Puerta)</th>
+                        <th>S/G (Disparos por Gol)</th>
+                        <th>Goles Estimados (SOT / S/G)</th>
+                        <th>$\lambda$ Ingresado</th>
+                        <th>Coherencia</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr id="home_coherence_row">
+                        <td>Local</td>
+                        <td id="home_sot_td">0.0</td>
+                        <td id="home_spg_td">0.0</td>
+                        <td id="home_estimated_goals_td">0.00</td>
+                        <td id="home_lambda_td">0.00</td>
+                        <td id="home_coherence_td"></td>
+                    </tr>
+                    <tr id="away_coherence_row">
+                        <td>Visitante</td>
+                        <td id="away_sot_td">0.0</td>
+                        <td id="away_spg_td">0.0</td>
+                        <td id="away_estimated_goals_td">0.00</td>
+                        <td id="away_lambda_td">0.00</td>
+                        <td id="away_coherence_td"></td>
+                    </tr>
+                </tbody>
+            </table>
             <div id="analysis_section">
                 <h3>🎯 Análisis de Presión y Eficiencia</h3>
                 <div class="efficiency-summary" id="sot_summary"></div>
@@ -292,6 +326,39 @@
                 tdElement.className = 'pass-cell bet-text';
             }
         }
+
+        /**
+         * Calcula y muestra la coherencia SOT/S/G vs. Lambda
+         */
+        function renderCoherenceAnalysis(lambda, sot, spg, teamPrefix) {
+            let estimatedGoals = 0;
+            if (sot > 0 && spg > 0) {
+                estimatedGoals = sot / spg;
+            }
+
+            const diff = Math.abs(estimatedGoals - lambda);
+            let coherenceText = '';
+            let coherenceClass = '';
+
+            if (diff <= 0.3) {
+                coherenceText = 'ALTA ✅';
+                coherenceClass = 'high-coherence';
+            } else if (diff <= 0.6) {
+                coherenceText = 'MEDIA ⚠️';
+            } else {
+                coherenceText = 'BAJA ❌';
+                coherenceClass = 'low-coherence';
+            }
+
+            document.getElementById(`${teamPrefix}_sot_td`).textContent = sot.toFixed(1);
+            document.getElementById(`${teamPrefix}_spg_td`).textContent = spg.toFixed(1);
+            document.getElementById(`${teamPrefix}_estimated_goals_td`).textContent = estimatedGoals.toFixed(2);
+            document.getElementById(`${teamPrefix}_lambda_td`).textContent = lambda.toFixed(2);
+            
+            const coherenceTd = document.getElementById(`${teamPrefix}_coherence_td`);
+            coherenceTd.textContent = coherenceText;
+            coherenceTd.className = coherenceClass;
+        }
         
         // Función principal de cálculo y veredicto
         function calculateProbabilities() {
@@ -316,64 +383,60 @@
             const bettingThreshold = getBettingThreshold(homeSPG, awaySPG);
 
             // 3. Actualizar la Interfaz de Resultados (Probabilidades y Cuotas)
-            // Nota: Aquí el LaTeX en el innerHTML solo funcionará si se usa una librería como MathJax, de lo contrario se mostrará como texto plano.
+            // Nota: El LaTeX solo se renderizará si se usa MathJax, pero el formato se mantiene por consistencia.
             document.getElementById('calculated_rates_summary').innerHTML = 
                 `$\\lambda_{\\text{Local}}$: ${results.lambdaHome.toFixed(3)} | 
                 $\\lambda_{\\text{Visita}}$: ${results.lambdaAway.toFixed(3)} | 
                 $\\lambda_{\\text{Total}}$: ${results.lambdaTotal.toFixed(3)} | 
                 Umbral de Apuesta: ${(bettingThreshold * 100).toFixed(0)}%`;
             
-            // OVER 0.5
+            // Renderizar todos los veredictos (Over/Under y BTTS)...
             document.getElementById('prob_over_0_5_td').textContent = format(results.over0_5) + '%';
             document.getElementById('odd_over_0_5_td').textContent = formatOdd(results.over0_5);
             renderVerdict(results.over0_5, bettingThreshold, 'verdict_over_0_5_td');
+            // ... (código truncado por brevedad, el original está completo)
 
-            // UNDER 0.5
             document.getElementById('prob_under_0_5_td').textContent = format(results.under0_5) + '%';
             document.getElementById('odd_under_0_5_td').textContent = formatOdd(results.under0_5);
             renderVerdict(results.under0_5, bettingThreshold, 'verdict_under_0_5_td');
-            
-            // OVER 1.5
+
             document.getElementById('prob_over_1_5_td').textContent = format(results.over1_5) + '%';
             document.getElementById('odd_over_1_5_td').textContent = formatOdd(results.over1_5);
             renderVerdict(results.over1_5, bettingThreshold, 'verdict_over_1_5_td');
 
-            // UNDER 1.5
             document.getElementById('prob_under_1_5_td').textContent = format(results.under1_5) + '%';
             document.getElementById('odd_under_1_5_td').textContent = formatOdd(results.under1_5);
             renderVerdict(results.under1_5, bettingThreshold, 'verdict_under_1_5_td');
 
-            // OVER 2.5
             document.getElementById('prob_over_2_5_td').textContent = format(results.over2_5) + '%';
             document.getElementById('odd_over_2_5_td').textContent = formatOdd(results.over2_5);
             renderVerdict(results.over2_5, bettingThreshold, 'verdict_over_2_5_td');
 
-            // UNDER 2.5
             document.getElementById('prob_under_2_5_td').textContent = format(results.under2_5) + '%';
             document.getElementById('odd_under_2_5_td').textContent = formatOdd(results.under2_5);
             renderVerdict(results.under2_5, bettingThreshold, 'verdict_under_2_5_td');
-            
-            // OVER 3.5
+
             document.getElementById('prob_over_3_5_td').textContent = format(results.over3_5) + '%';
             document.getElementById('odd_over_3_5_td').textContent = formatOdd(results.over3_5);
             renderVerdict(results.over3_5, bettingThreshold, 'verdict_over_3_5_td');
 
-            // UNDER 3.5
             document.getElementById('prob_under_3_5_td').textContent = format(results.under3_5) + '%';
             document.getElementById('odd_under_3_5_td').textContent = formatOdd(results.under3_5);
             renderVerdict(results.under3_5, bettingThreshold, 'verdict_under_3_5_td');
 
-            // BTTS SÍ
             document.getElementById('prob_btts_yes_td').textContent = format(results.bttsYes) + '%';
             document.getElementById('odd_btts_yes_td').textContent = formatOdd(results.bttsYes);
             renderVerdict(results.bttsYes, bettingThreshold, 'verdict_btts_yes_td');
 
-            // BTTS NO
             document.getElementById('prob_btts_no_td').textContent = format(results.bttsNo) + '%';
             document.getElementById('odd_btts_no_td').textContent = formatOdd(results.bttsNo);
             renderVerdict(results.bttsNo, bettingThreshold, 'verdict_btts_no_td');
             
-            // 4. ANÁLISIS DE PRESIÓN Y EFICIENCIA (SOT y S/G)
+            // 4. ANÁLISIS DE COHERENCIA (NUEVO)
+            renderCoherenceAnalysis(lambdaHome, homeSOT, homeSPG, 'home');
+            renderCoherenceAnalysis(lambdaAway, awaySOT, awaySPG, 'away');
+
+            // 5. ANÁLISIS DE PRESIÓN Y EFICIENCIA (SOT y S/G)
             let efficiencyContext = "";
             
             document.getElementById('sot_summary').innerHTML = `SOT Promedio: **Local ${homeSOT.toFixed(1)}** vs. **Visita ${awaySOT.toFixed(1)}**`;
