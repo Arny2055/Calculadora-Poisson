@@ -109,9 +109,10 @@
         }
 
         /* Columna de 1X2 */
+        #misc-probabilities tr:nth-child(1) td, 
         #misc-probabilities tr:nth-child(2) td, 
-        #misc-probabilities tr:nth-child(4) td {
-            background-color: #15381a; /* Ligeramente más oscuro para 1X2 */
+        #misc-probabilities tr:nth-child(3) td {
+            background-color: #15381a; 
             font-weight: bold;
             color: #00cc66;
         }
@@ -139,14 +140,12 @@
 <div class="container">
     <h1>⚽ ANÁLISIS PRO DE MERCADOS DE GOLES</h1>
 
-    <!-- 1. Pegar Datos -->
     <h2>1. Fuente de Datos de la Liga</h2>
     <p style="color: #aaa;">Pega la tabla de estadísticas completa. El sistema identifica las columnas automáticamente y asume la coma (,) como decimal.</p>
     <textarea id="data-input" placeholder="Pega la tabla completa aquí..."></textarea>
     <button onclick="parseAndLoadData()">Cargar y Analizar Datos de la Liga</button>
     <p id="data-status" class="error">Cargando...</p>
 
-    <!-- 2. Selección de Partido -->
     <h2>2. Seleccionar Evento</h2>
     <div class="grid-2">
         <div>
@@ -165,11 +164,9 @@
     <button onclick="calculateExpectedGoals()">Ejecutar Análisis de Poisson</button>
     <p id="calculation-error" class="error"></p>
 
-    <!-- 3. Resultados -->
     <div id="results" style="display: none;">
         
         <h2>3. Goles Esperados ($\lambda$) e Índices de Fuerza</h2>
-        <!-- Tabla de Goles Esperados -->
         <table class="result-table">
             <thead>
                 <tr><th>Equipo</th><th>Factor Ataque (GF)</th><th>Factor Defensa (GC)</th><th>Goles Esperados ($\lambda$)</th></tr>
@@ -181,7 +178,6 @@
         <h2>4. Probabilidades por Mercado</h2>
         
         <div class="market-section">
-            <!-- Columna 1: Mercados de Total de Goles (Over/Under) -->
             <div>
                 <h3>Total de Goles (Líneas O/U)</h3>
                 <table class="prob-table">
@@ -190,7 +186,6 @@
                 </table>
             </div>
 
-            <!-- Columna 2: Mercados por Equipo y BTTS -->
             <div>
                 <h3>Por Equipo y BTTS</h3>
                 <table class="prob-table">
@@ -199,7 +194,6 @@
                 </table>
             </div>
 
-            <!-- Columna 3: Mercados Pares/Impares y 1X2 -->
             <div>
                 <h3>Resultado Final y Pares</h3>
                 <table class="prob-table" id="misc-probabilities">
@@ -215,7 +209,6 @@
             </div>
         </div>
 
-        <!-- Tabla de Marcadores -->
         <h3>5. Top 5 Marcadores Exactos</h3>
         <table class="prob-table">
             <thead>
@@ -236,9 +229,9 @@
     const COL_INDEXES = {
         'Team': 0, 
         'Prom. Goles locales Anotados': 4,
-        'Prom. Goles locales Lanzados': 5, 
+        'Prom. Goles locales Lanzados': 5, // Goles RECIBIDOS LOCAL
         'Prom. Goles visitante Anotados': 7,
-        'Prom. Goles visitante Lanzados': 8 
+        'Prom. Goles visitante Lanzados': 8 // Goles RECIBIDOS VISITA
     };
 
     // Función Factorial (k!)
@@ -280,7 +273,6 @@
                     let team = {};
                     team.Equipo = values[COL_INDEXES['Team']];
                     
-                    // Asignar y convertir valores numéricos. Reemplazar ',' por '.'
                     const convert = (val) => parseFloat(val.replace(',', '.')) || 0;
 
                     team['Prom. Goles locales Anotados'] = convert(values[COL_INDEXES['Prom. Goles locales Anotados']]);
@@ -312,8 +304,8 @@
         const totalTeams = leagueData.length;
         if (totalTeams === 0) return;
 
-        let sumGLA = 0; 
-        let sumGVA = 0; 
+        let sumGLA = 0; // Suma de Goles Anotados Locales (GL_prom)
+        let sumGVA = 0; // Suma de Goles Anotados Visitantes (GV_prom)
 
         leagueData.forEach(team => {
             sumGLA += team['Prom. Goles locales Anotados'];
@@ -331,7 +323,6 @@
 
         [localSelect, visitorSelect].forEach(select => {
             select.innerHTML = '<option value="">Selecciona un equipo</option>';
-            // Ordenar los equipos alfabéticamente
             leagueData.sort((a, b) => a.Equipo.localeCompare(b.Equipo));
             
             leagueData.forEach(team => {
@@ -344,7 +335,7 @@
         });
     }
 
-    // --- 4. FUNCIÓN PRINCIPAL DE CÁLCULO (MODIFICADA) ---
+    // --- 4. FUNCIÓN PRINCIPAL DE CÁLCULO (CORREGIDA) ---
     function calculateExpectedGoals() {
         const localTeamName = document.getElementById('local-team').value;
         const visitorTeamName = document.getElementById('visitor-team').value;
@@ -368,19 +359,19 @@
         const localTeam = leagueData.find(t => t.Equipo === localTeamName);
         const visitorTeam = leagueData.find(t => t.Equipo === visitorTeamName);
 
-        // --- CÁLCULO DE FACTORES DE FUERZA Y LAMBDA (Goles Esperados) ---
-        // Recordatorio: GF_l/GC_v se comparan contra GL_prom (promedio local de la liga)
-        // GF_v/GC_l se comparan contra GV_prom (promedio visitante de la liga)
+        // --- CÁLCULO DE FACTORES DE FUERZA Y LAMBDA (CORREGIDO) ---
         
-        // Factores de Ataque
+        // 1. Factores de Ataque
         const GF_l = GL_prom > 0 ? localTeam['Prom. Goles locales Anotados'] / GL_prom : 0; 
         const GF_v = GV_prom > 0 ? visitorTeam['Prom. Goles visitante Anotados'] / GV_prom : 0;
 
-        // Factores de Defensa
-        const GC_v = GL_prom > 0 ? visitorTeam['Prom. Goles visitante Lanzados'] / GL_prom : 0; 
-        const GC_l = GV_prom > 0 ? localTeam['Prom. Goles locales Lanzados'] / GV_prom : 0; 
+        // 2. Factores de Defensa (CORRECCIÓN APLICADA AQUÍ)
+        // GC_v: La defensa del visitante se compara con el promedio de goles que recibe un equipo DE VISITA (GV_prom, que es el promedio de goles que se anotan de visita).
+        const GC_v = GV_prom > 0 ? visitorTeam['Prom. Goles visitante Lanzados'] / GV_prom : 0; 
+        // GC_l: La defensa del local se compara con el promedio de goles que recibe un equipo LOCAL (GL_prom, que es el promedio de goles que se anotan de local).
+        const GC_l = GL_prom > 0 ? localTeam['Prom. Goles locales Lanzados'] / GL_prom : 0; 
 
-        // Goles Esperados (Lambda)
+        // 3. Goles Esperados (Lambda)
         const lambdaLocal = GL_prom * GF_l * GC_v;
         const lambdaVisitor = GV_prom * GF_v * GC_l;
 
@@ -388,12 +379,12 @@
         let probLocalWin = 0;
         let probDraw = 0;
         let probVisitorWin = 0;
-        let probTotalGoals = {}; // {0: P(0), 1: P(1), 2: P(2), ...}
+        let probTotalGoals = {}; 
         let probPar = 0;
         let probImpar = 0;
         let scoreProbabilities = [];
         
-        const MAX_GOALS = 6; // Límite seguro para calcular marcadores (0-0 hasta 6-6)
+        const MAX_GOALS = 6; 
 
         // Inicializar probTotalGoals
         for(let k = 0; k <= 2 * MAX_GOALS; k++) {
@@ -414,7 +405,7 @@
                 else if (i === j) { probDraw += matchProb; } 
                 else { probVisitorWin += matchProb; }
                 
-                // 2. Probabilidades Total de Goles (hasta un límite seguro)
+                // 2. Probabilidades Total de Goles
                 if (totalGoals <= 2 * MAX_GOALS) {
                      probTotalGoals[totalGoals] += matchProb;
                 }
@@ -469,21 +460,19 @@
             return sum;
         }
 
-        // Normalizar 1X2 (para manejar la probabilidad residual más allá de 6-6)
+        // Normalizar 1X2
         const totalCalculatedProb = probLocalWin + probDraw + probVisitorWin;
         const remainingProb = 1.0 - totalCalculatedProb;
 
         if (remainingProb > 0.001) {
             const totalWeightedProb = probLocalWin + probDraw + probVisitorWin;
             if (totalWeightedProb > 0) {
-                // Redistribuir el remanente proporcionalmente
                 probLocalWin += remainingProb * (probLocalWin / totalWeightedProb);
                 probDraw += remainingProb * (probDraw / totalWeightedProb);
                 probVisitorWin += remainingProb * (probVisitorWin / totalWeightedProb);
             }
         }
         
-        // Ordenar los marcadores más probables
         scoreProbabilities.sort((a, b) => b.prob - a.prob);
 
 
@@ -553,7 +542,6 @@
 
     window.onload = function() {
         document.getElementById('data-status').textContent = 'Pega la tabla en el área de texto para empezar.';
-        // Llamar a parseAndLoadData() si hay texto preexistente (útil en entornos de edición)
         if (document.getElementById('data-input').value.trim() !== '') {
             parseAndLoadData();
         }
