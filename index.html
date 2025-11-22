@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Ultimate Football Backtester v5.1 (Input Odds)</title>
+    <title>Ultimate Football Backtester v6.0 (Dual Season)</title>
     
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
@@ -39,7 +39,7 @@
             overflow: hidden;
         }
 
-        /* HEADER */
+        /* HEADER MODIFICADO PARA DOS URLS */
         header {
             background-color: var(--bg-panel);
             padding: 0 20px;
@@ -53,7 +53,14 @@
 
         .brand { font-weight: 700; display: flex; align-items: center; gap: 10px; min-width: 180px; }
         .tag { font-size:0.7em; background:var(--accent); padding:2px 6px; border-radius:4px; color:white; }
-        .url-bar { display: flex; flex-grow: 1; gap: 10px; }
+        
+        .url-bar { 
+            display: grid; 
+            grid-template-columns: 1fr 1fr auto; /* Dos inputs y un botón */
+            gap: 10px; 
+            flex-grow: 1; 
+        }
+
         .url-input { background: var(--bg-main); border: 1px solid var(--border); color: white; padding: 6px 12px; border-radius: 6px; width: 100%; font-family: monospace; }
         .btn { padding: 6px 12px; border-radius: 6px; cursor: pointer; border: none; font-weight: 600; display: flex; align-items: center; gap: 8px; color:white; font-size: 0.85rem;}
         .btn-primary { background: var(--accent); }
@@ -71,7 +78,7 @@
         .control-group label { display: block; margin-bottom: 4px; font-size: 0.8rem; color: var(--text-secondary); }
         select, input[type="number"], input[type="date"] { width: 100%; padding: 6px; background: var(--bg-input); border: 1px solid var(--border); border-radius: 4px; color: white; font-size: 0.85rem; }
         
-        /* NEW: MATCHUP SELECTORS */
+        /* MATCHUP SELECTORS */
         .matchup-selectors { display: flex; flex-direction: column; gap: 10px; background: rgba(0,0,0,0.2); padding: 10px; border-radius: 6px; border: 1px solid var(--border); }
         .vs-badge { align-self: center; background: var(--text-secondary); color: var(--bg-main); font-size: 0.7rem; padding: 2px 6px; border-radius: 10px; font-weight: bold; }
 
@@ -137,10 +144,11 @@
     <div id="loadingOverlay"><i class="fas fa-circle-notch spinner"></i><h3 style="margin-top:15px; color:#ccc;">Procesando Datos...</h3></div>
 
     <header>
-        <div class="brand"><i class="fas fa-trophy"></i> Backtester <span class="tag">v5.1</span></div>
+        <div class="brand"><i class="fas fa-trophy"></i> Backtester <span class="tag">v6.0 DUAL</span></div>
         <div class="url-bar">
-            <input type="text" id="urlInput" class="url-input" placeholder="URL CSV (Ej: football-data.co.uk)">
-            <button onclick="loadFromUrl()" class="btn btn-primary"><i class="fas fa-cloud-download-alt"></i> Cargar</button>
+            <input type="text" id="urlInputCurrent" class="url-input" placeholder="URL Temporada ACTUAL (Obligatoria)">
+            <input type="text" id="urlInputPrevious" class="url-input" placeholder="URL Temporada ANTERIOR (Opcional)">
+            <button onclick="loadFromUrls()" class="btn btn-primary"><i class="fas fa-cloud-download-alt"></i> Cargar URLs</button>
         </div>
         <label for="fileInput" class="btn btn-secondary"><i class="fas fa-folder-open"></i> Local</label>
         <input type="file" id="fileInput" accept=".csv">
@@ -200,6 +208,7 @@
                 <label>Cuota Máxima</label>
                 <input type="number" id="maxOdds" value="3.00" step="0.01" min="1.01">
             </div>
+            
             <div class="control-group">
                 <label>Liga</label>
                 <select id="leagueSelect"><option value="all">Todas</option></select>
@@ -228,7 +237,7 @@
 
                     <div class="vs-divider">
                         <div class="vs-circle">VS</div>
-                        <div style="font-size:0.7rem; color:#666;">Historial Directo</div>
+                        <div style="font-size:0.7rem; color:#666;">Último H2H</div>
                         <div id="h2hResult" style="font-weight:bold; color:white;">-</div>
                     </div>
 
@@ -291,33 +300,94 @@
         let rawData = [];
         let chartEq=null, chartLg=null;
 
-        // --- CARGA ---
+        // --- CARGA Y PROCESAMIENTO DE DATOS ---
         document.getElementById('fileInput').addEventListener('change', e=>parseCSV(e.target.files[0]));
-        async function loadFromUrl() {
-            const url = document.getElementById('urlInput').value.trim();
-            if(!url) return alert("URL vacía");
-            document.getElementById('loadingOverlay').style.display='block';
+        
+        async function loadFromUrls() {
+            const urlCurrent = document.getElementById('urlInputCurrent').value.trim();
+            const urlPrevious = document.getElementById('urlInputPrevious').value.trim();
+            
+            if (!urlCurrent) return alert("La URL de la Temporada Actual es obligatoria.");
+
+            document.getElementById('loadingOverlay').style.display = 'block';
+
+            const urls = [urlCurrent];
+            if (urlPrevious) urls.push(urlPrevious);
+
             try {
-                const r = await fetch('https://api.allorigins.win/raw?url='+encodeURIComponent(url));
-                if(!r.ok) throw new Error();
-                const t = await r.text();
-                Papa.parse(t, { header:true, dynamicTyping:true, skipEmptyLines:true, complete:r=>processData(r.data) });
-            } catch(e){ alert("Error cargando"); document.getElementById('loadingOverlay').style.display='none'; }
+                // 1. Fetch de todas las URLs
+                const fetchPromises = urls.map(url => 
+                    fetch('https://api.allorigins.win/raw?url=' + encodeURIComponent(url))
+                        .then(res => {
+                            if (!res.ok) throw new Error(`Error al obtener datos de: ${url}`);
+                            return res.text();
+                        })
+                );
+                
+                const texts = await Promise.all(fetchPromises);
+                
+                // 2. Parsear todos los textos y combinar
+                let combinedData = [];
+                texts.forEach(text => {
+                    Papa.parse(text, { 
+                        header: true, 
+                        dynamicTyping: true, 
+                        skipEmptyLines: true, 
+                        complete: (results) => {
+                            // Se asume que PapaParse es síncrono en este callback, por lo que es seguro pushear
+                            combinedData.push(...results.data.filter(r => Object.keys(r).length > 0)); 
+                        } 
+                    });
+                });
+                
+                if (combinedData.length === 0) {
+                     throw new Error("No se encontraron datos utilizables en las URLs proporcionadas.");
+                }
+
+                processData(combinedData);
+
+            } catch(e){ 
+                console.error(e);
+                alert(`Error cargando datos: ${e.message || "Verifique las URLs."}`); 
+                document.getElementById('loadingOverlay').style.display='none'; 
+            }
         }
-        function parseCSV(f){ document.getElementById('loadingOverlay').style.display='block'; Papa.parse(f,{header:true, dynamicTyping:true, skipEmptyLines:true, complete:r=>processData(r.data)}); }
+
+        function parseCSV(f){ 
+            document.getElementById('loadingOverlay').style.display='block'; 
+            Papa.parse(f,{
+                header:true, 
+                dynamicTyping:true, 
+                skipEmptyLines:true, 
+                complete:r=>processData(r.data)
+            }); 
+        }
 
         function processData(data) {
+            // 1. Normalizar y Limpiar datos
             rawData = data.map(r => {
                 if(!r.Date || !r.HomeTeam) return null;
-                let d = r.Date; if(d.includes('/')) { const p=d.split('/'); d=`${p[2].length===2?'20'+p[2]:p[2]}-${p[1]}-${p[0]}`; }
+                
+                let d = r.Date; 
+                // Normalizar fecha (d/m/yy o d/m/yyyy -> YYYY-MM-DD)
+                if(typeof d === 'string' && d.includes('/')) { 
+                    const p=d.split('/'); 
+                    const year = p[2].length===2 ? '20'+p[2] : p[2];
+                    d=`${year}-${p[1].padStart(2,'0')}-${p[0].padStart(2,'0')}`; 
+                } 
+                
                 return {
                     date:d, league:r.Div, home:r.HomeTeam, away:r.AwayTeam, res:r.FTR, goalsH:r.FTHG, goalsA:r.FTAG,
-                    oddsH:r.B365H||r.AvgH, oddsD:r.B365D||r.AvgD, oddsA:r.B365A||r.AvgA,
-                    oddsO25:r['B365>2.5']||r.Avg25, oddsU25:r['B365<2.5']||r.Avg25_1
+                    oddsH:r.B365H||r.AvgH||1.01, oddsD:r.B365D||r.AvgD||1.01, oddsA:r.B365A||r.AvgA||1.01,
+                    oddsO25:r['B365>2.5']||r.Avg25||1.01, oddsU25:r['B365<2.5']||r.Avg25_1||1.01
                 };
-            }).filter(x=>x && x.oddsH);
+            }).filter(x=>x && x.oddsH > 1.01); 
 
-            // Llenar Selectores
+            // 2. Ordenar por fecha
+            rawData.sort((a, b) => a.date.localeCompare(b.date));
+
+
+            // 3. Llenar Selectores (Teams and Leagues)
             const teams = [...new Set([...rawData.map(x=>x.home), ...rawData.map(x=>x.away)])].sort();
             const populate = (id) => {
                 const s = document.getElementById(id); s.innerHTML='<option value="">Seleccionar</option>';
@@ -341,7 +411,7 @@
             else if(mkt==='O25'){ o=row.oddsO25; w=(row.goalsH+row.goalsA)>2.5; }
             else if(mkt==='U25'){ o=row.oddsU25||1.9; w=(row.goalsH+row.goalsA)<2.5; }
             
-            if(!o || o<min || o>max) return null; // No Bet
+            if(!o || o<min || o>max) return null; 
             return { pnl: w ? (stake*o - stake) : -stake, won: w, odds: o };
         }
 
@@ -351,7 +421,6 @@
             const stT = document.getElementById('stakeType').value;
             const stV = parseFloat(document.getElementById('stakeValue').value);
             const bank0 = parseFloat(document.getElementById('initialBank').value);
-            // Los valores se leen de los inputs de número
             const minO = parseFloat(document.getElementById('minOdds').value);
             const maxO = parseFloat(document.getElementById('maxOdds').value);
             const lg = document.getElementById('leagueSelect').value;
@@ -375,7 +444,6 @@
 
                     if(!lgP[r.league]) lgP[r.league]=0; lgP[r.league]+=res.pnl;
                     
-                    // Stats Equipos (Acumular)
                     if(!tmP[r.home]) tmP[r.home]=0; tmP[r.home]+=res.pnl;
                     if(!tmP[r.away]) tmP[r.away]=0; tmP[r.away]+=res.pnl;
                 }
@@ -390,12 +458,10 @@
             const tA = document.getElementById('teamAwaySelect').value;
             if(!tH || !tA) return alert("Selecciona ambos equipos");
 
-            // Obtener config actual
             const mkt = document.getElementById('marketSelect').value;
-            // Los valores se leen de los inputs de número
             const minO = parseFloat(document.getElementById('minOdds').value);
             const maxO = parseFloat(document.getElementById('maxOdds').value);
-            const stV = 1; // Usamos stake 1u para normalizar
+            const stV = 1; // Stake 1u
 
             // 1. Analizar Local en Casa
             let hBets=0, hWins=0, hPnl=0;
@@ -411,7 +477,7 @@
                 if(res) { aBets++; aPnl+=res.pnl; if(res.won) aWins++; }
             });
 
-            // 3. H2H Directo (Simple)
+            // 3. H2H Directo 
             const h2h = rawData.filter(r => (r.home===tH && r.away===tA) || (r.home===tA && r.away===tH));
             const lastMatch = h2h.length ? `${h2h[h2h.length-1].home} ${h2h[h2h.length-1].goalsH}-${h2h[h2h.length-1].goalsA} ${h2h[h2h.length-1].away} (${h2h[h2h.length-1].date.substring(0,4)})` : "N/A";
 
@@ -449,16 +515,17 @@
             document.getElementById('valYield').innerText = tot?((prof/tot)*100).toFixed(1)+'%':'0%';
             document.getElementById('valDrawdown').innerText = '-'+dd.toFixed(2)+'%';
 
+            document.getElementById('valProfit').className = `kpi-value ${prof>=0?'text-green':'text-red'}`;
+
             // Tabla Principal
             const tb = document.getElementById('tableBody'); tb.innerHTML='';
             rows.slice(-50).reverse().forEach(r => {
-                tb.innerHTML += `<tr><td>${r.date}</td><td>${r.match}</td><td>${r.sel}</td><td>${r.odds.toFixed(2)}</td><td>${r.res}</td><td class="${r.pnl>=0?'text-green':'text-red'}">${r.pnl.toFixed(2)}</td><td>${r.bank.toFixed(0)}</td></tr>`;
+                tb.innerHTML += `<tr><td>${r.date.substring(5)}</td><td>${r.match}</td><td>${r.sel}</td><td>${r.odds.toFixed(2)}</td><td>${r.res}</td><td class="${r.pnl>=0?'text-green':'text-red'}">${r.pnl.toFixed(2)}</td><td>${r.bank.toFixed(0)}</td></tr>`;
             });
 
             // Tabla Equipos
             const tbTeam = document.getElementById('teamTableBody'); tbTeam.innerHTML='';
             Object.entries(tmData).sort((a,b)=>b[1]-a[1]).slice(0,20).forEach(t => {
-                // Simplificación, ya que el modo Home/Away fue reemplazado por el Matchup Analyzer
                 tbTeam.innerHTML += `<tr><td style="color:white; font-weight:bold;">${t[0]}</td><td>Gen</td><td class="${t[1]>=0?'text-green':'text-red'}">${t[1].toFixed(2)}</td></tr>`;
             });
 
@@ -469,12 +536,12 @@
             const ctxEq = document.getElementById('equityChart').getContext('2d');
             if(chartEq) chartEq.destroy();
             const pts = hist.length>800 ? hist.filter((_,i)=>i%5===0) : hist;
-            chartEq = new Chart(ctxEq, { type:'line', data:{labels:pts.map(p=>p.x), datasets:[{data:pts.map(p=>p.y), borderColor:'#3b82f6', borderWidth:2, pointRadius:0, fill:true, backgroundColor:'rgba(59,130,246,0.1)'}]}, options:{responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}, scales:{x:{display:false},y:{grid:{color:'#334155'}}}}});
+            chartEq = new Chart(ctxEq, { type:'line', data:{labels:pts.map(p=>p.x), datasets:[{label:'Banca', data:pts.map(p=>p.y), borderColor:'#3b82f6', borderWidth:2, pointRadius:0, fill:true, backgroundColor:'rgba(59,130,246,0.1)'}]}, options:{responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}, title:{display:true, text:'Evolución de Banca', color:'white'}}, scales:{x:{display:false},y:{grid:{color:'#334155'}, ticks:{color:'white'}}}}});
 
             const ctxLg = document.getElementById('leagueChart').getContext('2d');
             if(chartLg) chartLg.destroy();
             const lgArr = Object.entries(lgData).sort((a,b)=>b[1]-a[1]);
-            chartLg = new Chart(ctxLg, { type:'bar', data:{labels:lgArr.map(x=>x[0]), datasets:[{data:lgArr.map(x=>x[1]), backgroundColor:lgArr.map(x=>x[1]>=0?'#10b981':'#ef4444')}]}, options:{responsive:true, maintainAspectRatio:false, indexAxis:'y', plugins:{legend:{display:false}}, scales:{x:{grid:{color:'#334155'}}}}});
+            chartLg = new Chart(ctxLg, { type:'bar', data:{labels:lgArr.map(x=>x[0]), datasets:[{data:lgArr.map(x=>x[1]), backgroundColor:lgArr.map(x=>x[1]>=0?'#10b981':'#ef4444')}]}, options:{responsive:true, maintainAspectRatio:false, indexAxis:'y', plugins:{legend:{display:false}}, scales:{x:{grid:{color:'#334155'}, ticks:{color:'white'}}, y:{ticks:{color:'white'}}}}});
         }
     </script>
 </body>
