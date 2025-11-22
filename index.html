@@ -3,10 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Ultimate Football Backtester v8.3 (Máxima Estabilidad)</title>
+    <title>Ultimate Football Backtester v8.4 (CORS FIX)</title>
     
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght300;400;600;700&display=swap" rel="stylesheet">
     
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js"></script>
@@ -48,9 +48,9 @@
             font-size: 0.85rem; 
         }
 
-        .separator { border: 0; height: 1px; background: var(--border); margin: 8px 0; } /* Margen más pequeño */
+        .separator { border: 0; height: 1px; background: var(--border); margin: 8px 0; }
         
-        /* OVERLAY de Carga - Corregido para visibilidad */
+        /* OVERLAY de Carga */
         #loadingOverlay {
             position: fixed;
             top: 0; left: 0; right: 0; bottom: 0;
@@ -124,7 +124,7 @@
 
         .sidebar h3 { 
             margin: 0; 
-            font-size: 0.75rem; /* Ajuste: ligeramente más grande para visibilidad */
+            font-size: 0.75rem;
             text-transform: uppercase; 
             color: var(--text-secondary); 
             letter-spacing: 0.5px; 
@@ -239,15 +239,15 @@
             width: 100%;
             font-size: 0.7rem; 
             text-align: center;
-            border-collapse: collapse; /* Asegurar que no hay doble borde */
+            border-collapse: collapse;
         }
         .score-matrix th, .score-matrix td {
             padding: 1px 2px; 
             border: 1px solid #334155;
-            line-height: 1.2; /* Asegurar compactidad vertical */
+            line-height: 1.2;
         }
         .score-matrix th { background-color: rgba(0,0,0,0.1); }
-        .score-matrix td { height: 18px; } /* Altura fija para celdas */
+        .score-matrix td { height: 18px; }
 
         /* Charts and Tables Section */
         .chart-box-full {
@@ -304,7 +304,7 @@
     </div>
 
     <header>
-        <div class="brand"><i class="fas fa-calculator"></i> Backtester <span class="tag">v8.3 Max. Estabilidad</span></div>
+        <div class="brand"><i class="fas fa-calculator"></i> Backtester <span class="tag">v8.4 CORS FIX</span></div>
         <div style="display:flex; gap:8px; align-items:center;">
             <input type="file" id="fileInput" accept=".csv" style="display:none;">
             <label for="fileInput" class="btn btn-secondary"><i class="fas fa-folder-open"></i> Local</label>
@@ -481,7 +481,7 @@
     </div>
 
     <script>
-        // *** LÓGICA JAVASCRIPT (Corregida en v8.3) ***
+        // *** LÓGICA JAVASCRIPT (Corregida en v8.4) ***
         let rawData = [];
         let seasonYears = { current: null, previous: null };
         let poissonTrainingData = null; 
@@ -520,16 +520,12 @@
         }
 
         function calculateRiskOfRuin(f, N) {
-            // RoR simplificado - Usamos el promedio de Win Rate
             const W = parseFloat(document.getElementById('valWinRate').innerText.replace('%', '')) / 100 || 0.5;
             const L = 1 - W;
             
-            // Si el Win Rate es menor o igual al 50% (o no hay apuestas), el RoR es 100%
             if (W <= L || N === 0) return 100; 
 
-            // Se asume la unidad de apuesta como el stake plano
             const bankUnits = parseFloat(document.getElementById('initialBank').value) * RoR_BANK_FRACTION;
-            // Si el stake es plano (1.0), el divisor es 1. Si es variable, usamos el promedio.
             const avgStake = document.getElementById('stakeType').value === 'flat' ? 1 : (totalStakeUnits / N); 
 
             const B_units = bankUnits / (avgStake || 1);
@@ -538,7 +534,7 @@
             return Math.min(100, RoR_Estimate * 100);
         }
 
-        // --- CARGA Y PROCESAMIENTO DE DATOS (Corrección en el manejo de URLs asíncronas) ---
+        // --- CARGA Y PROCESAMIENTO DE DATOS (FIX CORS) ---
         document.getElementById('fileInput').addEventListener('change', e=>parseCSV(e.target.files[0]));
         
         async function loadFromUrls() {
@@ -547,16 +543,18 @@
             
             if (!urlCurrent) return alert("La URL de la Temporada Actual es obligatoria.");
 
-            document.getElementById('loadingOverlay').style.display = 'flex'; // Mostrar Overlay
+            document.getElementById('loadingOverlay').style.display = 'flex';
 
+            // Usamos un proxy para evitar problemas de CORS, especialmente con archivos externos.
+            const proxyUrlBase = 'https://api.allorigins.win/raw?url=';
             const urls = [urlCurrent];
             if (urlPrevious) urls.push(urlPrevious);
 
             try {
                 const fetchPromises = urls.map(url => 
-                    fetch('https://api.allorigins.win/raw?url=' + encodeURIComponent(url))
+                    fetch(proxyUrlBase + encodeURIComponent(url))
                         .then(res => {
-                            if (!res.ok) throw new Error(`Fallo al obtener datos de ${url}. Estado: ${res.status}`);
+                            if (!res.ok) throw new Error(`Fallo en el proxy o URL no accesible: ${res.status}`);
                             return res.text();
                         })
                 );
@@ -566,20 +564,31 @@
                 let allData = [];
                 let parsingPromises = [];
 
-                texts.forEach((text) => {
+                texts.forEach((text, index) => {
                     parsingPromises.push(new Promise((resolve, reject) => {
                         Papa.parse(text, { 
                             header: true, 
                             dynamicTyping: true, 
                             skipEmptyLines: true, 
                             complete: (results) => {
-                                const validData = results.data.filter(r => Object.keys(r).length > 0 && r.HomeTeam && r.FTHG !== null);
+                                // **Validación de columnas clave**
+                                const requiredHeaders = ['Date', 'HomeTeam', 'FTHG', 'FTAG'];
+                                const hasRequired = requiredHeaders.every(h => results.meta.fields && results.meta.fields.includes(h));
+                                
+                                if (!hasRequired && results.data.length > 0) {
+                                    console.warn("Faltan cabeceras clave en el CSV:", results.meta.fields);
+                                    // No rechazamos, pero advertimos si faltan para evitar un fallo total
+                                }
+                                
+                                const validData = results.data.filter(r => 
+                                    r && r.HomeTeam && r.FTHG !== null && r.FTAG !== null && !isNaN(r.FTHG) && !isNaN(r.FTAG)
+                                );
                                 allData.push(...validData);
                                 resolve();
                             },
                             error: (error, file) => {
-                                console.warn("Error de PapaParse (Ignorado si el archivo no es un CSV válido):", error.message);
-                                resolve(); // No rechazamos, solo advertimos y resolvemos para que las otras cargas sigan
+                                console.error(`Error de PapaParse en URL ${index}:`, error);
+                                resolve(); // Resolvemos para no bloquear la carga de otros archivos
                             }
                         });
                     }));
@@ -587,13 +596,15 @@
                 
                 await Promise.all(parsingPromises);
 
-                if (allData.length === 0) throw new Error("No se encontraron datos utilizables. Asegúrese de que las URLs sean enlaces directos a CSVs válidos.");
+                if (allData.length === 0) {
+                     throw new Error("No se encontraron datos utilizables. Asegúrese de que las URLs sean enlaces directos a CSVs válidos con las columnas Date, HomeTeam, FTHG, FTAG, etc.");
+                }
 
                 processData(allData);
 
             } catch(e){ 
                 console.error("Error general en carga:", e);
-                alert(`❌ Error cargando datos:\n\n${e.message || "Verifique las URLs y que el formato CSV sea correcto."}`); 
+                alert(`❌ Error cargando datos:\n\n${e.message || "Verifique las URLs (y el contenido CSV) o si el servidor proxy está caído."}`); 
                 document.getElementById('loadingOverlay').style.display='none'; 
             }
         }
@@ -626,7 +637,6 @@
 
             // Primer paso: Calcular promedios globales
             data.forEach(r => {
-                // Validación estricta para asegurar que los goles son números válidos
                 if(r.goalsH >= 0 && r.goalsA >= 0 && r.home && r.away) {
                     totalMatches++;
                     totalHomeGoals += r.goalsH;
@@ -668,7 +678,6 @@
             for (const team in teamStats) {
                 const stats = teamStats[team];
                 
-                // Se asegura que no se divida por cero
                 const attH = (stats.playedH > 0 && avgGoalsHome > 0) ? (stats.scoredH / stats.playedH) / avgGoalsHome : 1.0;
                 const defH = (stats.playedH > 0 && avgGoalsAway > 0) ? (stats.concededH / stats.playedH) / avgGoalsAway : 1.0;
                 
@@ -687,16 +696,17 @@
         function processData(data) {
             // Filtrado y estandarización de datos
             rawData = data.map(r => {
+                // Validación para asegurar que las columnas clave existen y no son nulas
                 if(!r.Date || !r.HomeTeam || isNaN(r.FTHG) || isNaN(r.FTAG)) return null;
                 
-                // Corrección de formato de fecha para asegurar ordenamiento correcto
+                // Corrección de formato de fecha
                 let d = r.Date; 
                 if(typeof d === 'string') { 
                     if (d.includes('/')) {
                         const p = d.split('/'); 
                         const year = (p.length === 3 && p[2].length === 2) ? '20' + p[2] : p[2];
                         d = `${year}-${p[1].padStart(2,'0')}-${p[0].padStart(2,'0')}`; 
-                    } else if (d.includes('.')) { // Manejo de formato DD.MM.YYYY
+                    } else if (d.includes('.')) {
                         const p = d.split('.');
                         d = `${p[2]}-${p[1].padStart(2,'0')}-${p[0].padStart(2,'0')}`; 
                     }
@@ -706,6 +716,7 @@
                 return {
                     date:d, league:r.Div, home:r.HomeTeam, away:r.AwayTeam, res:r.FTR, 
                     goalsH:r.FTHG, goalsA:r.FTAG,
+                    // Se usa la cuota B365 como principal, con fallbacks a Avg y WH, y mínimo 1.01 si no hay dato
                     oddsH:r.B365H || r.AvgH || r.WHH || 1.01, 
                     oddsD:r.B365D || r.AvgD || r.WHD || 1.01, 
                     oddsA:r.B365A || r.AvgA || r.WHA || 1.01,
@@ -713,7 +724,7 @@
                     oddsU25:r['B365<2.5'] || r['Avg<2.5'] || r.WHUnder25 || 1.01,
                     totalGoals: r.FTHG + r.FTAG
                 };
-            }).filter(x=>x && x.oddsH > 1.01); 
+            }).filter(x=>x && x.oddsH > 1.01); // Filtrar filas no mapeadas o con cuota no válida
 
             rawData.sort((a, b) => a.date.localeCompare(b.date));
             poissonTrainingData = trainPoissonModel(rawData);
@@ -745,7 +756,6 @@
 
         // --- LÓGICA CORE ---
         function getMarketOdds(row, mkt) {
-            // Devuelve la cuota correspondiente al mercado
             if(mkt==='H') return row.oddsH;
             if(mkt==='D') return row.oddsD;
             if(mkt==='A') return row.oddsA;
@@ -755,7 +765,6 @@
         }
 
         function isWinningBet(row, mkt) {
-            // Comprueba si la apuesta resultó ganadora
             if(mkt==='H') return row.res==='H';
             if(mkt==='D') return row.res==='D';
             if(mkt==='A') return row.res==='A';
@@ -764,7 +773,6 @@
             return false;
         }
         
-        // Variable para almacenar el total de unidades apostadas, necesaria para el RoR.
         let totalStakeUnits = 0; 
 
         function calculateProfit(row, mkt, stakeType, stakeValue, bank, minOdds, maxOdds, minGoals, maxGoals, usePoisson) {
@@ -779,7 +787,6 @@
             let oddsPoisson = 0;
 
             if (usePoisson || stakeType === 'kelly') {
-                // Se usa el modelo Poisson para la probabilidad subyacente
                 const poissonRes = calculatePoissonProbabilities(row.home, row.away, false); 
                 if (!poissonRes) return null; 
 
@@ -793,7 +800,7 @@
 
                 oddsPoisson = 1 / pMarket;
                 
-                // Filtro de Valor Poisson (Solo si se activó el checkbox)
+                // Filtro de Valor Poisson 
                 if (usePoisson && o <= oddsPoisson) return null;
             }
 
@@ -804,17 +811,15 @@
             } else if (stakeType === 'percent') {
                 actualStake = bank * (stakeValue / 100);
             } else if (stakeType === 'kelly') {
-                // Cálculo de Kelly
                 if (pMarket === 0 || o === 0 || o <= oddsPoisson) return null;
                 
                 const kellyFraction = calculateKellyStake(pMarket, o);
-                // El 'stakeValue' en Kelly se usa como el % Máximo de Banca a Apostar
                 actualStake = bank * kellyFraction;
-                actualStake = Math.min(actualStake, bank * (stakeValue / 100)); // Limite de Kelly por el % de Banca
+                actualStake = Math.min(actualStake, bank * (stakeValue / 100));
             }
             
             actualStake = Math.min(actualStake, bank);
-            actualStake = Math.max(0, actualStake); // Asegurar stake no negativo
+            actualStake = Math.max(0, actualStake);
             if (actualStake < 0.01) return null;
             
             // --- Cierre de Apuesta ---
@@ -827,7 +832,7 @@
             };
         }
 
-        // --- ANÁLISIS POISSON (Matriz 3+ corregida) ---
+        // --- ANÁLISIS POISSON ---
         function calculatePoissonProbabilities(homeTeam, awayTeam, normalize = true) {
             if (!poissonTrainingData) return null;
             const { globalAverages, teamCoeffs } = poissonTrainingData;
@@ -836,15 +841,13 @@
             
             if (!homeCoeffs || !awayCoeffs) return null;
 
-            // Cálculo de Lambdas (Intensidades de Goles)
             const lambda_H = homeCoeffs.attH * awayCoeffs.defA * globalAverages.avgGoalsHome;
             const lambda_A = awayCoeffs.attA * homeCoeffs.defH * globalAverages.avgGoalsAway;
             
             let pHome = 0, pDraw = 0, pAway = 0, pOver25 = 0;
-            const maxGoals = 8; // Aumentamos el límite para mejor precisión en la cola de Poisson
+            const maxGoals = 8;
             const scoreMatrix = [];
 
-            // 1. Calcular matriz de probabilidades de marcador (P(x,y))
             for (let x = 0; x <= maxGoals; x++) { 
                 const pGx = poissonPMF(x, lambda_H);
                 const row = [];
@@ -854,7 +857,6 @@
                     const pScore = pGx * pGy;
                     row.push(pScore); 
 
-                    // Acumular probabilidades para 1X2 y O/U 2.5
                     if (x > y) pHome += pScore;
                     else if (x === y) pDraw += pScore;
                     else pAway += pScore;
@@ -867,7 +869,6 @@
             const pUnder25 = 1 - pOver25; 
             
             if (normalize) {
-                // Normalización de 1X2 para que sumen exactamente 1.0 (Corrección de la cola infinita)
                 const pTotal1X2 = pHome + pDraw + pAway;
                 if (pTotal1X2 > 0) {
                     const adjustment = 1 / pTotal1X2;
@@ -877,7 +878,6 @@
                 }
             }
             
-            // Asegurar que las probabilidades no excedan 1.0 por errores de coma flotante.
             pHome = Math.min(1, pHome);
             pDraw = Math.min(1, pDraw);
             pAway = Math.min(1, pAway);
@@ -916,7 +916,6 @@
                 return;
             }
 
-            // Buscar las cuotas de la casa de apuestas del último partido entre ellos
             const lastMatch = rawData.find(r => r.home === homeTeam && r.away === awayTeam); 
             
             updatePoissonCard(homeTeam, awayTeam, poissonRes, lastMatch, mkt);
@@ -958,7 +957,7 @@
                 `;
             }
 
-            // --- Generación de Matriz de Marcador Exacto (4x4 + 3+) - CORREGIDO ---
+            // --- Generación de Matriz de Marcador Exacto (4x4 + 3+) ---
             let matrixHTML = `
                 <div class="score-matrix">
                     <h4 style="margin:0 0 3px 0; color:white; font-size:0.7rem; text-align:center;">Matriz Marcador (%)</h4>
@@ -974,28 +973,23 @@
             const maxScore = 3; 
             let maxProb = 0;
             
-            // Función auxiliar para obtener la probabilidad de la celda X:Y (maneja 3+ y valores exactos)
             const getProb = (x, y) => {
                 const matrixSize = res.scoreMatrix.length;
                 let prob = 0;
 
                 if (x < maxScore && y < maxScore) {
-                    // Celdas exactas (0:0, 1:2, etc.)
                     prob = (x < matrixSize && y < matrixSize) ? res.scoreMatrix[x][y] : 0;
                 } else if (x === maxScore && y === maxScore) {
-                    // Celda 3+:3+ (Suma de todas las probabilidades >= 3:3)
                     for (let i = maxScore; i < matrixSize; i++) {
                         for (let j = maxScore; j < matrixSize; j++) {
                             prob += res.scoreMatrix[i][j];
                         }
                     }
                 } else if (x === maxScore) {
-                    // Celda 3+:Y (Suma de todas las probabilidades >= 3:Y)
                     for (let i = maxScore; i < matrixSize; i++) {
                         prob += (y < matrixSize) ? res.scoreMatrix[i][y] : 0;
                     }
                 } else if (y === maxScore) {
-                    // Celda X:3+ (Suma de todas las probabilidades X:>=3)
                     for (let j = maxScore; j < matrixSize; j++) {
                         prob += (x < matrixSize) ? res.scoreMatrix[x][j] : 0;
                     }
@@ -1004,14 +998,12 @@
                 return prob;
             };
 
-            // Encontrar la probabilidad máxima
             for (let x = 0; x <= maxScore; x++) {
                 for (let y = 0; y <= maxScore; y++) {
                     maxProb = Math.max(maxProb, getProb(x, y));
                 }
             }
 
-            // Llenar la tabla
             for (let x = 0; x <= maxScore; x++) {
                 matrixHTML += '<tr>';
                 matrixHTML += `<th>${x === maxScore ? '3+' : x}</th>`;
@@ -1070,7 +1062,7 @@
             let bank=bank0, peak=bank0, maxDD=0, wins=0, hist=[{x:'Inicio', y:bank0}], rows=[], lgP={}, tmP={};
             let optimizableBetsCombined = [];
             let totalProfitUnits = 0;
-            totalStakeUnits = 0; // REINICIAR: Corregido para usar la variable global
+            totalStakeUnits = 0;
             let totalBets = 0;
 
             const filtered = rawData.filter(r => lg==='all' || r.league===lg);
@@ -1078,7 +1070,6 @@
             filtered.forEach(r => {
                 const res = calculateProfit(r, mkt, stT, stV, bank, minO, maxO, minG, maxG, usePoisson);
                 
-                // Se calcula el beneficio si se hubiera hecho una apuesta plana (base para optimización)
                 const resOptimizable = calculateProfit(r, mkt, 'flat', 1.0, 1.0, 1.0, 50.0, 0, 10, false); 
                 if(resOptimizable) {
                     const optBet = { odds: resOptimizable.odds, pnl: resOptimizable.pnl, year: r.date.substring(0, 4) };
@@ -1088,7 +1079,7 @@
                 if(res) {
                     bank += res.pnl;
                     totalProfitUnits += res.pnl;
-                    totalStakeUnits += res.stake; // ACUMULAR: Corregido
+                    totalStakeUnits += res.stake;
                     totalBets++;
                     
                     if(res.won) wins++;
@@ -1118,12 +1109,11 @@
             updateOptimalOddsUI(optimalRangeCombined, compatibility); 
             
             // 4. Calcular RoR
-            const RoR = calculateRiskOfRuin(null, totalBets); // Ahora RoR usa la variable global totalStakeUnits
+            const RoR = calculateRiskOfRuin(null, totalBets);
 
             // 5. Actualizar UI Global
             updateGlobalUI(hist, rows, wins, bank0, bank, maxDD, lgP, tmP, totalStakeUnits, RoR);
             
-            // Se mantiene oculto al iniciar el backtest
             document.getElementById('poissonCard').style.display = 'none'; 
         }
 
