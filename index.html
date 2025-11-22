@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Ultimate Football Backtester v6.2 (Cross-Season)</title>
+    <title>Ultimate Football Backtester v6.3 (Error Fix)</title>
     
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
@@ -107,6 +107,13 @@
         #loadingOverlay { display: none; position: fixed; top:0; left:0; width:100%; height:100%; background: rgba(0,0,0,0.85); z-index: 999; text-align: center; padding-top: 20%; }
         .spinner { font-size: 2.5rem; color: var(--accent); animation: spin 1s linear infinite; }
         @keyframes spin { 100% { transform: rotate(360deg); } }
+        
+        /* Table Styles (Added for completeness) */
+        .table-scroll { overflow-y: auto; flex-grow: 1; }
+        table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+        th { text-align: left; padding: 8px; background: #252f45; position: sticky; top: 0; color: var(--text-secondary); z-index: 1; }
+        td { padding: 6px 8px; border-bottom: 1px solid var(--border); }
+        tr:hover { background: rgba(255,255,255,0.03); }
     </style>
 </head>
 <body>
@@ -114,7 +121,7 @@
     <div id="loadingOverlay"><i class="fas fa-circle-notch spinner"></i><h3 style="margin-top:15px; color:#ccc;">Procesando Datos...</h3></div>
 
     <header>
-        <div class="brand"><i class="fas fa-trophy"></i> Backtester <span class="tag">v6.2 CSS</span></div>
+        <div class="brand"><i class="fas fa-trophy"></i> Backtester <span class="tag">v6.3 ERR</span></div>
         <div class="url-bar">
             <input type="text" id="urlInputCurrent" class="url-input" placeholder="URL Temporada ACTUAL (Obligatoria)">
             <input type="text" id="urlInputPrevious" class="url-input" placeholder="URL Temporada ANTERIOR (Opcional)">
@@ -265,14 +272,13 @@
     <script>
         // --- VARIABLES ---
         let rawData = [];
-        let seasonYears = { current: null, previous: null }; // NEW
+        let seasonYears = { current: null, previous: null };
         let chartEq=null, chartLg=null;
 
         // --- CARGA Y PROCESAMIENTO DE DATOS ---
         document.getElementById('fileInput').addEventListener('change', e=>parseCSV(e.target.files[0]));
         
         async function loadFromUrls() {
-            // ... (Same loadFromUrls logic) ...
             const urlCurrent = document.getElementById('urlInputCurrent').value.trim();
             const urlPrevious = document.getElementById('urlInputPrevious').value.trim();
             
@@ -287,7 +293,10 @@
                 const fetchPromises = urls.map(url => 
                     fetch('https://api.allorigins.win/raw?url=' + encodeURIComponent(url))
                         .then(res => {
-                            if (!res.ok) throw new Error(`Error al obtener datos de: ${url}`);
+                            // NEW: Check HTTP status explicitly
+                            if (!res.ok) {
+                                throw new Error(`Fallo al obtener datos de ${url}. Estado HTTP: ${res.status}.`);
+                            }
                             return res.text();
                         })
                 );
@@ -295,26 +304,44 @@
                 const texts = await Promise.all(fetchPromises);
                 
                 let combinedData = [];
-                texts.forEach(text => {
+                let parsingErrors = []; // Array para capturar errores de parsing
+
+                texts.forEach((text, index) => {
+                    const url = urls[index];
                     Papa.parse(text, { 
                         header: true, 
                         dynamicTyping: true, 
                         skipEmptyLines: true, 
                         complete: (results) => {
-                            combinedData.push(...results.data.filter(r => Object.keys(r).length > 0)); 
-                        } 
+                            // Check if PapaParse found any data
+                            const validData = results.data.filter(r => Object.keys(r).length > 0);
+                            
+                            if (validData.length === 0 && text.length > 0) {
+                                // Data received but seems unparseable/empty after filter
+                                parsingErrors.push(`La URL ${url} no devolvió datos utilizables. Verifique los encabezados del CSV.`);
+                            }
+                            combinedData.push(...validData); 
+                        },
+                        error: (error, file) => {
+                            // Capture specific PapaParse error
+                            parsingErrors.push(`Error de parsing en la URL ${url}. Mensaje: ${error.message}`);
+                        }
                     });
                 });
                 
+                if (parsingErrors.length > 0) {
+                    throw new Error(parsingErrors.join('\n'));
+                }
+
                 if (combinedData.length === 0) {
-                     throw new Error("No se encontraron datos utilizables en las URLs proporcionadas.");
+                     throw new Error("No se encontraron datos utilizables. Asegúrese de que las URLs sean enlaces directos a CSVs y no estén vacíos.");
                 }
 
                 processData(combinedData);
 
             } catch(e){ 
-                console.error(e);
-                alert(`Error cargando datos: ${e.message || "Verifique las URLs."}`); 
+                console.error("Error general en carga:", e);
+                alert(`❌ Error cargando datos:\n\n${e.message || "Verifique si las URLs son enlaces directos a CSVs accesibles o si el archivo no está vacío."}`); 
                 document.getElementById('loadingOverlay').style.display='none'; 
             }
         }
@@ -325,57 +352,23 @@
                 header:true, 
                 dynamicTyping:true, 
                 skipEmptyLines:true, 
-                complete:r=>processData(r.data)
+                complete:r=>{
+                    if (r.data.length === 0) {
+                         alert("❌ Error cargando datos: El archivo CSV local no contiene datos utilizables.");
+                         document.getElementById('loadingOverlay').style.display='none';
+                    } else {
+                         processData(r.data);
+                    }
+                },
+                error: (error, file) => {
+                    console.error("Error de PapaParse en archivo local:", error);
+                    alert(`❌ Error de parsing en archivo local. Verifique el formato CSV:\n${error.message}`);
+                    document.getElementById('loadingOverlay').style.display='none';
+                }
             }); 
         }
 
-        function processData(data) {
-            // 1. Normalizar y Limpiar datos
-            rawData = data.map(r => {
-                if(!r.Date || !r.HomeTeam) return null;
-                
-                let d = r.Date; 
-                if(typeof d === 'string' && d.includes('/')) { 
-                    const p=d.split('/'); 
-                    const year = p[2].length===2 ? '20'+p[2] : p[2];
-                    d=`${year}-${p[1].padStart(2,'0')}-${p[0].padStart(2,'0')}`; 
-                } 
-                
-                return {
-                    date:d, league:r.Div, home:r.HomeTeam, away:r.AwayTeam, res:r.FTR, goalsH:r.FTHG, goalsA:r.FTAG,
-                    oddsH:r.B365H||r.AvgH||1.01, oddsD:r.B365D||r.AvgD||1.01, oddsA:r.B365A||r.AvgA||1.01,
-                    oddsO25:r['B365>2.5']||r.Avg25||1.01, oddsU25:r['B365<2.5']||r.Avg25_1||1.01
-                };
-            }).filter(x=>x && x.oddsH > 1.01); 
-
-            // 2. Ordenar por fecha
-            rawData.sort((a, b) => a.date.localeCompare(b.date));
-            
-            // 3. NEW: Identificar Temporadas
-            const allDates = rawData.map(r => r.date.substring(0, 4));
-            const uniqueYears = [...new Set(allDates)].sort().reverse(); // [2024, 2023, 2022]
-            
-            seasonYears.current = uniqueYears.length > 0 ? uniqueYears[0] : null;
-            seasonYears.previous = uniqueYears.length > 1 ? uniqueYears[1] : null;
-
-
-            // 4. Llenar Selectores (Teams and Leagues)
-            const teams = [...new Set([...rawData.map(x=>x.home), ...rawData.map(x=>x.away)])].sort();
-            const populate = (id) => {
-                const s = document.getElementById(id); s.innerHTML='<option value="">Seleccionar</option>';
-                teams.forEach(t => s.add(new Option(t,t)));
-            };
-            populate('teamHomeSelect'); populate('teamAwaySelect');
-            
-            const lgSel = document.getElementById('leagueSelect'); lgSel.innerHTML='<option value="all">Todas</option>';
-            [...new Set(rawData.map(x=>x.league))].sort().forEach(l=>lgSel.add(new Option(l,l)));
-
-            document.getElementById('loadingOverlay').style.display='none';
-            runBacktest();
-        }
-
-        // --- LÓGICA BACKTEST Y OPTIMIZACIÓN ---
-
+        // --- LÓGICA BACKTEST Y OPTIMIZACIÓN (Sin cambios de lógica) ---
         function calculateProfit(row, mkt, stake, min, max) {
             let o=0, w=false;
             if(mkt==='H'){ o=row.oddsH; w=row.res==='H'; }
@@ -433,7 +426,6 @@
             };
         }
         
-        // NEW FUNCTION: Verifica la rentabilidad del rango óptimo en los segmentos
         function checkCompatibility(optimalRange, currentData, previousData) {
             const min = parseFloat(optimalRange.min);
             const max = parseFloat(optimalRange.max);
@@ -460,14 +452,17 @@
             });
             const previousYield = previousBets > 5 ? (previousPnl / previousBets) * 100 : 0; 
 
-            const isCompatible = (currentYield > 1.0 && previousYield > 1.0); // Rendimiento > 1.0% en ambas
+            const isCompatible = (currentYield > 1.0 && previousYield > 1.0); 
 
             let status = 'BAJA COMPATIBILIDAD';
-            if (currentBets < 5 || previousBets < 5) {
+            if (currentBets < 5 && previousBets < 5) { // If both samples are too small, show insufficient
                 status = 'MUESTRA INSUFICIENTE';
             } else if (isCompatible) {
                  status = 'ALTA COMPATIBILIDAD';
+            } else if (currentBets < 5 || previousBets < 5) { // If only one sample is too small
+                 status = 'COMPATIBILIDAD INCOMPLETA';
             }
+
 
             return { 
                 current: currentYield.toFixed(1) + '%', 
@@ -478,6 +473,51 @@
                 totalPreviousBets: totalPreviousBets,
                 status: status
             };
+        }
+
+        function processData(data) {
+            // 1. Normalizar y Limpiar datos (Logic remains the same)
+            rawData = data.map(r => {
+                if(!r.Date || !r.HomeTeam) return null;
+                
+                let d = r.Date; 
+                if(typeof d === 'string' && d.includes('/')) { 
+                    const p=d.split('/'); 
+                    const year = p[2].length===2 ? '20'+p[2] : p[2];
+                    d=`${year}-${p[1].padStart(2,'0')}-${p[0].padStart(2,'0')}`; 
+                } 
+                
+                return {
+                    date:d, league:r.Div, home:r.HomeTeam, away:r.AwayTeam, res:r.FTR, goalsH:r.FTHG, goalsA:r.FTAG,
+                    oddsH:r.B365H||r.AvgH||1.01, oddsD:r.B365D||r.AvgD||1.01, oddsA:r.B365A||r.AvgA||1.01,
+                    oddsO25:r['B365>2.5']||r.Avg25||1.01, oddsU25:r['B365<2.5']||r.Avg25_1||1.01
+                };
+            }).filter(x=>x && x.oddsH > 1.01); 
+
+            // 2. Ordenar por fecha
+            rawData.sort((a, b) => a.date.localeCompare(b.date));
+            
+            // 3. Identificar Temporadas
+            const allDates = rawData.map(r => r.date.substring(0, 4));
+            const uniqueYears = [...new Set(allDates)].sort().reverse(); 
+            
+            seasonYears.current = uniqueYears.length > 0 ? uniqueYears[0] : null;
+            seasonYears.previous = uniqueYears.length > 1 ? uniqueYears[1] : null;
+
+
+            // 4. Llenar Selectores (Teams and Leagues)
+            const teams = [...new Set([...rawData.map(x=>x.home), ...rawData.map(x=>x.away)])].sort();
+            const populate = (id) => {
+                const s = document.getElementById(id); s.innerHTML='<option value="">Seleccionar</option>';
+                teams.forEach(t => s.add(new Option(t,t)));
+            };
+            populate('teamHomeSelect'); populate('teamAwaySelect');
+            
+            const lgSel = document.getElementById('leagueSelect'); lgSel.innerHTML='<option value="all">Todas</option>';
+            [...new Set(rawData.map(x=>x.league))].sort().forEach(l=>lgSel.add(new Option(l,l)));
+
+            document.getElementById('loadingOverlay').style.display='none';
+            runBacktest();
         }
 
 
@@ -541,7 +581,7 @@
             const compatibility = checkCompatibility(optimalRangeCombined, optimizableBetsCurrent, optimizableBetsPrevious);
             
             // 3. Actualizar UI de optimización
-            updateOptimalOddsUI(optimalRangeCombined, compatibility, optimizableBetsCurrent.length, optimizableBetsPrevious.length); 
+            updateOptimalOddsUI(optimalRangeCombined, compatibility); 
 
             // 4. Actualizar UI Global
             updateGlobalUI(hist, rows, wins, bank0, bank, maxDD, lgP, tmP);
@@ -557,7 +597,7 @@
             
             let compColor = 'var(--warning)';
             if (compatibility.status === 'ALTA COMPATIBILIDAD') compColor = 'var(--success)';
-            else if (compatibility.status === 'BAJA COMPATIBILIDAD') compColor = 'var(--danger)';
+            else if (compatibility.status === 'BAJA COMPATIBILIDAD' || compatibility.status === 'COMPATIBILIDAD INCOMPLETA') compColor = 'var(--danger)';
             document.getElementById('compStatus').style.backgroundColor = compColor;
             
             document.getElementById('currentYear').innerText = seasonYears.current || 'N/A';
@@ -575,7 +615,7 @@
         }
 
 
-        // --- UI UPDATES (Global and Charts - kept same) ---
+        // --- UI UPDATES (Global and Charts) ---
         function updateGlobalUI(hist, rows, wins, start, end, dd, lgData, tmData) {
             const tot = rows.length;
             const prof = end-start;
