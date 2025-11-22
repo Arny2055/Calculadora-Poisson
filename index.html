@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Ultimate Football Backtester v8.2 (Full)</title>
+    <title>Ultimate Football Backtester v8.3 (Full - Corregido)</title>
     
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
@@ -191,6 +191,7 @@
         .text-green { color: var(--success); }
         .text-red { color: var(--danger); }
         .text-purple { color: var(--poisson-accent); }
+        .text-orange { color: var(--warning); }
 
         .poisson-card {
             background: #2f496e; 
@@ -277,7 +278,7 @@
     <div id="loadingOverlay" style="display:none;"><i class="fas fa-circle-notch spinner"></i><h3 style="margin-top:20px; color:#ccc;">Procesando Datos y Entrenando Modelo...</h3></div>
 
     <header>
-        <div class="brand"><i class="fas fa-calculator"></i> Football Backtester <span class="tag">v8.2 Full</span></div>
+        <div class="brand"><i class="fas fa-calculator"></i> Football Backtester <span class="tag">v8.3 Full</span></div>
         <div style="display:flex; gap:10px; align-items:center;">
             <input type="file" id="fileInput" accept=".csv">
             <label for="fileInput" class="btn btn-secondary"><i class="fas fa-folder-open"></i> Archivo Local</label>
@@ -498,7 +499,9 @@
         let seasonYears = { current: null, previous: null };
         let poissonTrainingData = null; 
         let chartEq=null, chartLg=null;
-        const RoR_BANK_FRACTION = 0.5;
+        const RoR_BANK_FRACTION = 0.5; // Porcentaje de banca considerado para riesgo de ruina
+        let globalWinRate = 0; // Win rate calculado en el backtest
+        let totalStakeUnits = 0; // Variable global para RoR y Yield total
 
         // --- Tabs Logic ---
         function switchTab(tabId) {
@@ -534,16 +537,19 @@
             return Math.max(0.005, f); // Mínimo 0.5% (para evitar stakes ridículamente bajos)
         }
 
-        function calculateRiskOfRuin(f, N) {
-            // N = totalBets
-            const W = parseFloat(document.getElementById('valWinRate').innerText.replace('%', '')) / 100 || 0.5;
+        function calculateRiskOfRuina(totalBets, totalStake, globalWinRate) {
+            if (totalBets === 0 || totalStake === 0) return 100;
+            
+            const W = globalWinRate;
             const L = 1 - W;
             
-            if (W <= L || N === 0) return 100;
+            // Si el edge es negativo o nulo (WinRate no supera el BreakEven), el RoR es 100%
+            const breakEven = totalBets / totalStake; // 1 / OddsPromedio
+            if (W <= breakEven) return 100; 
 
             const bankUnits = parseFloat(document.getElementById('initialBank').value) * RoR_BANK_FRACTION;
-            // Usamos una aproximación de stake promedio si la suma total de stakes es conocida
-            const avgStake = totalStakeUnits > 0 && N > 0 ? (totalStakeUnits / N) : 1; 
+            // Usamos el stake promedio como la unidad apostada para la aproximación de Kelly
+            const avgStake = totalStake / totalBets; 
 
             // Esta es la fórmula simplificada para sistemas con edge positivo
             const B_units = bankUnits / (avgStake || 1);
@@ -591,7 +597,6 @@
                         dynamicTyping: true, 
                         skipEmptyLines: true, 
                         complete: (results) => {
-                            // Filtro de objetos vacíos que a veces crea PapaParse al final del archivo
                             const validData = results.data.filter(r => Object.keys(r).length > 0 && r.HomeTeam); 
                             if (validData.length === 0 && text.length > 0) parsingErrors.push(`La URL ${url} no devolvió datos utilizables o el formato es incorrecto.`);
                             combinedData.push(...validData); 
@@ -657,7 +662,6 @@
                 if(r.goalsH >= 0 && r.goalsA >= 0) {
                     const updateStats = (team, goalsScored, goalsConceded, isHome) => {
                         if (!teamStats[team]) {
-                            // Inicializar con contadores de partidos
                             teamStats[team] = { playedH: 0, scoredH: 0, concededH: 0, playedA: 0, scoredA: 0, concededA: 0 };
                         }
                         if (isHome) {
@@ -712,11 +716,19 @@
                 if(!r.Date || !r.HomeTeam || isNaN(r.FTHG) || isNaN(r.FTAG)) return null;
                 
                 let d = r.Date; 
-                // Normalización de fecha (dd/mm/yy o dd/mm/yyyy a yyyy-mm-dd)
+                // Normalización de fecha (dd/mm/yy o dd/mm/yyyy)
                 if(typeof d === 'string' && d.includes('/')) { 
-                    const p=d.split('/'); 
-                    const year = p[2].length===2 ? '20'+p[2] : p[2];
-                    d=`${year}-${p[1].padStart(2,'0')}-${p[0].padStart(2,'0')}`; 
+                    const p = d.split('/');
+                    // Intentar manejar formatos dd/mm/yy o dd/mm/yyyy
+                    if (p.length === 3) {
+                        let year = p[2];
+                        if (year.length === 2) {
+                            const currentYear = new Date().getFullYear();
+                            const century = (currentYear - (currentYear % 100)); // 2000
+                            year = (parseInt(year) < 70) ? (century + parseInt(year)).toString() : (century - 100 + parseInt(year)).toString();
+                        }
+                        d = `${year}-${p[1].padStart(2,'0')}-${p[0].padStart(2,'0')}`; 
+                    }
                 } 
                 
                 return {
@@ -776,8 +788,6 @@
             return false;
         }
 
-        let totalStakeUnits = 0; // Variable global para RoR
-
         function calculateProfit(row, mkt, stakeType, stakeValue, bank, minOdds, maxOdds, minGoals, maxGoals, usePoisson) {
             let o=getMarketOdds(row, mkt);
             if(!o || o<1.01) return null; 
@@ -785,15 +795,15 @@
             // --- 1. Filtro de Goles ---
             if(row.totalGoals < minGoals || row.totalGoals > maxGoals) return null;
             
-            // --- 2. Filtro de Cuota Plana (Ignorado si se usa Kelly o filtro Poisson) ---
-            const bypassOddsFilter = (stakeType === 'kelly' || usePoisson);
-            if(!bypassOddsFilter && (o < minOdds || o > maxOdds)) return null; 
-
-
             let pMarket = 0;
             let oddsPoisson = 0;
+            let isValueBet = false;
+            
+            const isKelly = (stakeType === 'kelly');
+            const requiresPoisson = usePoisson || isKelly;
 
-            if (usePoisson || stakeType === 'kelly') {
+
+            if (requiresPoisson) {
                 const poissonRes = calculatePoissonProbabilities(row.home, row.away, false); 
                 if (!poissonRes) return null; 
 
@@ -807,10 +817,20 @@
 
                 oddsPoisson = 1 / pMarket;
                 
-                // Filtro de Valor Poisson 
-                // Solo se considera si la cuota Real (o) es mayor a la cuota Poisson (oddsPoisson)
-                if ((usePoisson || stakeType === 'kelly') && o <= oddsPoisson) return null;
+                // Determinar si es una apuesta de valor (Odds Real > Odds Poisson)
+                isValueBet = o > oddsPoisson;
+
+                // Filtro de Valor Poisson: SI está activo, solo se permiten apuestas de valor
+                if (usePoisson && !isValueBet) return null;
+                
+                // Si usamos Kelly, también debe ser una apuesta de valor para calcular el stake Kelly positivo
+                if (isKelly && !isValueBet) return null;
             }
+
+            // --- 2. Filtro de Cuota Plana ---
+            // Si NO se usa Kelly O el filtro Poisson, se aplica el filtro de rango de cuota simple.
+            if (!requiresPoisson && (o < minOdds || o > maxOdds)) return null; 
+
 
             // --- Lógica de Stake ---
             let actualStake;
@@ -818,10 +838,8 @@
                 actualStake = stakeValue;
             } else if (stakeType === 'percent') {
                 actualStake = bank * (stakeValue / 100);
-            } else if (stakeType === 'kelly') {
-                // Cálculo de Kelly
-                if (pMarket === 0 || o === 0 || o <= oddsPoisson) return null;
-                
+            } else if (isKelly) {
+                // Cálculo de Kelly (solo se llega aquí si ya pasó el filtro de valor)
                 const kellyFraction = calculateKellyStake(pMarket, o);
                 actualStake = bank * kellyFraction;
                 // Limitador de Kelly (stakeValue es el límite fraccional en porcentaje)
@@ -1123,11 +1141,13 @@
 
                     if(!lgP[r.league]) lgP[r.league]=0; lgP[r.league]+=res.pnl;
                     
-                    // El profit por equipo es complejo con Kelly/Poisson, pero lo mantenemos como suma simple de PnL
                     if(!tmP[r.home]) tmP[r.home]=0; tmP[r.home]+=res.pnl;
                     if(!tmP[r.away]) tmP[r.away]=0; tmP[r.away]+=res.pnl;
                 }
             });
+
+            // Actualizar WinRate global
+            globalWinRate = totalBets > 0 ? wins / totalBets : 0;
 
             const currentData = optimizableBetsCombined.filter(b => seasonYears.current && b.year == seasonYears.current);
             const previousData = optimizableBetsCombined.filter(b => seasonYears.previous && b.year == seasonYears.previous);
@@ -1141,9 +1161,8 @@
             // 3. Actualizar UI de optimización
             updateOptimalOddsUI(optimalRangeCombined, compatibility); 
             
-            // 4. Calcular RoR
-            const averageYield = totalStakeUnits > 0 ? totalProfitUnits / totalStakeUnits : 0;
-            const RoR = calculateRiskOfRuin(totalBets); // Solo necesita totalBets para el cálculo final
+            // 4. Calcular RoR (usando el globalWinRate calculado)
+            const RoR = calculateRiskOfRuina(totalBets, totalStakeUnits, globalWinRate);
 
             // 5. Actualizar UI Global
             updateGlobalUI(hist, rows, wins, bank0, bank, maxDD, lgP, tmP, totalStakeUnits, RoR);
@@ -1180,7 +1199,7 @@
                     }
 
                     if (totalBets >= 30) { 
-                        const currentYield = (totalProfit / totalBets) * 100;
+                        const currentYield = (totalProfit / totalBets) * 100; // Stake 1
                         if (currentYield > bestYield) {
                             bestYield = currentYield;
                             bestMin = min_o;
@@ -1204,7 +1223,7 @@
             const max = parseFloat(optimalRange.max);
             const STAKE_UNIT = 1.0; 
             
-            if (min === 0 || max === 0 || optimalRange.min === 'N/A') return { current: 'N/A', previous: 'N/A', currentBets: 0, previousBets: 0, totalCurrentBets: 0, totalPreviousBets: 0, status: 'NO HAY MUESTRA' };
+            if (min === 0 || max === 0 || optimalRange.min === 'N/A') return { current: 'N/A', previous: 'N/A', currentBets: 0, previousBets: 0, totalCurrentBets: currentData.length, totalPreviousBets: previousData.length, status: 'NO HAY MUESTRA' };
 
             let currentPnl = 0, currentBets = 0, totalCurrentBets = currentData.length;
             currentData.forEach(bet => {
@@ -1256,7 +1275,7 @@
             
             let compColor = 'var(--warning)';
             if (compatibility.status === 'ALTA COMPATIBILIDAD') compColor = 'var(--success)';
-            else if (compatibility.status === 'BAJA COMPATIBILIDAD' || compatibility.status === 'COMPATIBILIDAD INCOMPLETA') compColor = 'var(--danger)';
+            else if (compatibility.status === 'BAJA COMPATIBILIDAD') compColor = 'var(--danger)';
             document.getElementById('compStatus').style.backgroundColor = compColor;
             
             document.getElementById('currentYear').innerText = seasonYears.current || 'N/A';
@@ -1265,8 +1284,11 @@
             document.getElementById('currentYield').innerText = compatibility.current;
             document.getElementById('previousYield').innerText = compatibility.previous;
             
-            document.getElementById('currentYield').className = "kpi-value " + (compatibility.current.includes('-') || compatibility.current === 'N/A' ? 'text-red' : 'text-green');
-            document.getElementById('previousYield').className = "kpi-value " + (compatibility.previous.includes('-') || compatibility.previous === 'N/A' ? 'text-red' : 'text-green');
+            const isCurrentYieldNegative = compatibility.current.includes('-') || compatibility.current === 'N/A';
+            document.getElementById('currentYield').className = "kpi-value " + (isCurrentYieldNegative ? 'text-red' : 'text-green');
+            
+            const isPreviousYieldNegative = compatibility.previous.includes('-') || compatibility.previous === 'N/A';
+            document.getElementById('previousYield').className = "kpi-value " + (isPreviousYieldNegative ? 'text-red' : 'text-green');
 
 
             document.getElementById('currentSample').innerText = `(Muestra: ${compatibility.currentBets}/${compatibility.totalCurrentBets})`;
@@ -1279,9 +1301,10 @@
             const tot = rows.length;
             const prof = end-start;
             const yieldVal = totalStakeUnits>0?((prof/totalStakeUnits)*100).toFixed(1):'0';
+            const winRatePercent = tot?((wins/tot)*100).toFixed(1):'0';
             
             document.getElementById('valBets').innerText = tot;
-            document.getElementById('valWinRate').innerText = tot?((wins/tot)*100).toFixed(1)+'%':'0%';
+            document.getElementById('valWinRate').innerText = winRatePercent + '%';
             document.getElementById('valProfit').innerText = prof.toFixed(2);
             document.getElementById('valYield').innerText = yieldVal + '%';
             document.getElementById('valDrawdown').innerText = '-'+dd.toFixed(2)+'%';
@@ -1291,7 +1314,7 @@
             document.getElementById('valProfit').className = `kpi-value ${prof>=0?'text-green':'text-red'}`;
             document.getElementById('valRoR').className = `kpi-value ${RoR<=10?'text-purple':'text-red'}`;
 
-            // Tabla Principal (Añadida columna STAKE)
+            // Tabla Principal
             const tb = document.getElementById('tableBody'); tb.innerHTML='';
             rows.slice(-50).reverse().forEach(r => {
                 tb.innerHTML += `<tr><td>${r.date.substring(5)}</td><td>${r.match}</td><td>${r.sel}</td><td>${r.odds.toFixed(2)}</td><td>${r.stake.toFixed(2)}</td><td>${r.res}</td><td class="${r.pnl>=0?'text-green':'text-red'}">${r.pnl.toFixed(2)}</td><td>${r.bank.toFixed(0)}</td></tr>`;
@@ -1440,8 +1463,12 @@
             `;
             
             // Reemplaza el contenido si ya existe para evitar duplicados
-            const existingDetails = cardElement.querySelector('h5:last-of-type');
-            if (existingDetails) existingDetails.parentElement.removeChild(existingDetails);
+            let existingDetails = cardElement.querySelector('h5:last-of-type');
+            if (existingDetails && existingDetails.textContent.includes('Rendimiento por Temporada')) {
+                existingDetails.nextElementSibling.remove();
+                existingDetails.remove();
+                existingDetails = null;
+            }
             
             cardElement.insertAdjacentHTML('beforeend', detailsHTML);
         }
