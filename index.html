@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Ultimate Football Backtester v8.1 (Layout Compacto)</title>
+    <title>Ultimate Football Backtester v8.2 (Full)</title>
     
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
@@ -277,7 +277,7 @@
     <div id="loadingOverlay" style="display:none;"><i class="fas fa-circle-notch spinner"></i><h3 style="margin-top:20px; color:#ccc;">Procesando Datos y Entrenando Modelo...</h3></div>
 
     <header>
-        <div class="brand"><i class="fas fa-calculator"></i> Football Backtester <span class="tag">v8.1 Compacto</span></div>
+        <div class="brand"><i class="fas fa-calculator"></i> Football Backtester <span class="tag">v8.2 Full</span></div>
         <div style="display:flex; gap:10px; align-items:center;">
             <input type="file" id="fileInput" accept=".csv">
             <label for="fileInput" class="btn btn-secondary"><i class="fas fa-folder-open"></i> Archivo Local</label>
@@ -535,15 +535,17 @@
         }
 
         function calculateRiskOfRuin(f, N) {
+            // N = totalBets
             const W = parseFloat(document.getElementById('valWinRate').innerText.replace('%', '')) / 100 || 0.5;
             const L = 1 - W;
             
             if (W <= L || N === 0) return 100;
 
             const bankUnits = parseFloat(document.getElementById('initialBank').value) * RoR_BANK_FRACTION;
-            const avgStake = N > 0 ? (totalStakeUnits / N) : 1; 
+            // Usamos una aproximación de stake promedio si la suma total de stakes es conocida
+            const avgStake = totalStakeUnits > 0 && N > 0 ? (totalStakeUnits / N) : 1; 
 
-            // Esta es la fórmula simplificada que usamos para sistemas con edge positivo
+            // Esta es la fórmula simplificada para sistemas con edge positivo
             const B_units = bankUnits / (avgStake || 1);
             const RoR_Estimate = Math.pow((L / W), B_units);
 
@@ -563,14 +565,16 @@
 
             document.getElementById('loadingOverlay').style.display = 'flex';
 
+            // Usar CORS proxy para evitar problemas de Same-Origin Policy
+            const corsProxy = 'https://api.allorigins.win/raw?url=';
             const urls = [urlCurrent];
             if (urlPrevious) urls.push(urlPrevious);
 
             try {
                 const fetchPromises = urls.map(url => 
-                    fetch('https://api.allorigins.win/raw?url=' + encodeURIComponent(url))
+                    fetch(corsProxy + encodeURIComponent(url))
                         .then(res => {
-                            if (!res.ok) throw new Error(`Fallo al obtener datos de ${url}.`);
+                            if (!res.ok) throw new Error(`Fallo al obtener datos de ${url}. Estado: ${res.status}`);
                             return res.text();
                         })
                 );
@@ -587,8 +591,9 @@
                         dynamicTyping: true, 
                         skipEmptyLines: true, 
                         complete: (results) => {
-                            const validData = results.data.filter(r => Object.keys(r).length > 0);
-                            if (validData.length === 0 && text.length > 0) parsingErrors.push(`La URL ${url} no devolvió datos utilizables.`);
+                            // Filtro de objetos vacíos que a veces crea PapaParse al final del archivo
+                            const validData = results.data.filter(r => Object.keys(r).length > 0 && r.HomeTeam); 
+                            if (validData.length === 0 && text.length > 0) parsingErrors.push(`La URL ${url} no devolvió datos utilizables o el formato es incorrecto.`);
                             combinedData.push(...validData); 
                         },
                         error: (error, file) => {
@@ -619,7 +624,7 @@
                          alert("❌ Error cargando datos: El archivo CSV local no contiene datos utilizables.");
                          document.getElementById('loadingOverlay').style.display='none';
                     } else {
-                         processData(r.data);
+                         processData(r.data.filter(r => Object.keys(r).length > 0 && r.HomeTeam));
                     }
                 },
                 error: (error, file) => {
@@ -636,6 +641,7 @@
             let totalHomeGoals = 0;
             let totalAwayGoals = 0;
 
+            // 1. Conteo global
             data.forEach(r => {
                 if(r.goalsH >= 0 && r.goalsA >= 0) {
                     totalMatches++;
@@ -646,10 +652,12 @@
             
             if (totalMatches === 0) return null;
 
+            // 2. Conteo por equipo
             data.forEach(r => {
                 if(r.goalsH >= 0 && r.goalsA >= 0) {
                     const updateStats = (team, goalsScored, goalsConceded, isHome) => {
                         if (!teamStats[team]) {
+                            // Inicializar con contadores de partidos
                             teamStats[team] = { playedH: 0, scoredH: 0, concededH: 0, playedA: 0, scoredA: 0, concededA: 0 };
                         }
                         if (isHome) {
@@ -668,6 +676,7 @@
                 }
             });
 
+            // 3. Cálculos de coeficientes
             const avgGoalsHome = totalHomeGoals / totalMatches;
             const avgGoalsAway = totalAwayGoals / totalMatches;
             
@@ -676,13 +685,19 @@
             for (const team in teamStats) {
                 const stats = teamStats[team];
                 
+                // Coeficientes de Local
                 const attH = (stats.playedH > 0) ? (stats.scoredH / stats.playedH) / avgGoalsHome : 1.0;
                 const defH = (stats.playedH > 0) ? (stats.concededH / stats.playedH) / avgGoalsAway : 1.0;
                 
+                // Coeficientes de Visitante
                 const attA = (stats.playedA > 0) ? (stats.scoredA / stats.playedA) / avgGoalsAway : 1.0;
                 const defA = (stats.playedA > 0) ? (stats.concededA / stats.playedA) / avgGoalsHome : 1.0;
 
-                teamCoeffs[team] = { attH, defH, attA, defA };
+                teamCoeffs[team] = { 
+                    attH, defH, attA, defA, 
+                    playedH: stats.playedH, // Muestra Local
+                    playedA: stats.playedA  // Muestra Visitante
+                };
             }
 
             return {
@@ -693,9 +708,11 @@
 
         function processData(data) {
             rawData = data.map(r => {
+                // Validación mínima de campos clave
                 if(!r.Date || !r.HomeTeam || isNaN(r.FTHG) || isNaN(r.FTAG)) return null;
                 
                 let d = r.Date; 
+                // Normalización de fecha (dd/mm/yy o dd/mm/yyyy a yyyy-mm-dd)
                 if(typeof d === 'string' && d.includes('/')) { 
                     const p=d.split('/'); 
                     const year = p[2].length===2 ? '20'+p[2] : p[2];
@@ -704,6 +721,7 @@
                 
                 return {
                     date:d, league:r.Div, home:r.HomeTeam, away:r.AwayTeam, res:r.FTR, goalsH:r.FTHG, goalsA:r.FTAG,
+                    // Uso de operadores lógicos OR (||) para fallback de cuotas si no existe B365
                     oddsH:r.B365H||r.AvgH||1.01, oddsD:r.B365D||r.AvgD||1.01, oddsA:r.B365A||r.AvgA||1.01,
                     oddsO25:r['B365>2.5']||r.Avg25||1.01, oddsU25:r['B365<2.5']||r.Avg25_1||1.01,
                     totalGoals: r.FTHG + r.FTAG
@@ -713,13 +731,14 @@
             rawData.sort((a, b) => a.date.localeCompare(b.date));
             poissonTrainingData = trainPoissonModel(rawData);
             
+            // Detección de temporadas
             const allDates = rawData.map(r => r.date.substring(0, 4));
             const uniqueYears = [...new Set(allDates)].sort().reverse(); 
             
             seasonYears.current = uniqueYears.length > 0 ? uniqueYears[0] : null;
             seasonYears.previous = uniqueYears.length > 1 ? uniqueYears[1] : null;
 
-
+            // Rellenar Selectores de Equipos y Ligas
             if(poissonTrainingData) {
                 const teams = Object.keys(poissonTrainingData.teamCoeffs).sort();
                 const populate = (id) => {
@@ -733,6 +752,7 @@
             [...new Set(rawData.map(x=>x.league))].sort().forEach(l=>lgSel.add(new Option(l,l)));
 
             document.getElementById('loadingOverlay').style.display='none';
+            // Ejecutar backtest inicial
             runBacktest(); 
         }
 
@@ -787,7 +807,7 @@
 
                 oddsPoisson = 1 / pMarket;
                 
-                // Filtro de Valor Poisson (Solo si se activó el checkbox o se usa Kelly)
+                // Filtro de Valor Poisson 
                 // Solo se considera si la cuota Real (o) es mayor a la cuota Poisson (oddsPoisson)
                 if ((usePoisson || stakeType === 'kelly') && o <= oddsPoisson) return null;
             }
@@ -861,6 +881,7 @@
             
             const pUnder25 = 1 - pOver25; 
             
+            // Normalizar el 1X2 para que sume 1 (opcional)
             if (normalize) {
                 const pTotal1X2 = pHome + pDraw + pAway;
                 if (pTotal1X2 > 0) {
@@ -902,7 +923,6 @@
                 return;
             }
 
-            // Buscar el último partido o un promedio de cuotas recientes para la UI (solo informativo)
             const lastMatch = rawData.find(r => r.home === homeTeam && r.away === awayTeam); 
             
             updatePoissonCard(homeTeam, awayTeam, poissonRes, lastMatch, mkt);
@@ -912,6 +932,14 @@
         function updatePoissonCard(home, away, res, lastMatch, selectedMkt) {
             const card = document.getElementById('poissonCard');
             card.style.display = 'block';
+
+            const homeCoeffs = poissonTrainingData.teamCoeffs[home];
+            const awayCoeffs = poissonTrainingData.teamCoeffs[away];
+            
+            // Obtener las muestras de partidos jugados como local (home) y como visitante (away)
+            const sampleH = homeCoeffs.playedH; // Muestra del local jugando como local
+            const sampleA = awayCoeffs.playedA; // Muestra del visitante jugando como visitante
+
 
             const markets = {
                 'H': { p: res.pHome, odds: lastMatch ? lastMatch.oddsH : null, label: 'Local (1)' },
@@ -1028,6 +1056,15 @@
                         <span class="text-purple" style="font-weight:600;">Goles Exp. (V):</span> <b>${res.lambda_A.toFixed(2)}</b>
                     </div>
                 </div>
+                
+                <div style="display:flex; justify-content:space-around; text-align:center; padding:5px 0; border-bottom:1px solid var(--poisson-dark);">
+                    <div style="font-size:0.75rem;">
+                        <span class="text-secondary" style="font-weight:600;"><i class="fas fa-home"></i> Muestra ${home}:</span> <b>${sampleH} Partidos Locales</b>
+                    </div>
+                    <div style="font-size:0.75rem;">
+                        <span class="text-secondary" style="font-weight:600;"><i class="fas fa-plane-departure"></i> Muestra ${away}:</span> <b>${sampleA} Partidos Visitantes</b>
+                    </div>
+                </div>
 
                 <div class="poisson-grid-wrapper">
                     <div class="poisson-odds-grid">
@@ -1106,7 +1143,7 @@
             
             // 4. Calcular RoR
             const averageYield = totalStakeUnits > 0 ? totalProfitUnits / totalStakeUnits : 0;
-            const RoR = calculateRiskOfRuin(averageYield, totalBets);
+            const RoR = calculateRiskOfRuin(totalBets); // Solo necesita totalBets para el cálculo final
 
             // 5. Actualizar UI Global
             updateGlobalUI(hist, rows, wins, bank0, bank, maxDD, lgP, tmP, totalStakeUnits, RoR);
@@ -1358,18 +1395,19 @@
             document.getElementById('projYield').className = `kpi-value ${historicalYield >= 0 ? 'text-green' : 'text-red'}`;
 
             // Mostrar el Yield y la Muestra de la temporada actual y anterior para el mismo rango
-            displaySeasonYieldsForRange(minOdds, maxOdds);
+            displaySeasonYieldsForRange(minOdds, maxOdds, card);
         }
 
-        function displaySeasonYieldsForRange(minO, maxO) {
+        function displaySeasonYieldsForRange(minO, maxO, cardElement) {
             let currentPnl = 0, currentBets = 0;
             let previousPnl = 0, previousBets = 0;
             const STAKE_UNIT = 1.0; 
+            const mkt = document.getElementById('marketSelect').value;
 
             rawData.forEach(r => {
-                const o = getMarketOdds(r, document.getElementById('marketSelect').value);
+                const o = getMarketOdds(r, mkt);
                 if (o >= minO && o <= maxO) {
-                    const w = isWinningBet(r, document.getElementById('marketSelect').value);
+                    const w = isWinningBet(r, mkt);
                     const pnl = w ? (o - STAKE_UNIT) : -STAKE_UNIT;
                     
                     const year = r.date.substring(0, 4);
@@ -1402,10 +1440,10 @@
             `;
             
             // Reemplaza el contenido si ya existe para evitar duplicados
-            const existingDetails = card.querySelector('h5:last-of-type');
+            const existingDetails = cardElement.querySelector('h5:last-of-type');
             if (existingDetails) existingDetails.parentElement.removeChild(existingDetails);
             
-            card.insertAdjacentHTML('beforeend', detailsHTML);
+            cardElement.insertAdjacentHTML('beforeend', detailsHTML);
         }
     </script>
 </body>
