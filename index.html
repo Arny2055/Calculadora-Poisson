@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Ultimate Football Backtester v6.0 (Dual Season)</title>
+    <title>Ultimate Football Backtester v6.1 (Optimizer)</title>
     
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
@@ -39,7 +39,7 @@
             overflow: hidden;
         }
 
-        /* HEADER MODIFICADO PARA DOS URLS */
+        /* HEADER */
         header {
             background-color: var(--bg-panel);
             padding: 0 20px;
@@ -56,7 +56,7 @@
         
         .url-bar { 
             display: grid; 
-            grid-template-columns: 1fr 1fr auto; /* Dos inputs y un botón */
+            grid-template-columns: 1fr 1fr auto; 
             gap: 10px; 
             flex-grow: 1; 
         }
@@ -92,6 +92,16 @@
         .kpi-value { font-size: 1.2rem; font-weight: 700; margin-top: 2px; }
         .text-green { color: var(--success); }
         .text-red { color: var(--danger); }
+
+        /* OPTIMIZATION CARD (NEW) */
+        .opt-card {
+            background: #2f496e; 
+            text-align:center;
+            padding: 15px;
+            border-radius: 6px;
+            border: 1px solid var(--accent);
+            flex-shrink: 0;
+        }
 
         /* MATCHUP CARD */
         .matchup-card {
@@ -144,7 +154,7 @@
     <div id="loadingOverlay"><i class="fas fa-circle-notch spinner"></i><h3 style="margin-top:15px; color:#ccc;">Procesando Datos...</h3></div>
 
     <header>
-        <div class="brand"><i class="fas fa-trophy"></i> Backtester <span class="tag">v6.0 DUAL</span></div>
+        <div class="brand"><i class="fas fa-trophy"></i> Backtester <span class="tag">v6.1 OPT</span></div>
         <div class="url-bar">
             <input type="text" id="urlInputCurrent" class="url-input" placeholder="URL Temporada ACTUAL (Obligatoria)">
             <input type="text" id="urlInputPrevious" class="url-input" placeholder="URL Temporada ANTERIOR (Opcional)">
@@ -253,13 +263,22 @@
                 </div>
             </div>
 
-            <div class="kpi-grid">
+            <div class="kpi-grid" style="grid-template-columns: repeat(5, 1fr);">
                 <div class="kpi-card"><div class="kpi-title">Apuestas (Global)</div><div class="kpi-value" id="valBets">0</div></div>
                 <div class="kpi-card"><div class="kpi-title">Win Rate</div><div class="kpi-value" id="valWinRate">0%</div></div>
                 <div class="kpi-card"><div class="kpi-title">Profit</div><div class="kpi-value" id="valProfit">0.00</div></div>
                 <div class="kpi-card"><div class="kpi-title">Yield</div><div class="kpi-value" id="valYield">0%</div></div>
                 <div class="kpi-card"><div class="kpi-title" style="color:#ef4444;">Drawdown</div><div class="kpi-value text-red" id="valDrawdown">0%</div></div>
             </div>
+            
+            <div class="opt-card">
+                <div class="kpi-title" style="color:white; font-size:1rem;">✅ RANGO ÓPTIMO ENCONTRADO (Maximiza Yield)</div>
+                <div class="kpi-value" id="valOptimalOddsRange" style="font-size:1.8rem;">N/A</div>
+                <div class="kpi-title" style="color:white; font-size:0.8rem; margin-top:5px;">
+                    Yield en Rango: <b id="valOptimalOddsYield">0.00%</b> | Apuestas en Rango: <b id="valOptimalOddsBets">0</b>
+                </div>
+            </div>
+
 
             <div class="charts-section">
                 <div class="chart-box-full">
@@ -315,7 +334,6 @@
             if (urlPrevious) urls.push(urlPrevious);
 
             try {
-                // 1. Fetch de todas las URLs
                 const fetchPromises = urls.map(url => 
                     fetch('https://api.allorigins.win/raw?url=' + encodeURIComponent(url))
                         .then(res => {
@@ -326,7 +344,6 @@
                 
                 const texts = await Promise.all(fetchPromises);
                 
-                // 2. Parsear todos los textos y combinar
                 let combinedData = [];
                 texts.forEach(text => {
                     Papa.parse(text, { 
@@ -334,7 +351,6 @@
                         dynamicTyping: true, 
                         skipEmptyLines: true, 
                         complete: (results) => {
-                            // Se asume que PapaParse es síncrono en este callback, por lo que es seguro pushear
                             combinedData.push(...results.data.filter(r => Object.keys(r).length > 0)); 
                         } 
                     });
@@ -369,7 +385,6 @@
                 if(!r.Date || !r.HomeTeam) return null;
                 
                 let d = r.Date; 
-                // Normalizar fecha (d/m/yy o d/m/yyyy -> YYYY-MM-DD)
                 if(typeof d === 'string' && d.includes('/')) { 
                     const p=d.split('/'); 
                     const year = p[2].length===2 ? '20'+p[2] : p[2];
@@ -415,6 +430,52 @@
             return { pnl: w ? (stake*o - stake) : -stake, won: w, odds: o };
         }
 
+        function findOptimalOddsRange(optimizableBets) {
+            if (optimizableBets.length < 50) return { min: 'N/A', max: 'N/A', yield: 0, bets: 0 }; 
+
+            let bestYield = -100;
+            let bestMin = 0, bestMax = 0;
+            let bestBets = 0;
+            const step = 0.05; // Granularidad
+            const maxOddsLimit = 8.00; // Límite de búsqueda
+
+            for (let min_o = 1.01; min_o <= maxOddsLimit; min_o += step) {
+                min_o = parseFloat(min_o.toFixed(2));
+
+                for (let max_o = min_o; max_o <= maxOddsLimit; max_o += step) {
+                    max_o = parseFloat(max_o.toFixed(2));
+                    
+                    let totalProfit = 0;
+                    let totalBets = 0;
+
+                    for (const bet of optimizableBets) {
+                        if (bet.odds >= min_o && bet.odds <= max_o) {
+                            totalProfit += bet.pnl;
+                            totalBets++;
+                        }
+                    }
+
+                    if (totalBets >= 30) { // Muestra mínima de 30 apuestas
+                        const currentYield = (totalProfit / totalBets) * 100;
+                        if (currentYield > bestYield) {
+                            bestYield = currentYield;
+                            bestMin = min_o;
+                            bestMax = max_o;
+                            bestBets = totalBets;
+                        }
+                    }
+                }
+            }
+            
+            return { 
+                min: bestMin.toFixed(2), 
+                max: bestMax.toFixed(2), 
+                yield: bestYield.toFixed(2), 
+                bets: bestBets 
+            };
+        }
+
+
         function runBacktest() {
             if(!rawData.length) return;
             const mkt = document.getElementById('marketSelect').value;
@@ -426,13 +487,21 @@
             const lg = document.getElementById('leagueSelect').value;
 
             let bank=bank0, peak=bank0, maxDD=0, wins=0, hist=[{x:'Inicio', y:bank0}], rows=[], lgP={}, tmP={};
+            let optimizableBets = [];
 
             const filtered = rawData.filter(r => lg==='all' || r.league===lg);
 
             filtered.forEach(r => {
+                // Cálculo para el backtest normal (con filtros de cuota y stake configurados)
                 const stake = (stT==='flat') ? stV : (bank*(stV/100));
                 const res = calculateProfit(r, mkt, stake, minO, maxO);
                 
+                // Cálculo para la optimización (stake 1u, sin filtros de cuota)
+                const resOptimizable = calculateProfit(r, mkt, 1.0, 1.0, 50.0); 
+                if(resOptimizable) {
+                    optimizableBets.push({ odds: resOptimizable.odds, pnl: resOptimizable.pnl });
+                }
+
                 if(res) {
                     bank += res.pnl;
                     if(res.won) wins++;
@@ -449,70 +518,26 @@
                 }
             });
 
+            // Lógica de Optimización
+            const optimalRange = findOptimalOddsRange(optimizableBets);
+            document.getElementById('valOptimalOddsRange').innerText = optimalRange.min + ' - ' + optimalRange.max;
+            document.getElementById('valOptimalOddsYield').innerText = optimalRange.yield + '%';
+            document.getElementById('valOptimalOddsBets').innerText = optimalRange.bets;
+
+
             updateGlobalUI(hist, rows, wins, bank0, bank, maxDD, lgP, tmP);
-        }
-
-        // --- ANALIZADOR MATCHUP ---
-        function analyzeMatchup() {
-            const tH = document.getElementById('teamHomeSelect').value;
-            const tA = document.getElementById('teamAwaySelect').value;
-            if(!tH || !tA) return alert("Selecciona ambos equipos");
-
-            const mkt = document.getElementById('marketSelect').value;
-            const minO = parseFloat(document.getElementById('minOdds').value);
-            const maxO = parseFloat(document.getElementById('maxOdds').value);
-            const stV = 1; // Stake 1u
-
-            // 1. Analizar Local en Casa
-            let hBets=0, hWins=0, hPnl=0;
-            rawData.filter(r => r.home === tH).forEach(r => {
-                const res = calculateProfit(r, mkt, stV, minO, maxO);
-                if(res) { hBets++; hPnl+=res.pnl; if(res.won) hWins++; }
-            });
-
-            // 2. Analizar Visita Fuera
-            let aBets=0, aWins=0, aPnl=0;
-            rawData.filter(r => r.away === tA).forEach(r => {
-                const res = calculateProfit(r, mkt, stV, minO, maxO);
-                if(res) { aBets++; aPnl+=res.pnl; if(res.won) aWins++; }
-            });
-
-            // 3. H2H Directo 
-            const h2h = rawData.filter(r => (r.home===tH && r.away===tA) || (r.home===tA && r.away===tH));
-            const lastMatch = h2h.length ? `${h2h[h2h.length-1].home} ${h2h[h2h.length-1].goalsH}-${h2h[h2h.length-1].goalsA} ${h2h[h2h.length-1].away} (${h2h[h2h.length-1].date.substring(0,4)})` : "N/A";
-
-            // Renderizar Card
-            document.getElementById('matchupCard').style.display = 'block';
-            document.getElementById('matchupStrategy').innerText = `Estrategia Actual: ${mkt} | Cuotas ${minO} - ${maxO}`;
-            
-            // Fill Home
-            document.getElementById('muHomeName').innerText = tH;
-            document.getElementById('muHomeBets').innerText = hBets;
-            document.getElementById('muHomeWin').innerText = hBets ? ((hWins/hBets)*100).toFixed(0)+'%' : '0%';
-            document.getElementById('muHomePL').innerText = hPnl.toFixed(2) + 'u';
-            document.getElementById('muHomePL').className = "stat-value " + (hPnl>=0?'text-green':'text-red');
-            document.getElementById('muHomeYield').innerText = hBets ? ((hPnl/hBets)*100).toFixed(1)+'%' : '0%';
-
-            // Fill Away
-            document.getElementById('muAwayName').innerText = tA;
-            document.getElementById('muAwayBets').innerText = aBets;
-            document.getElementById('muAwayWin').innerText = aBets ? ((aWins/aBets)*100).toFixed(0)+'%' : '0%';
-            document.getElementById('muAwayPL').innerText = aPnl.toFixed(2) + 'u';
-            document.getElementById('muAwayPL').className = "stat-value " + (aPnl>=0?'text-green':'text-red');
-            document.getElementById('muAwayYield').innerText = aBets ? ((aPnl/aBets)*100).toFixed(1)+'%' : '0%';
-
-            document.getElementById('h2hResult').innerText = lastMatch;
         }
 
         // --- UI UPDATES ---
         function updateGlobalUI(hist, rows, wins, start, end, dd, lgData, tmData) {
             const tot = rows.length;
             const prof = end-start;
+            const yieldVal = tot?((prof/tot)*100).toFixed(1):'0';
             
             document.getElementById('valBets').innerText = tot;
             document.getElementById('valWinRate').innerText = tot?((wins/tot)*100).toFixed(1)+'%':'0%';
             document.getElementById('valProfit').innerText = prof.toFixed(2);
-            document.getElementById('valYield').innerText = tot?((prof/tot)*100).toFixed(1)+'%':'0%';
+            document.getElementById('valYield').innerText = yieldVal + '%';
             document.getElementById('valDrawdown').innerText = '-'+dd.toFixed(2)+'%';
 
             document.getElementById('valProfit').className = `kpi-value ${prof>=0?'text-green':'text-red'}`;
