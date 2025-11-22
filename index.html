@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Ultimate Football Backtester v6.4 (Mobile First)</title>
+    <title>Ultimate Football Backtester v6.5 (Matchup Fix)</title>
     
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
@@ -94,7 +94,7 @@
         .text-red { color: var(--danger); }
         .text-orange { color: var(--warning); }
 
-        /* OPTIMIZATION CARD (NEW) */
+        /* OPTIMIZATION CARD */
         .opt-card {
             background: #2f496e; 
             padding: 15px;
@@ -185,7 +185,7 @@
 
             /* Chart/Table Adjustment (Stack side-by-side elements) */
             .split-row {
-                display: flex; /* Ensure flex for stacking */
+                display: flex; 
                 flex-direction: column;
                 gap: 15px;
             }
@@ -198,7 +198,7 @@
                 overflow-x: auto;
             }
             table {
-                min-width: 600px; /* Force table to be wide enough to scroll */
+                min-width: 600px; 
             }
         }
     </style>
@@ -208,7 +208,7 @@
     <div id="loadingOverlay"><i class="fas fa-circle-notch spinner"></i><h3 style="margin-top:15px; color:#ccc;">Procesando Datos...</h3></div>
 
     <header>
-        <div class="brand"><i class="fas fa-trophy"></i> Backtester <span class="tag">v6.4 MOB</span></div>
+        <div class="brand"><i class="fas fa-trophy"></i> Backtester <span class="tag">v6.5 FIX</span></div>
         <div class="url-bar">
             <input type="text" id="urlInputCurrent" class="url-input" placeholder="URL Temporada ACTUAL (Obligatoria)">
             <input type="text" id="urlInputPrevious" class="url-input" placeholder="URL Temporada ANTERIOR (Opcional)">
@@ -283,7 +283,7 @@
 
         <main class="main">
             
-            <div id="matchupCard" class="matchup-card" style="display:none;"></div>
+            <div id="matchupCard" class="matchup-card kpi-card" style="display:none;"></div>
 
             <div class="kpi-grid">
                 <div class="kpi-card"><div class="kpi-title">Apuestas (Global)</div><div class="kpi-value" id="valBets">0</div></div>
@@ -451,6 +451,95 @@
             }); 
         }
 
+        // --- ANÁLISIS DE ENFRENTAMIENTOS (H2H) ---
+        function analyzeMatchup() {
+            const homeTeam = document.getElementById('teamHomeSelect').value;
+            const awayTeam = document.getElementById('teamAwaySelect').value;
+            
+            if (!homeTeam || !awayTeam || homeTeam === awayTeam) {
+                alert("Seleccione dos equipos diferentes para analizar.");
+                document.getElementById('matchupCard').style.display = 'none';
+                return;
+            }
+            
+            const mkt = document.getElementById('marketSelect').value;
+            const minO = parseFloat(document.getElementById('minOdds').value);
+            const maxO = parseFloat(document.getElementById('maxOdds').value);
+
+            let stats = { bets: 0, wins: 0, profit: 0, home: { wins: 0, profit: 0 }, away: { wins: 0, profit: 0 } };
+
+            // 1. Filtrar partidos entre estos dos equipos (sin importar quién fue local)
+            const filteredMatches = rawData.filter(r => 
+                (r.home === homeTeam && r.away === awayTeam) || 
+                (r.home === awayTeam && r.away === homeTeam)
+            );
+            
+            // 2. Ejecutar análisis (stake 1u, sin gestión de banca)
+            filteredMatches.forEach(r => {
+                const res = calculateProfit(r, mkt, 1.0, minO, maxO); 
+                
+                if (res) {
+                    stats.bets++;
+                    stats.profit += res.pnl;
+                    if (res.won) stats.wins++;
+                    
+                    // Contabilizar rentabilidad según quién era el Local real del partido
+                    if (r.home === homeTeam) {
+                        stats.home.profit += res.pnl;
+                        if (res.won) stats.home.wins++;
+                    } else if (r.home === awayTeam) {
+                        stats.away.profit += res.pnl;
+                        if (res.won) stats.away.wins++;
+                    }
+                }
+            });
+
+            // 3. Actualizar UI
+            updateMatchupCard(homeTeam, awayTeam, stats);
+        }
+
+        function updateMatchupCard(home, away, stats) {
+            const card = document.getElementById('matchupCard');
+            const wr = stats.bets > 0 ? ((stats.wins / stats.bets) * 100).toFixed(1) : '0';
+            const yieldVal = stats.bets > 0 ? ((stats.profit / stats.bets) * 100).toFixed(1) : '0';
+            const profitClass = stats.profit >= 0 ? 'text-green' : 'text-red';
+
+            if (stats.bets === 0) {
+                card.innerHTML = `<h3 style="color:var(--danger); margin:0;">No hay partidos históricos entre ${home} y ${away} con los filtros de cuota seleccionados.</h3>`;
+                card.style.display = 'block';
+                card.style.backgroundColor = 'var(--bg-panel)';
+                return;
+            }
+            
+            card.style.display = 'block';
+            card.style.backgroundColor = '#1e3a8a'; 
+            card.style.borderColor = '#3b82f6';
+
+            card.innerHTML = `
+                <h3 style="margin-top:0; color:white; border-bottom:1px solid #3b82f6; padding-bottom:5px;">📊 Análisis H2H: ${home} vs ${away}</h3>
+                <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;">
+                    <div style="background:rgba(0,0,0,0.1); padding:10px; border-radius:4px; border:1px solid #3b82f6;">
+                        <div class="kpi-title">TOTAL H2H (${stats.bets} apuestas)</div>
+                        <div class="kpi-value ${profitClass}">${stats.profit.toFixed(2)}</div>
+                        <div class="kpi-title">Yield: ${yieldVal}% | Win Rate: ${wr}%</div>
+                    </div>
+                    
+                    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:5px;">
+                        <div style="background:rgba(0,0,0,0.1); padding:5px; border-radius:4px; border:1px solid #3b82f6;">
+                            <div class="kpi-title" style="font-size:0.7rem; color:white; font-weight:bold;">${home} (Local)</div>
+                            <div class="kpi-value" style="font-size:1rem; ${stats.home.profit >= 0 ? 'color:var(--success)' : 'color:var(--danger)'}">${stats.home.profit.toFixed(2)}</div>
+                            <div class="kpi-title" style="font-size:0.7rem;">Gana: ${stats.home.wins} veces</div>
+                        </div>
+                        <div style="background:rgba(0,0,0,0.1); padding:5px; border-radius:4px; border:1px solid #3b82f6;">
+                            <div class="kpi-title" style="font-size:0.7rem; color:white; font-weight:bold;">${away} (Local)</div>
+                            <div class="kpi-value" style="font-size:1rem; ${stats.away.profit >= 0 ? 'color:var(--success)' : 'color:var(--danger)'}">${stats.away.profit.toFixed(2)}</div>
+                            <div class="kpi-title" style="font-size:0.7rem;">Gana: ${stats.away.wins} veces</div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+        
         // --- LÓGICA BACKTEST Y OPTIMIZACIÓN (Sin cambios de lógica) ---
         function calculateProfit(row, mkt, stake, min, max) {
             let o=0, w=false;
@@ -667,6 +756,9 @@
 
             // 4. Actualizar UI Global
             updateGlobalUI(hist, rows, wins, bank0, bank, maxDD, lgP, tmP);
+            
+            // Ocultar tarjeta H2H al hacer Backtest Global
+            document.getElementById('matchupCard').style.display = 'none';
         }
 
         function updateOptimalOddsUI(optimalRange, compatibility) {
