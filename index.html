@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Ultimate Football Backtester v6.6 (Refined Matchup)</title>
+    <title>Ultimate Football Backtester v6.7 (New Markets)</title>
     
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
@@ -208,7 +208,7 @@
     <div id="loadingOverlay"><i class="fas fa-circle-notch spinner"></i><h3 style="margin-top:15px; color:#ccc;">Procesando Datos...</h3></div>
 
     <header>
-        <div class="brand"><i class="fas fa-trophy"></i> Backtester <span class="tag">v6.6 RMD</span></div>
+        <div class="brand"><i class="fas fa-trophy"></i> Backtester <span class="tag">v6.7 NM</span></div>
         <div class="url-bar">
             <input type="text" id="urlInputCurrent" class="url-input" placeholder="URL Temporada ACTUAL (Obligatoria)">
             <input type="text" id="urlInputPrevious" class="url-input" placeholder="URL Temporada ANTERIOR (Opcional)">
@@ -245,6 +245,8 @@
                     <option value="A">Visita (2)</option>
                     <option value="O25">Over 2.5 Goles</option>
                     <option value="U25">Under 2.5 Goles</option>
+                    <option value="BTSY">BTTS - Sí</option>
+                    <option value="BTSN">BTTS - No</option>
                 </select>
             </div>
 
@@ -407,7 +409,6 @@
                             combinedData.push(...validData); 
                         },
                         error: (error, file) => {
-                            // Limpiar console para no duplicar errores
                             console.error(`Error de PapaParse en la URL ${url}. Mensaje: ${error.message}`);
                             parsingErrors.push(`Error de parsing en la URL ${url}. Mensaje: ${error.message}`);
                         }
@@ -456,12 +457,19 @@
         // --- LÓGICA CORE ---
         function calculateProfit(row, mkt, stake, min, max) {
             let o=0, w=false;
+            
+            // 1. Mercados 1X2
             if(mkt==='H'){ o=row.oddsH; w=row.res==='H'; }
             else if(mkt==='D'){ o=row.oddsD; w=row.res==='D'; }
             else if(mkt==='A'){ o=row.oddsA; w=row.res==='A'; }
+            
+            // 2. Mercados de Goles (Over/Under 2.5)
             else if(mkt==='O25'){ o=row.oddsO25; w=(row.goalsH+row.goalsA)>2.5; }
-            // Se mantiene el fallback 1.9 para U25 si la cuota está vacía (asunción de línea estándar)
             else if(mkt==='U25'){ o=row.oddsU25||1.9; w=(row.goalsH+row.goalsA)<2.5; }
+            
+            // 3. Mercados BTTS (Ambos Marcan) (NUEVO)
+            else if(mkt==='BTSY'){ o=row.oddsBTSY; w=(row.goalsH>0 && row.goalsA>0); }
+            else if(mkt==='BTSN'){ o=row.oddsBTSN; w=(row.goalsH===0 || row.goalsA===0); }
             
             if(!o || o<min || o>max) return null; 
             return { pnl: w ? (stake*o - stake) : -stake, won: w, odds: o };
@@ -482,37 +490,32 @@
             const minO = parseFloat(document.getElementById('minOdds').value);
             const maxO = parseFloat(document.getElementById('maxOdds').value);
 
-            // Objeto para almacenar estadísticas detalladas por ubicación
             let stats = { 
                 bets: 0, 
                 wins: 0, 
                 profit: 0, 
-                home: { bets: 0, wins: 0, profit: 0 }, // stats para el Equipo A cuando juega de Local
-                away: { bets: 0, wins: 0, profit: 0 }  // stats para el Equipo B cuando juega de Local
+                home: { bets: 0, wins: 0, profit: 0 }, 
+                away: { bets: 0, wins: 0, profit: 0 } 
             };
 
-            // 1. Filtrar partidos entre estos dos equipos (sin importar quién fue local)
             const filteredMatches = rawData.filter(r => 
                 (r.home === homeTeam && r.away === awayTeam) || 
                 (r.home === awayTeam && r.away === homeTeam)
             );
             
-            // 2. Ejecutar análisis (stake 1u, sin gestión de banca)
             filteredMatches.forEach(r => {
                 const res = calculateProfit(r, mkt, 1.0, minO, maxO); 
                 
                 if (res) {
-                    // Stats Globales H2H
                     stats.bets++;
                     stats.profit += res.pnl;
                     if (res.won) stats.wins++;
                     
-                    // Stats Específicas por Ubicación
                     if (r.home === homeTeam) {
                         stats.home.bets++;
                         stats.home.profit += res.pnl;
                         if (res.won) stats.home.wins++;
-                    } else if (r.home === awayTeam) { // r.home es el equipo visitante seleccionado, r.away es el local
+                    } else if (r.home === awayTeam) { 
                         stats.away.bets++;
                         stats.away.profit += res.pnl;
                         if (res.won) stats.away.wins++;
@@ -520,7 +523,6 @@
                 }
             });
 
-            // 3. Actualizar UI
             updateMatchupCard(homeTeam, awayTeam, stats);
         }
 
@@ -530,7 +532,6 @@
             const yieldVal = stats.bets > 0 ? ((stats.profit / stats.bets) * 100).toFixed(1) : '0';
             const profitClass = stats.profit >= 0 ? 'text-green' : 'text-red';
             
-            // Cálculos detallados (MEJORA v6.6)
             const homeYield = stats.home.bets > 0 ? ((stats.home.profit / stats.home.bets) * 100).toFixed(1) : 'N/A';
             const homeWR = stats.home.bets > 0 ? ((stats.home.wins / stats.home.bets) * 100).toFixed(1) : 'N/A';
             const awayYield = stats.away.bets > 0 ? ((stats.away.profit / stats.away.bets) * 100).toFixed(1) : 'N/A';
@@ -684,8 +685,12 @@
                 
                 return {
                     date:d, league:r.Div, home:r.HomeTeam, away:r.AwayTeam, res:r.FTR, goalsH:r.FTHG, goalsA:r.FTAG,
+                    // 1X2 Odds
                     oddsH:r.B365H||r.AvgH||1.01, oddsD:r.B365D||r.AvgD||1.01, oddsA:r.B365A||r.AvgA||1.01,
-                    oddsO25:r['B365>2.5']||r.Avg25||1.01, oddsU25:r['B365<2.5']||r.Avg25_1||1.01
+                    // Over/Under 2.5 Odds
+                    oddsO25:r['B365>2.5']||r.Avg25||1.01, oddsU25:r['B365<2.5']||r.Avg25_1||1.01,
+                    // BTTS Odds (NUEVO)
+                    oddsBTSY:r.B365Y||r.AvgY||1.01, oddsBTSN:r.B365N||r.AvgN||1.01
                 };
             }).filter(x=>x && x.oddsH > 1.01); 
 
