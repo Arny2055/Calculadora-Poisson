@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Ultimate Football Value-Hacker v12.0 (Ponderación Temporal)</title>
+    <title>Ultimate Football Value-Hacker v13.0 (Carga Múltiple de Historial)</title>
     
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
@@ -37,6 +37,8 @@
         .btn { padding: 6px 12px; border-radius: 6px; cursor: pointer; border: none; font-weight: 600; display: flex; align-items: center; gap: 6px; color:white; font-size: 0.8rem; transition: background-color 0.2s;}
         .btn-secondary { background: var(--bg-card); border: 1px solid var(--border); }
         .btn-secondary:hover { background: var(--border); }
+        .btn-success { background: var(--success); }
+        .btn-success:hover { background: #05925a; }
         .container { display: grid; grid-template-columns: 250px 1fr; height: calc(100vh - 50px); overflow: hidden; }
         .sidebar { background-color: var(--bg-panel); border-right: 1px solid var(--border); padding: 15px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }
         .sidebar h3 { margin: 0; font-size: 0.75rem; text-transform: uppercase; color: var(--text-secondary); letter-spacing: 0.5px; padding-bottom: 5px; }
@@ -72,39 +74,44 @@
         .market-A { background-color: rgba(100, 149, 237, 0.1); }
         .market-O25, .market-U25 { background-color: rgba(169, 169, 169, 0.1); }
         .value-marker { padding: 2px 5px; border-radius: 4px; font-weight: 700; }
+        .file-list { font-size: 0.75rem; color: var(--text-secondary); max-height: 80px; overflow-y: auto; padding: 5px; border: 1px solid var(--border); border-radius: 4px;}
+        .file-list-item { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .file-stats { display: flex; justify-content: space-between; font-weight: 600; margin-bottom: 5px; color: var(--text-primary); }
     </style>
 </head>
 <body>
 
-    <div id="loadingOverlay" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.9); z-index: 1000; display: none; flex-direction: column; justify-content: center; align-items: center; color: white; font-size: 2rem;">
+    <div id="loadingOverlay">
         <i class="fas fa-hammer spinner"></i>
-        <h3 id="loadingMessage" style="margin-top:20px; color:#ccc;">Ejecutando Modelo Híbrido y Filtrando Valor...</h3>
+        <h3 id="loadingMessage" style="margin-top:20px; color:#ccc;">Cargando archivos...</h3>
     </div>
 
     <header>
-        <div class="brand"><i class="fas fa-hammer"></i> Value-Hacker <span class="tag">v12.0 PONDERACIÓN TEMPORAL</span></div>
+        <div class="brand"><i class="fas fa-hammer"></i> Value-Hacker <span class="tag">v13.0 Carga Múltiple</span></div>
         <div style="display:flex; gap:10px; align-items:center;">
-            <input type="file" id="fileInput" accept=".csv" multiple style="display:none;">
-            <label for="fileInput" class="btn btn-secondary"><i class="fas fa-folder-open"></i> Cargar Archivos CSV</label>
+            <input type="file" id="fileInputHistorical" accept=".csv" multiple style="display:none;" onchange="loadHistoricalFiles(event)">
+            <label for="fileInputHistorical" class="btn btn-success"><i class="fas fa-database"></i> Cargar Historial CSV (Múltiple)</label>
+            
+            <input type="file" id="fileInputFuture" accept=".csv" style="display:none;" onchange="loadFutureFile(event)">
+            <label for="fileInputFuture" class="btn btn-secondary"><i class="fas fa-calendar-alt"></i> Cargar Partidos Futuros (Único)</label>
         </div>
     </header>
 
     <div class="container">
         <aside class="sidebar">
             
-            <div style="padding:10px; border-radius:6px; background:var(--danger); color:white; font-size:0.8rem; font-weight:600;">
-                <i class="fas fa-exclamation-triangle"></i> **IMPORTANTE:** Usa el botón "Cargar Archivos CSV" para seleccionar los 2 archivos y evitar errores de CORS.
+            <div style="padding:10px; border-radius:6px; background:var(--bg-card); border:1px solid var(--accent);">
+                <div class="file-stats">
+                    <span>Historial: <span id="histFileCount">0</span> archivos</span>
+                    <span>Total: <span id="histMatchCount">0</span> partidos</span>
+                </div>
+                <div id="historicalFileList" class="file-list">No hay archivos de historial cargados.</div>
             </div>
-
-            <div class="control-group" style="margin-top:10px;">
-                <label style="color:var(--success);">Archivo 1: Estadística Pasada (Historial)</label>
-                <input type="text" id="urlInputCurrent" placeholder="Usa el botón de Cargar Archivos" disabled>
-            </div>
+            
             <div class="control-group">
-                <label style="color:var(--accent);">Archivo 2: Partidos a Analizar (Futuros)</label>
-                <input type="text" id="urlInputFuture" placeholder="Usa el botón de Cargar Archivos" disabled>
+                <label style="color:var(--accent);">Partidos a Analizar (Futuros)</label>
+                <input type="text" id="urlInputFuture" placeholder="Archivo a analizar cargado" disabled>
             </div>
-            <button onclick="loadFromUrls()" class="btn btn-primary" style="margin-bottom:10px; background:var(--danger); cursor:not-allowed;" disabled><i class="fas fa-times"></i> Cargar URLs (Deshabilitado)</button>
 
             <hr class="separator">
 
@@ -261,13 +268,14 @@
     </div>
 
     <script>
-        // *** COMIENZO DE LA LÓGICA JAVASCRIPT - VALUE HACKER v12.0 (PONDERACIÓN TEMPORAL) ***
+        // *** COMIENZO DE LA LÓGICA JAVASCRIPT - VALUE HACKER v13.0 (CARGA MÚLTIPLE) ***
         let historicalData = []; 
         let futureData = []; 
         let currentStats = null; 
         let leagueHADFactors = {}; 
         
         let chartEq=null, chartLg=null, chartDD=null; 
+        let historicalFileNames = []; // Nuevo array para guardar nombres de archivo
 
         // --- Tabs Logic ---
         function switchTab(tabId) {
@@ -316,69 +324,80 @@
         
         // --- CARGA Y PROCESAMIENTO DE DATOS ---
 
-        document.getElementById('fileInput').addEventListener('change', loadFromLocalFiles);
-        
-        function loadFromLocalFiles(e) {
-            const files = e.target.files;
-            
-            if (files.length === 0) return;
-            if (files.length > 2) {
-                alert("Por favor, selecciona MÁXIMO dos archivos CSV: uno para la estadística pasada y uno para los partidos a analizar.");
-                document.getElementById('fileInput').value = ''; 
-                return;
-            }
-            
-            document.getElementById('loadingMessage').innerText = "Cargando archivos locales...";
-            document.getElementById('loadingOverlay').style.display = 'flex';
-
-            const filePromises = Array.from(files).map(file => {
-                return new Promise((resolve, reject) => {
-                    Papa.parse(file, {
-                        header: true,
-                        dynamicTyping: true, 
-                        skipEmptyLines: true,
-                        complete: (results) => {
-                            const validData = results.data.filter(r => Object.keys(r).length > 0 && r.HomeTeam);
-                            const hasGoals = validData.some(d => (d.FTHG !== undefined && d.FTAG !== undefined && d.FTHG !== null && d.FTAG !== null));
-                            resolve({ data: validData, name: file.name, hasGoals: hasGoals });
-                        },
-                        error: (error, file) => {
-                            reject(`Error de parsing en el archivo ${file.name}. Mensaje: ${error.message}`);
-                        }
-                    });
+        function parseCSVFile(file) {
+             return new Promise((resolve, reject) => {
+                Papa.parse(file, {
+                    header: true,
+                    dynamicTyping: true, 
+                    skipEmptyLines: true,
+                    complete: (results) => {
+                        const validData = results.data.filter(r => Object.keys(r).length > 0 && r.HomeTeam);
+                        resolve({ data: validData, name: file.name });
+                    },
+                    error: (error, file) => {
+                        reject(`Error de parsing en el archivo ${file.name}. Mensaje: ${error.message}`);
+                    }
                 });
             });
-
-            Promise.all(filePromises)
-                .then(results => {
-                    results.sort((a, b) => (b.hasGoals ? 1 : 0) - (a.hasGoals ? 1 : 0));
-                    
-                    historicalData = results.length > 0 ? results[0].data : [];
-                    futureData = results.length > 1 ? results[1].data : [];
-                    
-                    if(results.length === 1 && !results[0].hasGoals) {
-                        historicalData = [];
-                        futureData = results[0].data;
-                    }
-                    
-                    if (historicalData.length === 0 && futureData.length === 0) {
-                        throw new Error("No se encontraron datos utilizables en los archivos CSV cargados.");
-                    }
-                    
-                    processAllData();
-                })
-                .catch(error => {
-                    console.error("Error al cargar archivos locales:", error);
-                    alert(`❌ Error cargando archivos locales:\n\n${error}`);
-                    document.getElementById('loadingOverlay').style.display = 'none';
-                    document.getElementById('fileInput').value = ''; 
-                });
         }
         
-        function loadFromUrls() {
-            alert("La carga por URL está deshabilitada por seguridad (CORS).");
+        async function loadHistoricalFiles(e) {
+            const files = e.target.files;
+            if (files.length === 0) return;
+            if (files.length > 30) {
+                 alert("Límite de 30 archivos de historial excedido. Por favor, selecciona 30 o menos.");
+                 e.target.value = '';
+                 return;
+            }
+            
+            document.getElementById('loadingMessage').innerText = `Cargando ${files.length} archivos de historial...`;
+            document.getElementById('loadingOverlay').style.display = 'flex';
+            
+            historicalData = [];
+            historicalFileNames = [];
+            
+            try {
+                const filePromises = Array.from(files).map(file => parseCSVFile(file));
+                const results = await Promise.all(filePromises);
+                
+                results.forEach(res => {
+                    historicalData.push(...res.data);
+                    historicalFileNames.push(res.name);
+                });
+                
+                processAllData();
+                
+            } catch (error) {
+                console.error("Error al cargar archivos de historial:", error);
+                alert(`❌ Error cargando archivos de historial:\n\n${error}`);
+                document.getElementById('loadingOverlay').style.display = 'none';
+            }
         }
+        
+        async function loadFutureFile(e) {
+            const file = e.target.files[0];
+            if (!file) return;
 
+            document.getElementById('loadingMessage').innerText = `Cargando partidos a analizar: ${file.name}...`;
+            document.getElementById('loadingOverlay').style.display = 'flex';
+            
+            futureData = [];
+            document.getElementById('urlInputFuture').value = '';
+            
+            try {
+                const result = await parseCSVFile(file);
+                futureData = result.data;
+                document.getElementById('urlInputFuture').value = result.name;
+
+                processAllData();
+
+            } catch (error) {
+                console.error("Error al cargar archivo futuro:", error);
+                alert(`❌ Error cargando archivo futuro:\n\n${error}`);
+                document.getElementById('loadingOverlay').style.display = 'none';
+            }
+        }
+        
         function normalizeData(data, isFuture) {
             const parseNum = (val) => {
                 if (typeof val === 'number') return val;
@@ -439,15 +458,18 @@
             const normalizedHistorical = normalizeData(historicalData, false).filter(r => r.goalsH !== null && r.goalsA !== null);
             normalizedHistorical.sort((a, b) => a.date.localeCompare(b.date));
             
+            // Actualizar la lista de archivos de historial cargados
+            updateHistoricalFileList(normalizedHistorical.length);
+
             leagueHADFactors = calculateLeagueHAD(normalizedHistorical);
             updateHADTable(leagueHADFactors);
 
-            // Se pasa la data normalizada y ordenada a calculateCurrentSeasonStats
             currentStats = calculateCurrentSeasonStats(normalizedHistorical);
             
-            futureData = normalizeData(futureData, true);
-            futureData.sort((a, b) => a.date.localeCompare(b.date));
+            const normalizedFuture = normalizeData(futureData, true);
+            normalizedFuture.sort((a, b) => a.date.localeCompare(b.date));
 
+            // Actualizar solo si hay datos para el modelo
             if(currentStats) {
                 const teams = Object.keys(currentStats.teamCoeffs).sort();
                 const populate = (id) => {
@@ -460,7 +482,7 @@
                 populate('teamHomeSelect'); populate('teamAwaySelect');
             }
             
-            const allLeagues = [...new Set([...normalizedHistorical.map(x=>x.league), ...futureData.map(x=>x.league)])].sort();
+            const allLeagues = [...new Set([...normalizedHistorical.map(x=>x.league), ...normalizedFuture.map(x=>x.league)])].sort();
             const lgSel = document.getElementById('leagueSelect'); lgSel.innerHTML='<option value="all">Todas</option>';
             allLeagues.forEach(l=>lgSel.add(new Option(l,l)));
 
@@ -468,17 +490,36 @@
 
             document.getElementById('loadingOverlay').style.display='none';
             
-            if (futureData.length > 0 && currentStats) {
+            if (normalizedFuture.length > 0 && currentStats) {
+                futureData = normalizedFuture; // Sobrescribir con datos normalizados y filtrados
                 runAnalysis();
             } else if (normalizedHistorical.length > 0) {
                 runHistoricalBacktest(normalizedHistorical);
                 updateGlobalUI(0, 0, 0, []); 
-            } else if (futureData.length > 0 && !currentStats) {
+            } else if (normalizedFuture.length > 0 && !currentStats) {
                 alert("Advertencia: Se cargaron partidos a analizar, pero no se encontró estadística pasada (goles de resultados) para calcular el modelo. No se puede filtrar EV+.");
-                document.getElementById('valBets').innerText = futureData.length;
+                document.getElementById('valBets').innerText = normalizedFuture.length;
             }
         }
         
+        function updateHistoricalFileList(matchCount) {
+            const listEl = document.getElementById('historicalFileList');
+            const fileCountEl = document.getElementById('histFileCount');
+            const matchCountEl = document.getElementById('histMatchCount');
+            
+            fileCountEl.innerText = historicalFileNames.length;
+            matchCountEl.innerText = matchCount;
+
+            if (historicalFileNames.length === 0) {
+                listEl.innerHTML = 'No hay archivos de historial cargados.';
+                return;
+            }
+
+            listEl.innerHTML = historicalFileNames.map(name => 
+                `<div class="file-list-item"><i class="fas fa-check-circle" style="color:var(--success);"></i> ${name}</div>`
+            ).join('');
+        }
+
         function calculateLeagueHAD(data) {
             const leagueTotals = {};
             const minMatches = 15; 
@@ -504,7 +545,7 @@
             if (globalMatches === 0) return {};
             const globalAvgHomeGoal = globalHomeGoals / globalMatches;
 
-            const initialGlobalStats = calculateCurrentSeasonStats(data, 1.0); // Sin Time Decay inicial
+            const initialGlobalStats = calculateCurrentSeasonStats(data, 1.0); // Sin Time Decay inicial para HAD
             if (!initialGlobalStats) return {};
 
             for (const league in leagueTotals) {
@@ -554,7 +595,7 @@
             return leagueHADFactors;
         }
 
-        // ** FUNCIÓN MODIFICADA: IMPLEMENTACIÓN DE TIME DECAY **
+        // FUNCIÓN CON PONDERACIÓN TEMPORAL (TIME DECAY) DE v12.0
         function calculateCurrentSeasonStats(data, decayOverride = null) {
             const teamStats = {};
             let totalMatchesWeighted = 0;
@@ -642,7 +683,6 @@
             };
         }
         
-        // ** FUNCIÓN SIN CAMBIOS, USA EL RESULTADO DE calculateCurrentSeasonStats MODIFICADO **
         function calculateHybridProbabilities(homeTeam, awayTeam, league, stats, hadFactors) {
             if (!stats) return null;
             const { globalAverages, teamCoeffs } = stats;
@@ -805,8 +845,15 @@
         function runAnalysis() {
             if(!futureData.length || !currentStats) {
                 document.getElementById('statsCard').style.display = 'block';
-                document.getElementById('statsCard').innerHTML = `<h3 style="color:var(--danger); margin:0;">Cargue la **estadística pasada** (con goles) y/o los **partidos a analizar** (con cuotas) para ejecutar el modelo.</h3>`;
-                if(historicalData.length > 0) runHistoricalBacktest(normalizeData(historicalData, false).filter(r => r.goalsH !== null && r.goalsA !== null));
+                const histData = normalizeData(historicalData, false).filter(r => r.goalsH !== null && r.goalsA !== null);
+                
+                if (histData.length === 0) {
+                    document.getElementById('statsCard').innerHTML = `<h3 style="color:var(--danger); margin:0;">Cargue la **estadística pasada** (con goles) para calcular el modelo.</h3>`;
+                } else if (futureData.length === 0) {
+                    document.getElementById('statsCard').innerHTML = `<h3 style="color:var(--danger); margin:0;">Cargue los **partidos a analizar** (con cuotas).</h3>`;
+                }
+                
+                if(histData.length > 0) runHistoricalBacktest(histData);
                 return;
             }
             
@@ -902,7 +949,7 @@
             const useValueFilter = document.getElementById('useFrequencyValue').checked; 
             const stT = document.getElementById('stakeType').value;
             const stV = parseFloat(document.getElementById('stakeValue').value);
-            // ** USANDO FILTROS ESTRICTOS EN BACKTEST (1.50 y 2.00) **
+            // USANDO FILTROS ESTRICTOS EN BACKTEST (1.50 y 2.00)
             const minO = 1.50;
             const maxO = 2.00; 
             const minEV = 5.00 / 100; 
@@ -1057,6 +1104,12 @@
                 }
             });
         }
+        
+        // Inicializar la interfaz al cargar
+        document.addEventListener('DOMContentLoaded', () => {
+            document.getElementById('loadingOverlay').style.display = 'none';
+        });
+        
     </script>
 </body>
 </html>
