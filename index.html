@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Ultimate Football Backtester v8.4 (Proyección Mejorada)</title>
+    <title>Ultimate Football Backtester v8.5 (Ranking Mejorado)</title>
     
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
@@ -271,6 +271,23 @@
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
         }
+
+        /* Estilos específicos para la tabla de ranking mejorada */
+        #teamTable th, #teamTable td {
+            padding: 4px 6px; /* Ajuste de padding */
+            font-size: 0.75rem; /* Ajuste de fuente */
+            text-align: center;
+        }
+        #teamTable th:first-child, #teamTable td:first-child {
+            text-align: left;
+            width: 40%;
+            font-size: 0.8rem;
+        }
+        #teamTable thead th {
+            font-weight: 700;
+            background-color: var(--border);
+            color: var(--text-primary);
+        }
     </style>
 </head>
 <body>
@@ -278,7 +295,7 @@
     <div id="loadingOverlay" style="display:none;"><i class="fas fa-circle-notch spinner"></i><h3 style="margin-top:20px; color:#ccc;">Procesando Datos y Entrenando Modelo...</h3></div>
 
     <header>
-        <div class="brand"><i class="fas fa-calculator"></i> Football Backtester <span class="tag">v8.4 Full</span></div>
+        <div class="brand"><i class="fas fa-calculator"></i> Football Backtester <span class="tag">v8.5 Full</span></div>
         <div style="display:flex; gap:10px; align-items:center;">
             <input type="file" id="fileInput" accept=".csv">
             <label for="fileInput" class="btn btn-secondary"><i class="fas fa-folder-open"></i> Archivo Local</label>
@@ -454,7 +471,14 @@
                         <div class="panel-header"><span class="panel-title"><i class="fas fa-users"></i> Ranking Equipos (Profit)</span></div>
                         <div class="table-scroll">
                             <table id="teamTable">
-                                <thead><tr><th>Equipo</th><th>Sit.</th><th>P/L</th></tr></thead>
+                                <thead>
+                                    <tr>
+                                        <th>Equipo</th>
+                                        <th><i class="fas fa-globe-americas"></i> Overall</th>
+                                        <th><i class="fas fa-home"></i> Home</th>
+                                        <th><i class="fas fa-plane-departure"></i> Away</th>
+                                    </tr>
+                                </thead>
                                 <tbody id="teamTableBody"></tbody>
                             </table>
                         </div>
@@ -1064,6 +1088,8 @@
             const lg = document.getElementById('leagueSelect').value;
 
             let bank=bank0, peak=bank0, maxDD=0, wins=0, hist=[{x:'Inicio', y:bank0}], rows=[], lgP={}, tmP={};
+            // Inicializar estructura de ranking de equipos mejorada
+            let tmPRanking = {}; 
             let optimizableBetsCombined = [];
             let totalProfitUnits = 0;
             totalStakeUnits = 0; 
@@ -1093,10 +1119,27 @@
                     hist.push({x:r.date, y:bank});
                     rows.push({date:r.date, match:`${r.home} v ${r.away}`, sel:mkt, odds:res.odds, stake:res.stake, res:`${r.goalsH}-${r.goalsA}`, pnl:res.pnl, bank:bank});
 
+                    // Acumulación de Profit/Loss por Liga
                     if(!lgP[r.league]) lgP[r.league]=0; lgP[r.league]+=res.pnl;
                     
-                    if(!tmP[r.home]) tmP[r.home]=0; tmP[r.home]+=res.pnl;
-                    if(!tmP[r.away]) tmP[r.away]=0; tmP[r.away]+=res.pnl;
+                    // --- Acumulación de Profit/Loss por Equipo (Ranking Mejorado) ---
+                    const updateTeamRanking = (team, pnl, type) => {
+                        if (!tmPRanking[team]) {
+                            tmPRanking[team] = { overall: 0, home: 0, away: 0 };
+                        }
+                        tmPRanking[team].overall += pnl;
+                        if (type === 'home') {
+                            tmPRanking[team].home += pnl;
+                        } else if (type === 'away') {
+                            tmPRanking[team].away += pnl;
+                        }
+                    };
+
+                    // La apuesta se aplica al equipo Local (Home)
+                    updateTeamRanking(r.home, res.pnl, 'home');
+                    // La apuesta se aplica al equipo Visitante (Away)
+                    updateTeamRanking(r.away, res.pnl, 'away');
+                    // --- Fin Acumulación de Profit/Loss por Equipo ---
                 }
             });
 
@@ -1113,7 +1156,8 @@
             
             const RoR = calculateRiskOfRuina(totalBets, totalStakeUnits, globalWinRate);
 
-            updateGlobalUI(hist, rows, wins, bank0, bank, maxDD, lgP, tmP, totalStakeUnits, RoR);
+            // Pasamos tmPRanking en lugar del antiguo tmP
+            updateGlobalUI(hist, rows, wins, bank0, bank, maxDD, lgP, tmPRanking, totalStakeUnits, RoR);
             
             document.getElementById('poissonCard').style.display = 'none';
             document.getElementById('oddsProjectionCard').style.display = 'none';
@@ -1245,7 +1289,8 @@
 
 
         // --- UI UPDATES (Global and Charts) ---
-        function updateGlobalUI(hist, rows, wins, start, end, dd, lgData, tmData, totalStakeUnits, RoR) {
+        // tmPRanking ahora es la estructura de objeto anidado: { team: { overall: 0, home: 0, away: 0 } }
+        function updateGlobalUI(hist, rows, wins, start, end, dd, lgData, tmPRanking, totalStakeUnits, RoR) {
             const tot = rows.length;
             const prof = end-start;
             const yieldVal = totalStakeUnits>0?((prof/totalStakeUnits)*100).toFixed(1):'0';
@@ -1268,10 +1313,27 @@
                 tb.innerHTML += `<tr><td>${r.date.substring(5)}</td><td>${r.match}</td><td>${r.sel}</td><td>${r.odds.toFixed(2)}</td><td>${r.stake.toFixed(2)}</td><td>${r.res}</td><td class="${r.pnl>=0?'text-green':'text-red'}">${r.pnl.toFixed(2)}</td><td>${r.bank.toFixed(0)}</td></tr>`;
             });
 
-            // Tabla Equipos
+            // --- Tabla Equipos (Ranking Mejorado) ---
             const tbTeam = document.getElementById('teamTableBody'); tbTeam.innerHTML='';
-            Object.entries(tmData).sort((a,b)=>b[1]-a[1]).slice(0,20).forEach(t => {
-                tbTeam.innerHTML += `<tr><td style="color:white; font-weight:bold;">${t[0]}</td><td>Gen</td><td class="${t[1]>=0?'text-green':'text-red'}">${t[1].toFixed(2)}</td></tr>`;
+            // Convertir el objeto tmPRanking en un array de equipos, ordenado por P/L Overall
+            const teamRankArray = Object.entries(tmPRanking)
+                .map(([team, stats]) => ({ team, ...stats }))
+                .sort((a, b) => b.overall - a.overall);
+
+            teamRankArray.slice(0,20).forEach(t => {
+                // Función auxiliar para formatear y dar color al P/L
+                const formatPnl = (pnl) => {
+                    return `<span class="${pnl>=0?'text-green':'text-red'}">${pnl.toFixed(2)}</span>`;
+                };
+
+                tbTeam.innerHTML += `
+                    <tr>
+                        <td style="font-weight:bold;">${t.team}</td>
+                        <td>${formatPnl(t.overall)}</td>
+                        <td>${formatPnl(t.home)}</td>
+                        <td>${formatPnl(t.away)}</td>
+                    </tr>
+                `;
             });
 
             renderCharts(hist, lgData);
