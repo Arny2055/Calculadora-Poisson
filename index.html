@@ -1200,24 +1200,41 @@
 
 
         // --- FUNCIONES DE OPTIMIZACIÓN y UI ---
+        // *** FUNCIÓN CORREGIDA Y MEJORADA ***
         function findOptimalOddsRange(optimizableBets) {
-            if (optimizableBets.length < 5) return { min: 'N/A', max: 'N/A', yield: 0, bets: 0 }; // Solo para evitar bucles si hay 0 datos
+            // Mínimo de apuestas requerido para considerar un rango válido
+            const minBetsRequired = 50; 
+            if (optimizableBets.length < minBetsRequired) return { min: 'N/A', max: 'N/A', yield: 0, bets: 0 }; 
 
             let bestYield = -100;
             let bestMin = 0, bestMax = 0;
             let bestBets = 0;
-            const step = 0.05; 
-            const maxOddsLimit = 8.00; 
+            
+            // Reducimos el paso de iteración para mayor precisión
+            const step = 0.01; 
+            // Aumentamos el límite de búsqueda a 15.00
+            const maxOddsLimit = 15.00; 
 
-            for (let min_o = 1.01; min_o <= maxOddsLimit; min_o += step) {
-                min_o = parseFloat(min_o.toFixed(2));
+            // Obtener todas las cuotas únicas y ordenarlas para limitar la búsqueda de rangos
+            const uniqueOdds = [...new Set(optimizableBets.map(b => b.odds))].sort((a, b) => a - b);
+            
+            const effectiveOddsToTest = uniqueOdds.filter(o => o <= maxOddsLimit);
 
-                for (let max_o = min_o; max_o <= maxOddsLimit; max_o += step) {
-                    max_o = parseFloat(max_o.toFixed(2));
+            // Iteramos sobre todos los pares posibles (min_o, max_o)
+            for (let i = 0; i < effectiveOddsToTest.length; i++) {
+                let min_o = effectiveOddsToTest[i];
+                
+                for (let j = i; j < effectiveOddsToTest.length; j++) {
+                    let max_o = effectiveOddsToTest[j];
                     
+                    // Asegurar que las cuotas sean números con 2 decimales
+                    min_o = parseFloat(min_o.toFixed(2));
+                    max_o = parseFloat(max_o.toFixed(2));
+
                     let totalProfit = 0;
                     let totalBets = 0;
 
+                    // Filtrar las apuestas dentro del rango [min_o, max_o]
                     for (const bet of optimizableBets) {
                         if (bet.odds >= min_o && bet.odds <= max_o) {
                             totalProfit += bet.pnl;
@@ -1225,9 +1242,11 @@
                         }
                     }
 
-                    if (totalBets >= 30) { 
+                    if (totalBets >= minBetsRequired) { 
                         const currentYield = (totalProfit / totalBets) * 100; // Stake 1
-                        if (currentYield > bestYield) {
+                        
+                        // Criterio de optimización: mejor Yield Y (si el Yield es igual, preferir el rango con más apuestas)
+                        if (currentYield > bestYield || (currentYield.toFixed(2) === bestYield.toFixed(2) && totalBets > bestBets)) {
                             bestYield = currentYield;
                             bestMin = min_o;
                             bestMax = max_o;
@@ -1237,6 +1256,11 @@
                 }
             }
             
+            // Si no se encuentra un rango con suficiente muestra o Yield positivo
+            if (bestBets === 0 || bestYield <= 0) {
+                 return { min: 'N/A', max: 'N/A', yield: 0, bets: 0 };
+            }
+
             return { 
                 min: bestMin.toFixed(2), 
                 max: bestMax.toFixed(2), 
@@ -1247,7 +1271,7 @@
         
         function checkCompatibility(optimalRange, currentData, previousData) {
             const min = parseFloat(optimalRange.min);
-            const max = parseFloat(optimalRange.max);
+            const max = parseFloat(optimalOddsRange.max);
             const STAKE_UNIT = 1.0; 
             
             if (min === 0 || max === 0 || optimalRange.min === 'N/A') return { current: 'N/A', previous: 'N/A', currentBets: 0, previousBets: 0, totalCurrentBets: currentData.length, totalPreviousBets: previousData.length, status: 'NO HAY MUESTRA' };
