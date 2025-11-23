@@ -55,6 +55,12 @@
             border-left: 5px solid #10b981;
             font-weight: 700;
         }
+        /* Estilos para el Accordion/Pestaña */
+        .accordion-content {
+            max-height: 0;
+            transition: max-height 0.5s ease-in-out;
+            overflow: hidden;
+        }
     </style>
 </head>
 <body class="bg-gray-100 min-h-screen p-2 sm:p-4">
@@ -98,7 +104,7 @@
                         <i class="fas fa-calendar-alt mr-3"></i> 2. Partidos a Predecir (Futuro)
                     </h2>
                     <p class="text-xs text-gray-700 mb-3">
-                        Carga un solo archivo CSV con los partidos. Columnas necesarias: <code class="font-mono bg-yellow-200 px-1 rounded">HomeTeam</code> y <code class="font-mono bg-yellow-200 px-1 rounded">AwayTeam</code>. Opcionales para valor: <code class="font-mono bg-yellow-200 px-1 rounded">MaxH</code>, <code class="font-mono bg-yellow-200 px-1 rounded">MaxD</code>, <code class="font-mono bg-yellow-200 px-1 rounded">MaxA</code>.
+                        Columnas necesarias: <code class="font-mono bg-yellow-200 px-1 rounded">Date</code>, <code class="font-mono bg-yellow-200 px-1 rounded">HomeTeam</code>, <code class="font-mono bg-yellow-200 px-1 rounded">AwayTeam</code>. Opcionales para valor: <code class="font-mono bg-yellow-200 px-1 rounded">MaxH</code>, <code class="font-mono bg-yellow-200 px-1 rounded">MaxD</code>, <code class="font-mono bg-yellow-200 px-1 rounded">MaxA</code>.
                     </p>
                     <input type="file" id="futureFileInput" accept=".csv" class="w-full p-2 border border-gray-300 rounded-lg text-sm bg-white file:py-1 file:px-2 file:text-xs file:font-semibold">
                     <button onclick="loadFutureMatches()" class="w-full mt-3 bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-3 rounded-lg text-sm transition duration-150">
@@ -132,25 +138,17 @@
             <!-- COLUMNA DERECHA: SELECCIÓN Y RESULTADOS -->
             <div class="lg:col-span-2 space-y-6">
 
-                <!-- 3. Lista de Partidos Futuros a Predecir -->
+                <!-- 3. Lista de Partidos Futuros a Predecir (Con Accordion) -->
                 <section id="futureMatchesSection" class="hidden bg-yellow-50 p-4 rounded-xl border-l-4 border-yellow-500 shadow-md">
                     <h2 class="text-xl font-bold text-yellow-700 mb-3 flex items-center">
                         <i class="fas fa-futbol mr-3"></i> 3. Partidos Futuros Pendientes (Clic para Analizar)
                     </h2>
-                    <div class="table-container">
-                        <table id="futureMatchesTable" class="poisson-table w-full text-center">
-                            <thead>
-                                <tr>
-                                    <th class="bg-yellow-800 rounded-tl-lg">Local</th>
-                                    <th class="bg-yellow-800">Visitante</th>
-                                    <th class="bg-yellow-800 rounded-tr-lg">Cuotas (1X2)</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <!-- Partidos Futuros Dinámicos Aquí -->
-                            </tbody>
-                        </table>
+                    
+                    <!-- Contenedor del Accordion de Partidos -->
+                    <div id="futureMatchesTableContainer">
+                        <!-- Grupos de partidos por día generados aquí -->
                     </div>
+                    
                     <p id="futureTeamsWarning" class="text-xs mt-3 text-red-500 hidden font-bold">Advertencia: Algunos equipos no tienen datos históricos.</p>
                 </section>
 
@@ -242,11 +240,12 @@
         const AWAY_TEAM_COL = 'AwayTeam';
         const HOME_GOALS_COL = 'FTHG';
         const AWAY_GOALS_COL = 'FTAG';
+        const DATE_COL = 'Date'; // NUEVA COLUMNA REQUERIDA PARA PARTIDOS FUTUROS
         const ODDS_COLS = {
             '1': 'MaxH',
             'X': 'MaxD',
             '2': 'MaxA'
-        }; // Cuotas para auto-cargar
+        }; 
 
         /* --- Funciones de Utilidad y UI --- */
 
@@ -274,11 +273,42 @@
         function closeModal() {
             document.getElementById('messageModal').classList.add('hidden');
         }
+        
+        /**
+         * Función para alternar el contenido del accordion
+         */
+        function toggleAccordion(id) {
+            const content = document.getElementById(id);
+            const icon = document.getElementById(`icon-${id}`);
+            
+            // Revisa si el contenido está visible (altura > 0)
+            const isExpanded = content.style.maxHeight !== '0px' && content.style.maxHeight !== '';
+            
+            // Cierra todos los otros accordiones abiertos
+            document.querySelectorAll('.accordion-content').forEach(c => {
+                if (c.id !== id) {
+                    c.style.maxHeight = '0px';
+                    const otherIcon = document.getElementById(`icon-${c.id}`);
+                    if (otherIcon) otherIcon.classList.remove('rotate-180');
+                }
+            });
+
+            if (isExpanded) {
+                // Colapsar el actual
+                content.style.maxHeight = '0px';
+                icon.classList.remove('rotate-180');
+            } else {
+                // Expandir el actual. Usamos scrollHeight para que la altura sea dinámica
+                content.style.maxHeight = content.scrollHeight + 'px';
+                icon.classList.add('rotate-180');
+            }
+        }
+
 
         /* --- Carga y Parsing de Datos --- */
 
         /**
-         * Parsea el texto CSV. Puede manejar datos históricos (con goles) o futuros (sin goles, pero con cuotas opcionales).
+         * Parsea el texto CSV. Puede manejar datos históricos (con goles) o futuros (sin goles, pero con cuotas opcionales y fecha).
          */
         function parseCSV(csvText, isHistorical = true) {
             const lines = csvText.trim().split('\n').filter(line => line.trim() !== '');
@@ -287,13 +317,19 @@
             const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
             const requiredTeamCols = [HOME_TEAM_COL, AWAY_TEAM_COL];
 
-            // 1. Verificar columnas de equipos
-            const missingTeamCols = requiredTeamCols.filter(col => !headers.includes(col));
-            if (missingTeamCols.length > 0) {
-                throw new Error(`Columnas CSV faltantes (equipos): ${missingTeamCols.join(', ')}. Verifica las cabeceras.`);
+            if (!isHistorical) {
+                 // Date es requerida para el agrupamiento
+                requiredTeamCols.push(DATE_COL); 
+            }
+
+            // 1. Verificar columnas de equipos y fecha
+            const missingRequiredCols = requiredTeamCols.filter(col => !headers.includes(col));
+            if (missingRequiredCols.length > 0) {
+                throw new Error(`Columnas CSV faltantes: ${missingRequiredCols.join(', ')}. Verifica las cabeceras.`);
             }
 
             const indices = {
+                [DATE_COL]: headers.indexOf(DATE_COL), // NUEVO
                 [HOME_TEAM_COL]: headers.indexOf(HOME_TEAM_COL),
                 [AWAY_TEAM_COL]: headers.indexOf(AWAY_TEAM_COL),
                 [HOME_GOALS_COL]: headers.indexOf(HOME_GOALS_COL),
@@ -323,6 +359,10 @@
                     match[HOME_TEAM_COL] = currentLine[indices[HOME_TEAM_COL]].trim().replace(/"/g, '');
                     match[AWAY_TEAM_COL] = currentLine[indices[AWAY_TEAM_COL]].trim().replace(/"/g, '');
                     
+                    if (!isHistorical) {
+                        match[DATE_COL] = currentLine[indices[DATE_COL]].trim().replace(/"/g, '');
+                    }
+                    
                     if (isHistorical) {
                         match[HOME_GOALS_COL] = parseInt(currentLine[indices[HOME_GOALS_COL]].trim().replace(/"/g, ''), 10);
                         match[AWAY_GOALS_COL] = parseInt(currentLine[indices[AWAY_GOALS_COL]].trim().replace(/"/g, ''), 10);
@@ -347,7 +387,7 @@
             }
 
             if (matches.length === 0) {
-                throw new Error("No se extrajeron partidos válidos. Revisa el formato.");
+                throw new Error("No se extrajeron partidos válidos. Revisa el formato y que los datos sean correctos.");
             }
 
             return matches;
@@ -447,6 +487,61 @@
                 statusElement.textContent = `Error: ${error.message}`;
                 showModal("Error de Carga Futura", error.message);
             }
+        }
+
+        /* --- Lógica de Agrupamiento y Ordenamiento --- */
+
+        /**
+         * Agrupa y ordena los partidos futuros por fecha.
+         */
+        function groupAndSortFutureMatches(matches) {
+            // 1. Clonar y Ordenar por fecha
+            const sortedMatches = [...matches].sort((a, b) => {
+                // Intenta crear objetos Date. Asume formatos comunes (DD/MM/YY o YYYY-MM-DD)
+                // Se usa el formato 'MM/DD/YYYY' si no hay guiones, o 'YYYY-MM-DD' si hay
+                const parseDate = (dateStr) => {
+                    if (!dateStr) return new Date(0); // Poner al inicio si no hay fecha
+                    const parts = dateStr.split(/[-/.]/);
+                    if (parts.length === 3) {
+                        // Intenta DD/MM/YYYY o YYYY/MM/DD. Mejor confiar en YYYY-MM-DD para ISO.
+                        if (parts[0].length === 4) return new Date(parts[0], parts[1] - 1, parts[2]); // YYYY-MM-DD
+                        if (parts[2].length === 4) return new Date(parts[2], parts[1] - 1, parts[0]); // DD/MM/YYYY
+                    }
+                    return new Date(dateStr); // Fallback
+                };
+                const dateA = parseDate(a[DATE_COL]);
+                const dateB = parseDate(b[DATE_COL]);
+                return dateA.getTime() - dateB.getTime();
+            });
+
+            // 2. Agrupar por fecha formateada
+            const groupedMatches = {};
+            const formatter = new Intl.DateTimeFormat('es-ES', { 
+                weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' 
+            });
+
+            sortedMatches.forEach((match, index) => {
+                // Almacenar el índice original en el array plano para `runCalculations`
+                match.originalIndex = index; 
+                
+                let dateKey;
+                try {
+                    const dateObj = new Date(match[DATE_COL]);
+                    if (isNaN(dateObj)) throw new Error("Invalid Date");
+
+                    // Usar un formato amigable en español como clave
+                    dateKey = formatter.format(dateObj);
+                } catch (e) {
+                    dateKey = `Fecha Desconocida (${match[DATE_COL]})`;
+                }
+
+                if (!groupedMatches[dateKey]) {
+                    groupedMatches[dateKey] = [];
+                }
+                groupedMatches[dateKey].push(match);
+            });
+
+            return groupedMatches;
         }
 
         /* --- Cálculos del Modelo Poisson (Mismos que antes) --- */
@@ -712,35 +807,78 @@
         }
         
         function displayFutureMatches() {
-            const tableBody = document.getElementById('futureMatchesTable').querySelector('tbody');
+            const groupedMatches = groupAndSortFutureMatches(futureMatches);
             const teamStrengthsKeys = Object.keys(teamStrengths);
+            const tableContainer = document.getElementById('futureMatchesTableContainer');
             let html = '';
             let teamsNotFound = false;
 
-            futureMatches.forEach((match, index) => {
-                const homeFound = teamStrengthsKeys.includes(match[HOME_TEAM_COL]);
-                const awayFound = teamStrengthsKeys.includes(match[AWAY_TEAM_COL]);
-                
-                const bgColor = (!homeFound || !awayFound) ? 'bg-red-50 text-red-700' : 'bg-white text-gray-800';
-                const warningIcon = (!homeFound || !awayFound) ? '<i class="fas fa-exclamation-circle text-red-500 ml-1"></i>' : '';
-                
-                const oddsHtml = match.odds && (match.odds['1'] || match.odds['X'] || match.odds['2'])
-                    ? `<span class="text-xs font-bold text-gray-700">${match.odds['1'].toFixed(2)}</span> / <span class="text-xs font-bold text-gray-700">${match.odds['X'].toFixed(2)}</span> / <span class="text-xs font-bold text-gray-700">${match.odds['2'].toFixed(2)}</span>`
-                    : '<span class="text-xs text-gray-400">N/A</span>';
-                
-                if (!homeFound || !awayFound) teamsNotFound = true;
-                
-                html += `
-                    <tr class="future-match-row ${bgColor}" 
-                        onclick="runCalculations(${index}, this)">
-                        <td class="font-semibold">${match[HOME_TEAM_COL]}</td>
-                        <td class="font-semibold">${match[AWAY_TEAM_COL]}${warningIcon}</td>
-                        <td>${oddsHtml}</td>
-                    </tr>
-                `;
-            });
+            // Iterar a través de los grupos por fecha
+            for (const dateKey in groupedMatches) {
+                if (groupedMatches.hasOwnProperty(dateKey)) {
+                    const matchesOfTheDay = groupedMatches[dateKey];
+                    // Crear un ID único basado en la fecha
+                    const dateId = 'date-group-' + dateKey.replace(/[^a-zA-Z0-9]/g, '-');
+                    
+                    // Encabezado del Accordion (La fecha)
+                    html += `
+                        <div class="mt-4">
+                            <button class="accordion-header w-full text-left p-3 bg-yellow-700 hover:bg-yellow-800 text-white font-bold rounded-xl flex justify-between items-center transition duration-150 shadow-md" 
+                                    onclick="toggleAccordion('${dateId}')">
+                                <span>${dateKey} (${matchesOfTheDay.length} partidos)</span>
+                                <i class="fas fa-chevron-down transform transition-transform duration-300" id="icon-${dateId}"></i>
+                            </button>
+                            
+                            <!-- Contenido del Accordion (Inicialmente oculto) -->
+                            <div id="${dateId}" class="accordion-content">
+                                <div class="table-container p-2 bg-white rounded-b-xl border border-yellow-300 border-t-0">
+                                    <table class="poisson-table w-full text-center">
+                                        <thead>
+                                            <tr>
+                                                <th class="bg-yellow-600 rounded-none w-1/3">Local</th>
+                                                <th class="bg-yellow-600 rounded-none w-1/3">Visitante</th>
+                                                <th class="bg-yellow-600 rounded-none w-1/3">Cuotas (1X2)</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                    `;
 
-            tableBody.innerHTML = html;
+                    // Cuerpo del Accordion (Lista de Partidos)
+                    matchesOfTheDay.forEach(match => {
+                        const homeFound = teamStrengthsKeys.includes(match[HOME_TEAM_COL]);
+                        const awayFound = teamStrengthsKeys.includes(match[AWAY_TEAM_COL]);
+                        
+                        const bgColor = (!homeFound || !awayFound) ? 'bg-red-50 text-red-700' : 'bg-white text-gray-800';
+                        const warningIcon = (!homeFound || !awayFound) ? '<i class="fas fa-exclamation-circle text-red-500 ml-1"></i>' : '';
+                        
+                        const oddsHtml = match.odds && (match.odds['1'] || match.odds['X'] || match.odds['2'])
+                            ? `<span class="text-xs font-bold text-gray-700">${match.odds['1'].toFixed(2)}</span> / <span class="text-xs font-bold text-gray-700">${match.odds['X'].toFixed(2)}</span> / <span class="text-xs font-bold text-gray-700">${match.odds['2'].toFixed(2)}</span>`
+                            : '<span class="text-xs text-gray-400">N/A</span>';
+                        
+                        if (!homeFound || !awayFound) teamsNotFound = true;
+                        
+                        html += `
+                            <tr class="future-match-row ${bgColor}" 
+                                onclick="runCalculations(${match.originalIndex}, this)">
+                                <td class="font-semibold">${match[HOME_TEAM_COL]}</td>
+                                <td class="font-semibold">${match[AWAY_TEAM_COL]}${warningIcon}</td>
+                                <td>${oddsHtml}</td>
+                            </tr>
+                        `;
+                    });
+
+                    // Cierre de tags
+                    html += `
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }
+            }
+
+            tableContainer.innerHTML = html;
             
             if(teamsNotFound) {
                  document.getElementById('futureTeamsWarning').classList.remove('hidden');
@@ -922,7 +1060,7 @@
             const awayTeam = match[AWAY_TEAM_COL];
 
             // 1. Limpiar estilos de selección
-            document.querySelectorAll('#futureMatchesTable tr').forEach(row => {
+            document.querySelectorAll('.future-match-row').forEach(row => {
                 row.classList.remove('selected-match');
             });
             clickedRow.classList.add('selected-match');
@@ -943,7 +1081,7 @@
             }
 
             try {
-                // 3. Auto-poblar las cuotas (NUEVO)
+                // 3. Auto-poblar las cuotas
                 const odds = match.odds || {};
                 
                 // Solo poblar si el valor de la cuota es > 1 (un valor válido)
