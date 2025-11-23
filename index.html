@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Ultimate Football Value-Hacker v11.0 (Home Advantage Dinámico)</title>
+    <title>Ultimate Football Value-Hacker v12.0 (Ponderación Temporal)</title>
     
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
@@ -82,7 +82,7 @@
     </div>
 
     <header>
-        <div class="brand"><i class="fas fa-hammer"></i> Value-Hacker <span class="tag">v11.0 HAD DINÁMICO</span></div>
+        <div class="brand"><i class="fas fa-hammer"></i> Value-Hacker <span class="tag">v12.0 PONDERACIÓN TEMPORAL</span></div>
         <div style="display:flex; gap:10px; align-items:center;">
             <input type="file" id="fileInput" accept=".csv" multiple style="display:none;">
             <label for="fileInput" class="btn btn-secondary"><i class="fas fa-folder-open"></i> Cargar Archivos CSV</label>
@@ -150,9 +150,9 @@
 
                 <h3>🛡️ Filtros de Riesgo / Volatilidad (ESTRICTO)</h3>
                 <div class="control-group">
-                    <label>Rango de Cuota **MÁXIMO**</label>
+                    <label>Rango de Cuota **MÍNIMO** y **MÁXIMO**</label>
                     <div style="display:flex; gap:5px;">
-                        <input type="number" id="minOdds" value="1.01" step="0.01" min="1.01" style="width:50%;" placeholder="Min Odd">
+                        <input type="number" id="minOdds" value="1.50" step="0.01" min="1.01" style="width:50%;" placeholder="Min Odd">
                         <input type="number" id="maxOdds" value="2.00" step="0.01" min="1.01" style="width:50%;" placeholder="Max Odd">
                     </div>
                 </div>
@@ -261,11 +261,11 @@
     </div>
 
     <script>
-        // *** COMIENZO DE LA LÓGICA JAVASCRIPT - VALUE HACKER v11.0 (HAD DINÁMICO) ***
+        // *** COMIENZO DE LA LÓGICA JAVASCRIPT - VALUE HACKER v12.0 (PONDERACIÓN TEMPORAL) ***
         let historicalData = []; 
         let futureData = []; 
         let currentStats = null; 
-        let leagueHADFactors = {}; // Nuevo cache para Home Advantage Dinámico
+        let leagueHADFactors = {}; 
         
         let chartEq=null, chartLg=null, chartDD=null; 
 
@@ -281,7 +281,6 @@
             if (tabId !== 'estadisticas') {
                 document.getElementById('statsCard').style.display = 'none';
             } else {
-                 // Asegurar que la tabla HAD se refresque al cambiar a esta pestaña
                  updateHADTable(leagueHADFactors);
             }
         }
@@ -440,11 +439,10 @@
             const normalizedHistorical = normalizeData(historicalData, false).filter(r => r.goalsH !== null && r.goalsA !== null);
             normalizedHistorical.sort((a, b) => a.date.localeCompare(b.date));
             
-            // Paso 1: Calcular la Ventaja del Local Dinámica (HAD)
             leagueHADFactors = calculateLeagueHAD(normalizedHistorical);
             updateHADTable(leagueHADFactors);
 
-            // Paso 2: Calcular las Estadísticas del Modelo
+            // Se pasa la data normalizada y ordenada a calculateCurrentSeasonStats
             currentStats = calculateCurrentSeasonStats(normalizedHistorical);
             
             futureData = normalizeData(futureData, true);
@@ -481,10 +479,9 @@
             }
         }
         
-        // ** NUEVA FUNCIÓN: CALCULAR HOME ADVANTAGE DINÁMICO (HAD) **
         function calculateLeagueHAD(data) {
             const leagueTotals = {};
-            const minMatches = 15; // Mínimo de partidos para calcular el HAD por liga
+            const minMatches = 15; 
 
             let globalHomeGoals = 0;
             let globalMatches = 0;
@@ -496,7 +493,6 @@
                         totalMatches: 0,
                         totalHomeGoals: 0,
                         expectedHomeGoals: 0,
-                        avgAttH: 0, avgDefA: 0,
                         leagueGames: []
                     };
                 }
@@ -508,23 +504,18 @@
             if (globalMatches === 0) return {};
             const globalAvgHomeGoal = globalHomeGoals / globalMatches;
 
-            // Paso 1: Calcular Coeficientes Iniciales Globales
-            const initialGlobalStats = calculateCurrentSeasonStats(data);
+            const initialGlobalStats = calculateCurrentSeasonStats(data, 1.0); // Sin Time Decay inicial
             if (!initialGlobalStats) return {};
-            const globalAttH = initialGlobalStats.globalAverages.avgGoalsHome / initialGlobalStats.globalAverages.avgGoalsHome; // Simplemente 1
-            const globalDefA = initialGlobalStats.globalAverages.avgGoalsAway / initialGlobalStats.globalAverages.avgGoalsAway; // Simplemente 1
 
             for (const league in leagueTotals) {
                 const games = leagueTotals[league].leagueGames;
                 let sumExpectedGoals = 0;
 
-                // Calcular la suma de Goles Esperados (xG) para esta liga SIN HAD APLICADO.
                 games.forEach(r => {
                     const homeCoeffs = initialGlobalStats.teamCoeffs[r.home];
                     const awayCoeffs = initialGlobalStats.teamCoeffs[r.away];
 
                     if (homeCoeffs && awayCoeffs) {
-                         // Usamos coeficientes y promedios globales para una estimación inicial de lambda
                         const lambdaH_initial = homeCoeffs.attH_factor * awayCoeffs.defA_factor * initialGlobalStats.globalAverages.avgGoalsHome;
                         sumExpectedGoals += lambdaH_initial;
                     }
@@ -538,9 +529,7 @@
                     const actualHomeAvg = leagueTotals[league].totalHomeGoals / leagueTotals[league].totalMatches;
                     const expectedHomeAvg = leagueTotals[league].expectedHomeGoals / leagueTotals[league].totalMatches;
                     
-                    // HAD Factor = Goles Reales / Goles Esperados
                     let hadFactor = actualHomeAvg / expectedHomeAvg;
-                    // Limitar el factor para evitar desvíos extremos
                     hadFactor = Math.max(0.8, Math.min(1.5, hadFactor)); 
 
                     leagueHADFactors[league] = {
@@ -551,10 +540,9 @@
                 }
             }
 
-            // HAD GLOBAL (Para ligas con menos de 15 partidos)
             const globalActualHomeAvg = globalHomeGoals / globalMatches;
             const globalExpectedHomeAvg = Object.values(leagueTotals).reduce((sum, l) => sum + l.expectedHomeGoals, 0) / globalMatches;
-            let globalHADFactor = globalActualHomeAvg / globalExpectedHomeAvg;
+            let globalHADFactor = (globalExpectedHomeAvg > 0) ? (globalActualHomeAvg / globalExpectedHomeAvg) : 1.0;
             globalHADFactor = Math.max(0.8, Math.min(1.5, globalHADFactor)); 
 
             leagueHADFactors['GLOBAL'] = {
@@ -566,33 +554,46 @@
             return leagueHADFactors;
         }
 
-        function calculateCurrentSeasonStats(data) {
-            // ... (Función calculateCurrentSeasonStats, sin cambios de lógica interna) ...
+        // ** FUNCIÓN MODIFICADA: IMPLEMENTACIÓN DE TIME DECAY **
+        function calculateCurrentSeasonStats(data, decayOverride = null) {
             const teamStats = {};
-            let totalMatches = 0;
-            let totalHomeGoals = 0;
-            let totalAwayGoals = 0;
+            let totalMatchesWeighted = 0;
+            let totalHomeGoalsWeighted = 0;
+            let totalAwayGoalsWeighted = 0;
             
-            data.forEach(r => {
+            const numMatches = data.length;
+
+            data.forEach((r, index) => {
                 if(r.goalsH >= 0 && r.goalsA >= 0) {
-                    totalMatches++;
-                    totalHomeGoals += r.goalsH;
-                    totalAwayGoals += r.goalsA;
+                    
+                    // LÓGICA DE PONDERACIÓN TEMPORAL (TIME DECAY)
+                    // Las ponderaciones van de 0.75 (partido más antiguo) a 1.0 (partido más reciente)
+                    const decayFactor = decayOverride !== null 
+                        ? decayOverride 
+                        : (0.75 + (index / numMatches) * 0.25); 
+
+                    totalMatchesWeighted += decayFactor;
+                    totalHomeGoalsWeighted += r.goalsH * decayFactor;
+                    totalAwayGoalsWeighted += r.goalsA * decayFactor;
 
                     const updateStats = (team, goalsScored, goalsConceded, isHome) => {
                         if (!teamStats[team]) {
                             teamStats[team] = { playedH: 0, scoredH: 0, concededH: 0, playedA: 0, scoredA: 0, concededA: 0, gd: 0 };
+                            teamStats[team].weightH = 0;
+                            teamStats[team].weightA = 0;
                         }
                         teamStats[team].gd += goalsScored - goalsConceded;
                         
                         if (isHome) {
                             teamStats[team].playedH++;
-                            teamStats[team].scoredH += goalsScored;
-                            teamStats[team].concededH += goalsConceded;
+                            teamStats[team].scoredH += goalsScored * decayFactor;
+                            teamStats[team].concededH += goalsConceded * decayFactor;
+                            teamStats[team].weightH += decayFactor;
                         } else {
                             teamStats[team].playedA++;
-                            teamStats[team].scoredA += goalsScored;
-                            teamStats[team].concededA += goalsConceded;
+                            teamStats[team].scoredA += goalsScored * decayFactor;
+                            teamStats[team].concededA += goalsConceded * decayFactor;
+                            teamStats[team].weightA += decayFactor;
                         }
                     };
 
@@ -601,25 +602,25 @@
                 }
             });
             
-            if (totalMatches === 0) return null;
+            if (totalMatchesWeighted === 0) return null;
 
-            const avgGoalsHome = totalHomeGoals / totalMatches;
-            const avgGoalsAway = totalAwayGoals / totalMatches;
+            const avgGoalsHome = totalHomeGoalsWeighted / totalMatchesWeighted;
+            const avgGoalsAway = totalAwayGoalsWeighted / totalMatchesWeighted;
 
             const teamCoeffs = {};
             for (const team in teamStats) {
                 const stats = teamStats[team];
                 
-                const calculateFactor = (avgTeamGoals, totalGames, avgGlobalGoals) => {
-                    if (totalGames === 0 || avgGlobalGoals <= 0.001) return 1.0; 
-                    return (avgTeamGoals / totalGames) / avgGlobalGoals;
+                const calculateFactor = (weightedGoals, totalWeight, avgGlobalGoals) => {
+                    if (totalWeight < 1 || avgGlobalGoals <= 0.001) return 1.0; 
+                    return (weightedGoals / totalWeight) / avgGlobalGoals;
                 };
 
-                const attH_factor = calculateFactor(stats.scoredH, stats.playedH, avgGoalsHome);
-                const defH_factor = calculateFactor(stats.concededH, stats.playedH, avgGoalsAway);
+                const attH_factor = calculateFactor(stats.scoredH, stats.weightH, avgGoalsHome);
+                const defH_factor = calculateFactor(stats.concededH, stats.weightH, avgGoalsAway);
                 
-                const attA_factor = calculateFactor(stats.scoredA, stats.playedA, avgGoalsAway);
-                const defA_factor = calculateFactor(stats.concededA, stats.playedA, avgGoalsHome); 
+                const attA_factor = calculateFactor(stats.scoredA, stats.weightA, avgGoalsAway);
+                const defA_factor = calculateFactor(stats.concededA, stats.weightA, avgGoalsHome); 
 
                 let powerFactor = 1.0;
                 if (stats.playedH + stats.playedA >= 5) {
@@ -636,12 +637,12 @@
             }
 
             return {
-                globalAverages: { avgGoalsHome, avgGoalsAway, totalMatches }, 
+                globalAverages: { avgGoalsHome, avgGoalsAway, totalMatches: totalMatchesWeighted }, 
                 teamCoeffs: teamCoeffs
             };
         }
         
-        // ** FUNCIÓN MODIFICADA: APLICACIÓN DEL HAD DINÁMICO EN EL CÁLCULO DE PROBABILIDADES **
+        // ** FUNCIÓN SIN CAMBIOS, USA EL RESULTADO DE calculateCurrentSeasonStats MODIFICADO **
         function calculateHybridProbabilities(homeTeam, awayTeam, league, stats, hadFactors) {
             if (!stats) return null;
             const { globalAverages, teamCoeffs } = stats;
@@ -650,7 +651,6 @@
             
             if (!homeCoeffs || !awayCoeffs) return null;
 
-            // Determinar el factor HAD a aplicar: Liga específica o Global
             let hadFactor = 1.0;
             if (hadFactors[league] && hadFactors[league].matches >= 15) {
                 hadFactor = hadFactors[league].factor;
@@ -659,7 +659,6 @@
             }
 
             // Fórmulas de lambda para Poisson (APLICANDO HAD)
-            // HAD se aplica solo a la expectativa de goles del local (lambdaH)
             const lambdaH = homeCoeffs.attH_factor * awayCoeffs.defA_factor * globalAverages.avgGoalsHome * hadFactor;
             const lambdaA = awayCoeffs.attA_factor * homeCoeffs.defH_factor * globalAverages.avgGoalsAway;
 
@@ -819,6 +818,7 @@
             const stT = document.getElementById('stakeType').value;
             const stV = parseFloat(document.getElementById('stakeValue').value);
             const bank0 = parseFloat(document.getElementById('initialBank').value);
+            // USANDO 1.50
             const minO = parseFloat(document.getElementById('minOdds').value);
             const maxO = parseFloat(document.getElementById('maxOdds').value); 
             const minEV = parseFloat(document.getElementById('minEV').value) / 100; 
@@ -849,7 +849,7 @@
                     const oddsFair = pModel > 0 ? (1 / pModel) : 0;
                     
                     if (oddsH < minO || oddsH > maxO || oddsFair === 0) return; 
-                    if (oddsH <= oddsFair) return; // Filtro de Valor Lógico
+                    if (oddsH <= oddsFair) return; 
 
                     const edge = (pModel * oddsH) - 1; 
                     const EV_percent = edge * 100;
@@ -902,8 +902,8 @@
             const useValueFilter = document.getElementById('useFrequencyValue').checked; 
             const stT = document.getElementById('stakeType').value;
             const stV = parseFloat(document.getElementById('stakeValue').value);
-            // ** USANDO FILTROS ESTRICTOS EN BACKTEST **
-            const minO = 1.01;
+            // ** USANDO FILTROS ESTRICTOS EN BACKTEST (1.50 y 2.00) **
+            const minO = 1.50;
             const maxO = 2.00; 
             const minEV = 5.00 / 100; 
 
@@ -997,7 +997,6 @@
             });
         }
         
-        // ** NUEVA FUNCIÓN: ACTUALIZAR TABLA HAD **
         function updateHADTable(hadFactors) {
             const tbHAD = document.getElementById('hadTableBody'); tbHAD.innerHTML='';
             Object.entries(hadFactors)
