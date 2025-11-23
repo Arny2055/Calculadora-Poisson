@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Ultimate Football Value-Hacker v15.0 (Optimización Móvil)</title>
+    <title>Ultimate Football Value-Hacker v15.1 (Descarga de Datos)</title>
     
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
@@ -223,7 +223,7 @@
     <header>
         <div class="brand">
             <button class="mobile-toggle" onclick="toggleSidebar()"><i class="fas fa-bars"></i></button>
-            <i class="fas fa-hammer"></i> Value-Hacker <span class="tag">v15.0 Móvil Opt.</span>
+            <i class="fas fa-hammer"></i> Value-Hacker <span class="tag">v15.1 Descarga Opt.</span>
         </div>
         <div style="display:flex; gap:10px; align-items:center;">
             <input type="file" id="fileInputHistorical" accept=".csv" multiple style="display:none;" onchange="loadHistoricalFiles(event)">
@@ -358,7 +358,10 @@
             </div>
             
             <div id="valueBetsSection" class="panel-box" style="width:100%; display:none;">
-                <div class="panel-header"><span class="panel-title" style="color:var(--accent);"><i class="fas fa-filter"></i> OPORTUNIDADES DE VALOR DETECTADAS (EV+)</span></div>
+                <div class="panel-header" style="display:flex; justify-content:space-between; align-items:center;">
+                    <span class="panel-title" style="color:var(--accent);"><i class="fas fa-filter"></i> OPORTUNIDADES DE VALOR DETECTADAS (EV+)</span>
+                    <button class="btn btn-secondary" onclick="downloadValueBets()" style="padding: 5px 10px;"><i class="fas fa-download"></i> Descargar</button>
+                </div>
                 <p style="font-size:0.8rem; color:var(--text-secondary);">La tabla muestra solo los mercados donde la Cuota de Mercado es mayor que la Cuota Justa del Modelo. **Ordenado por fecha (más cercano primero).**</p>
                 <div class="table-scroll" style="max-height: 60vh;">
                     <table id="valueBetsTable">
@@ -405,11 +408,12 @@
     </div>
 
     <script>
-        // *** COMIENZO DE LA LÓGICA JAVASCRIPT - VALUE HACKER v15.0 (OPTIMIZACIÓN MÓVIL) ***
+        // *** COMIENZO DE LA LÓGICA JAVASCRIPT - VALUE HACKER v15.1 (DESCARGA DE DATOS) ***
         let historicalData = []; 
         let futureData = []; 
         let currentStats = null; 
         let leagueHADFactors = {}; 
+        let valueBetsResults = []; // Variable global para almacenar los resultados del EV+
         
         let chartEq=null, chartLg=null, chartDD=null; 
         let historicalFileNames = []; 
@@ -1002,7 +1006,7 @@
                 return;
             }
             
-            document.getElementById('loadingMessage').innerText = "Filtrando Oportunidades de Valor Esperado (EV+)...";
+            document.getElementById('loadingMessage').innerText = "Filtrando Oportunidades de Valor Esperado (EV+) y Calculando Stake...";
             document.getElementById('loadingOverlay').style.display = 'flex';
             
             const mktFilter = document.getElementById('marketSelect').value;
@@ -1016,7 +1020,7 @@
             const minEV = parseFloat(document.getElementById('minEV').value) / 100; 
             const lg = document.getElementById('leagueSelect').value;
             
-            let valueBetsResults = []; 
+            valueBetsResults = []; // REINICIAR LA VARIABLE GLOBAL DE RESULTADOS DE VALOR
             let totalAnalyzed = 0;
             let maxEV = 0;
 
@@ -1051,20 +1055,23 @@
                     
                     if (EV_percent > maxEV) maxEV = EV_percent;
 
-                    let actualStake = 'N/A';
+                    let actualStake = 0;
                     if (stT === 'flat') {
-                        actualStake = stV.toFixed(2);
+                        actualStake = stV;
                     } else if (stT === 'percent') {
-                        actualStake = (bank0 * (stV / 100)).toFixed(2);
+                        actualStake = bank0 * (stV / 100);
                     } else if (stT === 'kelly') {
                         const kellyDenominator = stV;
                         let kellyFraction = calculateKellyStake(pModel, oddsH, kellyDenominator);
                         kellyFraction = Math.min(kellyFraction, 0.10); 
-                        actualStake = (bank0 * kellyFraction).toFixed(2);
+                        actualStake = bank0 * kellyFraction;
                     }
 
+                    actualStake = Math.max(0.01, actualStake); // Asegura que no sea negativo/cero
+                    
                     valueBetsResults.push({
                         date: r.date,
+                        league: r.league, // Agregar Liga
                         match: `${r.home} vs ${r.away}`,
                         market: mkt,
                         marketLabel: label,
@@ -1084,6 +1091,43 @@
             
             updateGlobalUI(totalAnalyzed, valueBetsResults.length, maxEV, valueBetsResults);
             document.getElementById('loadingOverlay').style.display = 'none';
+        }
+
+        // --- FUNCIONES DE DESCARGA ---
+        function downloadValueBets() {
+            if (valueBetsResults.length === 0) {
+                alert("No hay oportunidades de valor (EV+) para descargar.");
+                return;
+            }
+
+            // Mapear los resultados para el archivo CSV
+            const csvData = valueBetsResults.map(b => ({
+                Fecha: b.date,
+                Liga: b.league,
+                Partido: b.match,
+                Mercado: b.marketLabel,
+                'Cuota_Tomada': b.odds.toFixed(2),
+                'Cuota_Justa_(Modelo)': b.oddsFair.toFixed(2),
+                'EV_Porcentaje': `+${b.EV.toFixed(2)}%`,
+                'Stake_Monto': b.stake.toFixed(2)
+            }));
+            
+            const csv = Papa.unparse(csvData, {
+                header: true,
+                delimiter: ","
+            });
+
+            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            
+            const today = new Date().toISOString().slice(0, 10).replace(/-/g, ''); // YYYYMMDD
+            a.setAttribute('href', url);
+            a.setAttribute('download', `ValueBets_${today}.csv`);
+            
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
         }
 
         // --- FUNCIONES DE BACKTEST y UI ---
@@ -1157,7 +1201,7 @@
             renderCharts(hist, drawdownHist, lgP);
         }
 
-        function updateGlobalUI(totalAnalyzed, evPlusCount, maxEV, valueBetsResults) { 
+        function updateGlobalUI(totalAnalyzed, evPlusCount, maxEV, results) { // Recibe los resultados filtrados
             document.getElementById('valBets').innerText = totalAnalyzed;
             document.getElementById('valEVPlus').innerText = evPlusCount;
             document.getElementById('valMaxEV').innerText = maxEV.toFixed(2) + '%'; 
@@ -1166,16 +1210,16 @@
 
             const tbVB = document.getElementById('valueBetsTableBody'); tbVB.innerHTML='';
             
-            document.getElementById('valueBetsSection').style.display = (valueBetsResults.length > 0) ? 'block' : 'none';
+            document.getElementById('valueBetsSection').style.display = (results.length > 0) ? 'block' : 'none';
 
             // Ordenar por fecha (ascendente) y luego por EV (descendente)
-            valueBetsResults.sort((a, b) => {
+            results.sort((a, b) => {
                 if (a.date < b.date) return -1;
                 if (a.date > b.date) return 1;
                 return b.EV - a.EV;
             });
 
-            valueBetsResults.forEach(b => {
+            results.forEach(b => {
                 const evClass = b.EV >= 5.0 ? 'text-green' : (b.EV >= 0.01 ? 'text-warning' : 'text-secondary');
                 const marketClass = `market-${b.market.replace(/[^HD A OU]/g, '')}`; 
                 
@@ -1190,7 +1234,7 @@
                         <td>${b.odds.toFixed(2)}</td>
                         <td style="display:none;">${b.oddsFair.toFixed(2)}</td> 
                         <td class="${evClass}" style="font-weight:bold;">+${b.EV.toFixed(2)}%</td>
-                        <td>${b.stake}</td>
+                        <td>${b.stake.toFixed(2)}</td>
                     </tr>
                 `;
             });
