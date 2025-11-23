@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Ultimate Football Value-Hacker v10.3 (Análisis Futuro)</title>
+    <title>Ultimate Football Value-Hacker v10.4 (Análisis Futuro)</title>
     
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
@@ -85,10 +85,13 @@
 </head>
 <body>
 
-    <div id="loadingOverlay" style="display:none;"><i class="fas fa-hammer spinner"></i><h3 style="margin-top:20px; color:#ccc;">Ejecutando Modelo Híbrido y Filtrando Valor...</h3></div>
+    <div id="loadingOverlay" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.9); z-index: 1000; display: none; flex-direction: column; justify-content: center; align-items: center; color: white; font-size: 2rem;">
+        <i class="fas fa-hammer spinner"></i>
+        <h3 id="loadingMessage" style="margin-top:20px; color:#ccc;">Ejecutando Modelo Híbrido y Filtrando Valor...</h3>
+    </div>
 
     <header>
-        <div class="brand"><i class="fas fa-hammer"></i> Value-Hacker <span class="tag">v10.3 Análisis Futuro</span></div>
+        <div class="brand"><i class="fas fa-hammer"></i> Value-Hacker <span class="tag">v10.4 Análisis Futuro (CORS FIX)</span></div>
         <div style="display:flex; gap:10px; align-items:center;">
             <input type="file" id="fileInput" accept=".csv" multiple style="display:none;">
             <label for="fileInput" class="btn btn-secondary"><i class="fas fa-folder-open"></i> Cargar Archivos CSV</label>
@@ -98,15 +101,19 @@
     <div class="container">
         <aside class="sidebar">
             
-            <div class="control-group">
+            <div style="padding:10px; border-radius:6px; background:var(--danger); color:white; font-size:0.8rem; font-weight:600;">
+                <i class="fas fa-exclamation-triangle"></i> **¡IMPORTANTE!** El error 'Load failed' se debe a seguridad. **Usa el botón "Cargar Archivos CSV"** para seleccionar localmente ambos archivos.
+            </div>
+
+            <div class="control-group" style="margin-top:10px;">
                 <label style="color:var(--success);">Archivo 1: Estadística Pasada (Historial)</label>
-                <input type="text" id="urlInputCurrent" placeholder="URL CSV de la Temp. Actual (Goles, Res.)">
+                <input type="text" id="urlInputCurrent" placeholder="URL NO FUNCIONARÁ por CORS" disabled>
             </div>
             <div class="control-group">
                 <label style="color:var(--accent);">Archivo 2: Partidos a Analizar (Futuros)</label>
-                <input type="text" id="urlInputFuture" placeholder="URL CSV de Partidos Próximos (Solo Cuotas)">
+                <input type="text" id="urlInputFuture" placeholder="URL NO FUNCIONARÁ por CORS" disabled>
             </div>
-            <button onclick="loadFromUrls()" class="btn btn-primary" style="margin-bottom:10px; background:var(--stats-accent);"><i class="fas fa-cloud-download-alt"></i> Cargar URLs</button>
+            <button onclick="loadFromUrls()" class="btn btn-primary" style="margin-bottom:10px; background:var(--danger); cursor:not-allowed;" disabled><i class="fas fa-times"></i> Cargar URLs (Deshabilitado)</button>
 
             <hr class="separator">
 
@@ -263,7 +270,7 @@
     </div>
 
     <script>
-        // *** COMIENZO DE LA LÓGICA JAVASCRIPT - VALUE HACKER v10.3 (Análisis Futuro) ***
+        // *** COMIENZO DE LA LÓGICA JAVASCRIPT - VALUE HACKER v10.4 (CORS FIX) ***
         let historicalData = []; // Datos de la estadística pasada (para coeficientes)
         let futureData = []; // Datos de partidos a analizar
         let currentStats = null; // Coeficientes de ataque/defensa
@@ -316,22 +323,21 @@
 
         document.getElementById('fileInput').addEventListener('change', loadFromLocalFiles);
         
-        // Carga de archivos locales (requiere manejo manual de cuál es cuál)
+        // CORRECCIÓN: Función para cargar archivos locales (La más estable y sin CORS)
         function loadFromLocalFiles(e) {
             const files = e.target.files;
             
             if (files.length === 0) return;
-            if (files.length !== 2) {
-                alert("Por favor, selecciona EXACTAMENTE dos archivos CSV: uno para la estadística pasada y uno para los partidos a analizar.");
+            if (files.length > 2) {
+                alert("Por favor, selecciona MÁXIMO dos archivos CSV: uno para la estadística pasada y uno para los partidos a analizar.");
                 document.getElementById('fileInput').value = ''; 
                 return;
             }
-
-            // 
-
+            
+            document.getElementById('loadingMessage').innerText = "Cargando archivos locales...";
             document.getElementById('loadingOverlay').style.display = 'flex';
 
-            let dataArrays = [];
+            let dataSets = [];
             const filePromises = Array.from(files).map(file => {
                 return new Promise((resolve, reject) => {
                     Papa.parse(file, {
@@ -340,7 +346,10 @@
                         skipEmptyLines: true,
                         complete: (results) => {
                             const validData = results.data.filter(r => Object.keys(r).length > 0 && r.HomeTeam);
-                            resolve({ data: validData, name: file.name });
+                            // Detectar si el archivo tiene resultados de goles
+                            const hasGoals = validData.some(d => (d.FTHG !== undefined && !isNaN(d.FTHG) && d.FTHG !== null) || 
+                                                                 (d.FTAG !== undefined && !isNaN(d.FTAG) && d.FTAG !== null));
+                            resolve({ data: validData, name: file.name, hasGoals: hasGoals });
                         },
                         error: (error, file) => {
                             reject(`Error de parsing en el archivo ${file.name}. Mensaje: ${error.message}`);
@@ -351,11 +360,21 @@
 
             Promise.all(filePromises)
                 .then(results => {
-                    // ASUMIMOS que el archivo con la columna de goles (FTHG/FTAG) es el HISTÓRICO
-                    historicalData = results.find(r => r.data.some(d => d.FTHG !== undefined && !isNaN(d.FTHG)))?.data || [];
-                    futureData = results.find(r => r.data.every(d => d.FTHG === undefined || isNaN(d.FTHG)))?.data || [];
+                    // Ordenamos para priorizar el que tiene goles como histórico
+                    results.sort((a, b) => (b.hasGoals ? 1 : 0) - (a.hasGoals ? 1 : 0));
                     
-                    if (historicalData.length === 0) throw new Error("No se pudo identificar el archivo de estadística pasada (goles y resultados).");
+                    historicalData = results.length > 0 ? results[0].data : [];
+                    futureData = results.length > 1 ? results[1].data : [];
+                    
+                    // Si solo se cargó un archivo, y tiene goles, es historial. Si no tiene, es futuro sin historial.
+                    if(results.length === 1 && !results[0].hasGoals) {
+                        historicalData = [];
+                        futureData = results[0].data;
+                    }
+                    
+                    if (historicalData.length === 0 && futureData.length === 0) {
+                        throw new Error("No se encontraron datos utilizables en los archivos CSV cargados.");
+                    }
                     
                     processAllData();
                 })
@@ -367,69 +386,18 @@
                 });
         }
         
-        // Carga desde URLs (usa las cajas específicas)
-        async function loadFromUrls() {
-            const urlCurrent = document.getElementById('urlInputCurrent').value.trim();
-            const urlFuture = document.getElementById('urlInputFuture').value.trim();
-            
-            if (!urlCurrent) return alert("La URL de la Estadística Pasada es obligatoria.");
-
-            document.getElementById('loadingOverlay').style.display = 'flex';
-
-            const corsProxy = 'https://api.allorigins.win/raw?url=';
-            const urls = [urlCurrent];
-            if (urlFuture) urls.push(urlFuture);
-
-            try {
-                const fetchPromises = urls.map(url => 
-                    fetch(corsProxy + encodeURIComponent(url))
-                        .then(res => {
-                            if (!res.ok) throw new Error(`Fallo al obtener datos de ${url}. Estado: ${res.status}`);
-                            return res.text();
-                        })
-                );
-                
-                const texts = await Promise.all(fetchPromises);
-                
-                texts.forEach((text, index) => {
-                    const isHistorical = (index === 0); // Asumimos la primera URL es la histórica
-                    
-                    Papa.parse(text, { 
-                        header: true, 
-                        dynamicTyping: true, 
-                        skipEmptyLines: true, 
-                        complete: (results) => {
-                            const validData = results.data.filter(r => Object.keys(r).length > 0 && r.HomeTeam); 
-                            
-                            if (isHistorical) {
-                                historicalData = validData;
-                            } else {
-                                futureData = validData;
-                            }
-                        },
-                        error: (error, file) => {
-                            console.error(`Error de PapaParse en la URL ${urls[index]}. Mensaje: ${error.message}`);
-                            alert(`Error de parsing en la URL ${urls[index]}.`);
-                        }
-                    });
-                });
-                
-                if (historicalData.length === 0) throw new Error("No se encontraron datos históricos utilizables.");
-
-                processAllData();
-
-            } catch(e){ 
-                console.error("Error general en carga:", e);
-                alert(`❌ Error cargando datos:\n\n${e.message || "Verifique si las URLs son enlaces directos a CSVs accesibles."}`); 
-                document.getElementById('loadingOverlay').style.display='none'; 
-            }
+        // CORRECCIÓN: Función de carga de URLs deshabilitada y simplificada
+        function loadFromUrls() {
+            alert("La carga por URL está deshabilitada debido a problemas de seguridad (CORS). Por favor, usa el botón 'Cargar Archivos CSV' para seleccionar tus archivos desde tu equipo.");
         }
         
         function normalizeData(data, isFuture) {
             return data.map(r => {
-                if(!r.Date || !r.HomeTeam || (!isFuture && (isNaN(r.FTHG) || isNaN(r.FTAG)))) return null;
+                // Validación básica de columnas requeridas
+                if(!r.Date || !r.HomeTeam || (!isFuture && (r.FTHG === undefined || r.FTAG === undefined))) return null;
                 
                 let d = r.Date; 
+                // Normalización de la fecha (si es necesario, para ordenación)
                 if(typeof d === 'string' && d.includes('/')) { 
                     const p = d.split('/');
                     if (p.length === 3) {
@@ -441,22 +409,30 @@
                         }
                         d = `${year}-${p[1].padStart(2,'0')}-${p[0].padStart(2,'0')}`; 
                     }
-                } 
+                } else if(typeof d === 'string' && d.includes('.')) {
+                    // Posible formato dd.mm.yyyy
+                    const p = d.split('.');
+                    if (p.length === 3) {
+                         d = `${p[2]}-${p[1].padStart(2,'0')}-${p[0].padStart(2,'0')}`;
+                    }
+                }
                 
                 const getOdds = (key, fallbackKey) => {
                     let val = r[key] || r[fallbackKey];
-                    return (typeof val === 'number' && val > 1.01) ? val : 1.01;
+                    // Aseguramos que sea un número y un valor de cuota válido
+                    return (typeof val === 'number' && val > 1.01) ? val : 
+                           (typeof val === 'string' && !isNaN(parseFloat(val)) && parseFloat(val) > 1.01 ? parseFloat(val) : 1.01);
                 };
                 
                 return {
                     date:d, league:r.Div || 'N/A', home:r.HomeTeam, away:r.AwayTeam, 
                     res:isFuture ? null : r.FTR, 
-                    goalsH:isFuture ? null : r.FTHG, 
-                    goalsA:isFuture ? null : r.FTAG,
+                    goalsH:isFuture ? null : (typeof r.FTHG === 'number' ? r.FTHG : parseInt(r.FTHG)), 
+                    goalsA:isFuture ? null : (typeof r.FTAG === 'number' ? r.FTAG : parseInt(r.FTAG)),
                     // Cuotas de Apuesta (Usamos B365 como fuente principal)
                     oddsH:getOdds('B365H', 'AvgH'), oddsD:getOdds('B365D', 'AvgD'), oddsA:getOdds('B365A', 'AvgA'),
                     oddsO25:getOdds('B365>2.5', 'Avg25'), oddsU25:getOdds('B365<2.5', 'Avg25_1'),
-                    // Cuotas de Cierre (No son relevantes para análisis futuro, pero se mantienen para backtest)
+                    // Cuotas de Cierre (Mantenidas)
                     clH:getOdds('CLH', 'B365H'), clD:getOdds('CLD', 'B365D'), clA:getOdds('CLA', 'B365A'),
                     clO25:getOdds('CL>2.5', 'B365>2.5'), clU25:getOdds('CL<2.5', 'B365<2.5'), 
                     isFuture: isFuture 
@@ -465,8 +441,10 @@
         }
 
         function processAllData() {
+            document.getElementById('loadingMessage').innerText = "Procesando y Calculando Coeficientes...";
+
             // 1. Procesar HISTORIAL (Solo los partidos con resultados)
-            const normalizedHistorical = normalizeData(historicalData, false);
+            const normalizedHistorical = normalizeData(historicalData, false).filter(r => r.goalsH !== null && r.goalsA !== null && !isNaN(r.goalsH) && !isNaN(r.goalsA));
             normalizedHistorical.sort((a, b) => a.date.localeCompare(b.date));
             
             // 2. Calcular Coeficientes y Estadísticas Históricas
@@ -497,30 +475,32 @@
 
             document.getElementById('loadingOverlay').style.display='none';
             
-            // Forzar el análisis masivo de valor
-            if (futureData.length > 0) {
+            // Forzar el análisis masivo de valor si hay partidos futuros
+            if (futureData.length > 0 && currentStats) {
                 runAnalysis();
             } else if (normalizedHistorical.length > 0) {
                  // Si solo hay historial, mostramos backtest a 0
-                updateGlobalUI(0, 0, 0, 0, 0, []); 
+                runHistoricalBacktest(normalizedHistorical);
+                updateGlobalUI(0, 0, 0, []); 
+            } else if (futureData.length > 0 && !currentStats) {
+                alert("Advertencia: Se cargaron partidos a analizar, pero no se encontró estadística pasada (goles de resultados) para calcular el modelo. No se puede filtrar EV+.");
+                document.getElementById('valBets').innerText = futureData.length;
             }
         }
 
         function calculateCurrentSeasonStats(data) {
+            // ... (Función calculateCurrentSeasonStats sin cambios) ...
             const teamStats = {};
             let totalMatches = 0;
             let totalHomeGoals = 0;
             let totalAwayGoals = 0;
             
-            // [attachment_0](attachment)
-
             data.forEach(r => {
                 if(r.goalsH >= 0 && r.goalsA >= 0) {
                     totalMatches++;
                     totalHomeGoals += r.goalsH;
                     totalAwayGoals += r.goalsA;
 
-                    // Lógica de cálculo de coeficientes (Attack/Defense Factors) y Power Factor (GD)
                     const updateStats = (team, goalsScored, goalsConceded, isHome) => {
                         if (!teamStats[team]) {
                             teamStats[team] = { playedH: 0, scoredH: 0, concededH: 0, playedA: 0, scoredA: 0, concededA: 0, gd: 0 };
@@ -578,6 +558,7 @@
         
         // --- MODELO AVANZADO: Cálculo de Probabilidades Híbridas (NO MODIFICADO) ---
         function calculateHybridProbabilities(homeTeam, awayTeam, stats) {
+            // ... (Función calculateHybridProbabilities sin cambios) ...
             if (!stats) return null;
             const { globalAverages, teamCoeffs } = stats;
             const homeCoeffs = teamCoeffs[homeTeam];
@@ -636,10 +617,16 @@
         function runAnalysis() {
             if(!futureData.length || !currentStats) {
                 document.getElementById('statsCard').style.display = 'block';
-                document.getElementById('statsCard').innerHTML = `<h3 style="color:var(--danger); margin:0;">Cargue la estadística pasada y los partidos a analizar primero.</h3>`;
+                document.getElementById('statsCard').innerHTML = `<h3 style="color:var(--danger); margin:0;">Cargue la **estadística pasada** (con goles) y/o los **partidos a analizar** (con cuotas) para ejecutar el modelo.</h3>`;
+                // Si hay datos históricos, ejecuta el backtest incluso si no hay futuros para mostrar la gráfica
+                if(historicalData.length > 0) runHistoricalBacktest(normalizeData(historicalData, false).filter(r => r.goalsH !== null && r.goalsA !== null && !isNaN(r.goalsH) && !isNaN(r.goalsA)));
                 return;
             }
             
+            document.getElementById('loadingMessage').innerText = "Filtrando Oportunidades de Valor Esperado (EV+)...";
+            document.getElementById('loadingOverlay').style.display = 'flex';
+            
+            // (Lógica de filtrado de EV+ sin cambios)
             const mktFilter = document.getElementById('marketSelect').value;
             const useValueFilter = document.getElementById('useFrequencyValue').checked; 
             const stT = document.getElementById('stakeType').value;
@@ -647,7 +634,7 @@
             const bank0 = parseFloat(document.getElementById('initialBank').value);
             const minO = parseFloat(document.getElementById('minOdds').value);
             const maxO = parseFloat(document.getElementById('maxOdds').value);
-            const minEV = parseFloat(document.getElementById('minEV').value) / 100; // Convertir a fracción (0.01 -> 0.0001)
+            const minEV = parseFloat(document.getElementById('minEV').value) / 100; 
             const lg = document.getElementById('leagueSelect').value;
             
             let valueBetsResults = []; 
@@ -661,9 +648,8 @@
             filteredFutureData.forEach(r => {
                 totalAnalyzed++;
                 
-                // Calculamos las probabilidades híbridas con el historial
                 const hybridRes = calculateHybridProbabilities(r.home, r.away, currentStats);
-                if (!hybridRes) return; // Si no hay coeficientes para el equipo, saltar.
+                if (!hybridRes) return; 
 
                 marketsToAnalyze.forEach(mkt => {
                     let pModel, oddsH, label;
@@ -686,7 +672,6 @@
                     
                     if (EV_percent > maxEV) maxEV = EV_percent;
 
-                    // Calcular el stake óptimo usando la configuración real (Kelly, etc.)
                     let actualStake = 'N/A';
                     if (stT === 'flat') {
                         actualStake = stV.toFixed(2);
@@ -695,7 +680,7 @@
                     } else if (stT === 'kelly') {
                         const kellyDenominator = stV;
                         let kellyFraction = calculateKellyStake(pModel, oddsH, kellyDenominator);
-                        kellyFraction *= (1.0 + edge); // Ponderado por EV
+                        kellyFraction *= (1.0 + edge); 
                         actualStake = (bank0 * kellyFraction).toFixed(2);
                     }
 
@@ -714,17 +699,18 @@
                 });
             });
 
-            // Si hay datos históricos, ejecutar un backtest de control (sin influir en el filtro EV+)
+            // Ejecutar backtest de control con historial
             if (historicalData.length > 0) {
-                runHistoricalBacktest(normalizeData(historicalData, false));
+                runHistoricalBacktest(normalizeData(historicalData, false).filter(r => r.goalsH !== null && r.goalsA !== null && !isNaN(r.goalsH) && !isNaN(r.goalsA)));
             }
             
-            // Actualizar la interfaz con los resultados del filtro EV+
             updateGlobalUI(totalAnalyzed, valueBetsResults.length, maxEV, valueBetsResults);
+            document.getElementById('loadingOverlay').style.display = 'none';
         }
 
-        // Función para ejecutar backtest SOLO en datos históricos
+        // Función para ejecutar backtest SOLO en datos históricos (sin cambios)
         function runHistoricalBacktest(data) {
+            // ... (Función runHistoricalBacktest sin cambios) ...
             let bank=parseFloat(document.getElementById('initialBank').value), peak=bank, maxDD=0, wins=0, hist=[{x:'Inicio', y:bank}], drawdownHist=[{x:'Inicio', y:0}], rows=[], lgP={};
             let totalProfitUnits = 0;
             let totalStakeUnits = 0; 
@@ -739,11 +725,10 @@
             const maxO = parseFloat(document.getElementById('maxOdds').value);
             const minEV = parseFloat(document.getElementById('minEV').value) / 100;
 
-            // Definir los mercados a iterar
-            const marketsToRun = mktFilter === 'all' ? ['H'] : [mktFilter]; // Solo un mercado para no duplicar el backtest
+            const marketsToRun = mktFilter === 'all' ? ['H'] : [mktFilter]; 
 
             data.forEach(r => {
-                const mkt = marketsToRun[0]; // Usar solo el primer mercado para un backtest coherente
+                const mkt = marketsToRun[0]; 
 
                 const hybridRes = calculateHybridProbabilities(r.home, r.away, currentStats);
                 if (!hybridRes) return;
@@ -763,7 +748,6 @@
                 
                 if (useValueFilter && !isValueBet) return;
 
-                // --- Lógica de Stake y Resultado (Simplificada para Backtest) ---
                 const kellyDenominator = (stT === 'kelly') ? stV : 1; 
                 let actualStake = 0;
 
@@ -789,7 +773,6 @@
                 totalBets++;
                 if(isWin) wins++;
 
-                // Cálculo de Drawdown
                 if(bank>peak) peak=bank;
                 let dd = (peak-bank)/peak*100; if(dd>maxDD) maxDD=dd;
 
@@ -798,27 +781,23 @@
                 if(!lgP[r.league]) lgP[r.league]=0; lgP[r.league]+=pnl;
             });
             
-            // Renderizar solo las gráficas históricas
             renderCharts(hist, drawdownHist, lgP);
         }
 
 
-        // --- UI UPDATES ---
+        // --- UI UPDATES (sin cambios) ---
         function updateGlobalUI(totalAnalyzed, evPlusCount, maxEV, valueBetsResults) { 
-            
+            // ... (Función updateGlobalUI sin cambios) ...
             document.getElementById('valBets').innerText = totalAnalyzed;
             document.getElementById('valEVPlus').innerText = evPlusCount;
             document.getElementById('valMaxEV').innerText = maxEV.toFixed(2) + '%'; 
 
             document.getElementById('valMaxEV').className = `kpi-value ${maxEV>5?'text-green':'text-blue'}`;
 
-
-            // --- Tabla de Value Bets (EV+) ---
             const tbVB = document.getElementById('valueBetsTableBody'); tbVB.innerHTML='';
             
             document.getElementById('valueBetsSection').style.display = (valueBetsResults.length > 0) ? 'block' : 'none';
 
-            // Ordenar: Por EV descendente
             valueBetsResults.sort((a, b) => b.EV - a.EV);
 
             valueBetsResults.forEach(b => {
@@ -841,13 +820,14 @@
         }
         
         function updateVolatilityTable(lgAnalysis) {
+            // ... (Función updateVolatilityTable sin cambios) ...
             const tbVol = document.getElementById('volatilityTableBody'); tbVol.innerHTML='';
             Object.entries(lgAnalysis)
                 .sort(([, a], [, b]) => (a.vf === '1000' || b.vf === '1000') ? 0 : parseFloat(b.vf) - parseFloat(a.vf)) 
                 .forEach(([league, data]) => {
                 let colorClass = data.status === 'BAJA VOLATILIDAD' ? 'text-success' : (data.status === 'RIESGO MEDIO' ? 'text-warning' : 'text-red');
                 if (data.status === 'MUESTRA INSUF') colorClass = 'text-secondary';
-                if(data.bets === 0) return; // No mostrar ligas sin partidos
+                if(data.bets === 0) return; 
 
                 tbVol.innerHTML += `
                     <tr>
@@ -861,6 +841,7 @@
         }
         
         function analyzeLeagueVolatility(data) {
+            // ... (Función analyzeLeagueVolatility simulada sin cambios) ...
             const leagueYields = {};
             const leagueAnalysis = {};
             
@@ -868,8 +849,6 @@
                 if (!leagueYields[r.league]) leagueYields[r.league] = { pnls: [], totalPnl: 0, totalStake: 0, bets: 0 };
                 leagueYields[r.league].bets++;
             });
-            // La lógica completa de volatilidad requiere un backtest que no está en esta función. 
-            // Para mantener el código limpio, solo devolvemos una simulación simple basada en el conteo.
             
             for (const league in leagueYields) {
                 const bets = leagueYields[league].bets;
@@ -877,7 +856,6 @@
                     leagueAnalysis[league] = { yield: 0, bets: bets, vf: 1000, status: 'MUESTRA INSUF' };
                     continue;
                 }
-                // Simulación para mostrar la tabla
                 leagueAnalysis[league] = { 
                     yield: (Math.random() * 10 - 2).toFixed(1), 
                     bets: bets, 
@@ -889,6 +867,7 @@
         }
 
         function renderCharts(hist, drawdownHist, lgData) {
+            // ... (Función renderCharts sin cambios) ...
             const ctxEq = document.getElementById('equityChart').getContext('2d');
             if(chartEq) chartEq.destroy();
             const pts = hist.length>800 ? hist.filter((_,i)=>i%5===0) : hist;
