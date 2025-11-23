@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Ultimate Football Value-Hacker v10.6 (Máxima Robustez)</title>
+    <title>Ultimate Football Value-Hacker v10.7 (Filtro Estricto)</title>
     
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
@@ -82,7 +82,7 @@
     </div>
 
     <header>
-        <div class="brand"><i class="fas fa-hammer"></i> Value-Hacker <span class="tag">v10.6 ROBUSTO</span></div>
+        <div class="brand"><i class="fas fa-hammer"></i> Value-Hacker <span class="tag">v10.7 FILTRO ESTRICTO</span></div>
         <div style="display:flex; gap:10px; align-items:center;">
             <input type="file" id="fileInput" accept=".csv" multiple style="display:none;">
             <label for="fileInput" class="btn btn-secondary"><i class="fas fa-folder-open"></i> Cargar Archivos CSV</label>
@@ -148,18 +148,18 @@
                 
                 <hr class="separator">
 
-                <h3>🛡️ Filtros de Riesgo / Volatilidad</h3>
+                <h3>🛡️ Filtros de Riesgo / Volatilidad (ESTRICTO)</h3>
                 <div class="control-group">
-                    <label>Rango de Cuota</label>
+                    <label>Rango de Cuota **MÁXIMO**</label>
                     <div style="display:flex; gap:5px;">
-                        <input type="number" id="minOdds" value="1.50" step="0.01" min="1.01" style="width:50%;" placeholder="Min Odd">
-                        <input type="number" id="maxOdds" value="4.00" step="0.01" min="1.01" style="width:50%;" placeholder="Max Odd">
+                        <input type="number" id="minOdds" value="1.01" step="0.01" min="1.01" style="width:50%;" placeholder="Min Odd">
+                        <input type="number" id="maxOdds" value="2.00" step="0.01" min="1.01" style="width:50%;" placeholder="Max Odd">
                     </div>
                 </div>
                 
                 <div class="control-group">
-                    <label>Mínimo de Valor Esperado (EV%)</label>
-                    <input type="number" id="minEV" value="0.01" step="0.01" min="0.01" placeholder="Ej: 0.01 (1%)">
+                    <label>Mínimo de Valor Esperado (EV%) **MÍNIMO 5%**</label>
+                     <input type="number" id="minEV" value="5.00" step="0.01" min="0.01" placeholder="Ej: 5.00 (5%)">
                 </div>
 
                 <div class="control-group">
@@ -261,7 +261,7 @@
     </div>
 
     <script>
-        // *** COMIENZO DE LA LÓGICA JAVASCRIPT - VALUE HACKER v10.6 (MÁXIMA ROBUSTEZ) ***
+        // *** COMIENZO DE LA LÓGICA JAVASCRIPT - VALUE HACKER v10.7 (FILTRO ESTRICTO) ***
         let historicalData = []; 
         let futureData = []; 
         let currentStats = null; 
@@ -297,17 +297,26 @@
             if (n < factorialCache.length) return factorialCache[n];
             if (n === 0 || n === 1) return 1;
             for (let i = factorialCache.length; i <= n; i++) {
-                factorialCache[i] = factorialCache[i - 1] * i;
+                // Validación para evitar desbordamiento con números muy grandes (aunque con 5 goles es poco probable)
+                if (factorialCache[i - 1] * i > Number.MAX_SAFE_INTEGER) {
+                    console.warn(`Factorial de ${i} excede el límite seguro. Usando límite.`);
+                    factorialCache[i] = Number.MAX_SAFE_INTEGER;
+                } else {
+                    factorialCache[i] = factorialCache[i - 1] * i;
+                }
             }
             return factorialCache[n];
         }
 
         function poisson(lambda, k) {
-            if (lambda < 0 || k < 0) return 0;
-            return (Math.exp(-lambda) * Math.pow(lambda, k)) / factorial(k);
+            // OPTIMIZACIÓN: Limitar lambda para cálculos extremos
+            const limitedLambda = Math.min(20, lambda); 
+            if (limitedLambda < 0 || k < 0) return 0;
+            // Usamos la lambda limitada para mayor estabilidad
+            return (Math.exp(-limitedLambda) * Math.pow(limitedLambda, k)) / factorial(k);
         }
         
-        // --- CARGA Y PROCESAMIENTO DE DATOS ---
+        // --- CARGA Y PROCESAMIENTO DE DATOS (Mismos que v10.6) ---
 
         document.getElementById('fileInput').addEventListener('change', loadFromLocalFiles);
         
@@ -372,7 +381,6 @@
             alert("La carga por URL está deshabilitada por seguridad (CORS).");
         }
 
-        // CORRECCIÓN ROBUSTA: Normalización de datos con priorización de Cuotas de Cierre
         function normalizeData(data, isFuture) {
             const parseNum = (val) => {
                 if (typeof val === 'number') return val;
@@ -389,7 +397,6 @@
 
             const getGoal = (key) => {
                 let val = parseNum(key);
-                // Si es null o NaN, retorna null, si no, retorna el entero
                 return (val !== null && !isNaN(val) && val >= 0) ? Math.floor(val) : null;
             }
             
@@ -397,7 +404,6 @@
                 if(!r.Date || !r.HomeTeam) return null;
                 
                 let d = r.Date; 
-                // Normalización básica de la fecha
                 if(typeof d === 'string') {
                     if (d.includes('/')) {
                         const p = d.split('/');
@@ -445,8 +451,11 @@
             if(currentStats) {
                 const teams = Object.keys(currentStats.teamCoeffs).sort();
                 const populate = (id) => {
-                    const s = document.getElementById(id); s.innerHTML='<option value="">Seleccionar</option>';
+                    const s = document.getElementById(id); 
+                    const currentVal = s.value; // Guardar valor actual
+                    s.innerHTML='<option value="">Seleccionar</option>';
                     teams.forEach(t => s.add(new Option(t,t)));
+                    if (teams.includes(currentVal)) s.value = currentVal; // Restaurar si es posible
                 };
                 populate('teamHomeSelect'); populate('teamAwaySelect');
             }
@@ -471,7 +480,6 @@
             }
         }
 
-        // CORRECCIÓN ROBUSTA: Cálculo de coeficientes con chequeo de división por cero
         function calculateCurrentSeasonStats(data) {
             const teamStats = {};
             let totalMatches = 0;
@@ -515,9 +523,8 @@
             for (const team in teamStats) {
                 const stats = teamStats[team];
                 
-                // Función auxiliar para calcular el factor de forma segura
                 const calculateFactor = (avgTeamGoals, totalGames, avgGlobalGoals) => {
-                    if (totalGames === 0 || avgGlobalGoals <= 0) return 1.0; 
+                    if (totalGames === 0 || avgGlobalGoals <= 0.001) return 1.0; 
                     return (avgTeamGoals / totalGames) / avgGlobalGoals;
                 };
 
@@ -537,7 +544,7 @@
                     attH_factor, defH_factor, attA_factor, defA_factor,
                     playedH: stats.playedH, 
                     playedA: stats.playedA,
-                    powerFactor: Math.max(0.5, Math.min(1.5, powerFactor)) // Limitar factor 
+                    powerFactor: Math.max(0.5, Math.min(1.5, powerFactor)) 
                 };
             }
 
@@ -547,7 +554,6 @@
             };
         }
         
-        // --- MODELO AVANZADO: Cálculo de Probabilidades Híbridas ---
         function calculateHybridProbabilities(homeTeam, awayTeam, stats) {
             if (!stats) return null;
             const { globalAverages, teamCoeffs } = stats;
@@ -577,7 +583,6 @@
             let pDraw = pDrawRaw / sumRaw;
             let pAway = pAwayRaw / sumRaw;
             
-            // Aplicación del Power Factor (Robustez: chequeo)
             const powerH = homeCoeffs.powerFactor || 1.0;
             const powerA = awayCoeffs.powerFactor || 1.0;
             
@@ -585,7 +590,7 @@
             pAway *= powerA;
             
             let sum1X2 = pHome + pDraw + pAway;
-            if (sum1X2 === 0) sum1X2 = 1; // Evitar división por cero si todas las probabilidades son cero
+            if (sum1X2 === 0) sum1X2 = 1; 
 
             pHome /= sum1X2;
             pDraw /= sum1X2;
@@ -608,28 +613,33 @@
             };
         }
         
-        // Implementación de Análisis Manual
         function analyzeMatchup() {
             const homeTeam = document.getElementById('teamHomeSelect').value;
             const awayTeam = document.getElementById('teamAwaySelect').value;
             
             document.getElementById('statsCard').style.display = 'none';
 
+            if (!currentStats) {
+                document.getElementById('statsCard').style.display = 'block';
+                document.getElementById('statsCard').innerHTML = `<h3 style="color:var(--danger); margin:0;">El modelo no ha sido calculado. ¡Carga datos históricos!</h3>`;
+                return;
+            }
             if (!homeTeam || !awayTeam) {
                  document.getElementById('statsCard').style.display = 'block';
                  document.getElementById('statsCard').innerHTML = `<h3 style="color:var(--danger); margin:0;">Selecciona un equipo Local y uno Visitante para el análisis manual.</h3>`;
                  return;
             }
-            if (!currentStats || !currentStats.teamCoeffs[homeTeam] || !currentStats.teamCoeffs[awayTeam]) {
+            if (!currentStats.teamCoeffs[homeTeam] || !currentStats.teamCoeffs[awayTeam]) {
                  document.getElementById('statsCard').style.display = 'block';
-                 document.getElementById('statsCard').innerHTML = `<h3 style="color:var(--danger); margin:0;">No hay datos históricos suficientes para al menos uno de los equipos seleccionados.</h3>`;
+                 document.getElementById('statsCard').innerHTML = `<h3 style="color:var(--danger); margin:0;">No hay datos históricos suficientes para calcular los coeficientes de uno de los equipos seleccionados.</h3>`;
                  return;
             }
 
             const r = futureData.find(m => m.home === homeTeam && m.away === awayTeam);
             
+            // Usar cuotas del primer partido futuro encontrado o valores por defecto si no hay coincidencias
             const dummyFutureMatch = r || { 
-                oddsH: 2.0, oddsD: 3.20, oddsA: 3.50, 
+                oddsH: 1.80, oddsD: 3.20, oddsA: 4.50, 
                 oddsO25: 2.0, oddsU25: 1.80,
             };
 
@@ -643,15 +653,35 @@
                 { mkt: 'U25', label: 'Under 2.5', pModel: hybridRes.pUnder25, oddsH: dummyFutureMatch.oddsU25 }
             ];
 
+            const teamCoeffsH = currentStats.teamCoeffs[homeTeam];
+            const teamCoeffsA = currentStats.teamCoeffs[awayTeam];
+
+
             let tableHTML = `<h3 style="margin-top:0; color:white; font-size:1.1rem;">${homeTeam} vs ${awayTeam} - Edge Detallado</h3>`;
-            tableHTML += `<p style="color:var(--text-secondary); font-size:0.8rem;">Lambdas (xG): Local: ${hybridRes.lambdaH.toFixed(3)}, Visita: ${hybridRes.lambdaA.toFixed(3)}</p>`;
+            tableHTML += `<div style="font-size:0.8rem; color:var(--text-secondary); margin-bottom:10px;">`;
+            tableHTML += `**Coeficientes H:** Att: ${teamCoeffsH.attH_factor.toFixed(2)}, Def: ${teamCoeffsH.defH_factor.toFixed(2)}, Power: ${teamCoeffsH.powerFactor.toFixed(2)}<br>`;
+            tableHTML += `**Coeficientes A:** Att: ${teamCoeffsA.attA_factor.toFixed(2)}, Def: ${teamCoeffsA.defA_factor.toFixed(2)}, Power: ${teamCoeffsA.powerFactor.toFixed(2)}<br>`;
+            tableHTML += `**Lambdas (xG):** Local: ${hybridRes.lambdaH.toFixed(3)}, Visita: ${hybridRes.lambdaA.toFixed(3)}`;
+            tableHTML += `</div>`;
+
+
             tableHTML += `<div class="stats-grid">`;
             
             markets.forEach(({ mkt, label, pModel, oddsH }) => {
                 const oddsFair = pModel > 0 ? (1 / pModel) : 0;
                 const EV_percent = (pModel * oddsH - 1) * 100;
-                const evClass = EV_percent >= 0.01 ? 'text-green' : 'text-red';
-                const evMarker = EV_percent >= 0.01 ? `background:var(--success); color:black;` : `background:var(--danger); color:white;`;
+                
+                let evClass = 'text-red';
+                let evMarker = `background:var(--danger); color:white;`;
+                if (EV_percent >= 5.0) {
+                    evClass = 'text-green';
+                    evMarker = `background:var(--success); color:black;`;
+                } else if (EV_percent >= 0.01) {
+                    evClass = 'text-warning';
+                    evMarker = `background:var(--warning); color:black;`;
+                }
+                
+                const fairComparison = oddsFair > 0 && oddsH >= oddsFair ? '✅' : '❌';
                 
                 tableHTML += `
                     <div style="padding: 8px; border: 1px solid var(--border); border-radius: 4px; ${mkt === 'H'?'background-color:rgba(255, 204, 0, 0.1)':''}">
@@ -659,7 +689,7 @@
                         <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 4px;">
                             <div style="font-size: 1.1rem; font-weight: 700;">${oddsH.toFixed(2)}</div>
                             <div style="font-size: 0.9rem;">
-                                Fair: ${oddsFair.toFixed(2)}<br>
+                                Fair: ${oddsFair.toFixed(2)} ${fairComparison}<br>
                                 Prob: ${(pModel*100).toFixed(1)}%
                             </div>
                             <div class="value-marker ${evClass}" style="${evMarker}">${EV_percent.toFixed(2)}%</div>
@@ -676,7 +706,6 @@
 
         // --- FUNCIÓN PRINCIPAL DE FILTRADO DE VALOR (EV+) ---
         function runAnalysis() {
-            // ... (Chequeos y configuración - Sin cambios) ...
             if(!futureData.length || !currentStats) {
                 document.getElementById('statsCard').style.display = 'block';
                 document.getElementById('statsCard').innerHTML = `<h3 style="color:var(--danger); margin:0;">Cargue la **estadística pasada** (con goles) y/o los **partidos a analizar** (con cuotas) para ejecutar el modelo.</h3>`;
@@ -693,7 +722,9 @@
             const stV = parseFloat(document.getElementById('stakeValue').value);
             const bank0 = parseFloat(document.getElementById('initialBank').value);
             const minO = parseFloat(document.getElementById('minOdds').value);
-            const maxO = parseFloat(document.getElementById('maxOdds').value);
+            // USANDO 2.00
+            const maxO = parseFloat(document.getElementById('maxOdds').value); 
+            // USANDO 5.00%
             const minEV = parseFloat(document.getElementById('minEV').value) / 100; 
             const lg = document.getElementById('leagueSelect').value;
             
@@ -722,6 +753,9 @@
                     const oddsFair = pModel > 0 ? (1 / pModel) : 0;
                     
                     if (oddsH < minO || oddsH > maxO || oddsFair === 0) return; 
+
+                    // MEJORA CLAVE: Solo es valor si la cuota de mercado es mayor que la cuota justa del modelo
+                    if (oddsH <= oddsFair) return;
 
                     const edge = (pModel * oddsH) - 1; 
                     const EV_percent = edge * 100;
@@ -766,7 +800,7 @@
             document.getElementById('loadingOverlay').style.display = 'none';
         }
 
-        // CORRECCIÓN ROBUSTA: Límite estricto de Stake en Backtest
+        // --- FUNCIONES DE BACKTEST Y UI (Mismos que v10.6) ---
         function runHistoricalBacktest(data) {
             let bank=parseFloat(document.getElementById('initialBank').value), peak=bank, maxDD=0, hist=[{x:'Inicio', y:bank}], drawdownHist=[{x:'Inicio', y:0}], lgP={};
 
@@ -775,8 +809,8 @@
             const stT = document.getElementById('stakeType').value;
             const stV = parseFloat(document.getElementById('stakeValue').value);
             const minO = parseFloat(document.getElementById('minOdds').value);
-            const maxO = parseFloat(document.getElementById('maxOdds').value);
-            const minEV = parseFloat(document.getElementById('minEV').value) / 100;
+            const maxO = parseFloat(document.getElementById('maxOdds').value); 
+            const minEV = parseFloat(document.getElementById('minEV').value) / 100; 
 
             const marketsToRun = mktFilter === 'all' ? ['H'] : [mktFilter]; 
 
@@ -794,7 +828,10 @@
                 else if(mkt==='U25') { pModel=hybridRes.pUnder25; oddsH=r.oddsU25; }
                 else return;
 
-                if (oddsH < minO || oddsH > maxO || pModel === 0) return;
+                const oddsFair = pModel > 0 ? (1 / pModel) : 0;
+
+                if (oddsH < minO || oddsH > maxO || oddsFair === 0) return;
+                if (oddsH <= oddsFair) return; // Filtro de valor estricto
 
                 const edge = (pModel * oddsH) - 1; 
                 const isValueBet = edge > minEV;
@@ -808,14 +845,13 @@
                 else if (stT === 'percent') actualStake = bank * (stV / 100);
                 else if (stT === 'kelly' && isValueBet) {
                     let kellyFraction = calculateKellyStake(pModel, oddsH, kellyDenominator);
-                    kellyFraction = Math.min(kellyFraction, 0.10); // Límite de 10% de Kelly
+                    kellyFraction = Math.min(kellyFraction, 0.10); 
                     actualStake = bank * kellyFraction;
                 }
                 
-                // Asegurar que el stake sea razonable y no exceda la banca
                 actualStake = Math.min(actualStake, bank * 0.10); 
                 actualStake = Math.max(actualStake, 0.01); 
-                if (actualStake > bank) actualStake = bank * 0.01; // Último recurso si algo falló
+                if (actualStake > bank) actualStake = bank * 0.01; 
 
                 const isWin = (mkt==='H' && r.res==='H') || (mkt==='D' && r.res==='D') || (mkt==='A' && r.res==='A') || (mkt==='O25' && (r.goalsH+r.goalsA)>2) || (mkt==='U25' && (r.goalsH+r.goalsA)<3);
 
@@ -834,13 +870,12 @@
             renderCharts(hist, drawdownHist, lgP);
         }
 
-        // --- FUNCIONES DE UI (Sin cambios estructurales) ---
         function updateGlobalUI(totalAnalyzed, evPlusCount, maxEV, valueBetsResults) { 
             document.getElementById('valBets').innerText = totalAnalyzed;
             document.getElementById('valEVPlus').innerText = evPlusCount;
             document.getElementById('valMaxEV').innerText = maxEV.toFixed(2) + '%'; 
 
-            document.getElementById('valMaxEV').className = `kpi-value ${maxEV>5?'text-green':'text-blue'}`;
+            document.getElementById('valMaxEV').className = `kpi-value ${maxEV>=5?'text-green':'text-blue'}`;
 
             const tbVB = document.getElementById('valueBetsTableBody'); tbVB.innerHTML='';
             
