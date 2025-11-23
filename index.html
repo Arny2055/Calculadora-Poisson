@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Value Hacker v16.1 (EV+ por Mercado)</title>
+    <title>Value Hacker v16.2 (Filtro Inteligente de Yield)</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@3.7.1/dist/chart.min.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
@@ -456,6 +456,13 @@
                 <input type="checkbox" id="useFrequencyValue" checked>
                 <label for="useFrequencyValue" style="display:inline; margin-left: 5px;">Aplicar solo si EV+ &gt; Mínimo</label>
             </div>
+            
+            <div class="form-group">
+                <input type="checkbox" id="useProfitFilter" checked>
+                <label for="useProfitFilter" style="display:inline; margin-left: 5px; color: var(--stats-accent); font-weight:bold;">
+                    Aplicar Filtro Inteligente (Solo mercados rentables)
+                </label>
+            </div>
 
             <hr class="separator">
 
@@ -642,7 +649,7 @@
     </main>
 
 <script>
-    // *** COMIENZO DE LA LÓGICA JAVASCRIPT - VALUE HACKER v16.1 (LOCAL STORAGE) ***
+    // *** COMIENZO DE LA LÓGICA JAVASCRIPT - VALUE HACKER v16.2 (FILTRO INTELIGENTE) ***
     let historicalData = []; 
     let futureData = []; 
     let currentStats = null; 
@@ -652,6 +659,9 @@
     
     let chartEq=null, chartLg=null, chartDD=null; 
     let historicalFileNames = []; 
+
+    // *** NUEVA VARIABLE GLOBAL PARA ALMACENAR LOS MERCADOS RENTABLES ***
+    let profitableMarkets = new Set(); 
 
     // --- Lógica de Barra Lateral Móvil ---
     function toggleSidebar() {
@@ -1071,9 +1081,10 @@
         
         const mktFilter = document.getElementById('marketSelect').value;
         const useValueFilter = document.getElementById('useFrequencyValue').checked; 
+        const useProfitFilter = document.getElementById('useProfitFilter').checked; // NUEVO
         const stT = document.getElementById('stakeType').value;
         const stV = parseFloat(document.getElementById('stakeValue').value);
-        const bank0 = getBankValue(); // Usar la banca actual
+        const bank0 = getBankValue(); 
         const minO = parseFloat(document.getElementById('minOdds').value);
         const maxO = parseFloat(document.getElementById('maxOdds').value); 
         const minEV = parseFloat(document.getElementById('minEV').value) / 100; 
@@ -1082,6 +1093,11 @@
         valueBetsResults = []; 
         let totalAnalyzed = 0;
         let maxEV = 0;
+
+        // EJECUTAR BACKTEST PRIMERO PARA OBTENER LOS MERCADOS RENTABLES
+        if (historicalData.length > 0) {
+            runHistoricalBacktest(normalizeData(historicalData, false).filter(r => r.goalsH !== null && r.goalsA !== null));
+        }
 
         const filteredFutureData = futureData.filter(r => lg==='all' || r.league===lg);
         const marketsToAnalyze = mktFilter === 'all' ? ['H', 'D', 'A', 'O25', 'U25'] : [mktFilter];
@@ -1112,6 +1128,14 @@
                 
                 if (useValueFilter && !isValueBet) return;
                 
+                // *************************************************************************
+                // ** NUEVA REGLA: SOLO INCLUIR SI EL MERCADO FUE RENTABLE EN EL BACKTEST **
+                // *************************************************************************
+                if (useProfitFilter && profitableMarkets.size > 0 && !profitableMarkets.has(mkt)) {
+                    return; 
+                }
+                // *************************************************************************
+
                 if (EV_percent > maxEV) maxEV = EV_percent;
 
                 let actualStake = 0;
@@ -1129,7 +1153,7 @@
                 actualStake = Math.max(0.01, actualStake); 
                 actualStake = parseFloat(actualStake.toFixed(2));
                 
-                // Comprobación para evitar duplicados en la lista de resultados de valor (aunque no es estrictamente necesario, previene errores)
+                // Comprobación para evitar duplicados en la lista de resultados de valor
                 const isAlreadyPlaced = placedBets.some(b => 
                     b.match === `${r.home} vs ${r.away}` && 
                     b.market === mkt && 
@@ -1151,10 +1175,6 @@
             });
         });
 
-        if (historicalData.length > 0) {
-            runHistoricalBacktest(normalizeData(historicalData, false).filter(r => r.goalsH !== null && r.goalsA !== null));
-        }
-        
         updateGlobalUI(totalAnalyzed, valueBetsResults.length, maxEV, valueBetsResults);
         document.getElementById('loadingOverlay').style.display = 'none';
     }
@@ -1497,11 +1517,11 @@
         
         // --- INICIALIZACIÓN DE ESTADÍSTICAS POR MERCADO ---
         const marketStats = {
-            'H': { marketLabel: 'Local (1)', profit: 0, wagered: 0, count: 0, evSum: 0 },
-            'D': { marketLabel: 'Empate (X)', profit: 0, wagered: 0, count: 0, evSum: 0 },
-            'A': { marketLabel: 'Visita (2)', profit: 0, wagered: 0, count: 0, evSum: 0 },
-            'O25': { marketLabel: 'Over 2.5', profit: 0, wagered: 0, count: 0, evSum: 0 },
-            'U25': { marketLabel: 'Under 2.5', profit: 0, wagered: 0, count: 0, evSum: 0 }
+            'H': { marketLabel: 'Local (1)', profit: 0, wagered: 0, count: 0, evSum: 0, mkt: 'H' },
+            'D': { marketLabel: 'Empate (X)', profit: 0, wagered: 0, count: 0, evSum: 0, mkt: 'D' },
+            'A': { marketLabel: 'Visita (2)', profit: 0, wagered: 0, count: 0, evSum: 0, mkt: 'A' },
+            'O25': { marketLabel: 'Over 2.5', profit: 0, wagered: 0, count: 0, evSum: 0, mkt: 'O25' },
+            'U25': { marketLabel: 'Under 2.5', profit: 0, wagered: 0, count: 0, evSum: 0, mkt: 'U25' }
         };
 
         data.forEach((r, index) => {
@@ -1566,10 +1586,26 @@
             }
         });
         
+        // --- LÓGICA DE FILTRO INTELIGENTE (ACTUALIZADA) ---
+        profitableMarkets.clear();
+        Object.values(marketStats).forEach(stats => {
+            const yieldVal = stats.wagered > 0 ? (stats.profit / stats.wagered) * 100 : 0;
+            // Criterio: Al menos 20 apuestas y Yield positivo
+            if (stats.count >= 20 && yieldVal > 0.0) {
+                // Usamos el mkt (H, D, A, O25, U25) para el Set
+                profitableMarkets.add(stats.mkt); 
+            }
+        });
+        // Fin de Lógica de Filtro Inteligente
+
         // Stats para la tarjeta de resumen
         const totalReturn = profit;
         const totalYield = totalWagered > 0 ? (totalReturn / totalWagered) * 100 : 0;
         const finalBank = bank;
+
+        const profitableMarketsText = profitableMarkets.size > 0 
+            ? `<span class="text-green" style="font-weight:bold;">${Array.from(profitableMarkets).join(', ')}</span>`
+            : '<span class="text-red" style="font-weight:bold;">Ninguno (Se requiere más historial).</span>';
 
         const finalStatsHTML = `
             <h3 style="color:var(--stats-accent); margin-top:0;">Resultados del Backtest Histórico (${resolvedBets} Apuestas EV+ Simuladas)</h3>
@@ -1592,6 +1628,11 @@
                 </div>
             </div>
             
+            <p style="margin-top:10px; color:var(--text-primary); font-size:0.9rem;">
+                <i class="fas fa-filter" style="color:var(--info);"></i> 
+                Mercados Rentables (Yield > 0% con >= 20 apuestas): ${profitableMarketsText}
+            </p>
+
             <hr class="separator">
 
             <h3 style="color:var(--accent); margin-top:10px;"><i class="fas fa-hand-point-right"></i> Rendimiento Desglosado por Mercado (EV > 5%)</h3>
