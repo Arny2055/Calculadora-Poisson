@@ -3,9 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Calculadora de Apuestas Pro</title>
+    <title>Calculadora de Kelly, EV y Overround</title>
     <style>
-        /* Estilos CSS para el diseño "chingón" */
+        /* Estilos CSS (similares a los anteriores, con ajustes para Kelly) */
         body {
             font-family: 'Arial', sans-serif;
             background-color: #121212;
@@ -24,7 +24,7 @@
             border-radius: 15px;
             box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
             width: 100%;
-            max-width: 400px;
+            max-width: 450px; /* Un poco más ancho para más resultados */
             border: 1px solid #333;
         }
 
@@ -64,10 +64,6 @@
             outline: none;
         }
 
-        .input-group input[type="number"]::placeholder {
-            color: #757575;
-        }
-
         .button-calculate {
             width: 100%;
             padding: 12px;
@@ -85,10 +81,6 @@
             background-color: #00E68A;
         }
 
-        .button-calculate:active {
-            transform: scale(0.98);
-        }
-
         .results {
             margin-top: 25px;
             padding-top: 20px;
@@ -98,16 +90,26 @@
         .result-item {
             display: flex;
             justify-content: space-between;
-            margin-bottom: 10px;
+            margin-bottom: 12px;
             font-size: 1.1em;
+            padding: 5px 0;
+            border-bottom: 1px dotted #333;
+        }
+        
+        /* Estilo para los resultados clave de Kelly */
+        .kelly-output {
+            background-color: #00FF9920; /* Fondo ligero para destacar */
+            padding: 8px;
+            border-radius: 5px;
+            margin-top: 10px;
         }
 
         .result-item span:first-child {
             font-weight: bold;
-            color: #00FF99;
+            color: #B0B0B0;
         }
 
-        /* Colores dinámicos para el EV */
+        /* Colores dinámicos */
         .ev-positive {
             color: #4CAF50; /* Verde para positivo */
             font-weight: bold;
@@ -117,14 +119,9 @@
             color: #F44336; /* Rojo para negativo */
             font-weight: bold;
         }
-
-        .ev-neutral {
-            color: #FFEB3B; /* Amarillo para neutro */
-            font-weight: bold;
-        }
-
-        .overround-value {
-            color: #64B5F6; /* Azul claro para el Overround */
+        
+        .kelly-fraction {
+            color: #FFEB3B; /* Amarillo para la Fracción de Kelly */
             font-weight: bold;
         }
     </style>
@@ -132,7 +129,13 @@
 <body>
 
     <div class="calculator-container">
-        <h1>💰 Calculadora EV & Overround</h1>
+        <h1>📈 Calculadora Kelly, EV & Valor</h1>
+        
+        <div class="input-group">
+            <label for="bankroll">Bankroll Total ($)</label>
+            <input type="number" id="bankroll" placeholder="Ej: 1000" min="1" step="1" value="1000">
+        </div>
+
         <div class="input-group">
             <label for="probabilidad">Probabilidad Estimada por Ti (%)</label>
             <input type="number" id="probabilidad" placeholder="Ej: 55" min="0" max="100" step="0.01">
@@ -143,118 +146,132 @@
             <input type="number" id="cuota" placeholder="Ej: 1.95" min="1.01" step="0.01">
         </div>
 
-        <div class="input-group">
-            <label for="apuesta">Cantidad a Apostar ($)</label>
-            <input type="number" id="apuesta" placeholder="Ej: 10" min="1" step="1">
-        </div>
-
         <button class="button-calculate" onclick="calcular()">
-            Calcular EV y Overround
+            Calcular
         </button>
 
         <div class="results">
-            <div class="result-item">
-                <span>Probabilidad Implícita de la Bookie:</span>
-                <span id="probabilidadBookie">-</span>
-            </div>
+            <h2>Resultados Clave</h2>
+            
             <div class="result-item">
                 <span>Valor Esperado (EV):</span>
                 <span id="evResult">-</span>
             </div>
+            
             <div class="result-item">
-                <span>Overround (Margen de la Bookie):</span>
-                <span id="overroundResult" class="overround-value">-</span>
+                <span>Valor de la Apuesta (Tu P vs Bookie P):</span>
+                <span id="valorResult">-</span>
+            </div>
+            
+            <div class="kelly-output">
+                <h3>Criterio de Kelly</h3>
+                <div class="result-item">
+                    <span>Fracción de Kelly (f*):</span>
+                    <span id="kellyFraction" class="kelly-fraction">-</span>
+                </div>
+                <div class="result-item">
+                    <span>Cantidad a Apostar Óptima:</span>
+                    <span id="kellyBetAmount" class="ev-positive">-</span>
+                </div>
+            </div>
+            
+            <div class="result-item" style="margin-top: 20px;">
+                <span>Probabilidad Implícita de la Bookie:</span>
+                <span id="probabilidadBookie">-</span>
             </div>
         </div>
     </div>
 
     <script>
-        // Script JavaScript para los cálculos
         function calcular() {
             // 1. Obtener valores de los campos
+            const bankroll = parseFloat(document.getElementById('bankroll').value);
             const probabilidadUsuario = parseFloat(document.getElementById('probabilidad').value) / 100;
             const cuota = parseFloat(document.getElementById('cuota').value);
-            const apuesta = parseFloat(document.getElementById('apuesta').value);
-
+            
+            // Elementos de salida
             const probBookieDisplay = document.getElementById('probabilidadBookie');
             const evResultDisplay = document.getElementById('evResult');
-            const overroundResultDisplay = document.getElementById('overroundResult');
+            const valorResultDisplay = document.getElementById('valorResult');
+            const kellyFractionDisplay = document.getElementById('kellyFraction');
+            const kellyBetAmountDisplay = document.getElementById('kellyBetAmount');
 
             // 2. Validación de entradas
-            if (isNaN(probabilidadUsuario) || isNaN(cuota) || isNaN(apuesta) || probabilidadUsuario <= 0 || probabilidadUsuario > 1 || cuota <= 1.0) {
-                evResultDisplay.textContent = '¡Error!';
+            if (isNaN(bankroll) || isNaN(probabilidadUsuario) || isNaN(cuota) || bankroll <= 0 || probabilidadUsuario <= 0 || probabilidadUsuario > 1 || cuota <= 1.0) {
+                alert('Por favor, ingresa un Bankroll válido, Probabilidad (1-100) y Cuota (>1.0).');
+                
+                // Limpiar y poner error
+                const errorText = '¡Error!';
+                evResultDisplay.textContent = errorText;
                 evResultDisplay.className = 'ev-negative';
                 probBookieDisplay.textContent = '-';
-                overroundResultDisplay.textContent = '-';
-                alert('Por favor, ingresa valores válidos: Probabilidad (1-100), Cuota (>1.0), Apuesta (>0).');
+                valorResultDisplay.textContent = '-';
+                kellyFractionDisplay.textContent = '-';
+                kellyBetAmountDisplay.textContent = errorText;
+                kellyBetAmountDisplay.className = 'ev-negative';
                 return;
             }
 
             // --- CÁLCULO DE VALOR ESPERADO (EV) ---
-            // Fórmula: EV = (Probabilidad de Ganar * Ganancia Neta) - (Probabilidad de Perder * Apuesta)
-            // Donde:
-            // - Probabilidad de Ganar es la estimada por el usuario.
-            // - Ganancia Neta = (Cuota - 1) * Apuesta
-            // - Probabilidad de Perder = 1 - Probabilidad de Ganar
-
-            const gananciaNeta = (cuota - 1) * apuesta;
+            // Usamos una apuesta unitaria (1) para calcular el EV en términos de retorno porcentual.
+            // EV (por unidad apostada) = (P_ganar * Ganancia_neta) - (P_perder * 1)
+            const gananciaNetaUnitaria = (cuota - 1); // B en la fórmula de Kelly
             const probabilidadPerder = 1 - probabilidadUsuario;
-
-            const ev = (probabilidadUsuario * gananciaNeta) - (probabilidadPerder * apuesta);
-
-            // --- CÁLCULO DE PROBABILIDAD IMPLÍCITA DE LA BOOKIE ---
-            // Fórmula: P = 1 / Cuota
+            
+            const ev = (probabilidadUsuario * gananciaNetaUnitaria) - (probabilidadPerder * 1);
+            
+            // --- CÁLCULO DE PROBABILIDAD IMPLÍCITA Y VALOR ---
             const probabilidadBookieDecimal = 1 / cuota;
             const probabilidadBookiePorcentaje = probabilidadBookieDecimal * 100;
-
-            // --- CÁLCULO DE OVERROUND (Margen) ---
-            // Para una apuesta de 2 resultados (Overround = (1/Cuota1 + 1/Cuota2) - 1).
-            // Para un solo resultado, es la diferencia entre tu prob. y la de la bookie.
-            // La fórmula del Overround general se aplica a *todos* los resultados de un mercado.
-            // Aquí te muestro la *Probabilidad Implícita* de un solo resultado.
-            // La casa de apuestas siempre gana si la SUMA de las probabilidades implícitas de TODOS los resultados es > 100%.
-            // Overround para *este* resultado: (1 / cuota) - Probabilidad Estimada
-            // Lo más común es calcular el margen de la casa de apuestas (Overround) como el exceso de 100% de la suma de todas las P implícitas.
-            // Aquí, te daré la P implícita para que sepas el "valor" de tu apuesta (diferencia entre tu P y la de la bookie).
-            // Y te calcularé el Overround asumiendo una apuesta de 2 resultados (win/not win) con la cuota inversa para el "not win".
             
-            // Para ser rigurosos, el Overround requiere todas las cuotas del mercado.
-            // Asumiremos un mercado de 2 resultados (Resultado A: Cuota 'cuota', Resultado No-A: Cuota 'cuotaContraria').
-            // Por simplicidad, sólo mostraremos la Probabilidad Implícita de la Bookie.
-            // NOTA: El cálculo de Overround de un solo resultado no es estándar, pero la P. Implícita SÍ es clave.
-
-            const overround = (probabilidadBookieDecimal - probabilidadUsuario) * -1; // Margen entre nuestra prob y la bookie. Positivo = Valor.
+            // Valor (Diferencia porcentual de probabilidades)
+            const valorPorcentaje = ((probabilidadUsuario - probabilidadBookieDecimal) * 100).toFixed(2);
+            
+            // --- CÁLCULO DE CRITERIO DE KELLY (f*) ---
+            // Fórmula: f* = [P * (B + 1) - 1] / B  ---> f* = [P * Cuota - 1] / (Cuota - 1)
+            // Donde: 
+            // P = Probabilidad de Ganar (Usuario)
+            // B = Ganancia Neta (Cuota - 1)
+            
+            let kellyFraction = (probabilidadUsuario * cuota - 1) / gananciaNetaUnitaria;
+            
+            // Limitar Kelly a 0 si el resultado es negativo (EV negativo = no apostar)
+            if (kellyFraction <= 0) {
+                kellyFraction = 0;
+            }
+            
+            // Cantidad a Apostar según Kelly: f* * Bankroll
+            const kellyBetAmount = kellyFraction * bankroll;
 
             // 3. Mostrar resultados
             
             // EV
             let evClass = 'ev-neutral';
-            if (ev > 0.01) {
+            if (ev > 0.001) {
                 evClass = 'ev-positive';
-            } else if (ev < -0.01) {
+            } else if (ev < -0.001) {
                 evClass = 'ev-negative';
             }
 
-            evResultDisplay.textContent = `${ev.toFixed(2)} $`;
+            // EV se muestra como porcentaje de la apuesta, ya que Kelly es por unidad.
+            evResultDisplay.textContent = `${(ev * 100).toFixed(2)} %`;
             evResultDisplay.className = evClass;
-
+            
             // Probabilidad Implícita
             probBookieDisplay.textContent = `${probabilidadBookiePorcentaje.toFixed(2)} %`;
-
-            // Overround (Se mostrará el valor en % de la diferencia entre tu P y la P implícita)
-            // Si es positivo, tienes valor. Si es negativo, la cuota es baja.
-            // El Overround *estándar* de la bookie es 1/Cuota + 1/CuotaContraria - 1. Aquí mostramos el valor para tu apuesta.
-            const valorPorcentaje = ((probabilidadUsuario - probabilidadBookieDecimal) * 100).toFixed(2);
-            overroundResultDisplay.textContent = `${valorPorcentaje} %`;
             
-            if (parseFloat(valorPorcentaje) > 0) {
-                overroundResultDisplay.className = 'ev-positive';
-            } else if (parseFloat(valorPorcentaje) < 0) {
-                overroundResultDisplay.className = 'ev-negative';
-            } else {
-                overroundResultDisplay.className = 'ev-neutral';
-            }
+            // Valor
+            valorResultDisplay.textContent = `${valorPorcentaje} %`;
+            valorResultDisplay.className = (parseFloat(valorPorcentaje) > 0) ? 'ev-positive' : 'ev-negative';
 
+            // Kelly
+            kellyFractionDisplay.textContent = `${(kellyFraction * 100).toFixed(2)} %`;
+            kellyBetAmountDisplay.textContent = `${kellyBetAmount.toFixed(2)} $`;
+            kellyBetAmountDisplay.className = (kellyFraction > 0) ? 'ev-positive' : 'ev-negative';
+
+            if (kellyFraction <= 0) {
+                kellyBetAmountDisplay.textContent = '0.00 $ (EV Negativo)';
+            }
         }
     </script>
 </body>
