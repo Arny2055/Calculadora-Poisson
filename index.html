@@ -98,7 +98,7 @@
                         <i class="fas fa-calendar-alt mr-3"></i> 2. Partidos a Predecir (Futuro)
                     </h2>
                     <p class="text-xs text-gray-700 mb-3">
-                        Carga un solo archivo CSV con los partidos a pronosticar (solo <code class="font-mono bg-yellow-200 px-1 rounded">HomeTeam</code> y <code class="font-mono bg-yellow-200 px-1 rounded">AwayTeam</code>).
+                        Carga un solo archivo CSV con los partidos. Columnas necesarias: <code class="font-mono bg-yellow-200 px-1 rounded">HomeTeam</code> y <code class="font-mono bg-yellow-200 px-1 rounded">AwayTeam</code>. Opcionales para valor: <code class="font-mono bg-yellow-200 px-1 rounded">MaxH</code>, <code class="font-mono bg-yellow-200 px-1 rounded">MaxD</code>, <code class="font-mono bg-yellow-200 px-1 rounded">MaxA</code>.
                     </p>
                     <input type="file" id="futureFileInput" accept=".csv" class="w-full p-2 border border-gray-300 rounded-lg text-sm bg-white file:py-1 file:px-2 file:text-xs file:font-semibold">
                     <button onclick="loadFutureMatches()" class="w-full mt-3 bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-3 rounded-lg text-sm transition duration-150">
@@ -142,7 +142,8 @@
                             <thead>
                                 <tr>
                                     <th class="bg-yellow-800 rounded-tl-lg">Local</th>
-                                    <th class="bg-yellow-800 rounded-tr-lg">Visitante</th>
+                                    <th class="bg-yellow-800">Visitante</th>
+                                    <th class="bg-yellow-800 rounded-tr-lg">Cuotas (1X2)</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -171,7 +172,7 @@
                         <!-- Análisis de Valor -->
                         <div class="md:col-span-1 bg-white p-4 rounded-xl shadow-lg border-l-4 border-gray-300">
                             <h3 class="text-xl font-semibold text-gray-800 mb-3 flex items-center"><i class="fas fa-hand-holding-usd mr-2 text-blue-600"></i> Análisis de Valor (Odds)</h3>
-                            <h4 class="text-sm font-semibold text-gray-600 mb-3">Ingresar Cuotas de la Casa:</h4>
+                            <h4 class="text-sm font-semibold text-gray-600 mb-3">Cuotas de la Casa:</h4>
                             <div class="grid grid-cols-3 gap-2 mb-4">
                                 <div>
                                     <label class="block text-xs font-medium text-gray-600 mb-1 text-center">Local (1)</label>
@@ -241,6 +242,11 @@
         const AWAY_TEAM_COL = 'AwayTeam';
         const HOME_GOALS_COL = 'FTHG';
         const AWAY_GOALS_COL = 'FTAG';
+        const ODDS_COLS = {
+            '1': 'MaxH',
+            'X': 'MaxD',
+            '2': 'MaxA'
+        }; // Cuotas para auto-cargar
 
         /* --- Funciones de Utilidad y UI --- */
 
@@ -272,30 +278,39 @@
         /* --- Carga y Parsing de Datos --- */
 
         /**
-         * Parsea el texto CSV. Puede manejar datos históricos (con goles) o futuros (sin goles).
+         * Parsea el texto CSV. Puede manejar datos históricos (con goles) o futuros (sin goles, pero con cuotas opcionales).
          */
         function parseCSV(csvText, isHistorical = true) {
             const lines = csvText.trim().split('\n').filter(line => line.trim() !== '');
             if (lines.length < 2) throw new Error("Datos CSV insuficientes. Se requiere al menos una cabecera y una fila de datos.");
 
             const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
-            const requiredCols = [HOME_TEAM_COL, AWAY_TEAM_COL];
-            if (isHistorical) {
-                requiredCols.push(HOME_GOALS_COL, AWAY_GOALS_COL);
-            }
-            
-            const missingCols = requiredCols.filter(col => !headers.includes(col));
+            const requiredTeamCols = [HOME_TEAM_COL, AWAY_TEAM_COL];
 
-            if (missingCols.length > 0) {
-                throw new Error(`Columnas CSV faltantes: ${missingCols.join(', ')}. Verifica las cabeceras.`);
+            // 1. Verificar columnas de equipos
+            const missingTeamCols = requiredTeamCols.filter(col => !headers.includes(col));
+            if (missingTeamCols.length > 0) {
+                throw new Error(`Columnas CSV faltantes (equipos): ${missingTeamCols.join(', ')}. Verifica las cabeceras.`);
             }
 
             const indices = {
                 [HOME_TEAM_COL]: headers.indexOf(HOME_TEAM_COL),
                 [AWAY_TEAM_COL]: headers.indexOf(AWAY_TEAM_COL),
                 [HOME_GOALS_COL]: headers.indexOf(HOME_GOALS_COL),
-                [AWAY_GOALS_COL]: headers.indexOf(AWAY_GOALS_COL)
+                [AWAY_GOALS_COL]: headers.indexOf(AWAY_GOALS_COL),
+                [ODDS_COLS['1']]: headers.indexOf(ODDS_COLS['1']),
+                [ODDS_COLS['X']]: headers.indexOf(ODDS_COLS['X']),
+                [ODDS_COLS['2']]: headers.indexOf(ODDS_COLS['2'])
             };
+            
+            // 2. Verificar columnas de goles si es histórico
+            if (isHistorical) {
+                const missingGoalCols = [HOME_GOALS_COL, AWAY_GOALS_COL].filter(col => !headers.includes(col));
+                if (missingGoalCols.length > 0) {
+                     throw new Error(`Columnas CSV faltantes (goles): ${missingGoalCols.join(', ')}. Verifica las cabeceras.`);
+                }
+            }
+
 
             const matches = [];
 
@@ -311,11 +326,22 @@
                     if (isHistorical) {
                         match[HOME_GOALS_COL] = parseInt(currentLine[indices[HOME_GOALS_COL]].trim().replace(/"/g, ''), 10);
                         match[AWAY_GOALS_COL] = parseInt(currentLine[indices[AWAY_GOALS_COL]].trim().replace(/"/g, ''), 10);
+                        if (isNaN(match[HOME_GOALS_COL]) || isNaN(match[AWAY_GOALS_COL])) continue;
+                    } else {
+                        // Extraer cuotas opcionales para partidos futuros
+                        const oddsH = parseFloat(currentLine[indices[ODDS_COLS['1']]]) || 0;
+                        const oddsD = parseFloat(currentLine[indices[ODDS_COLS['X']]]) || 0;
+                        const oddsA = parseFloat(currentLine[indices[ODDS_COLS['2']]]) || 0;
+                        
+                        match.odds = {
+                            '1': oddsH > 1 ? oddsH : 0,
+                            'X': oddsD > 1 ? oddsD : 0,
+                            '2': oddsA > 1 ? oddsA : 0,
+                        };
                     }
                 } catch (e) { continue; } 
 
                 if (match[HOME_TEAM_COL] && match[AWAY_TEAM_COL]) {
-                     if (isHistorical && (isNaN(match[HOME_GOALS_COL]) || isNaN(match[AWAY_GOALS_COL]))) continue;
                      matches.push(match);
                 }
             }
@@ -698,13 +724,18 @@
                 const bgColor = (!homeFound || !awayFound) ? 'bg-red-50 text-red-700' : 'bg-white text-gray-800';
                 const warningIcon = (!homeFound || !awayFound) ? '<i class="fas fa-exclamation-circle text-red-500 ml-1"></i>' : '';
                 
+                const oddsHtml = match.odds && (match.odds['1'] || match.odds['X'] || match.odds['2'])
+                    ? `<span class="text-xs font-bold text-gray-700">${match.odds['1'].toFixed(2)}</span> / <span class="text-xs font-bold text-gray-700">${match.odds['X'].toFixed(2)}</span> / <span class="text-xs font-bold text-gray-700">${match.odds['2'].toFixed(2)}</span>`
+                    : '<span class="text-xs text-gray-400">N/A</span>';
+                
                 if (!homeFound || !awayFound) teamsNotFound = true;
                 
                 html += `
                     <tr class="future-match-row ${bgColor}" 
-                        onclick="runCalculations('${match[HOME_TEAM_COL]}', '${match[AWAY_TEAM_COL]}', this)">
+                        onclick="runCalculations(${index}, this)">
                         <td class="font-semibold">${match[HOME_TEAM_COL]}</td>
                         <td class="font-semibold">${match[AWAY_TEAM_COL]}${warningIcon}</td>
+                        <td>${oddsHtml}</td>
                     </tr>
                 `;
             });
@@ -823,7 +854,7 @@
                 return;
             }
 
-            // Limpiar resultados anteriores
+            // Limpiar resultados anteriores o mostrar mensaje
             document.getElementById('valueResults').innerHTML = '<p class="text-sm text-gray-500 text-center">Ingresa cuotas para calcular el valor.</p>';
 
             const odds1 = parseFloat(document.getElementById('odds1').value);
@@ -884,15 +915,19 @@
         }
 
 
-        function runCalculations(homeTeam, awayTeam, clickedRow) {
+        function runCalculations(matchIndex, clickedRow) {
             
+            const match = futureMatches[matchIndex];
+            const homeTeam = match[HOME_TEAM_COL];
+            const awayTeam = match[AWAY_TEAM_COL];
+
             // 1. Limpiar estilos de selección
             document.querySelectorAll('#futureMatchesTable tr').forEach(row => {
                 row.classList.remove('selected-match');
             });
             clickedRow.classList.add('selected-match');
 
-            // 2. Limpiar resultados anteriores
+            // 2. Limpiar y configurar UI
             document.getElementById('currentMatchTitle').textContent = `${homeTeam} vs ${awayTeam}`;
             document.getElementById('resultsSection').classList.add('hidden');
             document.getElementById('summaryResultsSection').classList.add('hidden');
@@ -908,6 +943,15 @@
             }
 
             try {
+                // 3. Auto-poblar las cuotas (NUEVO)
+                const odds = match.odds || {};
+                
+                // Solo poblar si el valor de la cuota es > 1 (un valor válido)
+                if (odds['1'] && odds['1'] > 1) document.getElementById('odds1').value = odds['1'].toFixed(2);
+                if (odds['X'] && odds['X'] > 1) document.getElementById('oddsX').value = odds['X'].toFixed(2);
+                if (odds['2'] && odds['2'] > 1) document.getElementById('odds2').value = odds['2'].toFixed(2);
+
+                // 4. Ejecutar cálculos del modelo
                 const expectedGoals = calculateExpectedGoals(homeTeam, awayTeam);
                 displaySummary(homeTeam, awayTeam, expectedGoals);
 
@@ -915,6 +959,11 @@
                 
                 displayDetailedForecast(homeTeam, awayTeam, results);
                 calculateAllMarkets(homeTeam, awayTeam, results.homeProbs, results.awayProbs);
+
+                // 5. Si se poblaron cuotas, ejecutar el cálculo de valor inmediatamente
+                if (odds['1'] || odds['X'] || odds['2']) {
+                    calculateValue();
+                }
 
                 document.getElementById('resultsSection').classList.remove('hidden');
                 document.getElementById('summaryResultsSection').classList.remove('hidden');
