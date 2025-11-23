@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Ultimate Football Value-Hacker v9.1 (EV & Volatilidad)</title>
+    <title>Ultimate Football Value-Hacker v10.0 (Poisson + CLV)</title>
     
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
@@ -12,25 +12,22 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js"></script>
 
     <style>
+        /* Estilos CSS Base (Ajustados para nuevas métricas) */
         :root {
-            /* Colores Base */
             --bg-main: #0c1524;
             --bg-panel: #1a2434;
             --bg-card: #222e40;
             --text-primary: #e2e8f0;
             --text-secondary: #94a3b8;
             --border: #334155;
-
-            /* Colores de Marca y Feedback */
-            --accent: #f59e0b; /* Amarillo/Naranja para la ventaja */
+            --accent: #f59e0b; 
             --accent-hover: #d97706;
-            --success: #10b981; /* Verde fuerte */
-            --danger: #ef4444; /* Rojo fuerte */
+            --success: #10b981;
+            --danger: #ef4444;
             --warning: #f59e0b;
-            --stats-bg: #1e3a8a; /* Azul oscuro */
-            --stats-accent: #60a5fa; /* Azul claro */
+            --stats-bg: #1e3a8a;
+            --stats-accent: #60a5fa;
         }
-        /* [Estilos CSS de la versión 8.5, pero con los colores de arriba] */
         * { box-sizing: border-box; outline: none; min-width: 0; }
         body { font-family: 'Inter', sans-serif; background-color: var(--bg-main); color: var(--text-primary); margin: 0; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
         .separator { border: 0; height: 1px; background: var(--border); margin: 15px 0; }
@@ -82,17 +79,18 @@
         #teamTable th, #teamTable td { padding: 4px 6px; font-size: 0.75rem; text-align: center;}
         #teamTable th:first-child, #teamTable td:first-child { text-align: left; width: 40%; font-size: 0.8rem;}
         #teamTable thead th { font-weight: 700; background-color: var(--border); color: var(--text-primary);}
-        /* Nuevo Estilo */
         .dd-chart-box { height: 150px; }
         .dd-chart-box canvas { height: 100%; }
+        .monthly-table td, .monthly-table th { font-size: 0.75rem; text-align: center; }
+        .monthly-table th:first-child { text-align: left; }
     </style>
 </head>
 <body>
 
-    <div id="loadingOverlay" style="display:none;"><i class="fas fa-circle-bolt spinner"></i><h3 style="margin-top:20px; color:#ccc;">Ejecutando Modelo de Valor Híbrido y Simulando Volatilidad...</h3></div>
+    <div id="loadingOverlay" style="display:none;"><i class="fas fa-hammer spinner"></i><h3 style="margin-top:20px; color:#ccc;">Ejecutando Modelo Híbrido, Poisson y Análisis CLV...</h3></div>
 
     <header>
-        <div class="brand"><i class="fas fa-hammer"></i> Value-Hacker <span class="tag">v9.1 EV Ponderado</span></div>
+        <div class="brand"><i class="fas fa-hammer"></i> Value-Hacker <span class="tag">v10.0 Poisson + CLV</span></div>
         <div style="display:flex; gap:10px; align-items:center;">
             <input type="file" id="fileInput" accept=".csv" multiple>
             <label for="fileInput" class="btn btn-secondary"><i class="fas fa-folder-open"></i> Cargar Archivos CSV (2)</label>
@@ -148,7 +146,7 @@
                         </select>
                         <input type="number" id="stakeValue" value="33" step="1" style="width:40%;" placeholder="Factor/Porc.">
                     </div>
-                    <label style="font-size:0.7rem; color:var(--warning); margin-top:5px;">*Kelly: StakeValue es el Denominador (Ej: 3 = Kelly/3)</label>
+                    <label style="font-size:0.7rem; color:var(--warning); margin-top:5px;">*Kelly: StakeValue es el Denominador. El stake es **ponderado por EV**.</label>
                     <input type="number" id="initialBank" value="1000" style="margin-top:5px;" placeholder="Banca Inicial" onchange="document.getElementById('bankLabel').innerText=this.value;">
                 </div>
                 
@@ -217,6 +215,7 @@
                     <div class="kpi-card"><div class="kpi-title">Valor Esperado Promedio (EV)</div><div class="kpi-value" id="valAvgEV">0.00%</div></div>
                     <div class="kpi-card"><div class="kpi-title">Profit Neto</div><div class="kpi-value" id="valProfit">0.00</div></div>
                     <div class="kpi-card"><div class="kpi-title">Yield Total</div><div class="kpi-value" id="valYield">0%</div></div>
+                    <div class="kpi-card"><div class="kpi-title">CLV Promedio (Edge Real)</div><div class="kpi-value" id="valCLV">0.00%</div></div> 
                     <div class="kpi-card"><div class="kpi-title">Drawdown Máx.</div><div class="kpi-value text-red" id="valDrawdown">0%</div></div>
                     <div class="kpi-card"><div class="kpi-title">Riesgo Ruina (RoR)</div><div class="kpi-value text-blue" id="valRoR">0%</div></div>
                 </div>
@@ -267,8 +266,21 @@
 
             <div class="split-row">
                 <div class="panel-box">
-                    <div class="panel-header"><span class="panel-title"><i class="fas fa-chart-bar"></i> Rendimiento Por Ligas</span></div>
-                    <div style="padding:10px; flex-grow:1;"><canvas id="leagueChart"></canvas></div>
+                    <div class="panel-header"><span class="panel-title"><i class="fas fa-calendar-day"></i> Rendimiento por Periodo (Mensual/Anual)</span></div>
+                    <div class="table-scroll" style="max-height: 250px;">
+                        <table class="monthly-table">
+                            <thead>
+                                <tr>
+                                    <th>Periodo</th>
+                                    <th>Bets</th>
+                                    <th>Profit</th>
+                                    <th>Yield %</th>
+                                </tr>
+                            </thead>
+                            <tbody id="monthlyTableBody">
+                                </tbody>
+                        </table>
+                    </div>
                 </div>
                 <div class="panel-box">
                     <div class="panel-header"><span class="panel-title"><i class="fas fa-users"></i> Ranking Equipos (Profit)</span></div>
@@ -291,7 +303,7 @@
     </div>
 
     <script>
-        // *** COMIENZO DE LA LÓGICA JAVASCRIPT - VALUE HACKER ***
+        // *** COMIENZO DE LA LÓGICA JAVASCRIPT - VALUE HACKER v10.0 ***
         let rawData = [];
         let seasonYears = { current: null, previous: null };
         let currentSeasonData = []; 
@@ -300,8 +312,9 @@
         const RoR_BANK_FRACTION = 0.5; 
         let globalWinRate = 0; 
         let totalStakeUnits = 0; 
+        let lgAnalysisCache = {}; // Cache para análisis de volatilidad
 
-        // --- Tabs Logic (Mismo que v8.5) ---
+        // --- Tabs Logic (Mismo que v9.1) ---
         function switchTab(tabId) {
             document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
             document.querySelectorAll('.tab-button').forEach(el => el.classList.remove('active'));
@@ -321,11 +334,8 @@
             const b = o - 1;
             const q = 1 - p;
             let f = ((b * p) - q) / b;
-            
-            // Kelly Fraccional Dinámico
             f = f / denominator;
-            
-            return Math.max(0.005, f); // Mínimo 0.5% de la banca
+            return Math.max(0.005, f);
         }
 
         function calculateRiskOfRuina(totalBets, totalStake, globalWinRate, avgOdds) {
@@ -333,14 +343,11 @@
             
             const W = globalWinRate;
             const L = 1 - W;
-            
-            const breakEven = 1 / (avgOdds || 2.0); // Usar promedio de odds si es posible
+            const breakEven = 1 / (avgOdds || 2.0);
             if (W <= breakEven) return 100; 
 
             const bankUnits = parseFloat(document.getElementById('initialBank').value) * RoR_BANK_FRACTION;
             const avgStake = totalStake / totalBets; 
-
-            // Fórmula de RoR simplificada (basada en el ratio de éxito/fracaso)
             const B_units = bankUnits / (avgStake || 1);
             const RoR_Estimate = Math.pow((L / W), B_units);
 
@@ -353,10 +360,25 @@
             return Math.sqrt(avgSquaredDifference);
         }
 
-        // --- CARGA Y PROCESAMIENTO DE DATOS (Mismo que v8.5) ---
+        // --- Implementación de Poisson para Goles ---
+        function factorial(n) {
+            if (n === 0 || n === 1) return 1;
+            let result = 1;
+            for (let i = 2; i <= n; i++) result *= i;
+            return result;
+        }
+
+        function poisson(lambda, k) {
+            // P(k) = (e^-lambda * lambda^k) / k!
+            if (lambda < 0 || k < 0) return 0;
+            return (Math.exp(-lambda) * Math.pow(lambda, k)) / factorial(k);
+        }
+
+        // --- CARGA Y PROCESAMIENTO DE DATOS ---
         document.getElementById('fileInput').addEventListener('change', loadFromLocalFiles);
         
         function loadFromLocalFiles(e) {
+            // [Lógica idéntica a v9.1]
             const files = e.target.files;
             
             if (files.length === 0) return;
@@ -407,6 +429,7 @@
         }
         
         async function loadFromUrls() {
+            // [Lógica idéntica a v9.1]
             const urlCurrent = document.getElementById('urlInputCurrent').value.trim();
             const urlPrevious = document.getElementById('urlInputPrevious').value.trim();
             
@@ -462,31 +485,25 @@
             }
         }
         
-        // --- FUNCIÓN MEJORADA: Cálculo de Estadísticas Híbridas (Frecuencia + Diferencia de Goles) ---
         function calculateCurrentSeasonStats(data) {
+            // [Lógica idéntica a v9.1, solo se añade el cálculo de promedios de goles globales]
             const teamStats = {};
             let totalMatches = 0;
             let totalHomeGoals = 0;
             let totalAwayGoals = 0;
-            let totalHomeWins = 0, totalDraws = 0, totalAwayWins = 0;
-            let totalOver25 = 0;
-
+            
             data.forEach(r => {
                 if(r.goalsH >= 0 && r.goalsA >= 0) {
                     totalMatches++;
                     totalHomeGoals += r.goalsH;
                     totalAwayGoals += r.goalsA;
-                    if (r.res === 'H') totalHomeWins++;
-                    else if (r.res === 'D') totalDraws++;
-                    else if (r.res === 'A') totalAwayWins++;
-                    if (r.goalsH + r.goalsA > 2) totalOver25++;
 
                     const updateStats = (team, goalsScored, goalsConceded, isHome) => {
                         if (!teamStats[team]) {
-                            teamStats[team] = { playedH: 0, scoredH: 0, concededH: 0, playedA: 0, scoredA: 0, concededA: 0, gd: 0 }; // Added GD
+                            teamStats[team] = { playedH: 0, scoredH: 0, concededH: 0, playedA: 0, scoredA: 0, concededA: 0, gd: 0 };
                         }
                         const goalsDifference = goalsScored - goalsConceded;
-                        teamStats[team].gd += goalsDifference; // Acumular diferencia de goles
+                        teamStats[team].gd += goalsDifference;
                         
                         if (isHome) {
                             teamStats[team].playedH++;
@@ -508,50 +525,41 @@
 
             const avgGoalsHome = totalHomeGoals / totalMatches;
             const avgGoalsAway = totalAwayGoals / totalMatches;
-            
-            const globalProbs = {
-                pHome: totalHomeWins / totalMatches,
-                pDraw: totalDraws / totalMatches,
-                pAway: totalAwayWins / totalMatches,
-                pOver25: totalOver25 / totalMatches,
-                pUnder25: 1 - (totalOver25 / totalMatches)
-            };
+            const avgTotalGoals = (totalHomeGoals + totalAwayGoals) / totalMatches; // Nuevo
 
             const teamCoeffs = {};
             for (const team in teamStats) {
                 const stats = teamStats[team];
                 
-                // Ataque y Defensa por Frecuencia Home
-                const attH = (stats.playedH > 0) ? (stats.scoredH / stats.playedH) : avgGoalsHome;
-                const defH = (stats.playedH > 0) ? (stats.concededH / stats.playedH) : avgGoalsAway;
+                // Ataque y Defensa por Frecuencia Home (Usados en Poisson)
+                const attH_factor = (stats.playedH > 0) ? (stats.scoredH / stats.playedH) / avgGoalsHome : 1.0; 
+                const defH_factor = (stats.playedH > 0) ? (stats.concededH / stats.playedH) / avgGoalsAway : 1.0; 
                 
-                // Ataque y Defensa por Frecuencia Away
-                const attA = (stats.playedA > 0) ? (stats.scoredA / stats.playedA) : avgGoalsAway;
-                const defA = (stats.playedA > 0) ? (stats.concededA / stats.playedA) : avgGoalsHome;
+                // Ataque y Defensa por Frecuencia Away (Usados en Poisson)
+                const attA_factor = (stats.playedA > 0) ? (stats.scoredA / stats.playedA) / avgGoalsAway : 1.0; 
+                const defA_factor = (stats.playedA > 0) ? (stats.concededA / stats.playedA) / avgGoalsHome : 1.0; 
 
-                // **NUEVO FACTOR DE POTENCIA (GD Ponderado)**
-                const gdPower = stats.gd / (stats.playedH + stats.playedA); // Promedio de GD
-                const powerFactor = 1 + (gdPower * 0.05); // Ponderación de 5% sobre el promedio de GD
+                // Factor de Potencia (GD Ponderado) para el 1X2
+                const gdPower = stats.gd / (stats.playedH + stats.playedA); 
+                const powerFactor = 1 + (gdPower * 0.05);
 
                 teamCoeffs[team] = { 
-                    attH, defH, attA, defA, 
+                    attH_factor, defH_factor, attA_factor, defA_factor,
                     playedH: stats.playedH, 
                     playedA: stats.playedA,
-                    powerFactor: powerFactor // El factor de Potencia Híbrido
+                    powerFactor: powerFactor
                 };
             }
 
             return {
-                globalAverages: { avgGoalsHome, avgGoalsAway, totalMatches },
-                globalProbs: globalProbs,
+                globalAverages: { avgGoalsHome, avgGoalsAway, avgTotalGoals, totalMatches }, // Agregado avgTotalGoals
                 teamCoeffs: teamCoeffs
             };
         }
 
 
         function processData(data) {
-            // [Lógica de limpieza de datos idéntica a v8.5]
-             rawData = data.map(r => {
+            rawData = data.map(r => {
                 if(!r.Date || !r.HomeTeam || isNaN(r.FTHG) || isNaN(r.FTAG)) return null;
                 
                 let d = r.Date; 
@@ -570,8 +578,12 @@
                 
                 return {
                     date:d, league:r.Div, home:r.HomeTeam, away:r.AwayTeam, res:r.FTR, goalsH:r.FTHG, goalsA:r.FTAG,
+                    // Cuotas de Apuesta
                     oddsH:r.B365H||r.AvgH||1.01, oddsD:r.B365D||r.AvgD||1.01, oddsA:r.B365A||r.AvgA||1.01,
                     oddsO25:r['B365>2.5']||r.Avg25||1.01, oddsU25:r['B365<2.5']||r.Avg25_1||1.01,
+                    // Cuotas de Cierre (NUEVO: Requiere columnas CLH, CLA, etc.)
+                    clH:r.CLH||r.AvgH||r.B365H||1.01, clD:r.CLD||r.AvgD||r.B365D||1.01, clA:r.CLA||r.AvgA||r.B365A||1.01,
+                    clO25:r['CL>2.5']||r['Avg>2.5']||r.B365A||1.01, clU25:r['CL<2.5']||r['Avg<2.5']||r.B365D||1.01, 
                     totalGoals: r.FTHG + r.FTAG
                 };
             }).filter(x=>x && x.oddsH > 1.01); 
@@ -605,7 +617,6 @@
             runBacktest(); 
         }
 
-
         // --- LÓGICA CORE ---
         function getMarketOdds(row, mkt) {
             if(mkt==='H') return row.oddsH;
@@ -614,6 +625,16 @@
             if(mkt==='O25') return row.oddsO25;
             if(mkt==='U25') return row.oddsU25;
             return 0; 
+        }
+        
+        // NUEVA FUNCIÓN: Obtener Cuotas de Cierre
+        function getClosingOdds(row, mkt) {
+            if(mkt==='H') return row.clH;
+            if(mkt==='D') return row.clD;
+            if(mkt==='A') return row.clA;
+            if(mkt==='O25') return row.clO25;
+            if(mkt==='U25') return row.clU25;
+            return getMarketOdds(row, mkt); // Fallback a cuota inicial si no hay CL
         }
 
         function isWinningBet(row, mkt) {
@@ -625,49 +646,61 @@
             return false;
         }
 
-        // --- MODELO AVANZADO: Cálculo de Probabilidades Híbridas ---
+        // --- MODELO AVANZADO: Cálculo de Probabilidades Híbridas (Ajuste para O/U con Poisson) ---
         function calculateHybridProbabilities(homeTeam, awayTeam, stats) {
             if (!stats) return null;
-            const { globalAverages, globalProbs, teamCoeffs } = stats;
+            const { globalAverages, teamCoeffs } = stats;
             const homeCoeffs = teamCoeffs[homeTeam];
             const awayCoeffs = teamCoeffs[awayTeam];
             
             if (!homeCoeffs || !awayCoeffs) return null;
 
-            // Frecuencias base (Estadística pura)
-            const pBaseHome = globalProbs.pHome;
-            const pBaseDraw = globalProbs.pDraw;
-            const pBaseAway = globalProbs.pAway;
-            
-            // Factor de Potencia (GD Ponderado)
+            // --- 1. Cálculo de Lambdas (Tasas de Goles Esperadas - Poisson) ---
+            const lambdaH = homeCoeffs.attH_factor * awayCoeffs.defA_factor * globalAverages.avgGoalsHome;
+            const lambdaA = awayCoeffs.attA_factor * homeCoeffs.defH_factor * globalAverages.avgGoalsAway;
+
+            // --- 2. Cálculo de Probabilidades 1X2 (GD Ponderado, no Poisson directo) ---
+            // Usamos una aproximación que mantiene la robustez del GD Power para 1X2
             const powerH = homeCoeffs.powerFactor;
             const powerA = awayCoeffs.powerFactor;
             
-            // Ajuste Híbrido: Multiplicar las probabilidades base por el factor de potencia del equipo
-            // El ajuste es heurístico, pero busca favorecer al equipo con mejor GD.
-            let pHome = pBaseHome * powerH / powerA;
-            let pAway = pBaseAway * powerA / powerH;
-            let pDraw = pBaseDraw;
+            // Frecuencias base (estimadas del Poisson para Normalización)
+            let pHome = poisson(lambdaH, 1) * (1 - poisson(lambdaA, 0)); // Aproximación
+            let pDraw = poisson(lambdaH, 0) * poisson(lambdaA, 0) + poisson(lambdaH, 1) * poisson(lambdaA, 1);
+            let pAway = poisson(lambdaA, 1) * (1 - poisson(lambdaH, 0)); 
             
-            // Normalización para que la suma sea 1 (distribución de probabilidad válida)
-            const sum = pHome + pDraw + pAway;
-            pHome /= sum;
-            pDraw /= sum;
-            pAway /= sum;
-
-            // Probabilidades de Goles (se mantiene la base de frecuencia para O/U)
-            const pOver25 = globalProbs.pOver25;
-            const pUnder25 = globalProbs.pUnder25;
+            // Re-aplicar el Factor de Potencia (GD) para mejorar la predicción 1X2
+            pHome = pHome * powerH / powerA;
+            pAway = pAway * powerA / powerH;
+            
+            // Normalización 1X2
+            const sum1X2 = pHome + pDraw + pAway;
+            pHome /= sum1X2;
+            pDraw /= sum1X2;
+            pAway /= sum1X2;
+            
+            // --- 3. Cálculo de Probabilidades O/U 2.5 (Poisson Puro) ---
+            let pUnder25 = 0;
+            // Suma de P(0-0) a P(2-0), P(0-2), P(1-1), P(2-1), P(1-2)
+            for (let h = 0; h <= 2; h++) {
+                for (let a = 0; a <= 2; a++) {
+                    if (h + a < 3) {
+                        pUnder25 += poisson(lambdaH, h) * poisson(lambdaA, a);
+                    }
+                }
+            }
+            const pOver25 = 1 - pUnder25;
             
             return {
                 pHome, pDraw, pAway, pOver25, pUnder25,
-                pTotal: pHome + pDraw + pAway // Debería ser ~1.00
+                lambdaH, lambdaA,
+                pTotal: pHome + pDraw + pAway 
             };
         }
         
-        // --- FUNCIÓN DE CÁLCULO DE PROFIT Y STAKE MEJORADA ---
-        function calculateProfit(row, mkt, stakeType, stakeValue, bank, minOdds, maxOdds, minEV, useValueFilter) {
-            let o=getMarketOdds(row, mkt);
+        // --- FUNCIÓN DE CÁLCULO DE PROFIT Y STAKE MEJORADA (Con Ponderación EV/Volatilidad) ---
+        function calculateProfit(row, mkt, stakeType, stakeValue, bank, minOdds, maxOdds, minEV, useValueFilter, lgAnalysis) {
+            let o = getMarketOdds(row, mkt);
             if(!o || o<1.01) return null; 
 
             // --- 1. Filtro de Cuota Plana ---
@@ -677,13 +710,14 @@
             let edge = 0;
             let EV_percent = 0;
             let isValueBet = false;
+            let clOdds = getClosingOdds(row, mkt);
+            let clv_percent = 0;
             
             const isKelly = (stakeType === 'kelly');
-            const requiresModel = useValueFilter || isKelly;
+            const requiresModel = useValueFilter || isKelly || clOdds > 1.01;
 
 
             if (requiresModel) {
-                // LLAMADA AL NUEVO MODELO HÍBRIDO
                 const hybridRes = calculateHybridProbabilities(row.home, row.away, currentStats); 
                 if (!hybridRes) return null; 
 
@@ -696,34 +730,53 @@
                 if (pModel <= 0) return null; 
 
                 // Cálculo de Edge y Valor Esperado (EV)
-                // Edge = pModel * Odds - 1
                 edge = (pModel * o) - 1; 
                 EV_percent = edge * 100;
                 
-                isValueBet = edge > minEV; // Filtro EV Mínimo
+                isValueBet = edge > minEV;
 
-                // Filtro de Valor EV: Solo apuesta si el EV es mayor que el umbral (minEV)
+                // Cálculo de CLV (Closing Line Value)
+                if (clOdds > 1.01) {
+                    clv_percent = ((o / clOdds) - 1) * 100; // Formula CLV %
+                }
+
+                // Filtro de Valor EV
                 if (useValueFilter && !isValueBet) return null;
             }
 
-            // --- Lógica de Stake ---
+            // --- Lógica de Stake (Ponderada por EV y Volatilidad) ---
             let actualStake;
             const kellyDenominator = (stakeType === 'kelly') ? stakeValue : 1; 
 
             if (stakeType === 'flat') {
                 actualStake = stakeValue;
             } else if (stakeType === 'percent') {
-                actualStake = bank * (stakeValue / 100);
+                // Stake Ponderado por EV (Si es % Banca, el EV positivo aumenta el stake)
+                const evWeight = Math.max(1, 1 + (EV_percent * 0.1)); // Aumenta 10% del EV al peso
+                actualStake = bank * (stakeValue / 100) * evWeight;
             } else if (isKelly && isValueBet) {
-                const kellyFraction = calculateKellyStake(pModel, o, kellyDenominator);
+                let kellyFraction = calculateKellyStake(pModel, o, kellyDenominator);
+                
+                // PONDERACIÓN 1: Multiplicar la Fracción de Kelly por el EV Positivo (Kelly Fraccional Dinámico)
+                // Esto aumenta la fracción de banca si el EV es muy alto
+                if (EV_percent > 0) {
+                     // Ejemplo: 1% EV añade un 0.1 al multiplicador (1.1x Kelly)
+                    const evMultiplier = Math.max(1.0, 1 + (EV_percent / 100)); 
+                    kellyFraction *= evMultiplier;
+                }
+
+                // PONDERACIÓN 2: Ajuste por Volatilidad (VF)
+                if (lgAnalysis[row.league] && parseFloat(lgAnalysis[row.league].vf) > 10) {
+                    // Reducir el stake en un 10% si la volatilidad es alta (VF > 10)
+                    kellyFraction *= 0.90; 
+                }
+
                 actualStake = bank * kellyFraction;
-                // El factor de Kelly ya limita el riesgo, solo nos aseguramos que no exceda la banca
             } else {
-                return null; // No apostar si no es Kelly de valor positivo o si el filtro está activado
+                return null; 
             }
             
-            // Filtro final: no apostar más del 10% de la banca (seguridad extra)
-            actualStake = Math.min(actualStake, bank * 0.10);
+            actualStake = Math.min(actualStake, bank * 0.10); // Límite de Stake 10%
             actualStake = Math.max(actualStake, 0); 
             if (actualStake < 0.01) return null;
             
@@ -733,6 +786,8 @@
                 pnl: w ? (actualStake * o - actualStake) : -actualStake, 
                 won: w, 
                 odds: o, 
+                clOdds: clOdds,
+                clv: clv_percent,
                 stake: actualStake,
                 EV: EV_percent,
                 pModel: pModel
@@ -741,6 +796,7 @@
         
         // --- ANÁLISIS DE PARTIDO AVANZADO ---
         function analyzeMatchup() {
+            // [Lógica idéntica a v9.1, pero llamará a la nueva función calculateHybridProbabilities]
             const homeTeam = document.getElementById('teamHomeSelect').value;
             const awayTeam = document.getElementById('teamAwaySelect').value;
             const mkt = document.getElementById('marketSelect').value;
@@ -764,6 +820,7 @@
         }
 
         function updateStatsCard(home, away, res, lastMatch, selectedMkt) {
+            // [Lógica idéntica a v9.1, actualizada con las nuevas métricas]
             const card = document.getElementById('statsCard');
             card.style.display = 'block';
 
@@ -776,11 +833,11 @@
             };
 
             const markets = {
-                'H': { p: res.pHome, odds: lastMatch ? lastMatch.oddsH : null, label: 'Local (1)' },
-                'D': { p: res.pDraw, odds: lastMatch ? lastMatch.oddsD : null, label: 'Empate (X)' },
-                'A': { p: res.pAway, odds: lastMatch ? lastMatch.oddsA : null, label: 'Visita (2)' },
-                'O25': { p: res.pOver25, odds: lastMatch ? lastMatch.oddsO25 : null, label: 'O2.5' },
-                'U25': { p: res.pUnder25, odds: lastMatch ? lastMatch.oddsU25 : null, label: 'U2.5' }
+                'H': { p: res.pHome, odds: lastMatch ? lastMatch.oddsH : null, clOdds: lastMatch ? lastMatch.clH : null, label: 'Local (1)' },
+                'D': { p: res.pDraw, odds: lastMatch ? lastMatch.oddsD : null, clOdds: lastMatch ? lastMatch.clD : null, label: 'Empate (X)' },
+                'A': { p: res.pAway, odds: lastMatch ? lastMatch.oddsA : null, clOdds: lastMatch ? lastMatch.clA : null, label: 'Visita (2)' },
+                'O25': { p: res.pOver25, odds: lastMatch ? lastMatch.oddsO25 : null, clOdds: lastMatch ? lastMatch.clO25 : null, label: 'O2.5 (Poisson)' },
+                'U25': { p: res.pUnder25, odds: lastMatch ? lastMatch.oddsU25 : null, clOdds: lastMatch ? lastMatch.clU25 : null, label: 'U2.5 (Poisson)' }
             };
 
             let marketHTML = '';
@@ -788,15 +845,21 @@
                 const mkt = markets[key];
                 const oddsModel = (mkt.p > 0 ? (1 / mkt.p) : 0);
                 const oddsReal = mkt.odds;
+                const oddsCL = mkt.clOdds;
                 
                 const edge = (mkt.p * oddsReal) - 1;
                 const edgePercent = edge * 100;
                 
+                let clvIndicator = '';
+                if(oddsReal && oddsCL && oddsCL > 1.01) {
+                    const clv = ((oddsReal / oddsCL) - 1) * 100;
+                    clvIndicator = `<span class="${clv>=0?'text-green':'text-red'}" style="font-size:0.9rem; font-weight:bold;">CLV: ${clv.toFixed(1)}%</span>`;
+                }
+
+
                 let edgeIndicator = '';
-                let isValue = false;
                 if (edgePercent > 0.01) {
                     edgeIndicator = `<span class="text-green" style="font-size:0.9rem;">(+${edgePercent.toFixed(2)}% EV)</span>`;
-                    isValue = true;
                 } else if (edgePercent < -0.01) {
                     edgeIndicator = `<span class="text-red" style="font-size:0.9rem;">(${edgePercent.toFixed(2)}% EV)</span>`;
                 }
@@ -808,12 +871,12 @@
                         <div class="kpi-title" style="color:white; font-weight:bold;">${mkt.label}</div>
                         <div class="kpi-value" style="font-size:1.1rem; color:var(--stats-accent);">P. Híbrida: ${(mkt.p * 100).toFixed(1)}%</div>
                         <div class="kpi-title" style="margin-top:3px; font-weight:bold;">Odds Implícita: ${oddsModel > 0 ? oddsModel.toFixed(2) : 'N/A'}</div>
-                        <div class="kpi-title">Odds Real: ${oddsReal ? oddsReal.toFixed(2) : 'N/A'} ${edgeIndicator}</div>
+                        <div class="kpi-title">Odds Tomada: ${oddsReal ? oddsReal.toFixed(2) : 'N/A'} ${edgeIndicator}</div>
+                        <div class="kpi-title">Odds Cierre: ${oddsCL ? oddsCL.toFixed(2) : 'N/A'} ${clvIndicator}</div>
                     </div>
                 `;
             }
 
-            // --- Generación de Matriz de Potencia ---
             let matrixHTML = `
                 <div class="score-matrix">
                     <h4 style="margin:0 0 5px 0; color:white; font-size:0.85rem;">Métricas Avanzadas (Temp. Actual)</h4>
@@ -832,21 +895,15 @@
                                 <td>${teamPowerData.away_power}</td>
                             </tr>
                             <tr>
-                                <td style="text-align:left; font-weight:bold;">Ataque Local / Visita</td>
-                                <td>${homeCoeffs.attH.toFixed(2)} / ${homeCoeffs.attA.toFixed(2)}</td>
-                                <td>${awayCoeffs.attH.toFixed(2)} / ${awayCoeffs.attA.toFixed(2)}</td>
-                            </tr>
-                            <tr>
-                                <td style="text-align:left; font-weight:bold;">Defensa Local / Visita</td>
-                                <td>${homeCoeffs.defH.toFixed(2)} / ${homeCoeffs.defA.toFixed(2)}</td>
-                                <td>${awayCoeffs.defH.toFixed(2)} / ${awayCoeffs.defA.toFixed(2)}</td>
+                                <td style="text-align:left; font-weight:bold; color:var(--stats-accent);">$\lambda$ Esperada (Poisson)</td>
+                                <td>${res.lambdaH.toFixed(2)}</td>
+                                <td>${res.lambdaA.toFixed(2)}</td>
                             </tr>
                         </tbody>
                     </table>
-                    <p style="font-size:0.75rem; color:var(--text-secondary); margin-top:10px;">*Probabilidad Híbrida: Frecuencia ajustada por Potencia (Diferencia de Goles Ponderada).</p>
+                    <p style="font-size:0.75rem; color:var(--text-secondary); margin-top:10px;">*Probabilidad Híbrida: 1X2 ajustado por GD Power. O/U calculado por Poisson.</p>
                 </div>
             `;
-            // --- Fin de Matriz ---
 
 
             card.innerHTML = `
@@ -878,7 +935,7 @@
                 document.getElementById('statsCard').innerHTML = `<h3 style="color:var(--danger); margin:0;">Cargue datos primero (URL o Archivos) para iniciar el backtest.</h3>`;
                 return;
             }
-
+            
             const mkt = document.getElementById('marketSelect').value;
             const useValueFilter = document.getElementById('useFrequencyValue').checked; 
             const stT = document.getElementById('stakeType').value;
@@ -897,14 +954,26 @@
             let totalBets = 0;
             let totalEV = 0;
             let oddsSum = 0;
+            let totalCLV = 0; // NUEVO
+            let clvBetCount = 0; // NUEVO
+            let monthlyResults = {}; // NUEVO: Para análisis de varianza
+            
+            // Recalcular análisis de volatilidad para el cache
+            lgAnalysisCache = analyzeLeagueVolatility(rawData.map(r => {
+                 // Usar Stake Plano 1.0 y EV > 0 para definir apuestas optimizables (para cálculo de VF)
+                const resOpt = calculateProfit(r, mkt, 'flat', 1.0, 10000, 1.0, 50.0, 0.001, true, {}); 
+                if (resOpt) return { odds: resOpt.odds, pnl: resOpt.pnl, year: r.date.substring(0, 4), league: r.league, EV: resOpt.EV };
+                return null;
+            }).filter(Boolean));
 
             const filtered = rawData.filter(r => lg==='all' || r.league===lg);
 
             filtered.forEach(r => {
-                const res = calculateProfit(r, mkt, stT, stV, bank, minO, maxO, minEV, useValueFilter);
+                const res = calculateProfit(r, mkt, stT, stV, bank, minO, maxO, minEV, useValueFilter, lgAnalysisCache);
                 
-                // Generación de lista de apuestas optimizables (para el rango óptimo y Volatilidad)
-                const resOptimizable = calculateProfit(r, mkt, 'flat', 1.0, 10000, 1.0, 50.0, 0.001, true); // EV > 0.1%
+                // Generación de lista de apuestas optimizables (para el rango óptimo)
+                // Se usa un stake plano 1.0, EV > 0.1%
+                const resOptimizable = calculateProfit(r, mkt, 'flat', 1.0, 10000, 1.0, 50.0, 0.001, true, {}); 
                 if(resOptimizable) {
                     const optBet = { 
                         odds: resOptimizable.odds, 
@@ -924,6 +993,11 @@
                     totalEV += res.EV;
                     oddsSum += res.odds;
                     
+                    if(res.clv !== 0) {
+                        totalCLV += res.clv;
+                        clvBetCount++;
+                    }
+                    
                     if(res.won) wins++;
                     
                     // Cálculo de Drawdown
@@ -937,6 +1011,14 @@
                     // Acumulación de Profit/Loss por Liga
                     if(!lgP[r.league]) lgP[r.league]=0; lgP[r.league]+=res.pnl;
                     
+                    // NUEVO: Acumulación de Profit/Loss Mensual
+                    const monthYear = r.date.substring(0, 7);
+                    if (!monthlyResults[monthYear]) monthlyResults[monthYear] = { pnl: 0, stake: 0, bets: 0 };
+                    monthlyResults[monthYear].pnl += res.pnl;
+                    monthlyResults[monthYear].stake += res.stake;
+                    monthlyResults[monthYear].bets++;
+
+
                     // Acumulación de Profit/Loss por Equipo (Ranking Mejorado)
                     const updateTeamRanking = (team, pnl, type) => {
                         if (!tmPRanking[team]) {
@@ -958,10 +1040,8 @@
             globalWinRate = totalBets > 0 ? wins / totalBets : 0;
             const avgOdds = totalBets > 0 ? oddsSum / totalBets : 0;
             const avgEV = totalBets > 0 ? totalEV / totalBets : 0;
+            const avgCLV = clvBetCount > 0 ? totalCLV / clvBetCount : 0; // NUEVO
 
-            // --- ANÁLISIS DE VOLATILIDAD POR LIGA ---
-            lgAnalysis = analyzeLeagueVolatility(optimizableBetsCombined);
-            
             // --- ANÁLISIS DE RANGO ÓPTIMO ---
             const currentData = optimizableBetsCombined.filter(b => seasonYears.current && b.year == seasonYears.current);
             const previousData = optimizableBetsCombined.filter(b => seasonYears.previous && b.year == seasonYears.previous);
@@ -972,7 +1052,7 @@
             
             const RoR = calculateRiskOfRuina(totalBets, totalStakeUnits, globalWinRate, avgOdds);
 
-            updateGlobalUI(hist, drawdownHist, rows, wins, bank0, bank, maxDD, lgP, tmPRanking, totalStakeUnits, RoR, avgEV, lgAnalysis);
+            updateGlobalUI(hist, drawdownHist, rows, wins, bank0, bank, maxDD, lgP, tmPRanking, totalStakeUnits, RoR, avgEV, avgCLV, monthlyResults, lgAnalysisCache);
             
             document.getElementById('statsCard').style.display = 'none';
         }
@@ -994,16 +1074,15 @@
 
             for (const league in leagueYields) {
                 const data = leagueYields[league];
-                if (data.pnls.length < 50) { // Mínimo de 50 apuestas para calcular VF
-                    leagueAnalysis[league] = { yield: 0, bets: data.pnls.length, vf: 0, status: 'MUESTRA INSUF' };
+                if (data.pnls.length < 50) {
+                    leagueAnalysis[league] = { yield: 0, bets: data.pnls.length, vf: 1000, status: 'MUESTRA INSUF' };
                     continue;
                 }
                 
                 const avgYield = data.totalPnl / data.totalStake;
                 const stdDev = calculateStandardDeviation(data.pnls, avgYield);
                 
-                // Factor de Volatilidad: Desviación Estándar / Yield promedio. Un VF bajo es mejor.
-                const vf = (avgYield !== 0) ? (stdDev / avgYield) : 1000;
+                const vf = (avgYield !== 0 && avgYield > 0.01) ? (stdDev / avgYield) : 1000;
                 
                 let status = 'ALTO RIESGO';
                 if (vf < 5.0 && avgYield > 0.05) status = 'BAJA VOLATILIDAD'; 
@@ -1020,8 +1099,8 @@
             return leagueAnalysis;
         }
 
-        // --- FUNCIONES DE OPTIMIZACIÓN y UI (Ajustadas a EV/Stake) ---
         function findOptimalOddsRange(optimizableBets) {
+            // [Lógica idéntica a v9.1]
             const minBetsRequired = 50; 
             if (optimizableBets.length < minBetsRequired) return { min: 'N/A', max: 'N/A', yield: 0, bets: 0 }; 
 
@@ -1059,7 +1138,6 @@
                     if (totalBets >= minBetsRequired) { 
                         const currentYield = (totalProfit / totalStake) * 100; 
                         
-                        // Priorizar Yield positivo alto sobre cantidad de apuestas, si hay empate en Yield
                         if (currentYield > bestYield || (currentYield.toFixed(2) === bestYield.toFixed(2) && totalBets > bestBets)) {
                             bestYield = currentYield;
                             bestMin = min_o;
@@ -1070,7 +1148,7 @@
                 }
             }
             
-            if (bestBets === 0 || bestYield <= 0.5) { // Requiere al menos 0.5% de Yield para ser "óptimo"
+            if (bestBets === 0 || bestYield <= 0.5) { 
                  return { min: 'N/A', max: 'N/A', yield: 0, bets: 0 };
             }
 
@@ -1083,6 +1161,7 @@
         }
         
         function checkCompatibility(optimalRange, currentData, previousData) {
+            // [Lógica idéntica a v9.1]
             const min = parseFloat(optimalRange.min);
             const max = parseFloat(optimalRange.max); 
             const STAKE_UNIT = 1.0; 
@@ -1129,6 +1208,7 @@
         }
 
         function updateOptimalOddsUI(optimalRange, compatibility) {
+            // [Lógica idéntica a v9.1]
             document.getElementById('rangeDisplay').innerText = optimalRange.min + ' - ' + optimalRange.max;
             document.getElementById('valOptimalOddsYield').innerText = optimalRange.yield + '%';
             document.getElementById('valOptimalOddsBets').innerText = optimalRange.bets;
@@ -1158,12 +1238,11 @@
         }
 
 
-        // --- UI UPDATES (Global and Charts) ---
-        function updateGlobalUI(hist, drawdownHist, rows, wins, start, end, dd, lgData, tmPRanking, totalStakeUnits, RoR, avgEV, lgAnalysis) {
+        // --- UI UPDATES (Global and Charts + NUEVO Mensual) ---
+        function updateGlobalUI(hist, drawdownHist, rows, wins, start, end, dd, lgData, tmPRanking, totalStakeUnits, RoR, avgEV, avgCLV, monthlyResults, lgAnalysis) {
             const tot = rows.length;
             const prof = end-start;
             const yieldVal = totalStakeUnits>0?((prof/totalStakeUnits)*100).toFixed(1):'0';
-            const winRatePercent = tot?((wins/tot)*100).toFixed(1):'0';
             
             document.getElementById('valBets').innerText = tot;
             document.getElementById('valAvgEV').innerText = avgEV.toFixed(2) + '%';
@@ -1171,19 +1250,20 @@
             document.getElementById('valYield').innerText = yieldVal + '%';
             document.getElementById('valDrawdown').innerText = '-'+dd.toFixed(2)+'%';
             document.getElementById('valRoR').innerText = RoR.toFixed(1) + '%';
+            
+            // NUEVO KPI: CLV
+            document.getElementById('valCLV').innerText = avgCLV.toFixed(2) + '%'; 
 
 
             document.getElementById('valProfit').className = `kpi-value ${prof>=0?'text-green':'text-red'}`;
             document.getElementById('valAvgEV').className = `kpi-value ${avgEV>=0.1?'text-green':'text-red'}`;
             document.getElementById('valRoR').className = `kpi-value ${RoR<=10?'text-blue':'text-red'}`;
+            document.getElementById('valCLV').className = `kpi-value ${avgCLV>=0.1?'text-green':'text-red'}`; // CLV es la prueba de Edge
 
-            // *** NOTA: Se ha eliminado la actualización de la tabla 'tableBody' para corregir el error ***
-            // La tabla no estaba definida en el HTML de esta versión.
-
-            // Tabla Volatilidad
+            // Tabla Volatilidad (usa el cache de lgAnalysis)
             const tbVol = document.getElementById('volatilityTableBody'); tbVol.innerHTML='';
             Object.entries(lgAnalysis)
-                .sort(([, a], [, b]) => (a.vf === '1000' || b.vf === '1000') ? 0 : parseFloat(a.vf) - parseFloat(b.vf)) // Ordenar por VF
+                .sort(([, a], [, b]) => (a.vf === '1000' || b.vf === '1000') ? 0 : parseFloat(a.vf) - parseFloat(b.vf)) 
                 .forEach(([league, data]) => {
                 let colorClass = data.status === 'BAJA VOLATILIDAD' ? 'text-success' : (data.status === 'RIESGO MEDIO' ? 'text-warning' : 'text-red');
                 if (data.status === 'MUESTRA INSUF') colorClass = 'text-secondary';
@@ -1194,6 +1274,25 @@
                         <td>${data.bets}</td>
                         <td class="${data.yield >= 0 ? 'text-green' : 'text-red'}">${data.yield}%</td>
                         <td class="${colorClass}">${data.vf}</td>
+                    </tr>
+                `;
+            });
+
+            // NUEVO: Tabla Rendimiento Mensual
+            const tbMonthly = document.getElementById('monthlyTableBody'); tbMonthly.innerHTML='';
+            Object.entries(monthlyResults)
+                .sort((a,b) => a[0].localeCompare(b[0])) // Ordenar cronológicamente
+                .reverse() // Mostrar el más reciente primero
+                .forEach(([monthYear, data]) => {
+                const monthlyYield = data.stake > 0 ? (data.pnl / data.stake) * 100 : 0;
+                const yieldClass = monthlyYield >= 0 ? 'text-green' : 'text-red';
+
+                tbMonthly.innerHTML += `
+                    <tr>
+                        <td style="text-align:left; font-weight:bold; color:white;">${monthYear}</td>
+                        <td>${data.bets}</td>
+                        <td class="${yieldClass}">${data.pnl.toFixed(2)}</td>
+                        <td class="${yieldClass}">${monthlyYield.toFixed(1)}%</td>
                     </tr>
                 `;
             });
@@ -1224,20 +1323,17 @@
         }
 
         function renderCharts(hist, drawdownHist, lgData) {
-            // Chart Evolución de Banca (Equity)
+            // [Lógica de gráficos idéntica a v9.1]
             const ctxEq = document.getElementById('equityChart').getContext('2d');
             if(chartEq) chartEq.destroy();
             const pts = hist.length>800 ? hist.filter((_,i)=>i%5===0) : hist;
-            chartEq = new Chart(ctxEq, { type:'line', data:{labels:pts.map(p=>p.x), datasets:[{label:'Banca', data:pts.map(p=>p.y), borderColor:'var(--accent)', borderWidth:2, pointRadius:0, fill:true, backgroundColor:'rgba(245, 158, 11, 0.1)'}]}, options:{responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}, title:{display:true, text:'Evolución de Banca (Kelly Fraccional)', color:'white', font:{size:14, weight:'600'}}}, scales:{x:{display:false},y:{grid:{color:'#334155'}, ticks:{color:'white'}}}}});
+            chartEq = new Chart(ctxEq, { type:'line', data:{labels:pts.map(p=>p.x), datasets:[{label:'Banca', data:pts.map(p=>p.y), borderColor:'var(--accent)', borderWidth:2, pointRadius:0, fill:true, backgroundColor:'rgba(245, 158, 11, 0.1)'}]}, options:{responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}, title:{display:true, text:'Evolución de Banca (Kelly Ponderado por EV)', color:'white', font:{size:14, weight:'600'}}}, scales:{x:{display:false},y:{grid:{color:'#334155'}, ticks:{color:'white'}}}}});
 
-            // Chart Drawdown
             const ctxDD = document.getElementById('drawdownChart').getContext('2d');
             if(chartDD) chartDD.destroy();
             const ddPts = drawdownHist.length>800 ? drawdownHist.filter((_,i)=>i%5===0) : drawdownHist;
             chartDD = new Chart(ctxDD, { type:'line', data:{labels:ddPts.map(p=>p.x), datasets:[{label:'Drawdown (%)', data:ddPts.map(p=>p.y), borderColor:'var(--danger)', borderWidth:1, pointRadius:0, fill:true, backgroundColor:'rgba(239, 68, 68, 0.2)'}]}, options:{responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}, title:{display:true, text:'Drawdown Máximo (%)', color:'white', font:{size:14, weight:'600'}}}, scales:{x:{display:false},y:{min:0, max:30, grid:{color:'#334155'}, ticks:{color:'white'}}}}});
 
-
-            // Chart Rendimiento por Liga
             const ctxLg = document.getElementById('leagueChart').getContext('2d');
             if(chartLg) chartLg.destroy();
             const lgArr = Object.entries(lgData).sort((a,b)=>b[1]-a[1]);
