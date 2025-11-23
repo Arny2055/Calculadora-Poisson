@@ -588,1363 +588,1408 @@
     </div>
 
     <script>
-        // LÓGICA JAVASCRIPT: ValueHacker_v17.0 (Optimizador Global)
+        // *** COMIENZO DE LA LÓGICA JAVASCRIPT - VALUE HACKER v17.0 (OPT. GLOBAL) ***
+        let historicalData = []; 
+        let futureData = []; 
+        let currentStats = null; 
+        let leagueHADFactors = {}; 
+        let valueBetsResults = []; 
+        let placedBets = []; 
+        
+        let chartEq=null, chartLg=null, chartDD=null; 
+        let historicalFileNames = []; 
+        let futureFileName = '';
 
-            // *** COMIENZO DE LA LÓGICA JAVASCRIPT - VALUE HACKER v17.0 (OPT. GLOBAL) ***
-            let historicalData = []; 
-            let futureData = []; 
-            let currentStats = null; 
-            let leagueHADFactors = {}; 
-            let valueBetsResults = []; 
-            let placedBets = []; 
+        // VARIABLES GLOBALES PARA LA OPTIMIZACIÓN DE RENTABILIDAD
+        let profitableMarkets = new Set(); 
+        let excludedLeagues = new Set(); // Ligas excluidas por la optimización
+        let excludedTeams = new Set();   // Equipos excluidos por la optimización
+
+        // --- Lógica de Barra Lateral Móvil ---
+        function toggleSidebar() {
+            document.getElementById('sidebar').classList.toggle('open');
+        }
+
+        // --- Tabs Logic ---
+        function switchTab(tabId) {
+            document.querySelectorAll('.tab-content').forEach(el => el.style.display = 'none');
+            document.querySelectorAll('.tab-button').forEach(el => el.classList.remove('active'));
+
+            const content = document.getElementById('tab' + tabId.charAt(0).toUpperCase() + tabId.slice(1));
+            if (content) content.style.display = 'block';
+
+            document.getElementById('tabConfigBtn').classList.remove('active');
+            document.getElementById('tabEstadisticasBtn').classList.remove('active');
+            document.getElementById('tabBancaBtn').classList.remove('active');
             
-            let chartEq=null, chartLg=null, chartDD=null; 
-            let historicalFileNames = []; 
-
-            // VARIABLES GLOBALES PARA LA OPTIMIZACIÓN DE RENTABILIDAD
-            let profitableMarkets = new Set(); 
-            let excludedLeagues = new Set(); // Ligas excluidas por la optimización
-            let excludedTeams = new Set();   // Equipos excluidos por la optimización
-
-            // --- Lógica de Barra Lateral Móvil ---
-            function toggleSidebar() {
-                document.getElementById('sidebar').classList.toggle('open');
-            }
-
-            // --- Tabs Logic ---
-            function switchTab(tabId) {
-                document.querySelectorAll('.tab-content').forEach(el => el.style.display = 'none');
-                document.querySelectorAll('.tab-button').forEach(el => el.classList.remove('active'));
-
-                const content = document.getElementById('tab' + tabId.charAt(0).toUpperCase() + tabId.slice(1));
-                if (content) content.style.display = 'block';
-
-                document.getElementById('tabConfigBtn').classList.remove('active');
-                document.getElementById('tabEstadisticasBtn').classList.remove('active');
-                document.getElementById('tabBancaBtn').classList.remove('active');
-                
-                let btnId = '';
-                if (tabId === 'estadisticas') btnId = 'tabEstadisticasBtn';
-                else if (tabId === 'banca') btnId = 'tabBancaBtn';
-                else btnId = 'tabConfigBtn';
-                
-                if (document.getElementById(btnId)) document.getElementById(btnId).classList.add('active');
-                
-                if (tabId === 'estadisticas') {
-                    updateHADTable(leagueHADFactors);
-                }
-            }
+            let btnId = '';
+            if (tabId === 'estadisticas') btnId = 'tabEstadisticasBtn';
+            else if (tabId === 'banca') btnId = 'tabBancaBtn';
+            else btnId = 'tabConfigBtn';
             
-            // --- FUNCIONES MATEMÁTICAS ---
-            function calculateKellyStake(p, o, denominator) {
-                const b = o - 1;
-                const q = 1 - p;
-                let f = ((b * p) - q) / b;
-                f = f / denominator;
-                return Math.max(0.005, f);
-            }
-
-            const factorialCache = [1];
-            function factorial(n) {
-                if (n < factorialCache.length) return factorialCache[n];
-                if (n === 0 || n === 1) return 1;
-                for (let i = factorialCache.length; i <= n; i++) {
-                    if (factorialCache[i - 1] * i > Number.MAX_SAFE_INTEGER) {
-                        factorialCache[i] = Number.MAX_SAFE_INTEGER;
-                    } else {
-                        factorialCache[i] = factorialCache[i - 1] * i;
-                    }
-                }
-                return factorialCache[n];
-            }
-
-            function poisson(lambda, k) {
-                const limitedLambda = Math.min(20, lambda); 
-                if (limitedLambda < 0 || k < 0) return 0;
-                return (Math.exp(-limitedLambda) * Math.pow(limitedLambda, k)) / factorial(k);
-            }
+            if (document.getElementById(btnId)) document.getElementById(btnId).classList.add('active');
             
-            // --- CARGA Y PROCESAMIENTO DE DATOS ---
-            function parseCSVFile(file) {
-                 return new Promise((resolve, reject) => {
-                    Papa.parse(file, {
-                        header: true, dynamicTyping: true, skipEmptyLines: true,
-                        complete: (results) => {
-                            const validData = results.data.filter(r => Object.keys(r).length > 0 && r.HomeTeam);
-                            resolve({ data: validData, name: file.name });
-                        },
-                        error: (error, file) => { reject(`Error de parsing en el archivo ${file.name}. Mensaje: ${error.message}`); }
-                    });
-                });
-            }
-            
-            async function loadHistoricalFiles(e) {
-                const files = e.target.files;
-                if (files.length === 0) return;
-                if (files.length > 30) {
-                     alert("Límite de 30 archivos de historial excedido. Por favor, selecciona 30 o menos.");
-                     e.target.value = '';
-                     return;
-                }
-                document.getElementById('loadingMessage').innerText = `Cargando ${files.length} archivos de historial...`;
-                document.getElementById('loadingOverlay').style.display = 'flex';
-                historicalData = []; historicalFileNames = [];
-                try {
-                    const filePromises = Array.from(files).map(file => parseCSVFile(file));
-                    const results = await Promise.all(filePromises);
-                    results.forEach(res => { historicalData.push(...res.data); historicalFileNames.push(res.name); });
-                    processAllData();
-                } catch (error) {
-                    console.error("Error al cargar archivos de historial:", error);
-                    alert(`❌ Error cargando archivos de historial:\n\n${error}`);
-                    document.getElementById('loadingOverlay').style.display = 'none';
-                }
-            }
-            
-            async function loadFutureFile(e) {
-                const file = e.target.files[0];
-                if (!file) return;
-                document.getElementById('loadingMessage').innerText = `Cargando partidos a analizar: ${file.name}...`;
-                document.getElementById('loadingOverlay').style.display = 'flex';
-                futureData = [];
-                document.getElementById('urlInputFuture').value = '';
-                try {
-                    const result = await parseCSVFile(file);
-                    futureData = result.data;
-                    document.getElementById('urlInputFuture').value = result.name;
-                    processAllData();
-                } catch (error) {
-                    console.error("Error al cargar archivo futuro:", error);
-                    alert(`❌ Error cargando archivo futuro:\n\n${error}`);
-                    document.getElementById('loadingOverlay').style.display = 'none';
-                }
-            }
-            
-            function normalizeData(data, isFuture) {
-                const parseNum = (val) => { if (typeof val === 'number') return val; if (typeof val === 'string') return parseFloat(val); return null; };
-                const getOdds = (key1, key2) => {
-                    let val1 = parseNum(key1); let val2 = parseNum(key2);
-                    let val = (val1 && val1 > 1.01) ? val1 : val2;
-                    return (val && val > 1.01) ? val : 1.01;
-                };
-                const getGoal = (key) => { let val = parseNum(key); return (val !== null && !isNaN(val) && val >= 0) ? Math.floor(val) : null; }
-                
-                return data.map(r => {
-                    if(!r.Date || !r.HomeTeam) return null;
-                    let d = r.Date; 
-                    if(typeof d === 'string') {
-                        if (d.includes('/')) {
-                            const p = d.split('/');
-                            if (p.length === 3) { let year = p[2]; if (year.length === 2) year = (parseInt(year) > 70 ? '19' : '20') + year; d = `${year}-${p[1].padStart(2,'0')}-${p[0].padStart(2,'0')}`; }
-                        } else if (d.includes('.')) {
-                            const p = d.split('.');
-                            if (p.length === 3) d = `${p[2]}-${p[1].padStart(2,'0')}-${p[0].padStart(2,'0')}`;
-                        }
-                    }
-                    const oddsH = getOdds(r.CLH, r.B365H);
-                    const oddsD = getOdds(r.CLD, r.B365D);
-                    const oddsA = getOdds(r.CLA, r.B365A);
-                    const oddsO25 = getOdds(r['CL>2.5'], r['B365>2.5']);
-                    const oddsU25 = getOdds(r['CL<2.5'], r['B365<2.5']);
-
-                    return {
-                        date:d, league:r.Div || 'N/A', home:r.HomeTeam, away:r.AwayTeam, 
-                        res:isFuture ? null : r.FTR, 
-                        goalsH:isFuture ? null : getGoal(r.FTHG), 
-                        goalsA:isFuture ? null : getGoal(r.FTAG),
-                        oddsH, oddsD, oddsA, oddsO25, oddsU25,
-                        isFuture: isFuture 
-                    };
-                }).filter(x=>x && x.oddsH > 1.01); 
-            }
-
-            function processAllData() {
-                document.getElementById('loadingMessage').innerText = "Procesando y Calculando Coeficientes...";
-
-                const normalizedHistorical = normalizeData(historicalData, false).filter(r => r.goalsH !== null && r.goalsA !== null);
-                normalizedHistorical.sort((a, b) => a.date.localeCompare(b.date));
-                
-                updateHistoricalFileList(normalizedHistorical.length);
-
-                leagueHADFactors = calculateLeagueHAD(normalizedHistorical);
+            if (tabId === 'estadisticas') {
                 updateHADTable(leagueHADFactors);
-
-                currentStats = calculateCurrentSeasonStats(normalizedHistorical);
-                
-                const normalizedFuture = normalizeData(futureData, true);
-                normalizedFuture.sort((a, b) => a.date.localeCompare(b.date));
-
-                if(currentStats) {
-                    const teams = Object.keys(currentStats.teamCoeffs).sort();
-                    const populate = (id) => {
-                        const s = document.getElementById(id); const currentVal = s.value; s.innerHTML='<option value="">Seleccionar</option>';
-                        teams.forEach(t => s.add(new Option(t,t))); if (teams.includes(currentVal)) s.value = currentVal; 
-                    };
-                    populate('teamHomeSelect'); populate('teamAwaySelect');
-                }
-                
-                const allLeagues = [...new Set([...normalizedHistorical.map(x=>x.league), ...normalizedFuture.map(x=>x.league)])].sort();
-                const lgSel = document.getElementById('leagueSelect'); lgSel.innerHTML='<option value="all">Todas</option>';
-                allLeagues.forEach(l=>lgSel.add(new Option(l,l)));
-
-                document.getElementById('historicalAnalysis').style.display = normalizedHistorical.length > 0 ? 'block' : 'none';
-
-                document.getElementById('loadingOverlay').style.display='none';
-                
-                if (normalizedHistorical.length > 0) {
-                    if (normalizedFuture.length > 0 && currentStats) {
-                        futureData = normalizedFuture; 
-                        document.getElementById('statsCard').style.display = 'block';
-                        document.getElementById('statsCard').innerHTML = `<h3 style="color:var(--info); margin:0;">Datos listos. Presione **Ejecutar Análisis y Backtest** para la optimización.</h3>`;
-                    } else {
-                         // No hay data futura, solo ejecutar backtest básico para mostrar stats
-                         runHistoricalBacktest(normalizedHistorical);
-                         updateGlobalUI(0, 0, 0, []); 
-                    }
-                }
             }
-            
-            function updateHistoricalFileList(matchCount) {
-                const listEl = document.getElementById('historicalFileList');
-                const fileCountEl = document.getElementById('histFileCount');
-                const matchCountEl = document.getElementById('histMatchCount');
-                
-                fileCountEl.innerText = historicalFileNames.length;
-                matchCountEl.innerText = matchCount;
+        }
+        
+        // --- FUNCIONES MATEMÁTICAS ---
+        function calculateKellyStake(p, o, denominator) {
+            const b = o - 1;
+            const q = 1 - p;
+            let f = ((b * p) - q) / b;
+            f = f / denominator;
+            return Math.max(0.005, f);
+        }
 
-                if (historicalFileNames.length === 0) {
-                    listEl.innerHTML = 'No hay archivos de historial cargados.';
-                    return;
-                }
-                listEl.innerHTML = historicalFileNames.map(name => 
-                    `<div class="file-list-item"><i class="fas fa-check-circle" style="color:var(--success);"></i> ${name}</div>`
-                ).join('');
-            }
-            
-            function calculateLeagueHAD(data) {
-                 const leagueTotals = {};
-                const minMatches = 15; 
-                let globalHomeGoals = 0;
-                let globalMatches = 0;
-
-                data.forEach(r => {
-                    const league = r.league;
-                    if (!leagueTotals[league]) {
-                        leagueTotals[league] = { totalMatches: 0, totalHomeGoals: 0, expectedHomeGoals: 0, leagueGames: [] };
-                    }
-                    leagueTotals[league].leagueGames.push(r);
-                    globalHomeGoals += r.goalsH;
-                    globalMatches++;
-                });
-                
-                if (globalMatches === 0) return {};
-                const initialGlobalStats = calculateCurrentSeasonStats(data, 1.0); 
-                if (!initialGlobalStats) return {};
-
-                for (const league in leagueTotals) {
-                    const games = leagueTotals[league].leagueGames;
-                    let sumExpectedGoals = 0;
-
-                    games.forEach(r => {
-                        const homeCoeffs = initialGlobalStats.teamCoeffs[r.home];
-                        const awayCoeffs = initialGlobalStats.teamCoeffs[r.away];
-
-                        if (homeCoeffs && awayCoeffs) {
-                            const lambdaH_initial = homeCoeffs.attH_factor * awayCoeffs.defA_factor * initialGlobalStats.globalAverages.avgGoalsHome;
-                            sumExpectedGoals += lambdaH_initial;
-                        }
-                        leagueTotals[league].totalMatches++;
-                        leagueTotals[league].totalHomeGoals += r.goalsH;
-                    });
-                    
-                    leagueTotals[league].expectedHomeGoals = sumExpectedGoals;
-
-                    if (leagueTotals[league].totalMatches >= minMatches && sumExpectedGoals > 0) {
-                        const actualHomeAvg = leagueTotals[league].totalHomeGoals / leagueTotals[league].totalMatches;
-                        const expectedHomeAvg = leagueTotals[league].expectedHomeGoals / leagueTotals[league].totalMatches;
-                        
-                        let hadFactor = actualHomeAvg / expectedHomeAvg;
-                        hadFactor = Math.max(0.8, Math.min(1.5, hadFactor)); 
-
-                        leagueHADFactors[league] = {
-                            factor: hadFactor, matches: leagueTotals[league].totalMatches, correction: `x${hadFactor.toFixed(3)}`
-                        };
-                    }
-                }
-
-                const globalActualHomeAvg = globalHomeGoals / globalMatches;
-                const globalExpectedHomeAvg = Object.values(leagueTotals).reduce((sum, l) => sum + l.expectedHomeGoals, 0) / globalMatches;
-                let globalHADFactor = (globalExpectedHomeAvg > 0) ? (globalActualHomeAvg / globalExpectedHomeAvg) : 1.0;
-                globalHADFactor = Math.max(0.8, Math.min(1.5, globalHADFactor)); 
-
-                leagueHADFactors['GLOBAL'] = {
-                    factor: globalHADFactor, matches: globalMatches, correction: `x${globalHADFactor.toFixed(3)}`
-                };
-                
-                return leagueHADFactors;
-            }
-
-            function calculateCurrentSeasonStats(data, decayOverride = null) {
-                const teamStats = {};
-                let totalMatchesWeighted = 0;
-                let totalHomeGoalsWeighted = 0;
-                let totalAwayGoalsWeighted = 0;
-                const numMatches = data.length;
-
-                data.forEach((r, index) => {
-                    if(r.goalsH >= 0 && r.goalsA >= 0) {
-                        const decayFactor = decayOverride !== null ? decayOverride : (0.75 + (index / numMatches) * 0.25); 
-
-                        totalMatchesWeighted += decayFactor;
-                        totalHomeGoalsWeighted += r.goalsH * decayFactor;
-                        totalAwayGoalsWeighted += r.goalsA * decayFactor;
-
-                        const updateStats = (team, goalsScored, goalsConceded, isHome) => {
-                            if (!teamStats[team]) { teamStats[team] = { playedH: 0, scoredH: 0, concededH: 0, playedA: 0, scoredA: 0, concededA: 0, gd: 0, weightH: 0, weightA: 0, league: r.league };}
-                            teamStats[team].gd += goalsScored - goalsConceded;
-                            
-                            if (isHome) {
-                                teamStats[team].playedH++; teamStats[team].scoredH += goalsScored * decayFactor;
-                                teamStats[team].concededH += goalsConceded * decayFactor; teamStats[team].weightH += decayFactor;
-                            } else {
-                                teamStats[team].playedA++; teamStats[team].scoredA += goalsScored * decayFactor;
-                                teamStats[team].concededA += goalsConceded * decayFactor; teamStats[team].weightA += decayFactor;
-                            }
-                        };
-                        updateStats(r.home, r.goalsH, r.goalsA, true);
-                        updateStats(r.away, r.goalsA, r.goalsH, false);
-                    }
-                });
-                
-                if (totalMatchesWeighted === 0) return null;
-
-                const avgGoalsHome = totalHomeGoalsWeighted / totalMatchesWeighted;
-                const avgGoalsAway = totalAwayGoalsWeighted / totalMatchesWeighted;
-
-                const teamCoeffs = {};
-                for (const team in teamStats) {
-                    const stats = teamStats[team];
-                    
-                    const calculateFactor = (weightedGoals, totalWeight, avgGlobalGoals) => {
-                        if (totalWeight < 1 || avgGlobalGoals <= 0.001) return 1.0; 
-                        return (weightedGoals / totalWeight) / avgGlobalGoals;
-                    };
-
-                    const attH_factor = calculateFactor(stats.scoredH, stats.weightH, avgGoalsHome);
-                    const defH_factor = calculateFactor(stats.concededH, stats.weightH, avgGoalsAway);
-                    const attA_factor = calculateFactor(stats.scoredA, stats.weightA, avgGoalsAway);
-                    const defA_factor = calculateFactor(stats.concededA, stats.weightA, avgGoalsHome); 
-
-                    let powerFactor = 1.0;
-                    if (stats.playedH + stats.playedA >= 5) {
-                        const gdPower = stats.gd / (stats.playedH + stats.playedA);
-                        powerFactor = 1 + (gdPower * 0.05); 
-                    }
-                    
-                    teamCoeffs[team] = { 
-                        attH_factor, defH_factor, attA_factor, defA_factor,
-                        playedH: stats.playedH, playedA: stats.playedA,
-                        powerFactor: Math.max(0.5, Math.min(1.5, powerFactor)),
-                        league: stats.league // Añadir liga al coeficiente del equipo
-                    };
-                }
-
-                return {
-                    globalAverages: { avgGoalsHome, avgGoalsAway, totalMatches: totalMatchesWeighted }, 
-                    teamCoeffs: teamCoeffs
-                };
-            }
-            
-            function calculateHybridProbabilities(homeTeam, awayTeam, league, stats, hadFactors) {
-                if (!stats) return null;
-                const { globalAverages, teamCoeffs } = stats;
-                const homeCoeffs = teamCoeffs[homeTeam];
-                const awayCoeffs = teamCoeffs[awayTeam];
-                
-                if (!homeCoeffs || !awayCoeffs) return null;
-
-                let hadFactor = 1.0;
-                if (hadFactors[league] && hadFactors[league].matches >= 15) {
-                    hadFactor = hadFactors[league].factor;
-                } else if (hadFactors['GLOBAL']) {
-                    hadFactor = hadFactors['GLOBAL'].factor;
-                }
-
-                const lambdaH = homeCoeffs.attH_factor * awayCoeffs.defA_factor * globalAverages.avgGoalsHome * hadFactor;
-                const lambdaA = awayCoeffs.attA_factor * homeCoeffs.defH_factor * globalAverages.avgGoalsAway;
-
-                const maxGoals = 5; 
-                let pHomeRaw = 0, pDrawRaw = 0, pAwayRaw = 0;
-                
-                for (let h = 0; h <= maxGoals; h++) {
-                    for (let a = 0; a <= maxGoals; a++) {
-                        const p = poisson(lambdaH, h) * poisson(lambdaA, a);
-                        if (h > a) pHomeRaw += p;
-                        else if (h < a) pAwayRaw += p;
-                        else pDrawRaw += p;
-                    }
-                }
-                const sumRaw = pHomeRaw + pDrawRaw + pAwayRaw;
-                
-                let pHome = pHomeRaw / sumRaw;
-                let pDraw = pDrawRaw / sumRaw;
-                let pAway = pAwayRaw / sumRaw;
-                
-                const powerH = homeCoeffs.powerFactor || 1.0;
-                const powerA = awayCoeffs.powerFactor || 1.0;
-                
-                pHome *= powerH; pAway *= powerA;
-                
-                let sum1X2 = pHome + pDraw + pAway;
-                if (sum1X2 === 0) sum1X2 = 1; 
-
-                pHome /= sum1X2; pDraw /= sum1X2; pAway /= sum1X2;
-                
-                let pUnder25 = 0;
-                for (let h = 0; h <= 2; h++) {
-                    for (let a = 0; a <= 2; a++) {
-                        if (h + a < 3) { pUnder25 += poisson(lambdaH, h) * poisson(lambdaA, a); }
-                    }
-                }
-                const pOver25 = 1 - pUnder25;
-                
-                return {
-                    pHome, pDraw, pAway, pOver25, pUnder25,
-                    lambdaH, lambdaA, hadFactor: hadFactor
-                };
-            }
-            
-            // --- PUNTO DE ENTRADA PARA LA OPTIMIZACIÓN ---
-            async function optimizeAndRunAnalysis() {
-                // Ocultar sidebar en móvil
-                document.getElementById('sidebar').classList.remove('open');
-                
-                const historical = normalizeData(historicalData, false).filter(r => r.goalsH !== null && r.goalsA !== null);
-                if (historical.length === 0) {
-                    alert("Cargue los archivos de Historial para poder realizar la optimización y el backtest.");
-                    return;
-                }
-
-                document.getElementById('loadingMessage').innerText = "Iniciando proceso de Optimización Global de Rentabilidad...";
-                document.getElementById('loadingOverlay').style.display = 'flex';
-                
-                // 1. Resetear las listas de exclusión
-                excludedLeagues.clear();
-                excludedTeams.clear();
-                profitableMarkets.clear();
-
-                let iteration = 0;
-                const maxIterations = 50; 
-                
-                let currentMarketStats = {};
-                let dataToAnalyze = [...historical];
-                let overallYield = -100;
-
-                while (iteration < maxIterations) {
-                    iteration++;
-
-                    // 1. Recalcular coeficientes (solo con la data que queda)
-                    const currentHistoricalStats = calculateCurrentSeasonStats(dataToAnalyze);
-                    if (!currentHistoricalStats) break;
-
-                    // 2. Ejecutar Backtest con la data actual (sin dibujar, solo obtener stats)
-                    const resultStats = runHistoricalBacktest(dataToAnalyze, true, currentHistoricalStats); 
-                    currentMarketStats = resultStats.marketStats;
-                    overallYield = resultStats.totalYield;
-
-                    // 3. Revisar el Criterio de Parada
-                    const losingMarkets = Object.values(currentMarketStats).filter(stats => stats.count >= 20 && (stats.wagered === 0 || (stats.profit / stats.wagered) * 100 <= 0.001));
-                    
-                    if (losingMarkets.length === 0) {
-                        // Éxito: Todos los mercados son rentables (Yield > 0%)
-                        document.getElementById('loadingMessage').innerText = `¡Optimización Exitosa! Finalizada en ${iteration} iteraciones. Yield Global: ${overallYield.toFixed(2)}%`;
-                        break; 
-                    }
-                    
-                    // 4. Identificar la peor entidad
-                    const { entity, yieldVal, type } = findWorstPerformer(dataToAnalyze, currentHistoricalStats);
-
-                    if (!entity) {
-                        // No hay más entidades que cumplan los filtros (ej. < 30 partidos)
-                         document.getElementById('loadingMessage').innerText = `Optimización detenida: No se puede mejorar más o datos insuficientes.`;
-                        break;
-                    }
-
-                    // 5. Aplicar la exclusión
-                    if (type === 'league') {
-                        excludedLeagues.add(entity);
-                    } else if (type === 'team') {
-                        excludedTeams.add(entity);
-                    }
-
-                    // 6. Filtrar los datos para la siguiente iteración
-                    dataToAnalyze = historical.filter(r => 
-                        !excludedLeagues.has(r.league) &&
-                        !excludedTeams.has(r.home) &&
-                        !excludedTeams.has(r.away)
-                    );
-                    
-                    document.getElementById('loadingMessage').innerText = `Iteración ${iteration}: Excluyendo ${type} **${entity}** (Yield: ${yieldVal.toFixed(2)}%). Partidos restantes: ${dataToAnalyze.length}`;
-                    
-                    if(dataToAnalyze.length < 100 && iteration > 1) { 
-                        document.getElementById('loadingMessage').innerText = `Optimización detenida por insuficiencia de datos.`;
-                        break; 
-                    }
-                }
-                
-                // Ejecutar backtest final con la data optimizada y dibujar los resultados
-                currentStats = calculateCurrentSeasonStats(dataToAnalyze); // Recalcular stats finales
-                if(currentStats) {
-                     runHistoricalBacktest(dataToAnalyze, false, currentStats, currentMarketStats); 
+        const factorialCache = [1];
+        function factorial(n) {
+            if (n < factorialCache.length) return factorialCache[n];
+            if (n === 0 || n === 1) return 1;
+            for (let i = factorialCache.length; i <= n; i++) {
+                if (factorialCache[i - 1] * i > Number.MAX_SAFE_INTEGER) {
+                    factorialCache[i] = Number.MAX_SAFE_INTEGER;
                 } else {
-                     document.getElementById('statsCardBacktest').innerHTML = `<h3 class="text-danger">No quedaron suficientes datos para el backtest final.</h3>`;
+                    factorialCache[i] = factorialCache[i - 1] * i;
                 }
-                
-                // Ejecutar análisis de futuros con las exclusiones aplicadas
-                runAnalysis();
             }
+            return factorialCache[n];
+        }
+
+        function poisson(lambda, k) {
+            const limitedLambda = Math.min(20, lambda); 
+            if (limitedLambda < 0 || k < 0) return 0;
+            return (Math.exp(-limitedLambda) * Math.pow(limitedLambda, k)) / factorial(k);
+        }
+        
+        // --- CARGA Y PROCESAMIENTO DE DATOS ---
+        function parseCSVFile(file) {
+             return new Promise((resolve, reject) => {
+                Papa.parse(file, {
+                    header: true, dynamicTyping: true, skipEmptyLines: true,
+                    complete: (results) => {
+                        // Filtro básico de validación para asegurar que hay data utilizable
+                        const validData = results.data.filter(r => 
+                            Object.keys(r).length > 0 && r.HomeTeam && r.Date
+                        );
+                        if (validData.length === 0) {
+                            reject(`El archivo ${file.name} no contiene datos válidos o le faltan columnas clave (HomeTeam/Date).`);
+                            return;
+                        }
+                        resolve({ data: validData, name: file.name });
+                    },
+                    error: (error, file) => { reject(`Error de parsing en el archivo ${file.name}. Mensaje: ${error.message}`); }
+                });
+            });
+        }
+        
+        async function loadHistoricalFiles(e) {
+            const files = e.target.files;
+            if (files.length === 0) return;
             
-            // Función de ayuda para identificar el peor Yield (Liga o Equipo)
-            function findWorstPerformer(data, stats) {
-                let worstYield = 1000;
-                let worstEntity = null;
-                let worstType = null;
-                const minCount = 30; // Mínimo para considerar la exclusión
-                const minEV = 0.05; // Solo evaluar EV+ > 5%
-                const kellyFactor = 33;
+            document.getElementById('loadingMessage').innerText = `Cargando ${files.length} archivos de historial...`;
+            document.getElementById('loadingOverlay').style.display = 'flex';
+            historicalData = []; historicalFileNames = [];
+            
+            try {
+                const filePromises = Array.from(files).map(file => parseCSVFile(file));
+                const results = await Promise.all(filePromises);
                 
-                // 1. Evaluar Ligas
-                const leagueMap = {};
-                data.forEach(r => {
-                    if (!leagueMap[r.league]) leagueMap[r.league] = { profit: 0, wagered: 0, count: 0 };
+                results.forEach(res => { 
+                    historicalData.push(...res.data); 
+                    historicalFileNames.push(res.name); 
                 });
                 
-                data.forEach(r => {
+                await processAllData();
+            } catch (error) {
+                console.error("Error al cargar archivos de historial:", error);
+                alert(`❌ Error cargando archivos de historial:\n\n${error}`);
+            } finally {
+                document.getElementById('loadingOverlay').style.display = 'none';
+            }
+        }
+        
+        async function loadFutureFile(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+            
+            document.getElementById('loadingMessage').innerText = `Cargando partidos a analizar: ${file.name}...`;
+            document.getElementById('loadingOverlay').style.display = 'flex';
+            futureData = [];
+            futureFileName = '';
+            
+            try {
+                const result = await parseCSVFile(file);
+                futureData = result.data;
+                futureFileName = result.name;
+                document.getElementById('urlInputFuture').value = result.name;
+                
+                await processAllData();
+            } catch (error) {
+                console.error("Error al cargar archivo futuro:", error);
+                alert(`❌ Error cargando archivo futuro:\n\n${error}`);
+            } finally {
+                document.getElementById('loadingOverlay').style.display = 'none';
+            }
+        }
+        
+        function normalizeData(data, isFuture) {
+            const parseNum = (val) => { 
+                if (typeof val === 'number') return val; 
+                if (typeof val === 'string') {
+                    const parsed = parseFloat(val);
+                    return !isNaN(parsed) ? parsed : null;
+                }
+                return null; 
+            };
+            const getOdds = (r) => {
+                const keys = ['CLH', 'B365H', 'CLD', 'B365D', 'CLA', 'B365A', 'CL>2.5', 'B365>2.5', 'CL<2.5', 'B365<2.5'];
+                const odds = {};
+                
+                // Función auxiliar para obtener la mejor cuota disponible
+                const getBestOdds = (keyPrefix) => {
+                    let val1 = parseNum(r[`CL${keyPrefix}`]); 
+                    let val2 = parseNum(r[`B365${keyPrefix}`]);
+                    let val = (val1 && val1 > 1.01) ? val1 : (val2 && val2 > 1.01) ? val2 : 1.01;
+                    return val;
+                };
+
+                odds.oddsH = getBestOdds('H');
+                odds.oddsD = getBestOdds('D');
+                odds.oddsA = getBestOdds('A');
+                odds.oddsO25 = getBestOdds('>2.5') || 1.01; 
+                odds.oddsU25 = getBestOdds('<2.5') || 1.01;
+                
+                return odds;
+            };
+            const getGoal = (key) => { let val = parseNum(key); return (val !== null && !isNaN(val) && val >= 0) ? Math.floor(val) : null; }
+            
+            return data.map(r => {
+                if(!r.Date || !r.HomeTeam) return null;
+                let d = r.Date; 
+                if(typeof d === 'string') {
+                    // Normalización de fecha DD/MM/YY o DD.MM.YY a YYYY-MM-DD
+                    if (d.includes('/') || d.includes('.')) {
+                        const sep = d.includes('/') ? '/' : '.';
+                        const p = d.split(sep);
+                        if (p.length === 3) { 
+                            let year = p[2]; 
+                            if (year.length === 2) year = (parseInt(year) > 70 ? '19' : '20') + year; 
+                            d = `${year}-${p[1].padStart(2,'0')}-${p[0].padStart(2,'0')}`; 
+                        }
+                    }
+                }
+                
+                const odds = getOdds(r);
+
+                return {
+                    date:d, league:r.Div || 'N/A', home:r.HomeTeam, away:r.AwayTeam, 
+                    res:isFuture ? null : r.FTR, 
+                    goalsH:isFuture ? null : getGoal(r.FTHG), 
+                    goalsA:isFuture ? null : getGoal(r.FTAG),
+                    ...odds,
+                    isFuture: isFuture 
+                };
+            }).filter(x=>x && x.home && x.away && x.date); // Filtrar por datos esenciales
+        }
+
+        async function processAllData() {
+            document.getElementById('loadingMessage').innerText = "Procesando y Calculando Coeficientes...";
+
+            const normalizedHistorical = normalizeData(historicalData, false).filter(r => r.goalsH !== null && r.goalsA !== null);
+            normalizedHistorical.sort((a, b) => a.date.localeCompare(b.date));
+            
+            updateHistoricalFileList(normalizedHistorical.length);
+
+            leagueHADFactors = calculateLeagueHAD(normalizedHistorical);
+            updateHADTable(leagueHADFactors);
+
+            currentStats = calculateCurrentSeasonStats(normalizedHistorical);
+            
+            const normalizedFuture = normalizeData(futureData, true);
+            normalizedFuture.sort((a, b) => a.date.localeCompare(b.date));
+
+            // Actualizar Selectores de Equipos y Ligas
+            if(currentStats) {
+                const teams = Object.keys(currentStats.teamCoeffs).sort();
+                const populate = (id) => {
+                    const s = document.getElementById(id); const currentVal = s.value; s.innerHTML='<option value="">Seleccionar</option>';
+                    teams.forEach(t => s.add(new Option(t,t))); if (teams.includes(currentVal)) s.value = currentVal; 
+                };
+                populate('teamHomeSelect'); populate('teamAwaySelect');
+            }
+            
+            const allLeagues = [...new Set([...normalizedHistorical.map(x=>x.league), ...normalizedFuture.map(x=>x.league)])].sort();
+            const lgSel = document.getElementById('leagueSelect'); lgSel.innerHTML='<option value="all">Todas</option>';
+            allLeagues.forEach(l=>lgSel.add(new Option(l,l)));
+
+            // Mostrar mensaje de estado
+            if (normalizedHistorical.length > 0) {
+                if (normalizedFuture.length > 0 && currentStats) {
+                    futureData = normalizedFuture; 
+                    document.getElementById('statsCard').style.display = 'block';
+                    document.getElementById('statsCard').innerHTML = `<h3 style="color:var(--info); margin:0;">Datos listos. Presione **Ejecutar Análisis y Backtest** para la optimización.</h3>`;
+                } else {
+                     // No hay data futura, solo ejecutar backtest básico para mostrar stats
+                     runHistoricalBacktest(normalizedHistorical);
+                     document.getElementById('statsCard').style.display = 'block';
+                     document.getElementById('statsCard').innerHTML = `<h3 style="color:var(--warning); margin:0;">Historial cargado. Faltan partidos futuros para el análisis EV+.</h3>`;
+                }
+            } else {
+                 document.getElementById('statsCard').style.display = 'block';
+                 document.getElementById('statsCard').innerHTML = `<h3 style="color:var(--danger); margin:0;">Cargue archivos de Historial (Paso 2) y Futuros (Paso 3).</h3>`;
+            }
+        }
+        
+        function updateHistoricalFileList(matchCount) {
+            const listEl = document.getElementById('historicalFileList');
+            const fileCountEl = document.getElementById('histFileCount');
+            const matchCountEl = document.getElementById('histMatchCount');
+            
+            fileCountEl.innerText = historicalFileNames.length;
+            matchCountEl.innerText = matchCount;
+
+            if (historicalFileNames.length === 0) {
+                listEl.innerHTML = 'No hay archivos de historial cargados.';
+                return;
+            }
+            listEl.innerHTML = historicalFileNames.map(name => 
+                `<div class="file-list-item"><i class="fas fa-check-circle" style="color:var(--success);"></i> ${name}</div>`
+            ).join('');
+        }
+        
+        // El resto de funciones (calculateLeagueHAD, calculateCurrentSeasonStats, calculateHybridProbabilities, optimizeAndRunAnalysis, findWorstPerformer, runAnalysis, etc.)
+        // son idénticas a la versión anterior y no requieren cambios para solucionar el problema de carga.
+        // Simplemente se agregan aquí para tener el código COMPLETO.
+        
+        // --- FUNCIÓN DE CÁLCULO DE HAD (HOME ADVANTAGE DISADVANTAGE) ---
+        function calculateLeagueHAD(data) {
+             const leagueTotals = {};
+            const minMatches = 15; 
+            let globalHomeGoals = 0;
+            let globalMatches = 0;
+
+            data.forEach(r => {
+                const league = r.league;
+                if (!leagueTotals[league]) {
+                    leagueTotals[league] = { totalMatches: 0, totalHomeGoals: 0, expectedHomeGoals: 0, leagueGames: [] };
+                }
+                leagueTotals[league].leagueGames.push(r);
+                globalHomeGoals += r.goalsH;
+                globalMatches++;
+            });
+            
+            if (globalMatches === 0) return {};
+            const initialGlobalStats = calculateCurrentSeasonStats(data, 1.0); 
+            if (!initialGlobalStats) return {};
+
+            for (const league in leagueTotals) {
+                const games = leagueTotals[league].leagueGames;
+                let sumExpectedGoals = 0;
+
+                games.forEach(r => {
+                    const homeCoeffs = initialGlobalStats.teamCoeffs[r.home];
+                    const awayCoeffs = initialGlobalStats.teamCoeffs[r.away];
+
+                    if (homeCoeffs && awayCoeffs) {
+                        const lambdaH_initial = homeCoeffs.attH_factor * awayCoeffs.defA_factor * initialGlobalStats.globalAverages.avgGoalsHome;
+                        sumExpectedGoals += lambdaH_initial;
+                    }
+                    leagueTotals[league].totalMatches++;
+                    leagueTotals[league].totalHomeGoals += r.goalsH;
+                });
+                
+                leagueTotals[league].expectedHomeGoals = sumExpectedGoals;
+
+                if (leagueTotals[league].totalMatches >= minMatches && sumExpectedGoals > 0) {
+                    const actualHomeAvg = leagueTotals[league].totalHomeGoals / leagueTotals[league].totalMatches;
+                    const expectedHomeAvg = leagueTotals[league].expectedHomeGoals / leagueTotals[league].totalMatches;
+                    
+                    let hadFactor = actualHomeAvg / expectedHomeAvg;
+                    hadFactor = Math.max(0.8, Math.min(1.5, hadFactor)); 
+
+                    leagueHADFactors[league] = {
+                        factor: hadFactor, matches: leagueTotals[league].totalMatches, correction: `x${hadFactor.toFixed(3)}`
+                    };
+                }
+            }
+
+            const globalActualHomeAvg = globalHomeGoals / globalMatches;
+            const globalExpectedHomeAvg = Object.values(leagueTotals).reduce((sum, l) => sum + l.expectedHomeGoals, 0) / globalMatches;
+            let globalHADFactor = (globalExpectedHomeAvg > 0) ? (globalActualHomeAvg / globalExpectedHomeAvg) : 1.0;
+            globalHADFactor = Math.max(0.8, Math.min(1.5, globalHADFactor)); 
+
+            leagueHADFactors['GLOBAL'] = {
+                factor: globalHADFactor, matches: globalMatches, correction: `x${globalHADFactor.toFixed(3)}`
+            };
+            
+            return leagueHADFactors;
+        }
+
+        // --- FUNCIÓN DE CÁLCULO DE ESTADÍSTICAS POR EQUIPO ---
+        function calculateCurrentSeasonStats(data, decayOverride = null) {
+            const teamStats = {};
+            let totalMatchesWeighted = 0;
+            let totalHomeGoalsWeighted = 0;
+            let totalAwayGoalsWeighted = 0;
+            const numMatches = data.length;
+
+            data.forEach((r, index) => {
+                if(r.goalsH >= 0 && r.goalsA >= 0) {
+                    const decayFactor = decayOverride !== null ? decayOverride : (0.75 + (index / numMatches) * 0.25); 
+
+                    totalMatchesWeighted += decayFactor;
+                    totalHomeGoalsWeighted += r.goalsH * decayFactor;
+                    totalAwayGoalsWeighted += r.goalsA * decayFactor;
+
+                    const updateStats = (team, goalsScored, goalsConceded, isHome) => {
+                        if (!teamStats[team]) { teamStats[team] = { playedH: 0, scoredH: 0, concededH: 0, playedA: 0, scoredA: 0, concededA: 0, gd: 0, weightH: 0, weightA: 0, league: r.league };}
+                        teamStats[team].gd += goalsScored - goalsConceded;
+                        
+                        if (isHome) {
+                            teamStats[team].playedH++; teamStats[team].scoredH += goalsScored * decayFactor;
+                            teamStats[team].concededH += goalsConceded * decayFactor; teamStats[team].weightH += decayFactor;
+                        } else {
+                            teamStats[team].playedA++; teamStats[team].scoredA += goalsScored * decayFactor;
+                            teamStats[team].concededA += goalsConceded * decayFactor; teamStats[team].weightA += decayFactor;
+                        }
+                    };
+                    updateStats(r.home, r.goalsH, r.goalsA, true);
+                    updateStats(r.away, r.goalsA, r.goalsH, false);
+                }
+            });
+            
+            if (totalMatchesWeighted === 0) return null;
+
+            const avgGoalsHome = totalHomeGoalsWeighted / totalMatchesWeighted;
+            const avgGoalsAway = totalAwayGoalsWeighted / totalMatchesWeighted;
+
+            const teamCoeffs = {};
+            for (const team in teamStats) {
+                const stats = teamStats[team];
+                
+                const calculateFactor = (weightedGoals, totalWeight, avgGlobalGoals) => {
+                    if (totalWeight < 1 || avgGlobalGoals <= 0.001) return 1.0; 
+                    return (weightedGoals / totalWeight) / avgGlobalGoals;
+                };
+
+                const attH_factor = calculateFactor(stats.scoredH, stats.weightH, avgGoalsHome);
+                const defH_factor = calculateFactor(stats.concededH, stats.weightH, avgGoalsAway);
+                const attA_factor = calculateFactor(stats.scoredA, stats.weightA, avgGoalsAway);
+                const defA_factor = calculateFactor(stats.concededA, stats.weightA, avgGoalsHome); 
+
+                let powerFactor = 1.0;
+                if (stats.playedH + stats.playedA >= 5) {
+                    const gdPower = stats.gd / (stats.playedH + stats.playedA);
+                    powerFactor = 1 + (gdPower * 0.05); 
+                }
+                
+                teamCoeffs[team] = { 
+                    attH_factor, defH_factor, attA_factor, defA_factor,
+                    playedH: stats.playedH, playedA: stats.playedA,
+                    powerFactor: Math.max(0.5, Math.min(1.5, powerFactor)),
+                    league: stats.league // Añadir liga al coeficiente del equipo
+                };
+            }
+
+            return {
+                globalAverages: { avgGoalsHome, avgGoalsAway, totalMatches: totalMatchesWeighted }, 
+                teamCoeffs: teamCoeffs
+            };
+        }
+        
+        // --- FUNCIÓN DE CÁLCULO DE PROBABILIDADES (MODELO POISSON HÍBRIDO) ---
+        function calculateHybridProbabilities(homeTeam, awayTeam, league, stats, hadFactors) {
+            if (!stats) return null;
+            const { globalAverages, teamCoeffs } = stats;
+            const homeCoeffs = teamCoeffs[homeTeam];
+            const awayCoeffs = teamCoeffs[awayTeam];
+            
+            if (!homeCoeffs || !awayCoeffs) return null;
+
+            let hadFactor = 1.0;
+            if (hadFactors[league] && hadFactors[league].matches >= 15) {
+                hadFactor = hadFactors[league].factor;
+            } else if (hadFactors['GLOBAL']) {
+                hadFactor = hadFactors['GLOBAL'].factor;
+            }
+
+            const lambdaH = homeCoeffs.attH_factor * awayCoeffs.defA_factor * globalAverages.avgGoalsHome * hadFactor;
+            const lambdaA = awayCoeffs.attA_factor * homeCoeffs.defH_factor * globalAverages.avgGoalsAway;
+
+            const maxGoals = 5; 
+            let pHomeRaw = 0, pDrawRaw = 0, pAwayRaw = 0;
+            
+            for (let h = 0; h <= maxGoals; h++) {
+                for (let a = 0; a <= maxGoals; a++) {
+                    const p = poisson(lambdaH, h) * poisson(lambdaA, a);
+                    if (h > a) pHomeRaw += p;
+                    else if (h < a) pAwayRaw += p;
+                    else pDrawRaw += p;
+                }
+            }
+            const sumRaw = pHomeRaw + pDrawRaw + pAwayRaw;
+            
+            let pHome = pHomeRaw / sumRaw;
+            let pDraw = pDrawRaw / sumRaw;
+            let pAway = pAwayRaw / sumRaw;
+            
+            const powerH = homeCoeffs.powerFactor || 1.0;
+            const powerA = awayCoeffs.powerFactor || 1.0;
+            
+            pHome *= powerH; pAway *= powerA;
+            
+            let sum1X2 = pHome + pDraw + pAway;
+            if (sum1X2 === 0) sum1X2 = 1; 
+
+            pHome /= sum1X2; pDraw /= sum1X2; pAway /= sum1X2;
+            
+            let pUnder25 = 0;
+            for (let h = 0; h <= 2; h++) {
+                for (let a = 0; a <= 2; a++) {
+                    if (h + a < 3) { pUnder25 += poisson(lambdaH, h) * poisson(lambdaA, a); }
+                }
+            }
+            const pOver25 = 1 - pUnder25;
+            
+            return {
+                pHome, pDraw, pAway, pOver25, pUnder25,
+                lambdaH, lambdaA, hadFactor: hadFactor
+            };
+        }
+        
+        // --- PUNTO DE ENTRADA PARA LA OPTIMIZACIÓN ---
+        async function optimizeAndRunAnalysis() {
+            // Ocultar sidebar en móvil
+            document.getElementById('sidebar').classList.remove('open');
+            
+            const historical = normalizeData(historicalData, false).filter(r => r.goalsH !== null && r.goalsA !== null);
+            if (historical.length === 0) {
+                alert("Cargue los archivos de Historial para poder realizar la optimización y el backtest.");
+                return;
+            }
+
+            document.getElementById('loadingMessage').innerText = "Iniciando proceso de Optimización Global de Rentabilidad...";
+            document.getElementById('loadingOverlay').style.display = 'flex';
+            
+            // 1. Resetear las listas de exclusión
+            excludedLeagues.clear();
+            excludedTeams.clear();
+            profitableMarkets.clear();
+
+            let iteration = 0;
+            const maxIterations = 50; 
+            
+            let currentMarketStats = {};
+            let dataToAnalyze = [...historical];
+            let overallYield = -100;
+
+            while (iteration < maxIterations) {
+                iteration++;
+
+                // 1. Recalcular coeficientes (solo con la data que queda)
+                const currentHistoricalStats = calculateCurrentSeasonStats(dataToAnalyze);
+                if (!currentHistoricalStats) break;
+
+                // 2. Ejecutar Backtest con la data actual (sin dibujar, solo obtener stats)
+                const resultStats = runHistoricalBacktest(dataToAnalyze, true, currentHistoricalStats); 
+                currentMarketStats = resultStats.marketStats;
+                overallYield = resultStats.totalYield;
+
+                // 3. Revisar el Criterio de Parada
+                const losingMarkets = Object.values(currentMarketStats).filter(stats => stats.count >= 20 && (stats.wagered === 0 || (stats.profit / stats.wagered) * 100 <= 0.001));
+                
+                if (losingMarkets.length === 0) {
+                    // Éxito: Todos los mercados son rentables (Yield > 0%)
+                    document.getElementById('loadingMessage').innerText = `¡Optimización Exitosa! Finalizada en ${iteration} iteraciones. Yield Global: ${overallYield.toFixed(2)}%`;
+                    break; 
+                }
+                
+                // 4. Identificar la peor entidad
+                const { entity, yieldVal, type } = findWorstPerformer(dataToAnalyze, currentHistoricalStats);
+
+                if (!entity) {
+                    // No hay más entidades que cumplan los filtros (ej. < 30 partidos)
+                     document.getElementById('loadingMessage').innerText = `Optimización detenida: No se puede mejorar más o datos insuficientes.`;
+                    break;
+                }
+
+                // 5. Aplicar la exclusión
+                if (type === 'league') {
+                    excludedLeagues.add(entity);
+                } else if (type === 'team') {
+                    excludedTeams.add(entity);
+                }
+
+                // 6. Filtrar los datos para la siguiente iteración
+                dataToAnalyze = historical.filter(r => 
+                    !excludedLeagues.has(r.league) &&
+                    !excludedTeams.has(r.home) &&
+                    !excludedTeams.has(r.away)
+                );
+                
+                document.getElementById('loadingMessage').innerText = `Iteración ${iteration}: Excluyendo ${type} **${entity}** (Yield: ${yieldVal.toFixed(2)}%). Partidos restantes: ${dataToAnalyze.length}`;
+                
+                if(dataToAnalyze.length < 100 && iteration > 1) { 
+                    document.getElementById('loadingMessage').innerText = `Optimización detenida por insuficiencia de datos.`;
+                    break; 
+                }
+            }
+            
+            // Ejecutar backtest final con la data optimizada y dibujar los resultados
+            currentStats = calculateCurrentSeasonStats(dataToAnalyze); // Recalcular stats finales
+            if(currentStats) {
+                 runHistoricalBacktest(dataToAnalyze, false, currentStats, currentMarketStats); 
+            } else {
+                 document.getElementById('statsCardBacktest').innerHTML = `<h3 class="text-danger">No quedaron suficientes datos para el backtest final.</h3>`;
+            }
+            
+            // Ejecutar análisis de futuros con las exclusiones aplicadas
+            runAnalysis();
+        }
+        
+        // Función de ayuda para identificar el peor Yield (Liga o Equipo)
+        function findWorstPerformer(data, stats) {
+            let worstYield = 1000;
+            let worstEntity = null;
+            let worstType = null;
+            const minCount = 30; // Mínimo para considerar la exclusión
+            const minEV = 0.05; // Solo evaluar EV+ > 5%
+            const kellyFactor = 33;
+            
+            // 1. Evaluar Ligas
+            const leagueMap = {};
+            data.forEach(r => {
+                if (!leagueMap[r.league]) leagueMap[r.league] = { profit: 0, wagered: 0, count: 0 };
+            });
+            
+            data.forEach(r => {
+                 const hybridRes = calculateHybridProbabilities(r.home, r.away, r.league, stats, leagueHADFactors);
+                 if (!hybridRes) return;
+                 
+                 const markets = [
+                     {mkt: 'H', odds: r.oddsH, pModel: hybridRes.pHome, result: r.goalsH > r.goalsA},
+                     {mkt: 'D', odds: r.oddsD, pModel: hybridRes.pDraw, result: r.goalsH === r.goalsA},
+                     {mkt: 'A', odds: r.oddsA, pModel: hybridRes.pAway, result: r.goalsH < r.goalsA},
+                     {mkt: 'O25', odds: r.oddsO25, pModel: hybridRes.pOver25, result: (r.goalsH + r.goalsA) > 2},
+                     {mkt: 'U25', odds: r.oddsU25, pModel: hybridRes.pUnder25, result: (r.goalsH + r.goalsA) < 3}
+                 ].filter(m => m.odds > 1.01 && m.pModel > 0);
+                 
+                 markets.forEach(m => {
+                     const edge = (m.pModel * m.odds) - 1;
+                     if (edge > minEV) { 
+                         const kellyFraction = calculateKellyStake(m.pModel, m.odds, kellyFactor);
+                         const stake = 100 * kellyFraction; 
+                         
+                         if (stake > 0.01) {
+                             const betProfit = m.result ? (stake * m.odds - stake) : -stake;
+                             leagueMap[r.league].profit += betProfit;
+                             leagueMap[r.league].wagered += stake;
+                             leagueMap[r.league].count++;
+                         }
+                     }
+                 });
+            });
+
+            for (const league in leagueMap) {
+                const lStats = leagueMap[league];
+                if (lStats.count >= minCount && lStats.wagered > 0) {
+                    const yieldVal = (lStats.profit / lStats.wagered) * 100;
+                    if (yieldVal < worstYield && !excludedLeagues.has(league)) {
+                        worstYield = yieldVal;
+                        worstEntity = league;
+                        worstType = 'league';
+                    }
+                }
+            }
+            
+            // 2. Evaluar Equipos
+            let worstTeamYield = 1000;
+            let worstTeam = null;
+            
+            // Solo evaluar equipos si la peor liga no es lo suficientemente mala (pierde menos del 10%) o si no hay peor liga
+            if (worstYield >= -10.0 || worstEntity === null) { 
+                
+                 const teamMap = {};
+                 data.forEach(r => {
+                     [r.home, r.away].forEach(team => {
+                         if (!teamMap[team]) teamMap[team] = { profit: 0, wagered: 0, count: 0 };
+                     });
+                 });
+                 
+                 data.forEach(r => {
                      const hybridRes = calculateHybridProbabilities(r.home, r.away, r.league, stats, leagueHADFactors);
                      if (!hybridRes) return;
                      
                      const markets = [
-                         {mkt: 'H', odds: r.oddsH, pModel: hybridRes.pHome, result: r.goalsH > r.goalsA},
-                         {mkt: 'D', odds: r.oddsD, pModel: hybridRes.pDraw, result: r.goalsH === r.goalsA},
-                         {mkt: 'A', odds: r.oddsA, pModel: hybridRes.pAway, result: r.goalsH < r.goalsA},
-                         {mkt: 'O25', odds: r.oddsO25, pModel: hybridRes.pOver25, result: (r.goalsH + r.goalsA) > 2},
-                         {mkt: 'U25', odds: r.oddsU25, pModel: hybridRes.pUnder25, result: (r.goalsH + r.goalsA) < 3}
+                         {mkt: 'H', odds: r.oddsH, pModel: hybridRes.pHome, result: r.goalsH > r.goalsA, teams: [r.home]},
+                         {mkt: 'D', odds: r.oddsD, pModel: hybridRes.pDraw, result: r.goalsH === r.goalsA, teams: [r.home, r.away]},
+                         {mkt: 'A', odds: r.oddsA, pModel: hybridRes.pAway, result: r.goalsH < r.goalsA, teams: [r.away]},
+                         {mkt: 'O25', odds: r.oddsO25, pModel: hybridRes.pOver25, result: (r.goalsH + r.goalsA) > 2, teams: [r.home, r.away]},
+                         {mkt: 'U25', odds: r.oddsU25, pModel: hybridRes.pUnder25, result: (r.goalsH + r.goalsA) < 3, teams: [r.home, r.away]}
                      ].filter(m => m.odds > 1.01 && m.pModel > 0);
                      
                      markets.forEach(m => {
                          const edge = (m.pModel * m.odds) - 1;
                          if (edge > minEV) { 
                              const kellyFraction = calculateKellyStake(m.pModel, m.odds, kellyFactor);
-                             const stake = 100 * kellyFraction; 
+                             const stake = 100 * kellyFraction;
                              
                              if (stake > 0.01) {
-                                 const betProfit = m.result ? (stake * m.odds - stake) : -stake;
-                                 leagueMap[r.league].profit += betProfit;
-                                 leagueMap[r.league].wagered += stake;
-                                 leagueMap[r.league].count++;
+                                  const betProfit = m.result ? (stake * m.odds - stake) : -stake;
+                                  m.teams.forEach(team => {
+                                      if (teamMap[team]) {
+                                          teamMap[team].profit += betProfit;
+                                          teamMap[team].wagered += stake;
+                                          teamMap[team].count++;
+                                      }
+                                  });
                              }
                          }
                      });
-                });
-
-                for (const league in leagueMap) {
-                    const lStats = leagueMap[league];
-                    if (lStats.count >= minCount && lStats.wagered > 0) {
-                        const yieldVal = (lStats.profit / lStats.wagered) * 100;
-                        if (yieldVal < worstYield && !excludedLeagues.has(league)) {
-                            worstYield = yieldVal;
-                            worstEntity = league;
-                            worstType = 'league';
-                        }
-                    }
-                }
-                
-                // 2. Evaluar Equipos
-                let worstTeamYield = 1000;
-                let worstTeam = null;
-                
-                // Solo evaluar equipos si la peor liga no es lo suficientemente mala (pierde menos del 10%) o si no hay peor liga
-                if (worstYield >= -10.0 || worstEntity === null) { 
-                    
-                     const teamMap = {};
-                     data.forEach(r => {
-                         [r.home, r.away].forEach(team => {
-                             if (!teamMap[team]) teamMap[team] = { profit: 0, wagered: 0, count: 0 };
-                         });
-                     });
-                     
-                     data.forEach(r => {
-                         const hybridRes = calculateHybridProbabilities(r.home, r.away, r.league, stats, leagueHADFactors);
-                         if (!hybridRes) return;
-                         
-                         const markets = [
-                             {mkt: 'H', odds: r.oddsH, pModel: hybridRes.pHome, result: r.goalsH > r.goalsA, teams: [r.home]},
-                             {mkt: 'D', odds: r.oddsD, pModel: hybridRes.pDraw, result: r.goalsH === r.goalsA, teams: [r.home, r.away]},
-                             {mkt: 'A', odds: r.oddsA, pModel: hybridRes.pAway, result: r.goalsH < r.goalsA, teams: [r.away]},
-                             {mkt: 'O25', odds: r.oddsO25, pModel: hybridRes.pOver25, result: (r.goalsH + r.goalsA) > 2, teams: [r.home, r.away]},
-                             {mkt: 'U25', odds: r.oddsU25, pModel: hybridRes.pUnder25, result: (r.goalsH + r.goalsA) < 3, teams: [r.home, r.away]}
-                         ].filter(m => m.odds > 1.01 && m.pModel > 0);
-                         
-                         markets.forEach(m => {
-                             const edge = (m.pModel * m.odds) - 1;
-                             if (edge > minEV) { 
-                                 const kellyFraction = calculateKellyStake(m.pModel, m.odds, kellyFactor);
-                                 const stake = 100 * kellyFraction;
-                                 
-                                 if (stake > 0.01) {
-                                      const betProfit = m.result ? (stake * m.odds - stake) : -stake;
-                                      m.teams.forEach(team => {
-                                          if (teamMap[team]) {
-                                              teamMap[team].profit += betProfit;
-                                              teamMap[team].wagered += stake;
-                                              teamMap[team].count++;
-                                          }
-                                      });
-                                 }
-                             }
-                         });
-                     });
-                     
-                     for (const team in teamMap) {
-                         const tStats = teamMap[team];
-                         if (tStats.count >= minCount && tStats.wagered > 0) {
-                             const yieldVal = (tStats.profit / tStats.wagered) * 100;
-                             if (yieldVal < worstTeamYield && !excludedTeams.has(team)) {
-                                 worstTeamYield = yieldVal;
-                                 worstTeam = team;
-                             }
+                 });
+                 
+                 for (const team in teamMap) {
+                     const tStats = teamMap[team];
+                     if (tStats.count >= minCount && tStats.wagered > 0) {
+                         const yieldVal = (tStats.profit / tStats.wagered) * 100;
+                         if (yieldVal < worstTeamYield && !excludedTeams.has(team)) {
+                             worstTeamYield = yieldVal;
+                             worstTeam = team;
                          }
                      }
-                     
-                     // Si el peor equipo es peor que la peor liga, o si no hay peor liga, elegimos el equipo.
-                     if (worstTeam !== null && worstTeamYield < worstYield) {
-                         worstEntity = worstTeam;
-                         worstYield = worstTeamYield;
-                         worstType = 'team';
-                     }
-                }
-
-                // Si el mejor candidato sigue perdiendo, lo devolvemos
-                if (worstEntity && worstYield < 0) {
-                    return { entity: worstEntity, yieldVal: worstYield, type: worstType };
-                }
-                
-                return { entity: null };
+                 }
+                 
+                 // Si el peor equipo es peor que la peor liga, o si no hay peor liga, elegimos el equipo.
+                 if (worstTeam !== null && worstTeamYield < worstYield) {
+                     worstEntity = worstTeam;
+                     worstYield = worstTeamYield;
+                     worstType = 'team';
+                 }
             }
 
+            // Si el mejor candidato sigue perdiendo, lo devolvemos
+            if (worstEntity && worstYield < 0) {
+                return { entity: worstEntity, yieldVal: worstYield, type: worstType };
+            }
+            
+            return { entity: null };
+        }
 
-            // --- FUNCIÓN PRINCIPAL DE FILTRADO DE VALOR (EV+) ---
-            function runAnalysis() {
-                if(!futureData.length || !currentStats) {
-                    document.getElementById('loadingOverlay').style.display = 'none';
-                    return;
-                }
-                
-                document.getElementById('loadingMessage').innerText = "Filtrando Oportunidades de Valor Esperado (EV+) y Aplicando Exclusiones...";
-                document.getElementById('loadingOverlay').style.display = 'flex';
-                
-                const mktFilter = document.getElementById('marketSelect').value;
-                const useValueFilter = document.getElementById('useFrequencyValue').checked; 
-                const useProfitFilter = document.getElementById('useProfitFilter').checked; 
-                const stT = document.getElementById('stakeType').value;
-                const stV = parseFloat(document.getElementById('stakeValue').value);
-                const bank0 = getBankValue(); 
-                const minO = parseFloat(document.getElementById('minOdds').value);
-                const maxO = parseFloat(document.getElementById('maxOdds').value); 
-                const minEV = parseFloat(document.getElementById('minEV').value) / 100; 
-                const lg = document.getElementById('leagueSelect').value;
-                
-                valueBetsResults = []; 
-                let totalAnalyzed = 0;
-                let maxEV = 0;
 
-                // Aplicar filtros de exclusión generados por el optimizador
-                const filteredFutureData = futureData.filter(r => 
-                    (lg === 'all' || r.league === lg) &&
-                    !excludedLeagues.has(r.league) &&
-                    !excludedTeams.has(r.home) &&
-                    !excludedTeams.has(r.away)
-                );
-                
-                const marketsToAnalyze = mktFilter === 'all' ? ['H', 'D', 'A', 'O25', 'U25'] : [mktFilter];
-
-                filteredFutureData.forEach(r => {
-                    totalAnalyzed++;
-                    
-                    const hybridRes = calculateHybridProbabilities(r.home, r.away, r.league, currentStats, leagueHADFactors);
-                    if (!hybridRes) return; 
-
-                    marketsToAnalyze.forEach(mkt => {
-                        let pModel, oddsH, label;
-                        if(mkt==='H') { pModel=hybridRes.pHome; oddsH=r.oddsH; label='Local (1)'; }
-                        else if(mkt==='D') { pModel=hybridRes.pDraw; oddsH=r.oddsD; label='Empate (X)'; }
-                        else if(mkt==='A') { pModel=hybridRes.pAway; oddsH=r.oddsA; label='Visita (2)'; }
-                        else if(mkt==='O25') { pModel=hybridRes.pOver25; oddsH=r.oddsO25; label='Over 2.5'; }
-                        else if(mkt==='U25') { pModel=hybridRes.pUnder25; oddsH=r.oddsU25; label='Under 2.5'; }
-                        else return;
-
-                        const oddsFair = pModel > 0 ? (1 / pModel) : 0;
-                        
-                        if (oddsH < minO || oddsH > maxO || oddsFair === 0) return; 
-                        if (oddsH <= oddsFair) return; 
-
-                        const edge = (pModel * oddsH) - 1; 
-                        const EV_percent = edge * 100;
-                        const isValueBet = edge > minEV;
-                        
-                        if (useValueFilter && !isValueBet) return;
-                        
-                        // Aplicar Filtro Inteligente (Solo mercados rentables en el backtest final)
-                        if (useProfitFilter && profitableMarkets.size > 0 && !profitableMarkets.has(mkt)) {
-                            return; 
-                        }
-
-                        if (EV_percent > maxEV) maxEV = EV_percent;
-
-                        let actualStake = 0;
-                        if (stT === 'flat') {
-                            actualStake = stV;
-                        } else if (stT === 'percent') {
-                            actualStake = bank0 * (stV / 100);
-                        } else if (stT === 'kelly') {
-                            const kellyDenominator = stV;
-                            let kellyFraction = calculateKellyStake(pModel, oddsH, kellyDenominator);
-                            kellyFraction = Math.min(kellyFraction, 0.10); 
-                            actualStake = bank0 * kellyFraction;
-                        }
-
-                        actualStake = Math.max(0.01, actualStake); 
-                        actualStake = parseFloat(actualStake.toFixed(2));
-                        
-                        const isAlreadyPlaced = placedBets.some(b => 
-                            b.match === `${r.home} vs ${r.away}` && 
-                            b.market === mkt && 
-                            b.date === r.date
-                        );
-
-                        valueBetsResults.push({
-                            date: r.date,
-                            league: r.league, 
-                            match: `${r.home} vs ${r.away}`,
-                            market: mkt,
-                            marketLabel: label,
-                            odds: oddsH,
-                            oddsFair: oddsFair,
-                            EV: EV_percent,
-                            stake: actualStake,
-                            isPlaced: isAlreadyPlaced 
-                        });
-                    });
-                });
-
-                updateGlobalUI(totalAnalyzed, valueBetsResults.length, maxEV, valueBetsResults);
+        // --- FUNCIÓN PRINCIPAL DE FILTRADO DE VALOR (EV+) ---
+        function runAnalysis() {
+            if(!futureData.length || !currentStats) {
                 document.getElementById('loadingOverlay').style.display = 'none';
+                return;
             }
-
-            // --- LÓGICA DE REGISTRO PERSISTENTE (localStorage) ---
             
-            function getBankValue() {
-                 const bankInput = parseFloat(document.getElementById('initialBank').value);
-                 const resolvedProfit = placedBets.filter(b => b.result !== 'PENDIENTE').reduce((sum, b) => sum + b.profit, 0);
-                 return bankInput + resolvedProfit;
-            }
+            document.getElementById('loadingMessage').innerText = "Filtrando Oportunidades de Valor Esperado (EV+) y Aplicando Exclusiones...";
+            document.getElementById('loadingOverlay').style.display = 'flex';
+            
+            const mktFilter = document.getElementById('marketSelect').value;
+            const useValueFilter = document.getElementById('useFrequencyValue').checked; 
+            const useProfitFilter = document.getElementById('useProfitFilter').checked; 
+            const stT = document.getElementById('stakeType').value;
+            const stV = parseFloat(document.getElementById('stakeValue').value);
+            const bank0 = getBankValue(); 
+            const minO = parseFloat(document.getElementById('minOdds').value);
+            const maxO = parseFloat(document.getElementById('maxOdds').value); 
+            const minEV = parseFloat(document.getElementById('minEV').value) / 100; 
+            const lg = document.getElementById('leagueSelect').value;
+            
+            valueBetsResults = []; 
+            let totalAnalyzed = 0;
+            let maxEV = 0;
 
-            function loadPlacedBets() {
-                try {
-                    const storedBets = localStorage.getItem('placedBets');
-                    placedBets = storedBets ? JSON.parse(storedBets) : [];
-                    updatePlacedBetsUI();
-                } catch (e) {
-                    console.error("Error cargando apuestas de localStorage", e);
-                    placedBets = [];
-                }
-            }
+            // Aplicar filtros de exclusión generados por el optimizador
+            const filteredFutureData = futureData.filter(r => 
+                (lg === 'all' || r.league === lg) &&
+                !excludedLeagues.has(r.league) &&
+                !excludedTeams.has(r.home) &&
+                !excludedTeams.has(r.away)
+            );
+            
+            const marketsToAnalyze = mktFilter === 'all' ? ['H', 'D', 'A', 'O25', 'U25'] : [mktFilter];
 
-            function savePlacedBets() {
-                try {
-                    localStorage.setItem('placedBets', JSON.stringify(placedBets));
-                    updatePlacedBetsUI();
-                } catch (e) {
-                    console.error("Error guardando apuestas en localStorage", e);
-                    alert("No se pudieron guardar los datos. El almacenamiento local puede estar lleno.");
-                }
-            }
-
-            function generateUniqueId() {
-                return Date.now().toString(36) + Math.random().toString(36).substring(2, 5);
-            }
-
-            function addBetToRegistry(betData) {
-                const exists = placedBets.some(b => 
-                    b.match === betData.match && 
-                    b.market === betData.market && 
-                    b.date === betData.date
-                );
-
-                if (exists) {
-                    alert(`La apuesta ${betData.marketLabel} en ${betData.match} ya está registrada.`);
-                    return;
-                }
-
-                const newBet = {
-                    id: generateUniqueId(),
-                    ...betData,
-                    result: 'PENDIENTE', 
-                    profit: 0.00
-                };
+            filteredFutureData.forEach(r => {
+                totalAnalyzed++;
                 
-                placedBets.push(newBet);
-                savePlacedBets();
-                
-                const index = valueBetsResults.findIndex(b => 
-                    b.match === betData.match && 
-                    b.market === betData.market
-                );
-                if(index !== -1) {
-                    valueBetsResults[index].isPlaced = true;
-                    // Llamar a runAnalysis para refrescar la tabla de futuros
-                    runAnalysis();
-                }
-            }
+                const hybridRes = calculateHybridProbabilities(r.home, r.away, r.league, currentStats, leagueHADFactors);
+                if (!hybridRes) return; 
 
-            function updateBetResult(id, result) {
-                const index = placedBets.findIndex(b => b.id === id);
-                if (index === -1) return;
+                marketsToAnalyze.forEach(mkt => {
+                    let pModel, oddsH, label;
+                    if(mkt==='H') { pModel=hybridRes.pHome; oddsH=r.oddsH; label='Local (1)'; }
+                    else if(mkt==='D') { pModel=hybridRes.pDraw; oddsH=r.oddsD; label='Empate (X)'; }
+                    else if(mkt==='A') { pModel=hybridRes.pAway; oddsH=r.oddsA; label='Visita (2)'; }
+                    else if(mkt==='O25') { pModel=hybridRes.pOver25; oddsH=r.oddsO25; label='Over 2.5'; }
+                    else if(mkt==='U25') { pModel=hybridRes.pUnder25; oddsH=r.oddsU25; label='Under 2.5'; }
+                    else return;
 
-                const bet = placedBets[index];
-                const stake = bet.stake;
-                const odds = bet.odds;
-                let profit = 0;
-
-                if (result === 'WIN') {
-                    profit = stake * odds - stake; 
-                } else if (result === 'LOSE') {
-                    profit = -stake; 
-                } else if (result === 'PUSH') {
-                    profit = 0; 
-                } else {
-                    result = 'PENDIENTE';
-                    profit = 0;
-                }
-                
-                bet.result = result;
-                bet.profit = parseFloat(profit.toFixed(2));
-                
-                savePlacedBets();
-            }
-
-            function updatePlacedBetsUI() {
-                const tbody = document.getElementById('placedBetsTableBody');
-                tbody.innerHTML = '';
-                
-                placedBets.sort((a, b) => a.date.localeCompare(b.date));
-
-                let totalWagered = 0;
-                let totalProfit = 0;
-                let resolvedCount = 0;
-
-                placedBets.forEach(b => {
-                    const statusClass = b.result === 'WIN' ? 'status-win' : (b.result === 'LOSE' ? 'status-lose' : (b.result === 'PUSH' ? 'status-push' : 'status-pending'));
-                    const profitClass = b.profit > 0 ? 'text-green' : (b.profit < 0 ? 'text-red' : 'text-secondary');
+                    const oddsFair = pModel > 0 ? (1 / pModel) : 0;
                     
-                    if (b.result !== 'PENDIENTE') {
-                        totalWagered += b.stake;
-                        totalProfit += b.profit;
-                        resolvedCount++;
+                    if (oddsH < minO || oddsH > maxO || oddsFair === 0) return; 
+                    if (oddsH <= oddsFair) return; 
+
+                    const edge = (pModel * oddsH) - 1; 
+                    const EV_percent = edge * 100;
+                    const isValueBet = edge > minEV;
+                    
+                    if (useValueFilter && !isValueBet) return;
+                    
+                    // Aplicar Filtro Inteligente (Solo mercados rentables en el backtest final)
+                    if (useProfitFilter && profitableMarkets.size > 0 && !profitableMarkets.has(mkt)) {
+                        return; 
                     }
 
-                    tbody.innerHTML += `
-                        <tr>
-                            <td>${b.id.substring(4,8)}</td>
-                            <td>${b.date.substring(5)}</td>
-                            <td>${b.match} (${b.marketLabel})</td>
-                            <td>${b.odds.toFixed(2)} (${b.EV.toFixed(2)}%)</td>
-                            <td>${b.stake.toFixed(2)}</td>
-                            <td class="${profitClass}">${b.profit.toFixed(2)}</td>
-                            <td>
-                                <span class="${statusClass}">${b.result}</span>
-                                <div style="display:flex; gap:3px; margin-top:3px; justify-content:flex-start;">
-                                    <button class="btn-status btn-win" onclick="updateBetResult('${b.id}', 'WIN')">W</button>
-                                    <button class="btn-status btn-lose" onclick="updateBetResult('${b.id}', 'LOSE')">L</button>
-                                    <button class="btn-status btn-push" onclick="updateBetResult('${b.id}', 'PUSH')">P</button>
-                                </div>
-                            </td>
-                        </tr>
-                    `;
+                    if (EV_percent > maxEV) maxEV = EV_percent;
+
+                    let actualStake = 0;
+                    if (stT === 'flat') {
+                        actualStake = stV;
+                    } else if (stT === 'percent') {
+                        actualStake = bank0 * (stV / 100);
+                    } else if (stT === 'kelly') {
+                        const kellyDenominator = stV;
+                        let kellyFraction = calculateKellyStake(pModel, oddsH, kellyDenominator);
+                        kellyFraction = Math.min(kellyFraction, 0.10); 
+                        actualStake = bank0 * kellyFraction;
+                    }
+
+                    actualStake = Math.max(0.01, actualStake); 
+                    actualStake = parseFloat(actualStake.toFixed(2));
+                    
+                    const isAlreadyPlaced = placedBets.some(b => 
+                        b.match === `${r.home} vs ${r.away}` && 
+                        b.market === mkt && 
+                        b.date === r.date
+                    );
+
+                    valueBetsResults.push({
+                        date: r.date,
+                        league: r.league, 
+                        match: `${r.home} vs ${r.away}`,
+                        market: mkt,
+                        marketLabel: label,
+                        odds: oddsH,
+                        oddsFair: oddsFair,
+                        EV: EV_percent,
+                        stake: actualStake,
+                        isPlaced: isAlreadyPlaced 
+                    });
                 });
-                
-                // Actualizar KPIs de Banca y Profit
-                const currentBank = getBankValue();
-                const avgYield = totalWagered > 0 ? (totalProfit / totalWagered) * 100 : 0;
+            });
 
-                document.getElementById('currentBankValue').innerText = currentBank.toFixed(2);
-                document.getElementById('currentBankValue').className = `kpi-value ${currentBank > getInitialBank() ? 'text-green' : 'text-red'}`;
-                
-                document.getElementById('totalProfitValue').innerText = totalProfit.toFixed(2);
-                document.getElementById('totalProfitValue').className = `kpi-value ${totalProfit > 0 ? 'text-green' : (totalProfit < 0 ? 'text-red' : 'text-blue')}`;
+            updateGlobalUI(totalAnalyzed, valueBetsResults.length, maxEV, valueBetsResults);
+            document.getElementById('loadingOverlay').style.display = 'none';
+        }
 
-                document.getElementById('avgYieldValue').innerText = avgYield.toFixed(2) + '%';
-                document.getElementById('avgYieldValue').className = `kpi-value ${avgYield > 0 ? 'text-green' : (avgYield < 0 ? 'text-red' : 'text-orange')}`;
-                
-                document.getElementById('resolvedBetsCount').innerText = resolvedCount;
-                document.getElementById('bankLabel').innerText = getInitialBank().toFixed(2);
+        // --- LÓGICA DE REGISTRO PERSISTENTE (localStorage) ---
+        
+        function getBankValue() {
+             const bankInput = parseFloat(document.getElementById('initialBank').value);
+             const resolvedProfit = placedBets.filter(b => b.result !== 'PENDIENTE').reduce((sum, b) => sum + b.profit, 0);
+             return bankInput + resolvedProfit;
+        }
+
+        function loadPlacedBets() {
+            try {
+                const storedBets = localStorage.getItem('placedBets');
+                placedBets = storedBets ? JSON.parse(storedBets) : [];
+                updatePlacedBetsUI();
+            } catch (e) {
+                console.error("Error cargando apuestas de localStorage", e);
+                placedBets = [];
+            }
+        }
+
+        function savePlacedBets() {
+            try {
+                localStorage.setItem('placedBets', JSON.stringify(placedBets));
+                updatePlacedBetsUI();
+            } catch (e) {
+                console.error("Error guardando apuestas en localStorage", e);
+                alert("No se pudieron guardar los datos. El almacenamiento local puede estar lleno.");
+            }
+        }
+
+        function generateUniqueId() {
+            return Date.now().toString(36) + Math.random().toString(36).substring(2, 5);
+        }
+
+        function addBetToRegistry(betData) {
+            const exists = placedBets.some(b => 
+                b.match === betData.match && 
+                b.market === betData.market && 
+                b.date === betData.date
+            );
+
+            if (exists) {
+                alert(`La apuesta ${betData.marketLabel} en ${betData.match} ya está registrada.`);
+                return;
             }
 
-            function clearPlacedBets() {
-                if (confirm("¿Estás seguro de que quieres borrar **TODO** el historial de apuestas registradas? Esto no se puede deshacer.")) {
-                    localStorage.removeItem('placedBets');
-                    placedBets = [];
-                    updatePlacedBetsUI();
-                    if(futureData.length > 0) optimizeAndRunAnalysis(); 
-                }
+            const newBet = {
+                id: generateUniqueId(),
+                ...betData,
+                result: 'PENDIENTE', 
+                profit: 0.00
+            };
+            
+            placedBets.push(newBet);
+            savePlacedBets();
+            
+            const index = valueBetsResults.findIndex(b => 
+                b.match === betData.match && 
+                b.market === betData.market
+            );
+            if(index !== -1) {
+                valueBetsResults[index].isPlaced = true;
+                // Llamar a runAnalysis para refrescar la tabla de futuros
+                runAnalysis();
+            }
+        }
+
+        function updateBetResult(id, result) {
+            const index = placedBets.findIndex(b => b.id === id);
+            if (index === -1) return;
+
+            const bet = placedBets[index];
+            const stake = bet.stake;
+            const odds = bet.odds;
+            let profit = 0;
+
+            if (result === 'WIN') {
+                profit = stake * odds - stake; 
+            } else if (result === 'LOSE') {
+                profit = -stake; 
+            } else if (result === 'PUSH') {
+                profit = 0; 
+            } else {
+                result = 'PENDIENTE';
+                profit = 0;
             }
             
-            function getInitialBank() {
-                return parseFloat(document.getElementById('initialBank').value);
-            }
+            bet.result = result;
+            bet.profit = parseFloat(profit.toFixed(2));
+            
+            savePlacedBets();
+        }
 
-            // --- FUNCIONES DE DESCARGA y UI ---
-            function downloadValueBets() {
-                if (valueBetsResults.length === 0) {
-                    alert("No hay oportunidades de valor (EV+) para descargar.");
-                    return;
+        function updatePlacedBetsUI() {
+            const tbody = document.getElementById('placedBetsTableBody');
+            tbody.innerHTML = '';
+            
+            placedBets.sort((a, b) => a.date.localeCompare(b.date));
+
+            let totalWagered = 0;
+            let totalProfit = 0;
+            let resolvedCount = 0;
+
+            placedBets.forEach(b => {
+                const statusClass = b.result === 'WIN' ? 'status-win' : (b.result === 'LOSE' ? 'status-lose' : (b.result === 'PUSH' ? 'status-push' : 'status-pending'));
+                const profitClass = b.profit > 0 ? 'text-green' : (b.profit < 0 ? 'text-red' : 'text-secondary');
+                
+                if (b.result !== 'PENDIENTE') {
+                    totalWagered += b.stake;
+                    totalProfit += b.profit;
+                    resolvedCount++;
                 }
 
-                const csvData = valueBetsResults.map(b => ({
-                    Fecha: b.date, Liga: b.league, Partido: b.match, Mercado: b.marketLabel,
-                    'Cuota_Tomada': b.odds.toFixed(2),
-                    'Cuota_Justa_(Modelo)': b.oddsFair.toFixed(2),
-                    'EV_Porcentaje': `+${b.EV.toFixed(2)}%`,
-                    'Stake_Monto': b.stake.toFixed(2)
-                }));
-                
-                const csv = Papa.unparse(csvData, { header: true, delimiter: "," });
-                const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                const today = new Date().toISOString().slice(0, 10).replace(/-/g, ''); 
-                a.setAttribute('href', url);
-                a.setAttribute('download', `ValueBets_${today}.csv`);
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
-            }
-
-            function updateGlobalUI(totalAnalyzed, evPlusCount, maxEV, results) { 
-                document.getElementById('valBets').innerText = totalAnalyzed;
-                document.getElementById('valEVPlus').innerText = evPlusCount;
-                document.getElementById('valMaxEV').innerText = maxEV.toFixed(2) + '%'; 
-
-                document.getElementById('valMaxEV').className = `kpi-value ${maxEV>=5?'text-green':'text-blue'}`;
-
-                const tbVB = document.getElementById('valueBetsTableBody'); tbVB.innerHTML='';
-                
-                document.getElementById('valueBetsSection').style.display = (results.length > 0) ? 'block' : 'none';
-
-                results.sort((a, b) => {
-                    if (a.date < b.date) return -1;
-                    if (a.date > b.date) return 1;
-                    return b.EV - a.EV;
-                });
-
-                results.forEach(b => {
-                    const evClass = b.EV >= 5.0 ? 'text-green' : (b.EV >= 0.01 ? 'text-warning' : 'text-secondary');
-                    const marketClass = `market-${b.market.replace(/[^HD A OU]/g, '')}`; 
-                    const dateDisplay = b.date ? b.date.substring(5) : 'N/A'; 
-                    
-                    const betDataString = JSON.stringify(b).replace(/'/g, "\\'").replace(/"/g, "'");
-
-                    const actionButton = b.isPlaced ? 
-                        `<button class="btn btn-secondary" style="background:var(--success); color:black; padding: 4px 8px; font-size: 0.75rem; white-space:nowrap;" disabled><i class="fas fa-check"></i> Registrada</button>` :
-                        `<button class="btn btn-secondary" style="background:var(--accent); color:black; padding: 4px 8px; font-size: 0.75rem; white-space:nowrap;" onclick="addBetToRegistry(${betDataString})"><i class="fas fa-plus"></i> Registrar Apuesta</button>`;
-                    
-                    tbVB.innerHTML += `
-                        <tr class="${marketClass}">
-                            <td style="font-weight:bold;">${dateDisplay}</td>
-                            <td style="text-align:left;">${b.match}</td>
-                            <td style="font-weight:bold;">${b.marketLabel}</td>
-                            <td>${b.odds.toFixed(2)}</td>
-                            <td>${b.oddsFair.toFixed(2)}</td> 
-                            <td class="${evClass}" style="font-weight:bold;">+${b.EV.toFixed(2)}%</td>
-                            <td>${b.stake.toFixed(2)}</td>
-                            <td>${actionButton}</td>
-                        </tr>
-                    `;
-                });
-                
-                // Mostrar lista negra de ligas/equipos
-                const blacklist = [...excludedLeagues].map(l => `<span class="text-red" style="font-weight:bold;">${l} (Liga)</span>`).join(', ') +
-                                  ([...excludedTeams].map(t => `<span class="text-red">${t} (Equipo)</span>`).join(', '));
-
-                const infoCard = document.getElementById('statsCard');
-                infoCard.style.display = 'block';
-                infoCard.innerHTML = `
-                    <h3 style="color:var(--stats-accent); margin-top:0;">Filtros de Optimización Aplicados</h3>
-                    <p style="margin:5px 0 0 0; font-weight:bold;">Ligas y Equipos Excluidos: ${blacklist || '<span class="text-green">Ninguno</span>'}</p>
+                tbody.innerHTML += `
+                    <tr>
+                        <td>${b.id.substring(4,8)}</td>
+                        <td>${b.date.substring(5)}</td>
+                        <td>${b.match} (${b.marketLabel})</td>
+                        <td>${b.odds.toFixed(2)} (${b.EV.toFixed(2)}%)</td>
+                        <td>${b.stake.toFixed(2)}</td>
+                        <td class="${profitClass}">${b.profit.toFixed(2)}</td>
+                        <td>
+                            <span class="${statusClass}">${b.result}</span>
+                            <div style="display:flex; gap:3px; margin-top:3px; justify-content:flex-start;">
+                                <button class="btn-status btn-win" onclick="updateBetResult('${b.id}', 'WIN')">W</button>
+                                <button class="btn-status btn-lose" onclick="updateBetResult('${b.id}', 'LOSE')">L</button>
+                                <button class="btn-status btn-push" onclick="updateBetResult('${b.id}', 'PUSH')">P</button>
+                            </div>
+                        </td>
+                    </tr>
                 `;
-            }
-            
-            function updateHADTable(hadFactors) {
-                const tbHAD = document.getElementById('hadTableBody'); tbHAD.innerHTML='';
-                Object.entries(hadFactors)
-                    .sort(([, a], [, b]) => b.matches - a.matches)
-                    .forEach(([league, data]) => {
-                    
-                    const factorClass = data.factor > 1.05 ? 'text-green' : (data.factor < 0.95 ? 'text-red' : 'text-secondary');
-                    
-                    tbHAD.innerHTML += `
-                        <tr>
-                            <td style="text-align:left; font-weight:bold; color:white;">${league}</td>
-                            <td>${data.matches}</td>
-                            <td class="${factorClass}">${data.factor.toFixed(3)}</td>
-                            <td>${data.correction}</td>
-                        </tr>
-                    `;
-                });
-            }
-
-            // --- Funciones de Análisis Manual y Backtest (ACTUALIZADAS) ---
-            
-            function analyzeMatchup() {
-                const homeTeam = document.getElementById('teamHomeSelect').value;
-                const awayTeam = document.getElementById('teamAwaySelect').value;
-                const league = document.getElementById('leagueSelect').value;
-                const statsCard = document.getElementById('statsCard');
-                statsCard.style.display = 'block';
-
-                if (!currentStats || !homeTeam || !awayTeam) {
-                    statsCard.innerHTML = `<h3 style="color:var(--danger); margin:0;">Selecciona ambos equipos y asegúrate de que el Historial está cargado.</h3>`;
-                    return;
-                }
-                
-                const teamStats = currentStats.teamCoeffs;
-                if (!teamStats[homeTeam] || !teamStats[awayTeam]) {
-                    statsCard.innerHTML = `<h3 style="color:var(--danger); margin:0;">Datos insuficientes: No se encontraron estadísticas para uno o ambos equipos.</h3>`;
-                    return;
-                }
-
-                const coeffsH = teamStats[homeTeam];
-                const coeffsA = teamStats[awayTeam];
-                
-                const hybridRes = calculateHybridProbabilities(homeTeam, awayTeam, league, currentStats, leagueHADFactors);
-
-                if (!hybridRes) {
-                     statsCard.innerHTML = `<h3 style="color:var(--danger); margin:0;">No se pudo calcular el modelo Poisson híbrido.</h3>`;
-                     return;
-                }
-
-                const { pHome, pDraw, pAway, pOver25, pUnder25, lambdaH, lambdaA, hadFactor } = hybridRes;
-                const sumProbs = pHome + pDraw + pAway;
-
-                statsCard.innerHTML = `
-                    <h3 style="color:var(--stats-accent); margin-top:0;">Edge y Coeficientes para ${homeTeam} vs ${awayTeam}</h3>
-                    <div style="display:flex; justify-content:space-around; gap:10px;">
-                        <div style="flex:1;">
-                            <h4 style="margin:0; font-size:1rem; color:var(--text-secondary);">Coeficientes de Poder</h4>
-                            <p style="margin:5px 0 0 0; font-weight:bold;">${homeTeam} (Local):</p>
-                            <ul style="list-style:none; padding-left:15px; font-size:0.9em; margin-top:3px;">
-                                <li>Ataque: ${coeffsH.attH_factor.toFixed(3)}</li>
-                                <li>Defensa: ${coeffsH.defH_factor.toFixed(3)}</li>
-                                <li>Ajuste HAD: x${hadFactor.toFixed(3)}</li>
-                            </ul>
-                            <p style="margin:5px 0 0 0; font-weight:bold;">${awayTeam} (Visita):</p>
-                            <ul style="list-style:none; padding-left:15px; font-size:0.9em; margin-top:3px;">
-                                <li>Ataque: ${coeffsA.attA_factor.toFixed(3)}</li>
-                                <li>Defensa: ${coeffsA.defH_factor.toFixed(3)}</li>
-                            </ul>
-                        </div>
-                        <div style="flex:1;">
-                             <h4 style="margin:0; font-size:1rem; color:var(--text-secondary);">Goles Esperados $(\\lambda)$</h4>
-                             <p style="margin:5px 0 0 0; font-weight:bold;">Goles Locales: <span style="color:var(--accent);">${lambdaH.toFixed(2)}</span></p>
-                             <p style="margin:5px 0 0 0; font-weight:bold;">Goles Visita: <span style="color:var(--accent);">${lambdaA.toFixed(2)}</span></p>
-                        </div>
-                        <div style="flex:1;">
-                            <h4 style="margin:0; font-size:1rem; color:var(--text-secondary);">Probabilidades (Modelo)</h4>
-                            <p style="margin:5px 0 0 0; font-weight:bold;">1 (Local): <span style="color:var(--success);">${(pHome*100).toFixed(2)}%</span> / Cuota Justa: <span style="color:var(--accent);">${(1/pHome).toFixed(2)}</span></p>
-                            <p style="margin:5px 0 0 0; font-weight:bold;">X (Empate): <span style="color:var(--success);">${(pDraw*100).toFixed(2)}%</span> / Cuota Justa: <span style="color:var(--accent);">${(1/pDraw).toFixed(2)}</span></p>
-                            <p style="margin:5px 0 0 0; font-weight:bold;">2 (Visita): <span style="color:var(--success);">${(pAway*100).toFixed(2)}%</span> / Cuota Justa: <span style="color:var(--accent);">${(1/pAway).toFixed(2)}</span></p>
-                            <p style="margin:5px 0 0 0; font-weight:bold;">Over 2.5: <span style="color:var(--success);">${(pOver25*100).toFixed(2)}%</span></p>
-                            <p style="margin:5px 0 0 0; font-weight:bold;">Under 2.5: <span style="color:var(--success);">${(pUnder25*100).toFixed(2)}%</span></p>
-                        </div>
-                    </div>
-                `;
-            }
-
-            function runHistoricalBacktest(data, isOptimizationRun = false, currentHistoricalStats = null, initialMarketStats = null) {
-                const bank0 = getInitialBank();
-                const minEV = 0.05; 
-                const kellyFactor = 33; 
-                
-                let bank = bank0;
-                let maxBank = bank0;
-                let profit = 0;
-                let totalWagered = 0;
-                let resolvedBets = 0;
-                
-                const equityHistory = [{x: 'Inicio', y: bank0}];
-                let maxDrawdown = 0;
-                const drawdownHistory = [{x: 'Inicio', y: 0}];
-                const leagueProfit = {};
-                
-                const marketStats = initialMarketStats || {
-                    'H': { marketLabel: 'Local (1)', profit: 0, wagered: 0, count: 0, evSum: 0, mkt: 'H' },
-                    'D': { marketLabel: 'Empate (X)', profit: 0, wagered: 0, count: 0, evSum: 0, mkt: 'D' },
-                    'A': { marketLabel: 'Visita (2)', profit: 0, wagered: 0, count: 0, evSum: 0, mkt: 'A' },
-                    'O25': { marketLabel: 'Over 2.5', profit: 0, wagered: 0, count: 0, evSum: 0, mkt: 'O25' },
-                    'U25': { marketLabel: 'Under 2.5', profit: 0, wagered: 0, count: 0, evSum: 0, mkt: 'U25' }
-                };
-                
-                // Si es una corrida de optimización, resetear las estadísticas
-                if (isOptimizationRun) {
-                    Object.keys(marketStats).forEach(key => {
-                        marketStats[key].profit = 0; marketStats[key].wagered = 0; 
-                        marketStats[key].count = 0; marketStats[key].evSum = 0;
-                    });
-                }
-                
-                const statsToUse = currentHistoricalStats || currentStats;
-
-                data.forEach((r, index) => {
-                    // Recalcular stats solo si NO estamos en la fase de optimización o si no hay stats pre-calculadas
-                    if (!isOptimizationRun && index % 100 === 0 && index > 0) { 
-                        currentStats = calculateCurrentSeasonStats(data.slice(0, index + 1));
-                        if (!currentStats) return;
-                    }
-                    
-                    if (!statsToUse || !r.oddsH || r.oddsH < 1.01) return;
-
-                    const hybridRes = calculateHybridProbabilities(r.home, r.away, r.league, statsToUse, leagueHADFactors);
-                    if (!hybridRes) return;
-
-                    const markets = [
-                        {mkt: 'H', odds: r.oddsH, pModel: hybridRes.pHome, result: r.goalsH > r.goalsA},
-                        {mkt: 'D', odds: r.oddsD, pModel: hybridRes.pDraw, result: r.goalsH === r.goalsA},
-                        {mkt: 'A', odds: r.oddsA, pModel: hybridRes.pAway, result: r.goalsH < r.goalsA},
-                        {mkt: 'O25', odds: r.oddsO25, pModel: hybridRes.pOver25, result: (r.goalsH + r.goalsA) > 2},
-                        {mkt: 'U25', odds: r.oddsU25, pModel: hybridRes.pUnder25, result: (r.goalsH + r.goalsA) < 3}
-                    ].filter(m => m.odds > 1.01 && m.pModel > 0);
-
-                    markets.forEach(m => {
-                        const edge = (m.pModel * m.odds) - 1;
-                        if (edge > minEV) {
-                            const kellyFraction = calculateKellyStake(m.pModel, m.odds, kellyFactor);
-                            const stake = bank * kellyFraction;
-                            
-                            if (stake > 0.01) {
-                                resolvedBets++;
-                                totalWagered += stake;
-                                let betProfit = 0;
-
-                                if (m.result) {
-                                    betProfit = stake * m.odds - stake;
-                                } else {
-                                    betProfit = -stake;
-                                }
-                                
-                                if (!isOptimizationRun) bank += betProfit;
-                                profit += betProfit;
-
-                                if (!leagueProfit[r.league]) leagueProfit[r.league] = 0;
-                                leagueProfit[r.league] += betProfit;
-                                
-                                marketStats[m.mkt].profit += betProfit;
-                                marketStats[m.mkt].wagered += stake;
-                                marketStats[m.mkt].count++;
-                                marketStats[m.mkt].evSum += edge;
-
-                                if (!isOptimizationRun) maxBank = Math.max(maxBank, bank);
-                            }
-                        }
-                    });
-
-                    if (!isOptimizationRun && resolvedBets > 0 && index % 10 === 0) { 
-                        const drawdown = (maxBank - bank) / maxBank;
-                        maxDrawdown = Math.max(maxDrawdown, drawdown);
-                        equityHistory.push({x: r.date, y: bank.toFixed(2)});
-                        drawdownHistory.push({x: r.date, y: (drawdown * 100).toFixed(2)});
-                    }
-                });
-                
-                const totalReturn = profit;
-                const totalYield = totalWagered > 0 ? (totalReturn / totalWagered) * 100 : 0;
-                
-                // --- LÓGICA DE FILTRO INTELIGENTE FINAL (SOLO EN LA ÚLTIMA EJECUCIÓN) ---
-                if (!isOptimizationRun) {
-                    profitableMarkets.clear();
-                    Object.values(marketStats).forEach(stats => {
-                        const yieldVal = stats.wagered > 0 ? (stats.profit / stats.wagered) * 100 : 0;
-                        // Criterio: Al menos 20 apuestas y Yield positivo
-                        if (stats.count >= 20 && yieldVal > 0.0) {
-                            profitableMarkets.add(stats.mkt); 
-                        }
-                    });
-
-                    // Stats para la tarjeta de resumen
-                    const finalBank = bank;
-
-                    const profitableMarketsText = profitableMarkets.size > 0 
-                        ? `<span class="text-green" style="font-weight:bold;">${Array.from(profitableMarkets).join(', ')}</span>`
-                        : '<span class="text-red" style="font-weight:bold;">Ninguno.</span>';
-
-                    const excludedInfo = `
-                        <p style="margin-top:10px; color:var(--text-primary); font-size:0.9rem; font-weight:bold;">
-                            <i class="fas fa-ban" style="color:var(--danger);"></i> 
-                            Ligas Excluidas: <span class="text-red">${excludedLeagues.size > 0 ? Array.from(excludedLeagues).join(', ') : 'Ninguna'}</span>
-                        </p>
-                         <p style="margin-top:5px; color:var(--text-primary); font-size:0.9rem; font-weight:bold;">
-                            <i class="fas fa-ban" style="color:var(--danger);"></i> 
-                            Equipos Excluidos: <span class="text-red">${excludedTeams.size > 0 ? Array.from(excludedTeams).join(', ') : 'Ninguno'}</span>
-                        </p>
-                    `;
-
-                    const finalStatsHTML = `
-                        <h3 style="color:var(--stats-accent); margin-top:0;">Resultados del Backtest Histórico (${resolvedBets} Apuestas EV+ Simuladas)</h3>
-                        <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap:10px;">
-                            <div class="kpi-card" style="border-color:var(--accent); min-width:auto;">
-                                <div class="kpi-title">Banca Final</div>
-                                <div class="kpi-value ${finalBank > bank0 ? 'text-green' : 'text-red'}">${finalBank.toFixed(2)}</div>
-                            </div>
-                            <div class="kpi-card" style="border-color:var(--accent); min-width:auto;">
-                                <div class="kpi-title">Profit Total</div>
-                                <div class="kpi-value ${totalReturn > 0 ? 'text-green' : 'text-red'}">${totalReturn.toFixed(2)}</div>
-                            </div>
-                            <div class="kpi-card" style="border-color:var(--accent); min-width:auto;">
-                                <div class="kpi-title">Yield Promedio</div>
-                                <div class="kpi-value ${totalYield > 0 ? 'text-green' : 'text-red'}">${totalYield.toFixed(2)}%</div>
-                            </div>
-                            <div class="kpi-card" style="border-color:var(--accent); min-width:auto;">
-                                <div class="kpi-title">Drawdown Máx.</div>
-                                <div class="kpi-value ${maxDrawdown <= 0.2 ? 'text-green' : (maxDrawdown < 0.35 ? 'text-orange' : 'text-red')}">${(maxDrawdown * 100).toFixed(2)}%</div>
-                            </div>
-                        </div>
-                        
-                        ${excludedInfo}
-                        
-                        <p style="margin-top:10px; color:var(--text-primary); font-size:0.9rem;">
-                            <i class="fas fa-filter" style="color:var(--info);"></i> 
-                            Mercados Filtrados (Yield > 0%): ${profitableMarketsText}
-                        </p>
-
-                        <hr class="separator">
-
-                        <h3 style="color:var(--accent); margin-top:10px;"><i class="fas fa-hand-point-right"></i> Rendimiento Desglosado por Mercado (EV > 5%)</h3>
-                        <div class="table-scroll" style="max-height: 250px; margin-top: 10px;">
-                            <table id="marketAnalysisTable">
-                                <thead>
-                                    <tr>
-                                        <th>Mercado</th>
-                                        <th>Apuestas</th>
-                                        <th>Profit Total</th>
-                                        <th>Yield (%)</th>
-                                        <th>EV Prom. (Modelo)</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="marketAnalysisTableBody"></tbody>
-                            </table>
-                        </div>
-                    `;
-                    document.getElementById('statsCardBacktest').style.display = 'block';
-                    document.getElementById('statsCardBacktest').innerHTML = finalStatsHTML;
-                    
-                    updateMarketAnalysisTable(marketStats);
-                    renderCharts(equityHistory, drawdownHistory, leagueProfit);
-                }
-                
-                return { marketStats, totalYield };
-            }
-            
-            function updateMarketAnalysisTable(marketStats) {
-                const tbody = document.getElementById('marketAnalysisTableBody');
-                tbody.innerHTML = '';
-                
-                const sortedMarkets = Object.values(marketStats)
-                    .filter(stats => stats.count > 0)
-                    .map(stats => {
-                        const yieldVal = stats.wagered > 0 ? (stats.profit / stats.wagered) * 100 : 0;
-                        return { 
-                            ...stats, 
-                            yield: yieldVal, 
-                            avgEV: stats.count > 0 ? (stats.evSum / stats.count) * 100 : 0
-                        };
-                    })
-                    .sort((a, b) => {
-                        if (b.yield !== a.yield) return b.yield - a.yield;
-                        return b.count - a.count;
-                    });
-
-                sortedMarkets.forEach(stats => {
-                    
-                    const profitClass = stats.profit > 0 ? 'text-green' : (stats.profit < 0 ? 'text-red' : 'text-secondary');
-                    const yieldClass = stats.yield > 0 ? 'text-green' : (stats.yield < 0 ? 'text-red' : 'text-secondary');
-                    
-                    tbody.innerHTML += `
-                        <tr>
-                            <td style="font-weight:bold; color:var(--accent);">${stats.marketLabel}</td>
-                            <td>${stats.count}</td>
-                            <td class="${profitClass}">${stats.profit.toFixed(2)}</td>
-                            <td class="${yieldClass}">${stats.yield.toFixed(2)}%</td>
-                            <td>${stats.avgEV.toFixed(2)}%</td>
-                        </tr>
-                    `;
-                });
-            }
-
-            // --- Funciones de Gráficos ---
-
-            function getChartOptions(title, yMin=undefined, color='var(--accent)', bgColor='rgba(245, 158, 11, 0.1)') {
-                return {
-                    responsive:true, maintainAspectRatio:false, 
-                    plugins:{legend:{display:false}, title:{display:true, text:title, color:'white', font:{size:14, weight:'600'}}}, 
-                    scales:{x:{display:false},y:{min:yMin, grid:{color:'#334155'}, ticks:{color:'white'}}},
-                    elements: { line: { borderColor: color, borderWidth: 2 }, point: { radius: 0 } },
-                    datasets: { line: { fill: true, backgroundColor: bgColor } }
-                };
-            }
-
-            function renderCharts(hist, drawdownHist, lgData) {
-                const ctxEq = document.getElementById('equityChart').getContext('2d');
-                if(chartEq) chartEq.destroy();
-                const pts = hist.length>800 ? hist.filter((_,i)=>i%5===0) : hist;
-                chartEq = new Chart(ctxEq, { type:'line', data:{labels:pts.map(p=>p.x), datasets:[{label:'Banca', data:pts.map(p=>p.y)}]}, 
-                    options: getChartOptions('Evolución de Banca (Backtest)')
-                });
-
-                const ctxDD = document.getElementById('drawdownChart').getContext('2d');
-                if(chartDD) chartDD.destroy();
-                const ddPts = drawdownHist.length>800 ? drawdownHist.filter((_,i)=>i%5===0) : drawdownHist;
-                chartDD = new Chart(ctxDD, { type:'line', data:{labels:ddPts.map(p=>p.x), datasets:[{label:'Drawdown (%)', data:ddPts.map(p=>p.y)}]}, 
-                    options: getChartOptions('Drawdown Máximo (%)', 0, 'var(--danger)', 'rgba(239, 68, 68, 0.2)')
-                });
-
-                const ctxLg = document.getElementById('leagueChart').getContext('2d');
-                if(chartLg) chartLg.destroy();
-                const lgArr = Object.entries(lgData).sort((a,b)=>b[1]-a[1]).slice(0, 10);
-                    
-                chartLg = new Chart(ctxLg, { 
-                    type:'bar', 
-                    data:{
-                        labels:lgArr.map(x=>x[0]), 
-                        datasets:[{
-                            data:lgArr.map(x=>x[1]), 
-                            backgroundColor:lgArr.map(x=>x[1]>=0?'var(--success)':'var(--danger)')
-                        }]
-                    }, 
-                    options:{
-                        responsive:true, maintainAspectRatio:false, indexAxis:'y', 
-                        plugins:{legend:{display:false}, title:{display:true, text:'Profit por Liga (Backtest Top 10)', color:'white', font:{size:14, weight:'600'}}}, 
-                        scales:{x:{grid:{color:'#334155'}, ticks:{color:'white'}}, y:{ticks:{color:'white'}}}
-                    }
-                });
-            }
-            
-            // Inicializar la interfaz al cargar
-            document.addEventListener('DOMContentLoaded', () => {
-                document.getElementById('loadingOverlay').style.display = 'none';
-                loadPlacedBets(); 
-                document.getElementById('tabConfigBtn').click(); 
             });
             
-        </script>
+            // Actualizar KPIs de Banca y Profit
+            const currentBank = getBankValue();
+            const avgYield = totalWagered > 0 ? (totalProfit / totalWagered) * 100 : 0;
+
+            document.getElementById('currentBankValue').innerText = currentBank.toFixed(2);
+            document.getElementById('currentBankValue').className = `kpi-value ${currentBank > getInitialBank() ? 'text-green' : 'text-red'}`;
+            
+            document.getElementById('totalProfitValue').innerText = totalProfit.toFixed(2);
+            document.getElementById('totalProfitValue').className = `kpi-value ${totalProfit > 0 ? 'text-green' : (totalProfit < 0 ? 'text-red' : 'text-blue')}`;
+
+            document.getElementById('avgYieldValue').innerText = avgYield.toFixed(2) + '%';
+            document.getElementById('avgYieldValue').className = `kpi-value ${avgYield > 0 ? 'text-green' : (avgYield < 0 ? 'text-red' : 'text-orange')}`;
+            
+            document.getElementById('resolvedBetsCount').innerText = resolvedCount;
+            document.getElementById('bankLabel').innerText = getInitialBank().toFixed(2);
+        }
+
+        function clearPlacedBets() {
+            if (confirm("¿Estás seguro de que quieres borrar **TODO** el historial de apuestas registradas? Esto no se puede deshacer.")) {
+                localStorage.removeItem('placedBets');
+                placedBets = [];
+                updatePlacedBetsUI();
+                if(futureData.length > 0) optimizeAndRunAnalysis(); 
+            }
+        }
+        
+        function getInitialBank() {
+            return parseFloat(document.getElementById('initialBank').value);
+        }
+
+        // --- FUNCIONES DE DESCARGA y UI ---
+        function downloadValueBets() {
+            if (valueBetsResults.length === 0) {
+                alert("No hay oportunidades de valor (EV+) para descargar.");
+                return;
+            }
+
+            const csvData = valueBetsResults.map(b => ({
+                Fecha: b.date, Liga: b.league, Partido: b.match, Mercado: b.marketLabel,
+                'Cuota_Tomada': b.odds.toFixed(2),
+                'Cuota_Justa_(Modelo)': b.oddsFair.toFixed(2),
+                'EV_Porcentaje': `+${b.EV.toFixed(2)}%`,
+                'Stake_Monto': b.stake.toFixed(2)
+            }));
+            
+            const csv = Papa.unparse(csvData, { header: true, delimiter: "," });
+            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            const today = new Date().toISOString().slice(0, 10).replace(/-/g, ''); 
+            a.setAttribute('href', url);
+            a.setAttribute('download', `ValueBets_${today}.csv`);
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+        }
+
+        function updateGlobalUI(totalAnalyzed, evPlusCount, maxEV, results) { 
+            document.getElementById('valBets').innerText = totalAnalyzed;
+            document.getElementById('valEVPlus').innerText = evPlusCount;
+            document.getElementById('valMaxEV').innerText = maxEV.toFixed(2) + '%'; 
+
+            document.getElementById('valMaxEV').className = `kpi-value ${maxEV>=5?'text-green':'text-blue'}`;
+
+            const tbVB = document.getElementById('valueBetsTableBody'); tbVB.innerHTML='';
+            
+            document.getElementById('valueBetsSection').style.display = (results.length > 0) ? 'block' : 'none';
+
+            results.sort((a, b) => {
+                if (a.date < b.date) return -1;
+                if (a.date > b.date) return 1;
+                return b.EV - a.EV;
+            });
+
+            results.forEach(b => {
+                const evClass = b.EV >= 5.0 ? 'text-green' : (b.EV >= 0.01 ? 'text-warning' : 'text-secondary');
+                const marketClass = `market-${b.market.replace(/[^HD A OU]/g, '')}`; 
+                const dateDisplay = b.date ? b.date.substring(5) : 'N/A'; 
+                
+                const betDataString = JSON.stringify(b).replace(/'/g, "\\'").replace(/"/g, "'");
+
+                const actionButton = b.isPlaced ? 
+                    `<button class="btn btn-secondary" style="background:var(--success); color:black; padding: 4px 8px; font-size: 0.75rem; white-space:nowrap;" disabled><i class="fas fa-check"></i> Registrada</button>` :
+                    `<button class="btn btn-secondary" style="background:var(--accent); color:black; padding: 4px 8px; font-size: 0.75rem; white-space:nowrap;" onclick="addBetToRegistry(${betDataString})"><i class="fas fa-plus"></i> Registrar Apuesta</button>`;
+                
+                tbVB.innerHTML += `
+                    <tr class="${marketClass}">
+                        <td style="font-weight:bold;">${dateDisplay}</td>
+                        <td style="text-align:left;">${b.match}</td>
+                        <td style="font-weight:bold;">${b.marketLabel}</td>
+                        <td>${b.odds.toFixed(2)}</td>
+                        <td>${b.oddsFair.toFixed(2)}</td> 
+                        <td class="${evClass}" style="font-weight:bold;">+${b.EV.toFixed(2)}%</td>
+                        <td>${b.stake.toFixed(2)}</td>
+                        <td>${actionButton}</td>
+                    </tr>
+                `;
+            });
+            
+            // Mostrar lista negra de ligas/equipos
+            const blacklist = [...excludedLeagues].map(l => `<span class="text-red" style="font-weight:bold;">${l} (Liga)</span>`).join(', ') +
+                              ([...excludedTeams].map(t => `<span class="text-red">${t} (Equipo)</span>`).join(', '));
+
+            const infoCard = document.getElementById('statsCard');
+            infoCard.style.display = 'block';
+            infoCard.innerHTML = `
+                <h3 style="color:var(--stats-accent); margin-top:0;">Filtros de Optimización Aplicados</h3>
+                <p style="margin:5px 0 0 0; font-weight:bold;">Ligas y Equipos Excluidos: ${blacklist || '<span class="text-green">Ninguno</span>'}</p>
+            `;
+        }
+        
+        function updateHADTable(hadFactors) {
+            const tbHAD = document.getElementById('hadTableBody'); tbHAD.innerHTML='';
+            Object.entries(hadFactors)
+                .sort(([, a], [, b]) => b.matches - a.matches)
+                .forEach(([league, data]) => {
+                
+                const factorClass = data.factor > 1.05 ? 'text-green' : (data.factor < 0.95 ? 'text-red' : 'text-secondary');
+                
+                tbHAD.innerHTML += `
+                    <tr>
+                        <td style="text-align:left; font-weight:bold; color:white;">${league}</td>
+                        <td>${data.matches}</td>
+                        <td class="${factorClass}">${data.factor.toFixed(3)}</td>
+                        <td>${data.correction}</td>
+                    </tr>
+                `;
+            });
+        }
+
+        // --- Funciones de Análisis Manual y Backtest (ACTUALIZADAS) ---
+        
+        function analyzeMatchup() {
+            const homeTeam = document.getElementById('teamHomeSelect').value;
+            const awayTeam = document.getElementById('teamAwaySelect').value;
+            const league = document.getElementById('leagueSelect').value;
+            const statsCard = document.getElementById('statsCard');
+            statsCard.style.display = 'block';
+
+            if (!currentStats || !homeTeam || !awayTeam) {
+                statsCard.innerHTML = `<h3 style="color:var(--danger); margin:0;">Selecciona ambos equipos y asegúrate de que el Historial está cargado.</h3>`;
+                return;
+            }
+            
+            const teamStats = currentStats.teamCoeffs;
+            if (!teamStats[homeTeam] || !teamStats[awayTeam]) {
+                statsCard.innerHTML = `<h3 style="color:var(--danger); margin:0;">Datos insuficientes: No se encontraron estadísticas para uno o ambos equipos.</h3>`;
+                return;
+            }
+
+            const coeffsH = teamStats[homeTeam];
+            const coeffsA = teamStats[awayTeam];
+            
+            const hybridRes = calculateHybridProbabilities(homeTeam, awayTeam, league, currentStats, leagueHADFactors);
+
+            if (!hybridRes) {
+                 statsCard.innerHTML = `<h3 style="color:var(--danger); margin:0;">No se pudo calcular el modelo Poisson híbrido.</h3>`;
+                 return;
+            }
+
+            const { pHome, pDraw, pAway, pOver25, pUnder25, lambdaH, lambdaA, hadFactor } = hybridRes;
+            const sumProbs = pHome + pDraw + pAway;
+
+            statsCard.innerHTML = `
+                <h3 style="color:var(--stats-accent); margin-top:0;">Edge y Coeficientes para ${homeTeam} vs ${awayTeam}</h3>
+                <div style="display:flex; justify-content:space-around; gap:10px;">
+                    <div style="flex:1;">
+                        <h4 style="margin:0; font-size:1rem; color:var(--text-secondary);">Coeficientes de Poder</h4>
+                        <p style="margin:5px 0 0 0; font-weight:bold;">${homeTeam} (Local):</p>
+                        <ul style="list-style:none; padding-left:15px; font-size:0.9em; margin-top:3px;">
+                            <li>Ataque: ${coeffsH.attH_factor.toFixed(3)}</li>
+                            <li>Defensa: ${coeffsH.defH_factor.toFixed(3)}</li>
+                            <li>Ajuste HAD: x${hadFactor.toFixed(3)}</li>
+                        </ul>
+                        <p style="margin:5px 0 0 0; font-weight:bold;">${awayTeam} (Visita):</p>
+                        <ul style="list-style:none; padding-left:15px; font-size:0.9em; margin-top:3px;">
+                            <li>Ataque: ${coeffsA.attA_factor.toFixed(3)}</li>
+                            <li>Defensa: ${coeffsA.defH_factor.toFixed(3)}</li>
+                        </ul>
+                    </div>
+                    <div style="flex:1;">
+                         <h4 style="margin:0; font-size:1rem; color:var(--text-secondary);">Goles Esperados $(\\lambda)$</h4>
+                         <p style="margin:5px 0 0 0; font-weight:bold;">Goles Locales: <span style="color:var(--accent);">${lambdaH.toFixed(2)}</span></p>
+                         <p style="margin:5px 0 0 0; font-weight:bold;">Goles Visita: <span style="color:var(--accent);">${lambdaA.toFixed(2)}</span></p>
+                    </div>
+                    <div style="flex:1;">
+                        <h4 style="margin:0; font-size:1rem; color:var(--text-secondary);">Probabilidades (Modelo)</h4>
+                        <p style="margin:5px 0 0 0; font-weight:bold;">1 (Local): <span style="color:var(--success);">${(pHome*100).toFixed(2)}%</span> / Cuota Justa: <span style="color:var(--accent);">${(1/pHome).toFixed(2)}</span></p>
+                        <p style="margin:5px 0 0 0; font-weight:bold;">X (Empate): <span style="color:var(--success);">${(pDraw*100).toFixed(2)}%</span> / Cuota Justa: <span style="color:var(--accent);">${(1/pDraw).toFixed(2)}</span></p>
+                        <p style="margin:5px 0 0 0; font-weight:bold;">2 (Visita): <span style="color:var(--success);">${(pAway*100).toFixed(2)}%</span> / Cuota Justa: <span style="color:var(--accent);">${(1/pAway).toFixed(2)}</span></p>
+                        <p style="margin:5px 0 0 0; font-weight:bold;">Over 2.5: <span style="color:var(--success);">${(pOver25*100).toFixed(2)}%</span></p>
+                        <p style="margin:5px 0 0 0; font-weight:bold;">Under 2.5: <span style="color:var(--success);">${(pUnder25*100).toFixed(2)}%</span></p>
+                    </div>
+                </div>
+            `;
+        }
+
+        function runHistoricalBacktest(data, isOptimizationRun = false, currentHistoricalStats = null, initialMarketStats = null) {
+            const bank0 = getInitialBank();
+            const minEV = 0.05; 
+            const kellyFactor = 33; 
+            
+            let bank = bank0;
+            let maxBank = bank0;
+            let profit = 0;
+            let totalWagered = 0;
+            let resolvedBets = 0;
+            
+            const equityHistory = [{x: 'Inicio', y: bank0}];
+            let maxDrawdown = 0;
+            const drawdownHistory = [{x: 'Inicio', y: 0}];
+            const leagueProfit = {};
+            
+            const marketStats = initialMarketStats || {
+                'H': { marketLabel: 'Local (1)', profit: 0, wagered: 0, count: 0, evSum: 0, mkt: 'H' },
+                'D': { marketLabel: 'Empate (X)', profit: 0, wagered: 0, count: 0, evSum: 0, mkt: 'D' },
+                'A': { marketLabel: 'Visita (2)', profit: 0, wagered: 0, count: 0, evSum: 0, mkt: 'A' },
+                'O25': { marketLabel: 'Over 2.5', profit: 0, wagered: 0, count: 0, evSum: 0, mkt: 'O25' },
+                'U25': { marketLabel: 'Under 2.5', profit: 0, wagered: 0, count: 0, evSum: 0, mkt: 'U25' }
+            };
+            
+            // Si es una corrida de optimización, resetear las estadísticas
+            if (isOptimizationRun) {
+                Object.keys(marketStats).forEach(key => {
+                    marketStats[key].profit = 0; marketStats[key].wagered = 0; 
+                    marketStats[key].count = 0; marketStats[key].evSum = 0;
+                });
+            }
+            
+            const statsToUse = currentHistoricalStats || currentStats;
+
+            data.forEach((r, index) => {
+                // Recalcular stats solo si NO estamos en la fase de optimización o si no hay stats pre-calculadas
+                if (!isOptimizationRun && index % 100 === 0 && index > 0) { 
+                    currentStats = calculateCurrentSeasonStats(data.slice(0, index + 1));
+                    if (!currentStats) return;
+                }
+                
+                if (!statsToUse || !r.oddsH || r.oddsH < 1.01) return;
+
+                const hybridRes = calculateHybridProbabilities(r.home, r.away, r.league, statsToUse, leagueHADFactors);
+                if (!hybridRes) return;
+
+                const markets = [
+                    {mkt: 'H', odds: r.oddsH, pModel: hybridRes.pHome, result: r.goalsH > r.goalsA},
+                    {mkt: 'D', odds: r.oddsD, pModel: hybridRes.pDraw, result: r.goalsH === r.goalsA},
+                    {mkt: 'A', odds: r.oddsA, pModel: hybridRes.pAway, result: r.goalsH < r.goalsA},
+                    {mkt: 'O25', odds: r.oddsO25, pModel: hybridRes.pOver25, result: (r.goalsH + r.goalsA) > 2},
+                    {mkt: 'U25', odds: r.oddsU25, pModel: hybridRes.pUnder25, result: (r.goalsH + r.goalsA) < 3}
+                ].filter(m => m.odds > 1.01 && m.pModel > 0);
+
+                markets.forEach(m => {
+                    const edge = (m.pModel * m.odds) - 1;
+                    if (edge > minEV) {
+                        const kellyFraction = calculateKellyStake(m.pModel, m.odds, kellyFactor);
+                        const stake = bank * kellyFraction;
+                        
+                        if (stake > 0.01) {
+                            resolvedBets++;
+                            totalWagered += stake;
+                            let betProfit = 0;
+
+                            if (m.result) {
+                                betProfit = stake * m.odds - stake;
+                            } else {
+                                betProfit = -stake;
+                            }
+                            
+                            if (!isOptimizationRun) bank += betProfit;
+                            profit += betProfit;
+
+                            if (!leagueProfit[r.league]) leagueProfit[r.league] = 0;
+                            leagueProfit[r.league] += betProfit;
+                            
+                            marketStats[m.mkt].profit += betProfit;
+                            marketStats[m.mkt].wagered += stake;
+                            marketStats[m.mkt].count++;
+                            marketStats[m.mkt].evSum += edge;
+
+                            if (!isOptimizationRun) maxBank = Math.max(maxBank, bank);
+                        }
+                    }
+                });
+
+                if (!isOptimizationRun && resolvedBets > 0 && index % 10 === 0) { 
+                    const drawdown = (maxBank - bank) / maxBank;
+                    maxDrawdown = Math.max(maxDrawdown, drawdown);
+                    equityHistory.push({x: r.date, y: bank.toFixed(2)});
+                    drawdownHistory.push({x: r.date, y: (drawdown * 100).toFixed(2)});
+                }
+            });
+            
+            const totalReturn = profit;
+            const totalYield = totalWagered > 0 ? (totalReturn / totalWagered) * 100 : 0;
+            
+            // --- LÓGICA DE FILTRO INTELIGENTE FINAL (SOLO EN LA ÚLTIMA EJECUCIÓN) ---
+            if (!isOptimizationRun) {
+                profitableMarkets.clear();
+                Object.values(marketStats).forEach(stats => {
+                    const yieldVal = stats.wagered > 0 ? (stats.profit / stats.wagered) * 100 : 0;
+                    // Criterio: Al menos 20 apuestas y Yield positivo
+                    if (stats.count >= 20 && yieldVal > 0.0) {
+                        profitableMarkets.add(stats.mkt); 
+                    }
+                });
+
+                // Stats para la tarjeta de resumen
+                const finalBank = bank;
+
+                const profitableMarketsText = profitableMarkets.size > 0 
+                    ? `<span class="text-green" style="font-weight:bold;">${Array.from(profitableMarkets).join(', ')}</span>`
+                    : '<span class="text-red" style="font-weight:bold;">Ninguno.</span>';
+
+                const excludedInfo = `
+                    <p style="margin-top:10px; color:var(--text-primary); font-size:0.9rem; font-weight:bold;">
+                        <i class="fas fa-ban" style="color:var(--danger);"></i> 
+                        Ligas Excluidas: <span class="text-red">${excludedLeagues.size > 0 ? Array.from(excludedLeagues).join(', ') : 'Ninguna'}</span>
+                    </p>
+                     <p style="margin-top:5px; color:var(--text-primary); font-size:0.9rem; font-weight:bold;">
+                        <i class="fas fa-ban" style="color:var(--danger);"></i> 
+                        Equipos Excluidos: <span class="text-red">${excludedTeams.size > 0 ? Array.from(excludedTeams).join(', ') : 'Ninguno'}</span>
+                    </p>
+                `;
+
+                const finalStatsHTML = `
+                    <h3 style="color:var(--stats-accent); margin-top:0;">Resultados del Backtest Histórico (${resolvedBets} Apuestas EV+ Simuladas)</h3>
+                    <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap:10px;">
+                        <div class="kpi-card" style="border-color:var(--accent); min-width:auto;">
+                            <div class="kpi-title">Banca Final</div>
+                            <div class="kpi-value ${finalBank > bank0 ? 'text-green' : 'text-red'}">${finalBank.toFixed(2)}</div>
+                        </div>
+                        <div class="kpi-card" style="border-color:var(--accent); min-width:auto;">
+                            <div class="kpi-title">Profit Total</div>
+                            <div class="kpi-value ${totalReturn > 0 ? 'text-green' : 'text-red'}">${totalReturn.toFixed(2)}</div>
+                        </div>
+                        <div class="kpi-card" style="border-color:var(--accent); min-width:auto;">
+                            <div class="kpi-title">Yield Promedio</div>
+                            <div class="kpi-value ${totalYield > 0 ? 'text-green' : 'text-red'}">${totalYield.toFixed(2)}%</div>
+                        </div>
+                        <div class="kpi-card" style="border-color:var(--accent); min-width:auto;">
+                            <div class="kpi-title">Drawdown Máx.</div>
+                            <div class="kpi-value ${maxDrawdown <= 0.2 ? 'text-green' : (maxDrawdown < 0.35 ? 'text-orange' : 'text-red')}">${(maxDrawdown * 100).toFixed(2)}%</div>
+                        </div>
+                    </div>
+                    
+                    ${excludedInfo}
+                    
+                    <p style="margin-top:10px; color:var(--text-primary); font-size:0.9rem;">
+                        <i class="fas fa-filter" style="color:var(--info);"></i> 
+                        Mercados Filtrados (Yield > 0%): ${profitableMarketsText}
+                    </p>
+
+                    <hr class="separator">
+
+                    <h3 style="color:var(--accent); margin-top:10px;"><i class="fas fa-hand-point-right"></i> Rendimiento Desglosado por Mercado (EV > 5%)</h3>
+                    <div class="table-scroll" style="max-height: 250px; margin-top: 10px;">
+                        <table id="marketAnalysisTable">
+                            <thead>
+                                <tr>
+                                    <th>Mercado</th>
+                                    <th>Apuestas</th>
+                                    <th>Profit Total</th>
+                                    <th>Yield (%)</th>
+                                    <th>EV Prom. (Modelo)</th>
+                                </tr>
+                            </thead>
+                            <tbody id="marketAnalysisTableBody"></tbody>
+                        </table>
+                    </div>
+                `;
+                document.getElementById('statsCardBacktest').style.display = 'block';
+                document.getElementById('statsCardBacktest').innerHTML = finalStatsHTML;
+                
+                updateMarketAnalysisTable(marketStats);
+                renderCharts(equityHistory, drawdownHistory, leagueProfit);
+            }
+            
+            return { marketStats, totalYield };
+        }
+        
+        function updateMarketAnalysisTable(marketStats) {
+            const tbody = document.getElementById('marketAnalysisTableBody');
+            tbody.innerHTML = '';
+            
+            const sortedMarkets = Object.values(marketStats)
+                .filter(stats => stats.count > 0)
+                .map(stats => {
+                    const yieldVal = stats.wagered > 0 ? (stats.profit / stats.wagered) * 100 : 0;
+                    return { 
+                        ...stats, 
+                        yield: yieldVal, 
+                        avgEV: stats.count > 0 ? (stats.evSum / stats.count) * 100 : 0
+                    };
+                })
+                .sort((a, b) => {
+                    if (b.yield !== a.yield) return b.yield - a.yield;
+                    return b.count - a.count;
+                });
+
+            sortedMarkets.forEach(stats => {
+                
+                const profitClass = stats.profit > 0 ? 'text-green' : (stats.profit < 0 ? 'text-red' : 'text-secondary');
+                const yieldClass = stats.yield > 0 ? 'text-green' : (stats.yield < 0 ? 'text-red' : 'text-secondary');
+                
+                tbody.innerHTML += `
+                    <tr>
+                        <td style="font-weight:bold; color:var(--accent);">${stats.marketLabel}</td>
+                        <td>${stats.count}</td>
+                        <td class="${profitClass}">${stats.profit.toFixed(2)}</td>
+                        <td class="${yieldClass}">${stats.yield.toFixed(2)}%</td>
+                        <td>${stats.avgEV.toFixed(2)}%</td>
+                    </tr>
+                `;
+            });
+        }
+
+        // --- Funciones de Gráficos ---
+
+        function getChartOptions(title, yMin=undefined, color='var(--accent)', bgColor='rgba(245, 158, 11, 0.1)') {
+            return {
+                responsive:true, maintainAspectRatio:false, 
+                plugins:{legend:{display:false}, title:{display:true, text:title, color:'white', font:{size:14, weight:'600'}}}, 
+                scales:{x:{display:false},y:{min:yMin, grid:{color:'#334155'}, ticks:{color:'white'}}},
+                elements: { line: { borderColor: color, borderWidth: 2 }, point: { radius: 0 } },
+                datasets: { line: { fill: true, backgroundColor: bgColor } }
+            };
+        }
+
+        function renderCharts(hist, drawdownHist, lgData) {
+            const ctxEq = document.getElementById('equityChart').getContext('2d');
+            if(chartEq) chartEq.destroy();
+            const pts = hist.length>800 ? hist.filter((_,i)=>i%5===0) : hist;
+            chartEq = new Chart(ctxEq, { type:'line', data:{labels:pts.map(p=>p.x), datasets:[{label:'Banca', data:pts.map(p=>p.y)}]}, 
+                options: getChartOptions('Evolución de Banca (Backtest)')
+            });
+
+            const ctxDD = document.getElementById('drawdownChart').getContext('2d');
+            if(chartDD) chartDD.destroy();
+            const ddPts = drawdownHist.length>800 ? drawdownHist.filter((_,i)=>i%5===0) : drawdownHist;
+            chartDD = new Chart(ctxDD, { type:'line', data:{labels:ddPts.map(p=>p.x), datasets:[{label:'Drawdown (%)', data:ddPts.map(p=>p.y)}]}, 
+                options: getChartOptions('Drawdown Máximo (%)', 0, 'var(--danger)', 'rgba(239, 68, 68, 0.2)')
+            });
+
+            const ctxLg = document.getElementById('leagueChart').getContext('2d');
+            if(chartLg) chartLg.destroy();
+            const lgArr = Object.entries(lgData).sort((a,b)=>b[1]-a[1]).slice(0, 10);
+                
+            chartLg = new Chart(ctxLg, { 
+                type:'bar', 
+                data:{
+                    labels:lgArr.map(x=>x[0]), 
+                    datasets:[{
+                        data:lgArr.map(x=>x[1]), 
+                        backgroundColor:lgArr.map(x=>x[1]>=0?'var(--success)':'var(--danger)')
+                    }]
+                }, 
+                options:{
+                    responsive:true, maintainAspectRatio:false, indexAxis:'y', 
+                    plugins:{legend:{display:false}, title:{display:true, text:'Profit por Liga (Backtest Top 10)', color:'white', font:{size:14, weight:'600'}}}, 
+                    scales:{x:{grid:{color:'#334155'}, ticks:{color:'white'}}, y:{ticks:{color:'white'}}}
+                }
+            });
+        }
+        
+        // Inicializar la interfaz al cargar
+        document.addEventListener('DOMContentLoaded', () => {
+            document.getElementById('loadingOverlay').style.display = 'none';
+            loadPlacedBets(); 
+            document.getElementById('tabConfigBtn').click(); 
+        });
+        
+    </script>
 
 </body>
 </html>
