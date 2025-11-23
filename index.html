@@ -297,8 +297,8 @@
     <header>
         <div class="brand"><i class="fas fa-calculator"></i> Football Backtester <span class="tag">v8.5 Full</span></div>
         <div style="display:flex; gap:10px; align-items:center;">
-            <input type="file" id="fileInput" accept=".csv">
-            <label for="fileInput" class="btn btn-secondary"><i class="fas fa-folder-open"></i> Archivo Local</label>
+            <input type="file" id="fileInput" accept=".csv" multiple>
+            <label for="fileInput" class="btn btn-secondary"><i class="fas fa-folder-open"></i> Cargar Archivos CSV (2)</label>
         </div>
     </header>
 
@@ -565,7 +565,61 @@
         // --- FIN FUNCIONES MATEMÁTICAS ---
 
         // --- CARGA Y PROCESAMIENTO DE DATOS ---
-        document.getElementById('fileInput').addEventListener('change', e=>parseCSV(e.target.files[0]));
+        // Se asocia al evento 'change' del input con multiple="true"
+        document.getElementById('fileInput').addEventListener('change', loadFromLocalFiles);
+        
+        // Nueva función para manejar la carga de 2 archivos locales
+        function loadFromLocalFiles(e) {
+            const files = e.target.files;
+            
+            if (files.length === 0) return;
+            if (files.length !== 2) {
+                alert("Por favor, selecciona EXACTAMENTE dos archivos CSV: uno para la temporada actual y uno para la temporada anterior.");
+                document.getElementById('fileInput').value = ''; // Limpiar el input
+                return;
+            }
+
+            document.getElementById('loadingOverlay').style.display = 'flex';
+
+            let combinedData = [];
+            let filesParsed = 0;
+
+            const parseFile = (file) => {
+                return new Promise((resolve, reject) => {
+                    Papa.parse(file, {
+                        header: true,
+                        dynamicTyping: true,
+                        skipEmptyLines: true,
+                        complete: (results) => {
+                            const validData = results.data.filter(r => Object.keys(r).length > 0 && r.HomeTeam);
+                            if (validData.length === 0 && file.size > 0) {
+                                reject(`El archivo ${file.name} no contiene datos utilizables.`);
+                            } else {
+                                resolve(validData);
+                            }
+                        },
+                        error: (error, file) => {
+                            reject(`Error de parsing en el archivo ${file.name}. Mensaje: ${error.message}`);
+                        }
+                    });
+                });
+            };
+
+            Promise.all(Array.from(files).map(parseFile))
+                .then(dataArrays => {
+                    dataArrays.forEach(data => combinedData.push(...data));
+                    if (combinedData.length === 0) {
+                        throw new Error("No se encontraron datos utilizables en los archivos combinados. Verifique el formato CSV.");
+                    }
+                    processData(combinedData);
+                })
+                .catch(error => {
+                    console.error("Error al cargar archivos locales:", error);
+                    alert(`❌ Error cargando archivos locales:\n\n${error}`);
+                    document.getElementById('loadingOverlay').style.display = 'none';
+                    document.getElementById('fileInput').value = ''; // Limpiar el input
+                });
+        }
         
         async function loadFromUrls() {
             const urlCurrent = document.getElementById('urlInputCurrent').value.trim();
@@ -622,27 +676,7 @@
                 document.getElementById('loadingOverlay').style.display='none'; 
             }
         }
-
-        function parseCSV(f){ 
-            document.getElementById('loadingOverlay').style.display='flex'; 
-            Papa.parse(f,{
-                header:true, dynamicTyping:true, skipEmptyLines:true, 
-                complete:r=>{
-                    if (r.data.length === 0) {
-                         alert("❌ Error cargando datos: El archivo CSV local no contiene datos utilizables.");
-                         document.getElementById('loadingOverlay').style.display='none';
-                    } else {
-                         processData(r.data.filter(r => Object.keys(r).length > 0 && r.HomeTeam));
-                    }
-                },
-                error: (error, file) => {
-                    console.error("Error de PapaParse en archivo local:", error);
-                    alert(`❌ Error de parsing en archivo local. Verifique el formato CSV:\n${error.message}`);
-                    document.getElementById('loadingOverlay').style.display='none';
-                }
-            }); 
-        }
-
+        
         function trainPoissonModel(data) {
             const teamStats = {};
             let totalMatches = 0;
@@ -1072,7 +1106,8 @@
                 </div>
             `;
         }
-        
+
+
         // --- FUNCIÓN PRINCIPAL DE BACKTESTING ---
         function runBacktest() {
             if(!rawData.length) return;
@@ -1136,9 +1171,9 @@
                     };
 
                     // La apuesta se aplica al equipo Local (Home)
-                    updateTeamRanking(r.home, res.pnl, 'home');
+                    updateTeamRanking(r.home, res.pnl, r.home === r.away ? 'overall' : 'home'); 
                     // La apuesta se aplica al equipo Visitante (Away)
-                    updateTeamRanking(r.away, res.pnl, 'away');
+                    updateTeamRanking(r.away, res.pnl, r.home === r.away ? 'overall' : 'away'); 
                     // --- Fin Acumulación de Profit/Loss por Equipo ---
                 }
             });
