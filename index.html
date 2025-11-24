@@ -144,7 +144,7 @@
                 <div class="p-6 bg-white rounded-xl shadow-lg">
                     <h2 class="text-2xl font-semibold mb-4 text-indigo-700">4. Análisis Exhaustivo (Rachas y Segmentos)</h2>
                     
-                    <h3 class="text-xl font-medium text-gray-700 mb-2 mt-4">Rachas Rentables (OddH > 2.50)</h3>
+                    <h3 class="text-xl font-medium text-gray-700 mb-2 mt-4">Análisis de Rachas y Rentabilidad (Basado en la Estrategia)</h3>
                     <div id="streakAnalysis" class="p-4 bg-yellow-50 rounded-lg border border-yellow-200">
                         <p class="text-sm text-yellow-800">Esperando datos...</p>
                     </div>
@@ -173,13 +173,13 @@
 
     <script>
         // Función auxiliar para reemplazar alert()
-        function showMessage(message) {
-            // Usamos el statusMessage en la UI en lugar de alert()
+        function showMessage(message, isError = true) {
             statusMessage.textContent = message;
-            statusMessage.classList.add('text-red-600');
+            statusMessage.classList.toggle('text-red-600', isError);
+            statusMessage.classList.toggle('text-green-600', !isError);
             setTimeout(() => {
-                statusMessage.classList.remove('text-red-600');
-                statusMessage.textContent = ''; // Limpiar después de un tiempo
+                statusMessage.classList.remove('text-red-600', 'text-green-600');
+                statusMessage.textContent = ''; 
             }, 5000);
         }
 
@@ -205,50 +205,68 @@
 
         // --- CONFIGURACIÓN DE COLUMNAS (ADAPTAR ESTO) ---
         // CLAVE INTERNA (USADA POR EL MOTOR): 'NOMBRE EXACTO EN TU ARCHIVO CSV'
-        // ¡DEBES REVISAR QUE EL VALOR A LA DERECHA COINCIDA CON TUS ENCABEZADOS!
+        // NOTA: 'Match' y 'Result FT' serán procesadas para obtener HomeTeam/AwayTeam y FTResult.
         const COLUMN_MAP = {
-            'Date': 'Date',           // Columna de la fecha
-            'League': 'League',       // Columna del nombre de la liga
-            'HomeTeam': 'HomeTeam',   // Columna del equipo local (ej: Real Madrid)
-            'AwayTeam': 'AwayTeam',   // Columna del equipo visitante (ej: Barcelona)
-            'FTResult': 'FTR',        // Columna del resultado final ('H', 'D', o 'A')
-            'OddH': 'MaxH',           // Cuota de la victoria local (ej: Máxima Cuota Local)
-            'OddD': 'MaxD',           // Cuota del empate (ej: Máxima Cuota Empate)
-            'OddA': 'MaxA',           // Cuota de la victoria visitante (ej: Máxima Cuota Visitante)
+            'Date': 'Date',           
+            'League': 'League',       
+            'Match': 'Match',         // Columna que contiene "Equipo Local - Equipo Visitante"
+            'ScoreFT': 'Result FT',   // Columna que contiene el marcador final (ej: 1-0)
+            'OddH': 'Odd 1 PreMatch', // Cuota de la victoria local (1)
+            'OddD': 'Odd X PreMatch', // Cuota del empate (X)
+            'OddA': 'Odd 2 PreMatch', // Cuota de la victoria visitante (2)
         };
-        const INTERNAL_KEYS = Object.keys(COLUMN_MAP); // Las claves internas que necesitamos
-
-
+        // Las claves internas finales que el motor necesita
+        const REQUIRED_INTERNAL_KEYS = ['Date', 'League', 'HomeTeam', 'AwayTeam', 'FTResult', 'OddH', 'OddD', 'OddA'];
+        
         // --- FUNCIONES DE UTILIDAD Y CORE ---
 
         /**
+         * Convierte el marcador final (ej: "1-0") al resultado de apuesta ('H', 'D', 'A').
+         * @param {string} score - El marcador final (e.g., "1-0").
+         * @returns {string} El resultado ('H', 'D', 'A', o una cadena vacía si es inválido).
+         */
+        function scoreToResult(score) {
+            // Se espera el formato: "H-A" e.g., "1-0" o "3-2"
+            if (!score || typeof score !== 'string' || !score.includes('-')) return '';
+            
+            // Usamos un regex flexible para manejar posibles espacios o formato de guion bajo (aunque asumimos guion)
+            const parts = score.split(/-|_/).map(s => parseInt(s.trim()));
+            
+            if (parts.length !== 2 || isNaN(parts[0]) || isNaN(parts[1])) return '';
+
+            const homeGoals = parts[0];
+            const awayGoals = parts[1];
+
+            if (homeGoals > awayGoals) return 'H'; // Home Win
+            if (homeGoals < awayGoals) return 'A'; // Away Win
+            return 'D'; // Draw
+        }
+
+        /**
          * Parsea el contenido de un archivo CSV a un array de objetos.
-         * Usa el COLUMN_MAP para mapear los encabezados del CSV a las claves internas.
+         * Mapea y deriva las columnas necesarias para el backtesting.
          * @param {string} csvText - Contenido crudo del archivo CSV.
          * @returns {Array<Object>} Array de objetos donde cada objeto es una fila.
          */
         function parseCSV(csvText) {
-            // Dividir por líneas y remover la última si está vacía
             const lines = csvText.trim().split('\n').filter(line => line.trim().length > 0);
-            if (lines.length <= 1) { // Solo cabecera o vacío
-                statusMessage.textContent = 'Error: El CSV está vacío o solo contiene la cabecera.';
-                runBacktestBtn.disabled = true;
+            if (lines.length <= 1) { 
+                showMessage('Error: El CSV está vacío o solo contiene la cabecera.');
                 return [];
             }
 
             // 1. Obtener cabeceras y limpiarlas (trim)
-            const headerLine = lines[0].trim();
-            // Asumiendo delimitador ',' (coma). Si usas ';', cambia aquí.
-            const rawHeaders = headerLine.split(',').map(h => h.trim()); 
+            // Usamos el primer delimitador que encontremos (coma o punto y coma)
+            const delimiter = lines[0].includes(';') ? ';' : ','; 
+            const rawHeaders = lines[0].trim().split(delimiter).map(h => h.trim()); 
 
-            // 2. Mapear las columnas requeridas (INTERNAL_KEYS) a los índices del CSV
-            const headerIndexMap = {}; // Mapa: Clave Interna (ej: 'OddH') -> Índice de Columna
+            // 2. Mapear las columnas requeridas (de CSV a índice)
+            const headerIndexMap = {}; 
+            const requiredCsvHeaders = Object.values(COLUMN_MAP);
             const missingCsvHeaders = [];
 
-            for (const internalKey of INTERNAL_KEYS) {
+            for (const internalKey in COLUMN_MAP) {
                 const csvHeaderName = COLUMN_MAP[internalKey]; 
-                
-                // Buscamos el nombre de la columna en los encabezados del archivo
                 const index = rawHeaders.findIndex(rawHeader => rawHeader === csvHeaderName);
                 
                 if (index === -1) {
@@ -259,29 +277,64 @@
             }
             
             if (missingCsvHeaders.length > 0) {
-                statusMessage.textContent = `ERROR DE FORMATO: No se encontraron las columnas CSV: ${missingCsvHeaders.join(', ')}. Por favor, revise el COLUMN_MAP en el código.`;
-                runBacktestBtn.disabled = true;
+                showMessage(`ERROR DE FORMATO: No se encontraron las columnas CSV necesarias: ${missingCsvHeaders.join(', ')}. Por favor, revise el COLUMN_MAP en el código para que coincida con sus encabezados.`, true);
                 return [];
             }
             
             // 3. Procesar las filas de datos
             const data = [];
             for (let i = 1; i < lines.length; i++) {
-                // Asumiendo delimitador ',' (coma). Si usas ';', cambia aquí.
-                const values = lines[i].trim().split(','); 
-                if (values.length !== rawHeaders.length) continue; // Saltar líneas con conteo incorrecto
+                const values = lines[i].trim().split(delimiter); 
+                if (values.length !== rawHeaders.length) continue; 
 
                 const row = {};
+                let isValid = true;
                 
-                // Iterar sobre las claves internas que nos interesan
-                for (const internalKey of INTERNAL_KEYS) {
+                // Mapeo de valores crudos
+                for (const internalKey in COLUMN_MAP) {
                     const index = headerIndexMap[internalKey];
-                    const val = values[index].trim();
-                    
-                    // Convertir a número si es posible (importante para cuotas)
-                    row[internalKey] = isNaN(parseFloat(val)) || val.length === 0 ? val : parseFloat(val);
+                    const val = values[index] ? values[index].trim() : '';
+
+                    // Convertir a número si es cuota (Odd)
+                    if (internalKey.startsWith('Odd')) {
+                        const numVal = parseFloat(val.replace(',', '.')); // Soporte para coma decimal
+                        row[internalKey] = isNaN(numVal) ? null : numVal;
+                        if (row[internalKey] === null) {
+                            // Si la cuota no es un número, saltamos el partido
+                            isValid = false;
+                            break; 
+                        }
+                    } else {
+                        row[internalKey] = val;
+                    }
                 }
-                data.push(row);
+
+                if (!isValid) continue; // Salta si la cuota era inválida
+
+                // 4. Derivación de campos clave
+                // Derivar HomeTeam y AwayTeam
+                const matchParts = row.Match.split(' - ').map(p => p.trim());
+                if (matchParts.length === 2) {
+                    row.HomeTeam = matchParts[0];
+                    row.AwayTeam = matchParts[1];
+                } else {
+                    // Si el formato del partido es incorrecto, saltar
+                    continue; 
+                }
+
+                // Derivar FTResult (H, D, A)
+                row.FTResult = scoreToResult(row.ScoreFT);
+
+                // Si el resultado final no se pudo derivar (ej: marcador incompleto), saltar
+                if (!row.FTResult) continue; 
+
+                // Limpiar la fila final para solo tener las claves necesarias
+                const finalRow = {};
+                REQUIRED_INTERNAL_KEYS.forEach(key => {
+                    finalRow[key] = row[key];
+                });
+
+                data.push(finalRow);
             }
             return data;
         }
@@ -293,8 +346,7 @@
          * @returns {Object|null} Retorna {betType: 'H'|'D'|'A', odd: number} si hay apuesta, o null.
          */
         function applyStrategy(match) {
-            // EJEMPLO DE ESTRATEGIA: Apostar a la Victoria Local (H) si la cuota es >= 2.50
-            // Asegúrese de que la propiedad 'OddH' es un número
+            // ESTRATEGIA DE EJEMPLO: Apostar a la Victoria Local (H) si la cuota es >= 2.50
             
             const requiredOdd = 2.50;
 
@@ -474,7 +526,7 @@
             let totalBets = 0;
 
             for (const match of data) {
-                const bet = applyStrategy(match); // Usar la misma estrategia para el análisis de rachas
+                const bet = applyStrategy(match); 
                 
                 if (bet) {
                     totalBets++;
@@ -540,11 +592,11 @@
 
             // 3. Análisis de Rachas Rentables
             const strategyDesc = results.streakResults.totalBets > 0 ? 
-                `Se aplicó la estrategia (${results.streakResults.totalBets} apuestas):` : 
-                'No se encontraron apuestas con la estrategia de ejemplo.';
+                `Resultados de la estrategia aplicada (${results.streakResults.totalBets} apuestas):` : 
+                'No se realizaron apuestas con la estrategia actual (revisa `applyStrategy`).';
 
             streakAnalysisEl.innerHTML = `
-                <p class="text-sm text-gray-800">${strategyDesc}</p>
+                <p class="text-sm text-gray-800 font-medium">${strategyDesc}</p>
                 <ul class="list-disc list-inside mt-2 space-y-1">
                     <li class="font-medium text-green-700">Racha Ganadora Máxima: <span class="font-bold">${results.streakResults.maxProfitStreak}</span> apuestas consecutivas.</li>
                     <li class="font-medium text-red-700">Racha Perdedora Máxima: <span class="font-bold">${results.streakResults.maxLossStreak}</span> apuestas consecutivas.</li>
@@ -559,6 +611,7 @@
                  leagueAnalysisEl.innerHTML = '<tr><td colspan="4" class="px-6 py-4 text-center text-sm text-gray-500">No se realizaron apuestas en ninguna liga con la estrategia actual.</td></tr>';
             } else {
                 sortedLeagues.forEach(([league, stats]) => {
+                    if (stats.bets === 0) return; // Omitir ligas sin apuestas
                     const winRate = (stats.wins / stats.bets) * 100;
                     const roi = (stats.profit / stats.stakeSum) * 100;
                     const profitText = formatter.format(stats.profit);
@@ -575,7 +628,7 @@
                 });
             }
 
-            statusMessage.textContent = `Análisis completado para ${results.totalBets} apuestas.`;
+            showMessage(`Análisis completado para ${results.totalBets} apuestas.`, false);
         }
 
         /**
@@ -586,7 +639,7 @@
             const ctx = document.getElementById('equityChart').getContext('2d');
 
             if (equityChartInstance) {
-                equityChartInstance.data.labels = Array.from({ length: equityData.length }, (_, i) => i + 1);
+                equityChartInstance.data.labels = Array.from({ length: equityData.length }, (_, i) => i); // Índice 0 es capital inicial
                 equityChartInstance.data.datasets[0].data = equityData;
                 equityChartInstance.update();
                 return;
@@ -596,7 +649,7 @@
             equityChartInstance = new Chart(ctx, {
                 type: 'line',
                 data: {
-                    labels: Array.from({ length: equityData.length }, (_, i) => i + 1),
+                    labels: Array.from({ length: equityData.length }, (_, i) => i),
                     datasets: [{
                         label: 'Capital (€)',
                         data: equityData,
@@ -616,7 +669,7 @@
                             title: { display: true, text: 'Capital' }
                         },
                         x: {
-                            title: { display: true, text: 'Número de Apuesta' }
+                            title: { display: true, text: 'Punto de Tiempo (0=Inicial)' }
                         }
                     },
                     plugins: {
@@ -634,7 +687,6 @@
             rawData = [];
             runBacktestBtn.disabled = true;
             buttonText.textContent = 'Cargando y Procesando Datos...';
-            statusMessage.textContent = '';
             
             const file = event.target.files[0];
             if (!file) {
@@ -651,11 +703,11 @@
                     if (rawData.length > 0) {
                         runBacktestBtn.disabled = false;
                         buttonText.textContent = 'Ejecutar Backtesting';
-                        statusMessage.textContent = `¡Datos cargados! ${rawData.length} filas listas para el análisis.`;
+                        showMessage(`¡Datos cargados! ${rawData.length} filas listas para el análisis.`, false);
                     } else {
-                         // Si rawData está vacío, el error de parsing ya lo reportó en statusMessage
+                        // El error de parsing ya lo reportó parseCSV en statusMessage
                         runBacktestBtn.disabled = true;
-                        buttonText.textContent = 'Corregir el COLUMN_MAP para Reintentar.';
+                        buttonText.textContent = 'Corregir el COLUMN_MAP y Reintentar.';
                     }
                 };
                 reader.readAsText(file);
@@ -673,6 +725,7 @@
                 buttonText.textContent = 'Ejecutando...';
                 runBacktestBtn.disabled = true;
                 
+                // Pequeño timeout para permitir que la UI se actualice con el estado "Ejecutando..."
                 setTimeout(() => {
                     try {
                         runBacktest();
@@ -690,9 +743,10 @@
 
         // Inicializar el gráfico al cargar la página (vacío)
         window.onload = () => {
+            // Inicializamos el gráfico con el capital inicial por defecto
             updateChart([parseFloat(document.getElementById('initialCapital').value)]);
             // Mostrar un mensaje de bienvenida
-            statusMessage.textContent = 'Carga un archivo CSV y define tu estrategia en el script.';
+            showMessage('Carga tu archivo CSV y define tu estrategia en el script para comenzar.', false);
         };
         
     </script>
