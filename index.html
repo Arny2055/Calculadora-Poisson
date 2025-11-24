@@ -172,6 +172,16 @@
     </div>
 
     <script>
+        // Función auxiliar para reemplazar alert()
+        function showMessage(message) {
+            // Usamos el statusMessage en la UI en lugar de alert()
+            statusMessage.textContent = message;
+            statusMessage.classList.add('text-red-600');
+            setTimeout(() => {
+                statusMessage.classList.remove('text-red-600');
+            }, 5000);
+        }
+
         // --- VARIABLES GLOBALES Y CONFIGURACIÓN ---
         let rawData = [];
         let equityChartInstance = null;
@@ -195,6 +205,7 @@
         // --- ASUNCIONES DE COLUMNAS (Ajustar según su CSV) ---
         // ESTA ES LA ESTRUCTURA QUE EL CÓDIGO ASUME. AJUSTE LOS NOMBRES DE LAS PROPIEDADES 
         // AL NOMBRE EXACTO DE LAS COLUMNAS EN SU ARCHIVO CSV.
+        // NOTA: EL PARSER AHORA ES MÁS FLEXIBLE, IGNORANDO ESPACIOS EXTRA AL COMPARAR LOS ENCABEZADOS.
         const COLUMN_MAP = {
             'Fecha': 'Date',
             'Liga': 'League',
@@ -205,64 +216,69 @@
             'CuotaEmpate': 'OddD',
             'CuotaVisitante': 'OddA',
         };
-        const REQUIRED_COLUMNS = Object.values(COLUMN_MAP);
+        const REQUIRED_KEYS = Object.values(COLUMN_MAP); // Las claves internas que necesitamos
 
 
         // --- FUNCIONES DE UTILIDAD Y CORE ---
 
         /**
          * Parsea el contenido de un archivo CSV a un array de objetos.
+         * Se ha mejorado para ser más robusto ante espacios en blanco y para reportar columnas faltantes.
          * @param {string} csvText - Contenido crudo del archivo CSV.
          * @returns {Array<Object>} Array de objetos donde cada objeto es una fila.
          */
         function parseCSV(csvText) {
-            // Dividir por líneas
-            const lines = csvText.trim().split('\n');
-            if (lines.length === 0) return [];
-
-            // Obtener cabeceras y mapearlas a las claves internas
-            const headerLine = lines[0].trim();
-            const headers = headerLine.split(',').map(h => h.trim());
-
-            // Crear un mapa inverso para buscar las claves internas correctas
-            const reverseColumnMap = {};
-            for (const key in COLUMN_MAP) {
-                reverseColumnMap[COLUMN_MAP[key]] = key;
-            }
-
-            // Verificar si las columnas requeridas existen en el CSV
-            const foundHeaders = {};
-            let allRequiredFound = true;
-            for (const requiredKey of REQUIRED_COLUMNS) {
-                const csvHeader = headers.find(h => h === requiredKey);
-                if (csvHeader) {
-                    foundHeaders[requiredKey] = csvHeader;
-                } else {
-                    allRequiredFound = false;
-                    console.error(`Columna requerida no encontrada: ${requiredKey}`);
-                }
-            }
-
-            if (!allRequiredFound) {
-                statusMessage.textContent = 'Error: El CSV debe contener las columnas: ' + REQUIRED_COLUMNS.join(', ');
+            // Dividir por líneas y remover la última si está vacía
+            const lines = csvText.trim().split('\n').filter(line => line.trim().length > 0);
+            if (lines.length <= 1) { // Solo cabecera o vacío
+                statusMessage.textContent = 'Error: El CSV está vacío o solo contiene la cabecera.';
+                runBacktestBtn.disabled = true;
                 return [];
             }
 
-            // Procesar las filas de datos
+            // 1. Obtener cabeceras y limpiarlas (trim)
+            const headerLine = lines[0].trim();
+            const rawHeaders = headerLine.split(',').map(h => h.trim());
+
+            // 2. Mapear las columnas requeridas (REQUIRED_KEYS) a los índices del CSV
+            const headerIndexMap = {}; // Mapa: Clave Interna (ej: 'OddH') -> Índice de Columna
+            const missingColumns = [];
+
+            REQUIRED_KEYS.forEach(requiredKey => {
+                // Buscamos la columna en los encabezados crudos (ignorando espacios extra)
+                const index = rawHeaders.findIndex(rawHeader => rawHeader === requiredKey);
+                
+                if (index === -1) {
+                    // Columna requerida no encontrada
+                    missingColumns.push(requiredKey);
+                } else {
+                    // Almacenar el índice
+                    headerIndexMap[requiredKey] = index;
+                }
+            });
+            
+            if (missingColumns.length > 0) {
+                statusMessage.textContent = 'ERROR DE FORMATO: Faltan las siguientes columnas: ' + missingColumns.join(', ');
+                runBacktestBtn.disabled = true;
+                return [];
+            }
+            
+            // 3. Procesar las filas de datos
             const data = [];
             for (let i = 1; i < lines.length; i++) {
                 const values = lines[i].trim().split(',');
-                if (values.length !== headers.length) continue; // Saltar líneas mal formadas
+                if (values.length !== rawHeaders.length) continue; // Saltar líneas con conteo incorrecto
 
                 const row = {};
-                headers.forEach((header, index) => {
-                    // Solo guardar las columnas que están en nuestro mapa de requisitos
-                    if (foundHeaders[header]) {
-                        // Intentar convertir a número si aplica, si no, dejar como string
-                        const val = values[index].trim();
-                        row[header] = isNaN(parseFloat(val)) || val.length === 0 ? val : parseFloat(val);
-                    }
-                });
+                
+                // Iterar sobre las claves internas que nos interesan
+                for (const requiredKey of REQUIRED_KEYS) {
+                    const index = headerIndexMap[requiredKey];
+                    const val = values[index].trim();
+                    
+                    // Convertir a número si es posible (importante para cuotas y resultados)
+                    row[requiredKey] = isNaN(parseFloat(val)) || val.length === 0 ? val : parseFloat(val);
+                }
                 data.push(row);
             }
             return data;
@@ -279,7 +295,7 @@
             
             const requiredOdd = 2.50;
 
-            if (match.OddH >= requiredOdd) {
+            if (match.OddH >= requiredOdd && typeof match.OddH === 'number') {
                 return {
                     betType: 'H', // Apostamos a Home (Local)
                     odd: match.OddH // La cuota a la que apostamos
@@ -313,7 +329,7 @@
          */
         function runBacktest() {
             if (rawData.length === 0) {
-                alert('Por favor, cargue un archivo CSV válido primero.');
+                showMessage('Por favor, cargue un archivo CSV válido y que contenga datos.');
                 return;
             }
 
@@ -323,7 +339,7 @@
             const teamFilter = document.getElementById('teamFilter').value.toUpperCase().trim();
 
             if (isNaN(initialCapital) || initialCapital <= 0 || isNaN(stakeSize) || stakeSize <= 0) {
-                 alert('El Capital Inicial y el Tamaño de Apuesta deben ser números positivos.');
+                 showMessage('El Capital Inicial y el Tamaño de Apuesta deben ser números positivos.');
                 return;
             }
 
@@ -340,18 +356,17 @@
             
             // Inicialización para el análisis por grupo
             const leagueStats = {};
-            const teamStats = {};
             
             // ----------------------------------------------------
             // 1. APLICACIÓN DE FILTROS Y SIMULACIÓN
             // ----------------------------------------------------
             const filteredData = rawData.filter(match => {
                 // Filtro por Liga
-                if (leagueFilter && match.League.toUpperCase().indexOf(leagueFilter) === -1) {
+                if (leagueFilter && match.League && match.League.toUpperCase().indexOf(leagueFilter) === -1) {
                     return false;
                 }
                 // Filtro por Equipo (Local o Visitante)
-                if (teamFilter && match.HomeTeam.toUpperCase().indexOf(teamFilter) === -1 && match.AwayTeam.toUpperCase().indexOf(teamFilter) === -1) {
+                if (teamFilter && match.HomeTeam && match.AwayTeam && match.HomeTeam.toUpperCase().indexOf(teamFilter) === -1 && match.AwayTeam.toUpperCase().indexOf(teamFilter) === -1) {
                     return false;
                 }
                 return true;
@@ -387,7 +402,8 @@
                     if (currentCapital > peakCapital) {
                         peakCapital = currentCapital;
                     }
-                    const drawdown = (peakCapital - currentCapital) / peakCapital;
+                    // Evitar división por cero si el capital inicial es 0 (aunque el input lo impide)
+                    const drawdown = peakCapital > 0 ? (peakCapital - currentCapital) / peakCapital : 0;
                     if (drawdown > maxDrawdown) {
                         maxDrawdown = drawdown;
                     }
@@ -395,7 +411,7 @@
                     // ------------------------------------
                     // 2. ANÁLISIS POR GRUPO (Ligas)
                     // ------------------------------------
-                    const leagueName = match.League;
+                    const leagueName = match.League || 'Desconocida';
                     if (!leagueStats[leagueName]) {
                         leagueStats[leagueName] = { bets: 0, wins: 0, profit: 0, stakeSum: 0 };
                     }
@@ -405,11 +421,6 @@
                     if (profit > 0) {
                         leagueStats[leagueName].wins++;
                     }
-
-                    // ------------------------------------
-                    // 3. ANÁLISIS POR GRUPO (Equipos - para TeamFilter)
-                    // ------------------------------------
-                    // Aquí se podría añadir una lógica más compleja para equipos si el filtro fuera dinámico
                 }
             });
 
@@ -419,7 +430,8 @@
             // ----------------------------------------------------
             
             const netProfit = currentCapital - initialCapital;
-            const roi = totalBets > 0 ? (netProfit / (totalBets * stakeSize)) * 100 : 0;
+            const totalStake = totalBets * stakeSize;
+            const roi = totalStake > 0 ? (netProfit / totalStake) * 100 : 0;
             const winRate = totalBets > 0 ? (wins / totalBets) * 100 : 0;
 
             const results = {
@@ -447,8 +459,7 @@
         }
         
         /**
-         * Identifica rachas rentables y perdedoras basadas en una condición.
-         * Condición de ejemplo: Apostar a 'H' (Local) si OddH > 2.50 (la misma de la estrategia)
+         * Identifica rachas rentables y perdedoras basadas en la estrategia actual.
          */
         function analyzeStreaks(data, stake) {
             let currentProfitStreak = 0;
@@ -525,8 +536,12 @@
             updateChart(results.equityHistory);
 
             // 3. Análisis de Rachas Rentables
+            const strategyDesc = results.streakResults.totalBets > 0 ? 
+                `Se aplicó la estrategia (${results.streakResults.totalBets} apuestas):` : 
+                'No se encontraron apuestas con la estrategia de ejemplo.';
+
             streakAnalysisEl.innerHTML = `
-                <p class="text-sm text-gray-800">Se identificó la estrategia de ejemplo (OddH ≥ 2.50) en ${results.streakResults.totalBets} apuestas.</p>
+                <p class="text-sm text-gray-800">${strategyDesc}</p>
                 <ul class="list-disc list-inside mt-2 space-y-1">
                     <li class="font-medium text-green-700">Racha Ganadora Máxima: <span class="font-bold">${results.streakResults.maxProfitStreak}</span> apuestas consecutivas.</li>
                     <li class="font-medium text-red-700">Racha Perdedora Máxima: <span class="font-bold">${results.streakResults.maxLossStreak}</span> apuestas consecutivas.</li>
@@ -535,21 +550,26 @@
             
             // 4. Análisis por Ligas
             leagueAnalysisEl.innerHTML = '';
-            for (const league in results.leagueStats) {
-                const stats = results.leagueStats[league];
-                const winRate = (stats.wins / stats.bets) * 100;
-                const roi = (stats.profit / stats.stakeSum) * 100;
-                const profitText = formatter.format(stats.profit);
+            const sortedLeagues = Object.entries(results.leagueStats).sort(([, a], [, b]) => b.bets - a.bets);
 
-                const row = document.createElement('tr');
-                row.className = 'hover:bg-gray-100 transition duration-150';
-                row.innerHTML = `
-                    <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">${league}</td>
-                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${stats.bets}</td>
-                    <td class="px-6 py-4 whitespace-nowrap text-sm font-semibold ${winRate >= 50 ? 'text-green-600' : 'text-red-600'}">${winRate.toFixed(2)} %</td>
-                    <td class="px-6 py-4 whitespace-nowrap text-sm font-bold ${stats.profit >= 0 ? 'text-green-600' : 'text-red-600'}">${profitText} (${roi.toFixed(2)}% ROI)</td>
-                `;
-                leagueAnalysisEl.appendChild(row);
+            if (sortedLeagues.length === 0) {
+                 leagueAnalysisEl.innerHTML = '<tr><td colspan="4" class="px-6 py-4 text-center text-sm text-gray-500">No se realizaron apuestas en ninguna liga con la estrategia actual.</td></tr>';
+            } else {
+                sortedLeagues.forEach(([league, stats]) => {
+                    const winRate = (stats.wins / stats.bets) * 100;
+                    const roi = (stats.profit / stats.stakeSum) * 100;
+                    const profitText = formatter.format(stats.profit);
+
+                    const row = document.createElement('tr');
+                    row.className = 'hover:bg-gray-100 transition duration-150';
+                    row.innerHTML = `
+                        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">${league}</td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${stats.bets}</td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm font-semibold ${winRate >= 50 ? 'text-green-600' : 'text-red-600'}">${winRate.toFixed(2)} %</td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm font-bold ${stats.profit >= 0 ? 'text-green-600' : 'text-red-600'}">${profitText} (${roi.toFixed(2)}% ROI)</td>
+                    `;
+                    leagueAnalysisEl.appendChild(row);
+                });
             }
 
             statusMessage.textContent = `Análisis completado para ${results.totalBets} apuestas.`;
@@ -630,6 +650,7 @@
                         buttonText.textContent = 'Ejecutar Backtesting';
                         statusMessage.textContent = `¡Datos cargados! ${rawData.length} filas listas para el análisis.`;
                     } else {
+                         // Si rawData está vacío, el error de parsing ya lo reportó en statusMessage
                         runBacktestBtn.disabled = true;
                         buttonText.textContent = 'CSV Inválido. Reintentar.';
                     }
@@ -637,7 +658,7 @@
                 reader.readAsText(file);
             } catch (error) {
                 console.error('Error al cargar el archivo:', error);
-                statusMessage.textContent = 'Error al leer el archivo.';
+                showMessage('Error crítico al leer el archivo. Revise la consola del navegador.');
                 runBacktestBtn.disabled = true;
                 buttonText.textContent = 'Cargar CSV para Ejecutar Backtesting';
             }
@@ -648,7 +669,7 @@
             if (rawData.length > 0) {
                 buttonText.textContent = 'Ejecutando...';
                 runBacktestBtn.disabled = true;
-                // Ejecutar en un timeout para liberar el hilo principal (mejora la UX)
+                
                 setTimeout(() => {
                     try {
                         runBacktest();
@@ -656,7 +677,7 @@
                         buttonText.textContent = 'Volver a Ejecutar Backtesting';
                     } catch (error) {
                         console.error('Error durante la ejecución del backtesting:', error);
-                        statusMessage.textContent = 'Error en el motor de backtesting. Revisa la consola.';
+                        showMessage('Error en el motor de backtesting. Revisa la consola para más detalles.');
                         runBacktestBtn.disabled = false;
                         buttonText.textContent = 'Volver a Ejecutar Backtesting';
                     }
