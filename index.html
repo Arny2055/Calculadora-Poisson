@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Motor de Backtesting Deportivo Avanzado</title>
+    <title>Motor de Backtesting Deportivo O2.5</title>
     <!-- Tailwind CSS CDN -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- Chart.js CDN para la visualización de la curva de capital -->
@@ -40,8 +40,8 @@
 
     <div class="max-w-7xl mx-auto">
         <header class="text-center mb-8">
-            <h1 class="text-4xl font-extrabold text-gray-800">Motor de Backtesting Deportivo</h1>
-            <p class="text-lg text-gray-500 mt-2">Simulación y análisis avanzado de estrategias de apuestas con archivos CSV.</p>
+            <h1 class="text-4xl font-extrabold text-gray-800">Motor de Backtesting: Más de 2.5 Goles</h1>
+            <p class="text-lg text-gray-500 mt-2">Simulación de estrategias basadas en cuotas y estadísticas del mercado O2.5.</p>
         </header>
 
         <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
@@ -68,16 +68,16 @@
                     </div>
                 </div>
 
-                <!-- Filtros de Datos -->
+                <!-- Parámetros de Estrategia -->
                 <div class="mb-6 space-y-4">
-                    <h3 class="text-xl font-medium text-gray-700">Filtros (Opcional)</h3>
+                    <h3 class="text-xl font-medium text-gray-700">Filtro de Estrategia O2.5</h3>
                     <div>
-                        <label for="leagueFilter" class="block text-sm font-medium text-gray-700">Filtrar por Liga (ej: Premier League)</label>
-                        <input type="text" id="leagueFilter" placeholder="Dejar vacío para todas" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-3 focus:ring-indigo-500 focus:border-indigo-500 border">
+                        <label for="minOdd" class="block text-sm font-medium text-gray-700">Cuota Mínima O2.5 para Apostar</label>
+                        <input type="number" id="minOdd" value="1.80" step="0.01" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-3 focus:ring-indigo-500 focus:border-indigo-500 border">
                     </div>
                     <div>
-                        <label for="teamFilter" class="block text-sm font-medium text-gray-700">Filtrar por Equipo (ej: Manchester Utd)</label>
-                        <input type="text" id="teamFilter" placeholder="Dejar vacío para todos" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-3 focus:ring-indigo-500 focus:border-indigo-500 border">
+                        <label for="maxOdd" class="block text-sm font-medium text-gray-700">Cuota Máxima O2.5 para Apostar</label>
+                        <input type="number" id="maxOdd" value="2.20" step="0.01" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-3 focus:ring-indigo-500 focus:border-indigo-500 border">
                     </div>
                 </div>
 
@@ -142,9 +142,9 @@
                 
                 <!-- Análisis Detallado (Rachas y Grupos) -->
                 <div class="p-6 bg-white rounded-xl shadow-lg">
-                    <h2 class="text-2xl font-semibold mb-4 text-indigo-700">4. Análisis Exhaustivo (Rachas y Segmentos)</h2>
+                    <h2 class="text-2xl font-semibold mb-4 text-indigo-700">4. Análisis Exhaustivo (Ligas)</h2>
                     
-                    <h3 class="text-xl font-medium text-gray-700 mb-2 mt-4">Análisis de Rachas y Rentabilidad (Basado en la Estrategia)</h3>
+                    <h3 class="text-xl font-medium text-gray-700 mb-2 mt-4">Análisis de Rachas y Rentabilidad</h3>
                     <div id="streakAnalysis" class="p-4 bg-yellow-50 rounded-lg border border-yellow-200">
                         <p class="text-sm text-yellow-800">Esperando datos...</p>
                     </div>
@@ -203,48 +203,41 @@
         const leagueAnalysisEl = document.getElementById('leagueAnalysis');
         const streakAnalysisEl = document.getElementById('streakAnalysis');
 
-        // --- CONFIGURACIÓN DE COLUMNAS (ADAPTAR ESTO) ---
+        // --- CONFIGURACIÓN DE COLUMNAS (ADAPTADA PARA O2.5) ---
         // CLAVE INTERNA (USADA POR EL MOTOR): 'NOMBRE EXACTO EN TU ARCHIVO CSV'
-        // NOTA: 'Match' y 'Result FT' serán procesadas para obtener HomeTeam/AwayTeam y FTResult.
         const COLUMN_MAP = {
             'Date': 'Date',           
             'League': 'League',       
-            'Match': 'Match',         // Columna que contiene "Equipo Local - Equipo Visitante"
-            'ScoreFT': 'Result FT',   // Columna que contiene el marcador final (ej: 1-0)
-            'OddH': 'Odd 1 PreMatch', // Cuota de la victoria local (1)
-            'OddD': 'Odd X PreMatch', // Cuota del empate (X)
-            'OddA': 'Odd 2 PreMatch', // Cuota de la victoria visitante (2)
+            'Match': 'Match',         
+            'ScoreFT': 'Result FT',   // Marcador final (e.g., 1-0)
+            'OddO25': 'Odd',          // La cuota de Over 2.5
+            'Result': 'Result',       // Resultado de la apuesta (Winning/Losing), opcional, pero lo usaremos
         };
         // Las claves internas finales que el motor necesita
-        const REQUIRED_INTERNAL_KEYS = ['Date', 'League', 'HomeTeam', 'AwayTeam', 'FTResult', 'OddH', 'OddD', 'OddA'];
+        const REQUIRED_INTERNAL_KEYS = ['Date', 'League', 'Match', 'ScoreFT', 'OddO25'];
         
         // --- FUNCIONES DE UTILIDAD Y CORE ---
 
         /**
-         * Convierte el marcador final (ej: "1-0") al resultado de apuesta ('H', 'D', 'A').
+         * Determina si el partido terminó en Over 2.5 (Win) o Under 2.5 (Loss).
          * @param {string} score - El marcador final (e.g., "1-0").
-         * @returns {string} El resultado ('H', 'D', 'A', o una cadena vacía si es inválido).
+         * @returns {boolean} True si es Over 2.5, False si es Under 2.5.
          */
-        function scoreToResult(score) {
+        function isOver2_5(score) {
             // Se espera el formato: "H-A" e.g., "1-0" o "3-2"
-            if (!score || typeof score !== 'string' || !score.includes('-')) return '';
+            if (!score || typeof score !== 'string' || !score.includes('-')) return false;
             
-            // Usamos un regex flexible para manejar posibles espacios o formato de guion bajo (aunque asumimos guion)
             const parts = score.split(/-|_/).map(s => parseInt(s.trim()));
             
-            if (parts.length !== 2 || isNaN(parts[0]) || isNaN(parts[1])) return '';
+            if (parts.length !== 2 || isNaN(parts[0]) || isNaN(parts[1])) return false;
 
-            const homeGoals = parts[0];
-            const awayGoals = parts[1];
-
-            if (homeGoals > awayGoals) return 'H'; // Home Win
-            if (homeGoals < awayGoals) return 'A'; // Away Win
-            return 'D'; // Draw
+            const totalGoals = parts[0] + parts[1];
+            return totalGoals >= 3;
         }
 
         /**
          * Parsea el contenido de un archivo CSV a un array de objetos.
-         * Mapea y deriva las columnas necesarias para el backtesting.
+         * Mapea y deriva las columnas necesarias para el backtesting O2.5.
          * @param {string} csvText - Contenido crudo del archivo CSV.
          * @returns {Array<Object>} Array de objetos donde cada objeto es una fila.
          */
@@ -256,17 +249,16 @@
             }
 
             // 1. Obtener cabeceras y limpiarlas (trim)
-            // Usamos el primer delimitador que encontremos (coma o punto y coma)
             const delimiter = lines[0].includes(';') ? ';' : ','; 
-            const rawHeaders = lines[0].trim().split(delimiter).map(h => h.trim()); 
+            const rawHeaders = lines[0].trim().split(delimiter).map(h => h.trim().replace(/['"]+/g, '')); // Limpiar comillas
 
             // 2. Mapear las columnas requeridas (de CSV a índice)
             const headerIndexMap = {}; 
-            const requiredCsvHeaders = Object.values(COLUMN_MAP);
             const missingCsvHeaders = [];
 
             for (const internalKey in COLUMN_MAP) {
                 const csvHeaderName = COLUMN_MAP[internalKey]; 
+                // Buscamos la cabecera exacta, ignorando comillas
                 const index = rawHeaders.findIndex(rawHeader => rawHeader === csvHeaderName);
                 
                 if (index === -1) {
@@ -293,15 +285,14 @@
                 // Mapeo de valores crudos
                 for (const internalKey in COLUMN_MAP) {
                     const index = headerIndexMap[internalKey];
-                    const val = values[index] ? values[index].trim() : '';
+                    let val = values[index] ? values[index].trim().replace(/['"]+/g, '') : '';
 
-                    // Convertir a número si es cuota (Odd)
-                    if (internalKey.startsWith('Odd')) {
+                    // Convertir la Cuota O2.5 a número
+                    if (internalKey === 'OddO25') {
                         const numVal = parseFloat(val.replace(',', '.')); // Soporte para coma decimal
                         row[internalKey] = isNaN(numVal) ? null : numVal;
                         if (row[internalKey] === null) {
-                            // Si la cuota no es un número, saltamos el partido
-                            isValid = false;
+                            isValid = false; // Cuota inválida, saltamos el partido
                             break; 
                         }
                     } else {
@@ -309,30 +300,21 @@
                     }
                 }
 
-                if (!isValid) continue; // Salta si la cuota era inválida
+                if (!isValid) continue; 
 
-                // 4. Derivación de campos clave
-                // Derivar HomeTeam y AwayTeam
-                const matchParts = row.Match.split(' - ').map(p => p.trim());
-                if (matchParts.length === 2) {
-                    row.HomeTeam = matchParts[0];
-                    row.AwayTeam = matchParts[1];
-                } else {
-                    // Si el formato del partido es incorrecto, saltar
-                    continue; 
-                }
+                // 4. Derivación de campos clave para O2.5
+                // Determinar el resultado real del mercado O2.5
+                row.ActualO25Result = isOver2_5(row.ScoreFT);
 
-                // Derivar FTResult (H, D, A)
-                row.FTResult = scoreToResult(row.ScoreFT);
+                // Si el ScoreFT es inválido, saltar
+                if (row.ActualO25Result === undefined) continue; 
 
-                // Si el resultado final no se pudo derivar (ej: marcador incompleto), saltar
-                if (!row.FTResult) continue; 
-
-                // Limpiar la fila final para solo tener las claves necesarias
+                // Limpiar la fila final
                 const finalRow = {};
                 REQUIRED_INTERNAL_KEYS.forEach(key => {
                     finalRow[key] = row[key];
                 });
+                finalRow.ActualO25Result = row.ActualO25Result;
 
                 data.push(finalRow);
             }
@@ -340,20 +322,19 @@
         }
 
         /**
-         * LÓGICA DE LA ESTRATEGIA: Define si se realiza una apuesta en un partido y qué tipo.
-         * ESTA FUNCIÓN ES LA QUE DEBE MODIFICAR PARA PROBAR SU SISTEMA.
+         * LÓGICA DE LA ESTRATEGIA: Define si se realiza una apuesta en Over 2.5 en un partido.
          * @param {Object} match - El objeto del partido con todos los datos.
-         * @returns {Object|null} Retorna {betType: 'H'|'D'|'A', odd: number} si hay apuesta, o null.
+         * @param {number} minOdd - Cuota mínima definida por el usuario.
+         * @param {number} maxOdd - Cuota máxima definida por el usuario.
+         * @returns {Object|null} Retorna {betOdd: number} si hay apuesta, o null.
          */
-        function applyStrategy(match) {
-            // ESTRATEGIA DE EJEMPLO: Apostar a la Victoria Local (H) si la cuota es >= 2.50
-            
-            const requiredOdd = 2.50;
+        function applyStrategy(match, minOdd, maxOdd) {
+            const odd = match.OddO25;
 
-            if (match.OddH >= requiredOdd && typeof match.OddH === 'number') {
+            // La estrategia es simplemente apostar si la cuota cae dentro del rango definido
+            if (odd >= minOdd && odd <= maxOdd && typeof odd === 'number') {
                 return {
-                    betType: 'H', // Apostamos a Home (Local)
-                    odd: match.OddH // La cuota a la que apostamos
+                    betOdd: odd // La cuota a la que apostamos
                 };
             }
 
@@ -362,22 +343,16 @@
         }
 
         /**
-         * Calcula el resultado de la apuesta.
+         * Calcula el resultado de la apuesta O2.5.
          * @param {Object} match - El objeto del partido.
-         * @param {Object} bet - El objeto de la apuesta ({betType, odd}).
+         * @param {Object} bet - El objeto de la apuesta ({betOdd}).
          * @param {number} stake - El tamaño de la apuesta.
          * @returns {number} El beneficio/pérdida de la operación.
          */
         function calculateProfit(match, bet, stake) {
-            const actualResult = match.FTResult; // H, D, A
-            let isWin = false;
-
-            // La propiedad FTResult debe contener 'H', 'D', o 'A'
-            if (bet.betType === actualResult) {
-                isWin = true;
-            }
-
-            return isWin ? stake * (bet.odd - 1) : -stake;
+            const isWin = match.ActualO25Result; // True si fue Over 2.5
+            
+            return isWin ? stake * (bet.betOdd - 1) : -stake;
         }
 
         /**
@@ -391,11 +366,12 @@
 
             const initialCapital = parseFloat(document.getElementById('initialCapital').value);
             const stakeSize = parseFloat(document.getElementById('stakeSize').value);
-            const leagueFilter = document.getElementById('leagueFilter').value.toUpperCase().trim();
-            const teamFilter = document.getElementById('teamFilter').value.toUpperCase().trim();
+            const minOdd = parseFloat(document.getElementById('minOdd').value);
+            const maxOdd = parseFloat(document.getElementById('maxOdd').value);
 
-            if (isNaN(initialCapital) || initialCapital <= 0 || isNaN(stakeSize) || stakeSize <= 0) {
-                 showMessage('El Capital Inicial y el Tamaño de Apuesta deben ser números positivos.');
+
+            if (isNaN(initialCapital) || initialCapital <= 0 || isNaN(stakeSize) || stakeSize <= 0 || isNaN(minOdd) || isNaN(maxOdd) || minOdd > maxOdd) {
+                 showMessage('Revise que el Capital, Stake y las Cuotas de filtro sean números válidos. La cuota mínima debe ser menor o igual a la máxima.');
                 return;
             }
 
@@ -414,23 +390,12 @@
             const leagueStats = {};
             
             // ----------------------------------------------------
-            // 1. APLICACIÓN DE FILTROS Y SIMULACIÓN
+            // 1. SIMULACIÓN
             // ----------------------------------------------------
-            const filteredData = rawData.filter(match => {
-                // Filtro por Liga
-                if (leagueFilter && match.League && match.League.toUpperCase().indexOf(leagueFilter) === -1) {
-                    return false;
-                }
-                // Filtro por Equipo (Local o Visitante)
-                if (teamFilter && match.HomeTeam && match.AwayTeam && match.HomeTeam.toUpperCase().indexOf(teamFilter) === -1 && match.AwayTeam.toUpperCase().indexOf(teamFilter) === -1) {
-                    return false;
-                }
-                return true;
-            });
-
-
-            filteredData.forEach(match => {
-                const bet = applyStrategy(match);
+            
+            rawData.forEach(match => {
+                // Aplicar la estrategia con los filtros de cuotas del usuario
+                const bet = applyStrategy(match, minOdd, maxOdd);
 
                 if (bet) {
                     totalBets++;
@@ -442,7 +407,8 @@
                     // ------------------------------------
                     
                     // Ganadas/Perdidas y Rachas
-                    if (profit > 0) {
+                    const isWin = profit > 0;
+                    if (isWin) {
                         wins++;
                         currentLossStreak = 0;
                     } else {
@@ -473,7 +439,7 @@
                     leagueStats[leagueName].bets++;
                     leagueStats[leagueName].profit += profit;
                     leagueStats[leagueName].stakeSum += stakeSize;
-                    if (profit > 0) {
+                    if (isWin) {
                         leagueStats[leagueName].wins++;
                     }
                 }
@@ -481,7 +447,7 @@
 
 
             // ----------------------------------------------------
-            // 4. CÁLCULO DE MÉTRICAS FINALES
+            // 3. CÁLCULO DE MÉTRICAS FINALES
             // ----------------------------------------------------
             
             const netProfit = currentCapital - initialCapital;
@@ -505,9 +471,9 @@
             };
 
             // ----------------------------------------------------
-            // 5. ANÁLISIS DE RACHAS RENTABLES (Condición Específica)
+            // 4. ANÁLISIS DE RACHAS RENTABLES
             // ----------------------------------------------------
-            const streakResults = analyzeStreaks(filteredData, stakeSize);
+            const streakResults = analyzeStreaks(rawData, stakeSize, minOdd, maxOdd);
             results.streakResults = streakResults;
 
             displayResults(results);
@@ -516,7 +482,7 @@
         /**
          * Identifica rachas rentables y perdedoras basadas en la estrategia actual.
          */
-        function analyzeStreaks(data, stake) {
+        function analyzeStreaks(data, stake, minOdd, maxOdd) {
             let currentProfitStreak = 0;
             let maxProfitStreak = 0;
             let currentLossStreak = 0;
@@ -526,14 +492,15 @@
             let totalBets = 0;
 
             for (const match of data) {
-                const bet = applyStrategy(match); 
+                const bet = applyStrategy(match, minOdd, maxOdd); 
                 
                 if (bet) {
                     totalBets++;
                     const profit = calculateProfit(match, bet, stake);
                     totalProfit += profit;
                     
-                    if (profit > 0) {
+                    const isWin = profit > 0;
+                    if (isWin) {
                         currentProfitStreak++;
                         currentLossStreak = 0;
                     } else {
@@ -591,9 +558,11 @@
             updateChart(results.equityHistory);
 
             // 3. Análisis de Rachas Rentables
+            const minOdd = parseFloat(document.getElementById('minOdd').value);
+            const maxOdd = parseFloat(document.getElementById('maxOdd').value);
             const strategyDesc = results.streakResults.totalBets > 0 ? 
-                `Resultados de la estrategia aplicada (${results.streakResults.totalBets} apuestas):` : 
-                'No se realizaron apuestas con la estrategia actual (revisa `applyStrategy`).';
+                `Resultados de la estrategia Over 2.5 (Cuotas entre ${minOdd.toFixed(2)} y ${maxOdd.toFixed(2)}):` : 
+                'No se realizaron apuestas con la estrategia actual (ajusta el rango de cuotas).';
 
             streakAnalysisEl.innerHTML = `
                 <p class="text-sm text-gray-800 font-medium">${strategyDesc}</p>
@@ -621,7 +590,7 @@
                     row.innerHTML = `
                         <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">${league}</td>
                         <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${stats.bets}</td>
-                        <td class="px-6 py-4 whitespace-nowrap text-sm font-semibold ${winRate >= 50 ? 'text-green-600' : 'text-red-600'}">${winRate.toFixed(2)} %</td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm font-semibold ${winRate >= 33.3 ? 'text-green-600' : 'text-red-600'}">${winRate.toFixed(2)} %</td>
                         <td class="px-6 py-4 whitespace-nowrap text-sm font-bold ${stats.profit >= 0 ? 'text-green-600' : 'text-red-600'}">${profitText} (${roi.toFixed(2)}% ROI)</td>
                     `;
                     leagueAnalysisEl.appendChild(row);
@@ -669,7 +638,7 @@
                             title: { display: true, text: 'Capital' }
                         },
                         x: {
-                            title: { display: true, text: 'Punto de Tiempo (0=Inicial)' }
+                            title: { display: true, text: 'Apuesta # (0=Inicial)' }
                         }
                     },
                     plugins: {
@@ -707,7 +676,7 @@
                     } else {
                         // El error de parsing ya lo reportó parseCSV en statusMessage
                         runBacktestBtn.disabled = true;
-                        buttonText.textContent = 'Corregir el COLUMN_MAP y Reintentar.';
+                        buttonText.textContent = 'Corregir el formato del CSV y Reintentar.';
                     }
                 };
                 reader.readAsText(file);
@@ -746,7 +715,7 @@
             // Inicializamos el gráfico con el capital inicial por defecto
             updateChart([parseFloat(document.getElementById('initialCapital').value)]);
             // Mostrar un mensaje de bienvenida
-            showMessage('Carga tu archivo CSV y define tu estrategia en el script para comenzar.', false);
+            showMessage('Carga tu archivo CSV y ajusta el rango de cuotas para probar la estrategia O2.5.', false);
         };
         
     </script>
