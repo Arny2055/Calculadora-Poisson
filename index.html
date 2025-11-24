@@ -3,47 +3,34 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Backtesting de Valor (Value Betting)</title>
+    <title>Backtesting de Rentabilidad por Liga y Equipo</title>
     <style>
         /* Estilos */
         body { font-family: Arial, sans-serif; margin: 20px; background-color: #f4f4f9; color: #333; }
-        .container { max-width: 900px; margin: auto; background: #fff; padding: 30px; border-radius: 8px; box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1); }
+        .container { max-width: 1000px; margin: auto; background: #fff; padding: 30px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15); }
         h2 { color: #007bff; border-bottom: 2px solid #007bff; padding-bottom: 10px; margin-bottom: 20px; }
-        label { display: block; margin-bottom: 8px; font-weight: bold; }
-        #csvFile { margin-bottom: 20px; }
-        #results { 
-            margin-top: 30px; 
-            padding: 15px; 
-            border: 1px solid #ddd; 
-            background-color: #e9e9f9; 
-            font-size: 16px;
-        }
+        .config-box { background-color: #fff3e0; padding: 15px; border: 1px dashed #ff9800; margin-bottom: 20px; }
+        input[type="number"] { width: 150px; padding: 5px; border: 1px solid #ccc; margin-right: 20px; }
+        #results { margin-top: 30px; }
         .profit { color: green; font-weight: bold; }
         .loss { color: red; font-weight: bold; }
         .neutral { color: orange; font-weight: bold; }
-        .config-box { 
-            background-color: #fff3e0; 
-            padding: 15px; 
-            border: 1px dashed #ff9800; 
-            margin-bottom: 20px;
-        }
+        table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+        th { background-color: #f2f2f2; }
     </style>
 </head>
 <body>
 
     <div class="container">
-        <h2>💰 Backtesting Avanzado: Detección de Valor (Over 2.5)</h2>
+        <h2>📊 Análisis de Rentabilidad Detallado (Ligas, Equipos y Periodos)</h2>
 
         <div class="config-box">
-            <h3>⚙️ Configuración de Estrategia de Valor</h3>
-            
-            <label for="minOdd">1. Cuota Mínima de Over 2.5 para Considerar Valor (ej. 2.00):</label>
-            <input type="number" id="minOdd" value="2.00" step="0.05" min="1.5" style="width: 150px; padding: 5px; border: 1px solid #ccc;">
-            <p style="font-size: 0.9em; margin-top: 5px;">*Apostar solo si la cuota es igual o mayor a este valor (buscamos un riesgo asumido por la casa).</p>
-
-            <label for="minCombinedAttack">2. Umbral Mínimo de Ataque Combinado (Attack + Danger):</label>
-            <input type="number" id="minCombinedAttack" value="250" min="100" style="width: 150px; padding: 5px; border: 1px solid #ccc;">
-            <p style="font-size: 0.9em; margin-top: 5px;">*La suma de Home Attack/Danger + Away Attack/Danger debe ser mayor a este número (buscamos un partido muy abierto).</p>
+            <h3>⚙️ Estrategia de Valor (Over 2.5 Goles)</h3>
+            <label for="minOdd">Cuota Mínima de Over 2.5 (ej. 2.00):</label>
+            <input type="number" id="minOdd" value="2.00" step="0.05" min="1.5">
+            <label for="minCombinedAttack">Umbral Mínimo de Ataque Combinado (ej. 250):</label>
+            <input type="number" id="minCombinedAttack" value="250" min="100">
         </div>
 
         <form id="csvForm">
@@ -52,7 +39,7 @@
         </form>
         
         <div id="results">
-            Ajusta los parámetros de Valor, carga tu archivo CSV y ejecuta la prueba.
+            Carga tu archivo CSV y ajusta los parámetros de la estrategia para iniciar el análisis.
         </div>
     </div>
 
@@ -62,115 +49,202 @@
         const minOddInput = document.getElementById('minOdd');
         const minCombinedAttackInput = document.getElementById('minCombinedAttack');
 
-        // Escuchar cambios en la configuración y en la carga del archivo
+        // Escuchar cambios para recalcular
         [csvFile, minOddInput, minCombinedAttackInput].forEach(element => {
             element.addEventListener('change', () => {
                 if (csvFile.files.length > 0) {
                      const reader = new FileReader();
-                     reader.onload = (e) => runBacktest(e.target.result);
+                     reader.onload = (e) => runFullAnalysis(e.target.result);
                      reader.readAsText(csvFile.files[0]);
                 }
             });
         });
-        
+
         // -----------------------------------------------------------------------------------
         // **CONSTANTES DE ÍNDICE (Basadas en tu imagen de CSV)**
         // -----------------------------------------------------------------------------------
         const DESIRED_ODD_INDEX = 1;      // 'Desired Odd' (Cuota Over 2.5)
-        const HOME_ATTACK_INDEX = 3;      // 'Home Attack'
-        const AWAY_ATTACK_INDEX = 6;      // 'Away Attack'
-        const HOME_DANGER_INDEX = 5;      // 'Home Danger'
-        const AWAY_DANGER_INDEX = 7;      // 'Away Danger'
+        const DATE_INDEX = 2;             // 'Date'
+        const LEAGUE_INDEX = 3;           // 'League'
+        const MATCH_INDEX = 4;            // 'Match' (Contiene HomeTeam vs AwayTeam)
+        const HOME_ATTACK_INDEX = 3;
+        const AWAY_ATTACK_INDEX = 6;
+        const HOME_DANGER_INDEX = 5;
+        const AWAY_DANGER_INDEX = 7;
         const TOTAL_SCORE_INDEX = 14;     // 'Total Score' (Resultado final de goles)
         const STAKE_SIZE = 1;             // Apuesta fija por partido (1 unidad)
         // -----------------------------------------------------------------------------------
         
-        function runBacktest(csvText) {
+        function runFullAnalysis(csvText) {
             const lines = csvText.trim().split('\n');
             if (lines.length <= 1) {
                 resultsDiv.innerHTML = "El archivo CSV está vacío o solo contiene encabezados.";
                 return;
             }
 
-            // 1. Obtener parámetros de la estrategia del usuario
+            // 1. Obtener parámetros y estructuras de datos para el análisis
             const MIN_ODD_THRESHOLD = parseFloat(minOddInput.value);
             const MIN_ATTACK_THRESHOLD = parseFloat(minCombinedAttackInput.value);
             
             let totalApuestas = 0;
             let saldoFinal = 0;
             let aciertos = 0;
+            
+            // Estructuras de agrupamiento
+            const leagueStats = {}; // { 'LeagueName': {bets: 0, profit: 0, hits: 0} }
+            const teamStats = {};   // { 'TeamName': {bets: 0, profit: 0, hits: 0} }
+            const monthStats = {};  // { 'YYYY-MM': {bets: 0, profit: 0, hits: 0} }
 
             // 2. Procesar cada partido
             for (let i = 1; i < lines.length; i++) {
                 const values = lines[i].split(',');
-
-                // Validación de fila incompleta
                 if (values.length < TOTAL_SCORE_INDEX + 1) continue; 
 
-                // Obtener y Parsear datos clave
+                // Obtener datos
                 const desiredOdd = parseFloat(values[DESIRED_ODD_INDEX]);
-                const homeAttack = parseFloat(values[HOME_ATTACK_INDEX]);
-                const awayAttack = parseFloat(values[AWAY_ATTACK_INDEX]);
+                const league = values[LEAGUE_INDEX].trim();
+                const match = values[MATCH_INDEX].trim();
+                const dateString = values[DATE_INDEX].trim();
                 const homeDanger = parseFloat(values[HOME_DANGER_INDEX]);
                 const awayDanger = parseFloat(values[AWAY_DANGER_INDEX]);
+                const homeAttack = parseFloat(values[HOME_ATTACK_INDEX]);
+                const awayAttack = parseFloat(values[AWAY_ATTACK_INDEX]);
                 const totalScore = parseFloat(values[TOTAL_SCORE_INDEX]);
 
-                // 3. Crear el Indicador de Valor (el corazón de la estrategia)
+                // Parsear Equipos
+                const teams = match.split(' - '); // Asume 'TeamA - TeamB'
+                const homeTeam = teams[0].trim();
+                const awayTeam = (teams.length > 1) ? teams[1].trim() : 'Unknown';
+
+                // Parsear Mes/Año (YYYY-MM)
+                // Asume formato 'DD/MM/YY' o similar. Necesitamos adaptarlo a 'YYYY-MM'.
+                // Intentaremos un formato simple YYYY-MM basado en el final de la cadena de fecha:
+                const yearMonth = dateString.slice(-4, -2) + '-' + dateString.slice(-2); // Ejemplo: '24-nov. 2023' -> '2023-11'
+
+                // 3. Aplicar Estrategia de Valor (Value Betting)
                 const combinedAttackIndex = homeAttack + awayAttack + homeDanger + awayDanger;
-
-                // ----------------------------------------------------------------
-                // 🚀 CONDICIONES DE VALUE BETTING (OVER 2.5)
-                // ----------------------------------------------------------------
-                
-                // CONDICIÓN 1: La cuota tiene valor percibido (la casa subestima el riesgo)
                 const isHighOdd = desiredOdd >= MIN_ODD_THRESHOLD;
-
-                // CONDICIÓN 2: Las métricas fundamentales justifican la apuesta (el partido es un "tiro al aire")
                 const isHighAttack = combinedAttackIndex >= MIN_ATTACK_THRESHOLD;
                 
-                // Si ambas condiciones se cumplen, ¡APOSTAMOS!
                 if (isHighOdd && isHighAttack) {
                     
                     totalApuestas++;
-                    let ganancia = -STAKE_SIZE; // Perdedora
-
+                    let ganancia = -STAKE_SIZE; 
                     const IS_WINNER = (totalScore >= 3); 
 
                     if (IS_WINNER) { 
-                        // Ganancia = (Cuota - 1) * Stake
                         ganancia = (desiredOdd - 1) * STAKE_SIZE;
                         aciertos++;
                     }
                     
                     saldoFinal += ganancia;
+                    
+                    // 4. Registrar Métricas por Categoría
+                    
+                    // Función auxiliar para actualizar las estadísticas de un grupo
+                    const updateStats = (groupStats, key, profit) => {
+                        if (!groupStats[key]) {
+                            groupStats[key] = { bets: 0, profit: 0, hits: 0 };
+                        }
+                        groupStats[key].bets++;
+                        groupStats[key].profit += profit;
+                        if (profit > 0) groupStats[key].hits++;
+                    };
+                    
+                    // a) Ligas
+                    updateStats(leagueStats, league, ganancia);
+                    
+                    // b) Equipos (Ambos equipos se ven afectados por el resultado)
+                    updateStats(teamStats, homeTeam, ganancia);
+                    updateStats(teamStats, awayTeam, ganancia);
+                    
+                    // c) Periodo Mensual
+                    updateStats(monthStats, yearMonth, ganancia);
                 }
             }
 
-            // 4. Mostrar Resultados Finales
+            // 5. Mostrar Resultados
+            resultsDiv.innerHTML = renderResults(totalApuestas, aciertos, saldoFinal, leagueStats, teamStats, monthStats);
+        }
+
+        /**
+         * Función para generar el HTML de los resultados
+         */
+        function renderResults(totalApuestas, aciertos, saldoFinal, leagueStats, teamStats, monthStats) {
             const totalInvested = totalApuestas * STAKE_SIZE;
             const profitabilityClass = (saldoFinal > 0) ? 'profit' : (saldoFinal < 0 ? 'loss' : 'neutral');
             const totalReturn = (totalInvested > 0) ? (saldoFinal / totalInvested) * 100 : 0;
             const winRate = (totalApuestas > 0) ? (aciertos / totalApuestas) * 100 : 0;
 
-
-            let htmlOutput = `
-                <h3>Resultados del Value Backtesting</h3>
-                <p><strong>Estrategia aplicada:</strong> Apostar a **Over 2.5 Goles** si:</p>
-                <ul>
-                    <li>Cuota $\\ge$ **${MIN_ODD_THRESHOLD.toFixed(2)}** (Buscando Valor)</li>
-                    <li>Suma de (Attack + Danger) $\\ge$ **${MIN_ATTACK_THRESHOLD}** (Justificación Estadística)</li>
-                </ul>
+            let html = `
+                <h3>🚀 Balance Global de la Estrategia</h3>
+                <p>Estrategia aplicada: **Over 2.5 Goles con Value Bet** (Cuota $\\ge$ ${minOddInput.value}, Ataque $\\ge$ ${minCombinedAttackInput.value})</p>
                 <hr>
                 <p>➡️ Total de apuestas realizadas: **${totalApuestas}**</p>
-                <p>➡️ Tasa de acierto (Win Rate): **${winRate.toFixed(2)}%** (${aciertos} de ${totalApuestas})</p>
-                <p>➡️ Cuota promedio ganadora: **${(totalInvested / aciertos).toFixed(2)}**</p> 
-                <hr>
-                <h4>Balance Final (Unidades)</h4>
-                <p>G / P Netas (unidades): <span class="${profitabilityClass}">${saldoFinal.toFixed(2)} unidades</span></p>
-                <p>Retorno de Inversión (ROI): <span class="${profitabilityClass}">${totalReturn.toFixed(2)}%</span></p>
+                <p>➡️ Tasa de acierto (Win Rate): **${winRate.toFixed(2)}%**</p>
+                <p>➡️ G / P Netas (unidades): <span class="${profitabilityClass}">${saldoFinal.toFixed(2)} unidades</span></p>
+                <p>➡️ Retorno de Inversión (ROI): <span class="${profitabilityClass}">${totalReturn.toFixed(2)}%</span></p>
+                
+                ${renderTable(leagueStats, 'Ligas más rentables/perdedoras (Min. 5 Apuestas)', 5)}
+                
+                ${renderTable(teamStats, 'Equipos más rentables/perdedores (Min. 10 Apuestas)', 10)}
+
+                ${renderTable(monthStats, 'Rentabilidad por Periodo de Tiempo (Mes)', 1, 'month')}
+
+                <p style="margin-top: 30px; font-size: 0.9em; color: #666;">
+                    *El ROI se calcula solo para apuestas con saldo positivo para evitar la división por cero si no hubo aciertos.
+                </p>
+            `;
+            return html;
+        }
+
+        /**
+         * Función auxiliar para generar las tablas de resultados
+         */
+        function renderTable(data, title, minBets, dataType = 'general') {
+            const dataArray = Object.keys(data)
+                .map(key => ({
+                    name: key,
+                    ...data[key],
+                    roi: data[key].bets > 0 ? (data[key].profit / data[key].bets) * 100 : 0
+                }))
+                .filter(item => item.bets >= minBets) // Filtro de apuestas mínimas
+                .sort((a, b) => b.profit - a.profit); // Ordenar por beneficio
+
+            if (dataArray.length === 0) {
+                return `<h4>${title}</h4><p>No hay suficientes datos (${minBets} apuestas mínimas) para este análisis.</p>`;
+            }
+
+            let html = `
+                <h4>${title}</h4>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>${dataType === 'month' ? 'Periodo' : 'Nombre'}</th>
+                            <th>Apuestas</th>
+                            <th>Aciertos</th>
+                            <th>Ganancia Neta (unidades)</th>
+                            <th>ROI (%)</th>
+                        </tr>
+                    </thead>
+                    <tbody>
             `;
 
-            resultsDiv.innerHTML = htmlOutput;
+            dataArray.forEach(item => {
+                const profitClass = (item.profit > 0) ? 'profit' : (item.profit < 0 ? 'loss' : 'neutral');
+                html += `
+                    <tr>
+                        <td>${item.name}</td>
+                        <td>${item.bets}</td>
+                        <td>${item.hits}</td>
+                        <td class="${profitClass}">${item.profit.toFixed(2)}</td>
+                        <td class="${profitClass}">${item.roi.toFixed(2)}</td>
+                    </tr>
+                `;
+            });
+
+            html += `</tbody></table>`;
+            return html;
         }
 
     </script>
