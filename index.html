@@ -3,93 +3,147 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Cargar y Procesar Historial de Ligas (CSV)</title>
+    <title>Backtesting de BetMines CSV</title>
     <style>
-        /* Estilos básicos */
+        /* Estilos */
         body { font-family: Arial, sans-serif; margin: 20px; background-color: #f4f4f9; color: #333; }
-        .container { max-width: 800px; margin: auto; background: #fff; padding: 30px; border-radius: 8px; box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1); }
+        .container { max-width: 900px; margin: auto; background: #fff; padding: 30px; border-radius: 8px; box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1); }
         h2 { color: #007bff; border-bottom: 2px solid #007bff; padding-bottom: 10px; margin-bottom: 20px; }
         label { display: block; margin-bottom: 8px; font-weight: bold; }
-        input[type="file"] { margin-bottom: 20px; }
-        #output { 
-            margin-top: 20px; 
+        #csvFile { margin-bottom: 20px; }
+        #results { 
+            margin-top: 30px; 
             padding: 15px; 
             border: 1px solid #ddd; 
             background-color: #e9e9f9; 
-            max-height: 400px; 
-            overflow: auto;
-            white-space: pre-wrap; /* Mantiene el formato del CSV */
-            font-family: monospace;
-            font-size: 14px;
+            font-size: 16px;
         }
+        .profit { color: green; font-weight: bold; }
+        .loss { color: red; font-weight: bold; }
+        .neutral { color: orange; font-weight: bold; }
     </style>
 </head>
 <body>
 
     <div class="container">
-        <h2>📊 Cargar y Mostrar Historial de Ligas (CSV)</h2>
+        <h2>📈 Backtesting Automático de BetMines</h2>
 
         <form id="csvForm">
-            <label for="csvFile">Selecciona tu archivo CSV (Historial de Ligas):</label>
+            <label for="csvFile">Cargar Archivo CSV de Historial de BetMines:</label>
             <input type="file" id="csvFile" name="historialCSV" accept=".csv" required>
         </form>
 
-        <p>El contenido del archivo se mostrará a continuación (solo las primeras 10 filas):</p>
+        <p>A continuación, se aplicará la estrategia y se mostrará la rentabilidad:</p>
         
-        <div id="output">
+        <div id="results">
             Esperando la carga del archivo CSV...
         </div>
     </div>
 
     <script>
-        // 1. Obtener los elementos clave del DOM
         const csvFile = document.getElementById('csvFile');
-        const outputDiv = document.getElementById('output');
+        const resultsDiv = document.getElementById('results');
 
-        // 2. Escuchar el evento 'change' del input de archivo
+        // Escucha el cambio en el input para iniciar la lectura
         csvFile.addEventListener('change', (event) => {
-            // Se ejecuta cuando el usuario selecciona un archivo
             const file = event.target.files[0];
-
             if (file) {
-                // 3. Crear un objeto FileReader
                 const reader = new FileReader();
-
-                // 4. Definir qué hacer cuando la lectura del archivo termine
                 reader.onload = (e) => {
-                    const content = e.target.result; // El contenido del archivo como texto
-                    processCSV(content);
+                    const content = e.target.result;
+                    runBacktest(content);
                 };
-
-                // 5. Iniciar la lectura del archivo como texto
                 reader.readAsText(file);
             }
         });
 
-        // 6. Función para procesar y mostrar el contenido
-        function processCSV(csvText) {
-            // Dividir el texto en líneas (filas)
-            const lines = csvText.split('\n');
-
-            if (lines.length === 0) {
-                outputDiv.textContent = 'El archivo CSV está vacío.';
+        /**
+         * Función principal para ejecutar el Backtesting
+         * @param {string} csvText - Contenido del archivo CSV
+         */
+        function runBacktest(csvText) {
+            // Dividir el texto en filas y eliminar la primera fila (encabezados)
+            const lines = csvText.trim().split('\n');
+            if (lines.length <= 1) {
+                resultsDiv.innerHTML = "El archivo CSV está vacío o solo contiene encabezados.";
                 return;
             }
 
-            // Tomar solo las primeras 10 líneas para evitar sobrecargar la vista
-            const displayLines = lines.slice(0, 10);
+            // Asumimos que la primera línea contiene los encabezados.
+            const headers = lines[0].split(',');
             
-            // Reconstruir el texto a mostrar, añadiendo información
-            let outputContent = "✅ **Carga Exitosa**\n\n";
-            outputContent += "--- Primeras " + displayLines.length + " Filas ---\n";
-            outputContent += displayLines.join('\n'); // Unir las líneas con saltos de línea
+            // **IMPORTANTE**: Debes verificar que tu CSV de BetMines contenga estas columnas:
+            // 1. Un indicador del Resultado Final (e.g., 'FT Result' o similar: H, D, A)
+            // 2. La cuota del equipo local (e.g., 'Home Odd' o similar)
+            
+            // Índices de columna (ajústalos si el orden de tu CSV es diferente)
+            // Estos son ejemplos comunes:
+            const RESULT_INDEX = 10; // Columna donde está el resultado final (H, D, A)
+            const HOME_ODD_INDEX = 1; // Columna donde está la cuota del local
 
-            // Mostrar el contenido en el div de salida
-            outputDiv.textContent = outputContent;
+            let totalApuestas = 0;
+            let saldoFinal = 0;
+            const STAKE_SIZE = 1; // Apuesta fija de 1 unidad (por ejemplo, 1€)
+
+            // Procesar cada partido (empezamos en 1 para saltar los encabezados)
+            for (let i = 1; i < lines.length; i++) {
+                const values = lines[i].split(',');
+
+                if (values.length < Math.max(RESULT_INDEX, HOME_ODD_INDEX) + 1) {
+                    // console.warn('Fila incompleta saltada:', lines[i]);
+                    continue; // Saltar filas incompletas
+                }
+
+                // Obtener los datos clave del partido
+                const homeOdd = parseFloat(values[HOME_ODD_INDEX]);
+                const ftResult = values[RESULT_INDEX].trim().toUpperCase(); // H, D, A
+
+                // ----------------------------------------------------------------
+                // 🚀 ESTRATEGIA DE BACKTESTING: Apuesta al local si la cuota es < 2.00
+                // ----------------------------------------------------------------
+
+                const STRATEGY_ODD_LIMIT = 2.00;
+                
+                if (homeOdd < STRATEGY_ODD_LIMIT) {
+                    totalApuestas++;
+                    let ganancia = -STAKE_SIZE; // Inicialmente, perdemos el Stake
+
+                    if (ftResult === 'H') { // Si el local ganó
+                        // Ganancia = (Cuota * Stake) - Stake
+                        ganancia = (homeOdd * STAKE_SIZE) - STAKE_SIZE;
+                    }
+                    
+                    saldoFinal += ganancia;
+                }
+            }
+
+            // ----------------------------------------------------------------
+            // 🏆 MOSTRAR RESULTADOS
+            // ----------------------------------------------------------------
+
+            let profitabilityClass = 'neutral';
+            if (saldoFinal > 0) {
+                profitabilityClass = 'profit';
+            } else if (saldoFinal < 0) {
+                profitabilityClass = 'loss';
+            }
             
-            // Si quisieras analizar el CSV más a fondo (ej. como matriz):
-            // const dataMatrix = lines.map(line => line.split(','));
-            // console.log("Matriz de datos completa:", dataMatrix);
+            const totalReturn = (saldoFinal / (totalApuestas * STAKE_SIZE)) * 100;
+
+            let htmlOutput = `
+                <h3>Resultados del Backtesting</h3>
+                <p><strong>Estrategia aplicada:</strong> Apostar al Local (H) si la cuota del local (Home Odd) es inferior a ${STRATEGY_ODD_LIMIT.toFixed(2)}.</p>
+                <hr>
+                <p>➡️ Total de partidos analizados (filas): **${lines.length - 1}**</p>
+                <p>➡️ Total de apuestas realizadas por la estrategia: **${totalApuestas}**</p>
+                <p>➡️ Stake (Apuesta por partido): **${STAKE_SIZE} unidad**</p>
+                <hr>
+                <h4>Balance Final</h4>
+                <p>G / P Netas (unidades): <span class="${profitabilityClass}">${saldoFinal.toFixed(2)} unidades</span></p>
+                <p>Retorno de Inversión (ROI): <span class="${profitabilityClass}">${totalReturn.toFixed(2)}%</span></p>
+            `;
+
+            resultsDiv.innerHTML = htmlOutput;
         }
 
     </script>
