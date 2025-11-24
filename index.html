@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Backtesting de BetMines CSV</title>
+    <title>Backtesting Avanzado de BetMines (Ataque)</title>
     <style>
         /* Estilos */
         body { font-family: Arial, sans-serif; margin: 20px; background-color: #f4f4f9; color: #333; }
@@ -21,30 +21,42 @@
         .profit { color: green; font-weight: bold; }
         .loss { color: red; font-weight: bold; }
         .neutral { color: orange; font-weight: bold; }
+        .config-box { 
+            background-color: #f1f8ff; 
+            padding: 15px; 
+            border: 1px dashed #007bff; 
+            margin-bottom: 20px;
+        }
     </style>
 </head>
 <body>
 
     <div class="container">
-        <h2>📈 Backtesting Automático de BetMines</h2>
+        <h2>🚀 Backtesting - Estrategia de Peligro de Ataque</h2>
+
+        <div class="config-box">
+            <h3>⚙️ Configuración de la Estrategia</h3>
+            <label for="dangerThreshold">Umbral de Peligro Combinado (Home Danger + Away Danger):</label>
+            <input type="number" id="dangerThreshold" value="100" min="1" style="width: 100px; padding: 5px; border: 1px solid #ccc;">
+            <p style="font-size: 0.9em; margin-top: 5px;">*Solo se apostará a Over 2.5 si la suma de los valores de peligro es mayor a este número.</p>
+        </div>
 
         <form id="csvForm">
             <label for="csvFile">Cargar Archivo CSV de Historial de BetMines:</label>
             <input type="file" id="csvFile" name="historialCSV" accept=".csv" required>
         </form>
-
-        <p>A continuación, se aplicará la estrategia y se mostrará la rentabilidad:</p>
         
         <div id="results">
-            Esperando la carga del archivo CSV...
+            Ajusta el umbral, carga tu archivo CSV y se ejecutará el Backtesting.
         </div>
     </div>
 
     <script>
         const csvFile = document.getElementById('csvFile');
         const resultsDiv = document.getElementById('results');
+        const dangerThresholdInput = document.getElementById('dangerThreshold');
 
-        // Escucha el cambio en el input para iniciar la lectura
+        // Escucha el cambio en el input de archivo para iniciar la lectura
         csvFile.addEventListener('change', (event) => {
             const file = event.target.files[0];
             if (file) {
@@ -57,86 +69,95 @@
             }
         });
 
+        // También escucha cambios en el umbral para recalcular si ya hay un archivo
+        dangerThresholdInput.addEventListener('change', () => {
+            if (csvFile.files.length > 0) {
+                 const reader = new FileReader();
+                 reader.onload = (e) => runBacktest(e.target.result);
+                 reader.readAsText(csvFile.files[0]);
+            }
+        });
+
+
         /**
          * Función principal para ejecutar el Backtesting
          * @param {string} csvText - Contenido del archivo CSV
          */
         function runBacktest(csvText) {
-            // Dividir el texto en filas y eliminar la primera fila (encabezados)
+            
+            // 1. Preparación de datos y configuración
             const lines = csvText.trim().split('\n');
             if (lines.length <= 1) {
                 resultsDiv.innerHTML = "El archivo CSV está vacío o solo contiene encabezados.";
                 return;
             }
 
-            // Asumimos que la primera línea contiene los encabezados.
-            const headers = lines[0].split(',');
+            // Umbral de Peligro definido por el usuario
+            const DANGER_THRESHOLD = parseFloat(dangerThresholdInput.value);
             
-            // **IMPORTANTE**: Debes verificar que tu CSV de BetMines contenga estas columnas:
-            // 1. Un indicador del Resultado Final (e.g., 'FT Result' o similar: H, D, A)
-            // 2. La cuota del equipo local (e.g., 'Home Odd' o similar)
+            // **IMPORTANTE**: Índices de columna basados en la imagen (asumiendo 0-index)
+            const DESIRED_ODD_INDEX = 1;  // 'Desired Odd' (Cuota a la que apostamos, en este caso Over 2.5)
+            const HOME_DANGER_INDEX = 5;  // 'Home Danger'
+            const AWAY_DANGER_INDEX = 7;  // 'Away Danger'
+            const TOTAL_SCORE_INDEX = 14; // 'Total Score' (Resultado final de goles)
             
-            // Índices de columna (ajústalos si el orden de tu CSV es diferente)
-            // Estos son ejemplos comunes:
-            const RESULT_INDEX = 10; // Columna donde está el resultado final (H, D, A)
-            const HOME_ODD_INDEX = 1; // Columna donde está la cuota del local
-
             let totalApuestas = 0;
             let saldoFinal = 0;
-            const STAKE_SIZE = 1; // Apuesta fija de 1 unidad (por ejemplo, 1€)
+            const STAKE_SIZE = 1; // Apuesta fija de 1 unidad
 
-            // Procesar cada partido (empezamos en 1 para saltar los encabezados)
+            // 2. Procesar cada partido (empezamos en 1 para saltar los encabezados)
             for (let i = 1; i < lines.length; i++) {
                 const values = lines[i].split(',');
 
-                if (values.length < Math.max(RESULT_INDEX, HOME_ODD_INDEX) + 1) {
-                    // console.warn('Fila incompleta saltada:', lines[i]);
-                    continue; // Saltar filas incompletas
+                // Validación básica de fila
+                if (values.length < Math.max(DESIRED_ODD_INDEX, HOME_DANGER_INDEX, AWAY_DANGER_INDEX, TOTAL_SCORE_INDEX) + 1) {
+                    continue; 
                 }
 
                 // Obtener los datos clave del partido
-                const homeOdd = parseFloat(values[HOME_ODD_INDEX]);
-                const ftResult = values[RESULT_INDEX].trim().toUpperCase(); // H, D, A
+                const desiredOdd = parseFloat(values[DESIRED_ODD_INDEX]);
+                const homeDanger = parseFloat(values[HOME_DANGER_INDEX]);
+                const awayDanger = parseFloat(values[AWAY_DANGER_INDEX]);
+                const totalScore = parseFloat(values[TOTAL_SCORE_INDEX]);
+
+                // Calcular el indicador clave
+                const combinedDanger = homeDanger + awayDanger;
 
                 // ----------------------------------------------------------------
-                // 🚀 ESTRATEGIA DE BACKTESTING: Apuesta al local si la cuota es < 2.00
+                // 🚀 ESTRATEGIA DE BACKTESTING: Over 2.5 Goles
                 // ----------------------------------------------------------------
-
-                const STRATEGY_ODD_LIMIT = 2.00;
                 
-                if (homeOdd < STRATEGY_ODD_LIMIT) {
+                // Aplicar el filtro de la estrategia
+                if (combinedDanger > DANGER_THRESHOLD) {
+                    
                     totalApuestas++;
                     let ganancia = -STAKE_SIZE; // Inicialmente, perdemos el Stake
 
-                    if (ftResult === 'H') { // Si el local ganó
+                    // Chequear si se cumplió la apuesta (Over 2.5)
+                    // Apostamos a Over 2.5, por lo que necesitamos 3 o más goles.
+                    const IS_WINNER = (totalScore >= 3); 
+
+                    if (IS_WINNER) { 
                         // Ganancia = (Cuota * Stake) - Stake
-                        ganancia = (homeOdd * STAKE_SIZE) - STAKE_SIZE;
+                        ganancia = (desiredOdd * STAKE_SIZE) - STAKE_SIZE;
                     }
                     
                     saldoFinal += ganancia;
                 }
             }
 
-            // ----------------------------------------------------------------
-            // 🏆 MOSTRAR RESULTADOS
-            // ----------------------------------------------------------------
-
-            let profitabilityClass = 'neutral';
-            if (saldoFinal > 0) {
-                profitabilityClass = 'profit';
-            } else if (saldoFinal < 0) {
-                profitabilityClass = 'loss';
-            }
-            
-            const totalReturn = (saldoFinal / (totalApuestas * STAKE_SIZE)) * 100;
+            // 3. Mostrar Resultados
+            const totalInvested = totalApuestas * STAKE_SIZE;
+            const profitabilityClass = (saldoFinal > 0) ? 'profit' : (saldoFinal < 0 ? 'loss' : 'neutral');
+            const totalReturn = (totalInvested > 0) ? (saldoFinal / totalInvested) * 100 : 0;
 
             let htmlOutput = `
                 <h3>Resultados del Backtesting</h3>
-                <p><strong>Estrategia aplicada:</strong> Apostar al Local (H) si la cuota del local (Home Odd) es inferior a ${STRATEGY_ODD_LIMIT.toFixed(2)}.</p>
+                <p><strong>Estrategia aplicada:</strong> Apuesta a **Over 2.5 Goles** si la suma de 'Home Danger' + 'Away Danger' es mayor a **${DANGER_THRESHOLD}**.</p>
                 <hr>
                 <p>➡️ Total de partidos analizados (filas): **${lines.length - 1}**</p>
                 <p>➡️ Total de apuestas realizadas por la estrategia: **${totalApuestas}**</p>
-                <p>➡️ Stake (Apuesta por partido): **${STAKE_SIZE} unidad**</p>
+                <p>➡️ Total invertido (unidades): **${totalInvested.toFixed(2)}**</p>
                 <hr>
                 <h4>Balance Final</h4>
                 <p>G / P Netas (unidades): <span class="${profitabilityClass}">${saldoFinal.toFixed(2)} unidades</span></p>
@@ -145,7 +166,6 @@
 
             resultsDiv.innerHTML = htmlOutput;
         }
-
     </script>
 
 </body>
