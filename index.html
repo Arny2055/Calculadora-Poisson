@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Backtesting Avanzado de BetMines (Ataque)</title>
+    <title>Backtesting de Valor (Value Betting)</title>
     <style>
         /* Estilos */
         body { font-family: Arial, sans-serif; margin: 20px; background-color: #f4f4f9; color: #333; }
@@ -22,9 +22,9 @@
         .loss { color: red; font-weight: bold; }
         .neutral { color: orange; font-weight: bold; }
         .config-box { 
-            background-color: #f1f8ff; 
+            background-color: #fff3e0; 
             padding: 15px; 
-            border: 1px dashed #007bff; 
+            border: 1px dashed #ff9800; 
             margin-bottom: 20px;
         }
     </style>
@@ -32,13 +32,18 @@
 <body>
 
     <div class="container">
-        <h2>🚀 Backtesting - Estrategia de Peligro de Ataque</h2>
+        <h2>💰 Backtesting Avanzado: Detección de Valor (Over 2.5)</h2>
 
         <div class="config-box">
-            <h3>⚙️ Configuración de la Estrategia</h3>
-            <label for="dangerThreshold">Umbral de Peligro Combinado (Home Danger + Away Danger):</label>
-            <input type="number" id="dangerThreshold" value="100" min="1" style="width: 100px; padding: 5px; border: 1px solid #ccc;">
-            <p style="font-size: 0.9em; margin-top: 5px;">*Solo se apostará a Over 2.5 si la suma de los valores de peligro es mayor a este número.</p>
+            <h3>⚙️ Configuración de Estrategia de Valor</h3>
+            
+            <label for="minOdd">1. Cuota Mínima de Over 2.5 para Considerar Valor (ej. 2.00):</label>
+            <input type="number" id="minOdd" value="2.00" step="0.05" min="1.5" style="width: 150px; padding: 5px; border: 1px solid #ccc;">
+            <p style="font-size: 0.9em; margin-top: 5px;">*Apostar solo si la cuota es igual o mayor a este valor (buscamos un riesgo asumido por la casa).</p>
+
+            <label for="minCombinedAttack">2. Umbral Mínimo de Ataque Combinado (Attack + Danger):</label>
+            <input type="number" id="minCombinedAttack" value="250" min="100" style="width: 150px; padding: 5px; border: 1px solid #ccc;">
+            <p style="font-size: 0.9em; margin-top: 5px;">*La suma de Home Attack/Danger + Away Attack/Danger debe ser mayor a este número (buscamos un partido muy abierto).</p>
         </div>
 
         <form id="csvForm">
@@ -47,125 +52,127 @@
         </form>
         
         <div id="results">
-            Ajusta el umbral, carga tu archivo CSV y se ejecutará el Backtesting.
+            Ajusta los parámetros de Valor, carga tu archivo CSV y ejecuta la prueba.
         </div>
     </div>
 
     <script>
         const csvFile = document.getElementById('csvFile');
         const resultsDiv = document.getElementById('results');
-        const dangerThresholdInput = document.getElementById('dangerThreshold');
+        const minOddInput = document.getElementById('minOdd');
+        const minCombinedAttackInput = document.getElementById('minCombinedAttack');
 
-        // Escucha el cambio en el input de archivo para iniciar la lectura
-        csvFile.addEventListener('change', (event) => {
-            const file = event.target.files[0];
-            if (file) {
-                const reader = new FileReader();
-                reader.onload = (e) => {
-                    const content = e.target.result;
-                    runBacktest(content);
-                };
-                reader.readAsText(file);
-            }
+        // Escuchar cambios en la configuración y en la carga del archivo
+        [csvFile, minOddInput, minCombinedAttackInput].forEach(element => {
+            element.addEventListener('change', () => {
+                if (csvFile.files.length > 0) {
+                     const reader = new FileReader();
+                     reader.onload = (e) => runBacktest(e.target.result);
+                     reader.readAsText(csvFile.files[0]);
+                }
+            });
         });
-
-        // También escucha cambios en el umbral para recalcular si ya hay un archivo
-        dangerThresholdInput.addEventListener('change', () => {
-            if (csvFile.files.length > 0) {
-                 const reader = new FileReader();
-                 reader.onload = (e) => runBacktest(e.target.result);
-                 reader.readAsText(csvFile.files[0]);
-            }
-        });
-
-
-        /**
-         * Función principal para ejecutar el Backtesting
-         * @param {string} csvText - Contenido del archivo CSV
-         */
+        
+        // -----------------------------------------------------------------------------------
+        // **CONSTANTES DE ÍNDICE (Basadas en tu imagen de CSV)**
+        // -----------------------------------------------------------------------------------
+        const DESIRED_ODD_INDEX = 1;      // 'Desired Odd' (Cuota Over 2.5)
+        const HOME_ATTACK_INDEX = 3;      // 'Home Attack'
+        const AWAY_ATTACK_INDEX = 6;      // 'Away Attack'
+        const HOME_DANGER_INDEX = 5;      // 'Home Danger'
+        const AWAY_DANGER_INDEX = 7;      // 'Away Danger'
+        const TOTAL_SCORE_INDEX = 14;     // 'Total Score' (Resultado final de goles)
+        const STAKE_SIZE = 1;             // Apuesta fija por partido (1 unidad)
+        // -----------------------------------------------------------------------------------
+        
         function runBacktest(csvText) {
-            
-            // 1. Preparación de datos y configuración
             const lines = csvText.trim().split('\n');
             if (lines.length <= 1) {
                 resultsDiv.innerHTML = "El archivo CSV está vacío o solo contiene encabezados.";
                 return;
             }
 
-            // Umbral de Peligro definido por el usuario
-            const DANGER_THRESHOLD = parseFloat(dangerThresholdInput.value);
-            
-            // **IMPORTANTE**: Índices de columna basados en la imagen (asumiendo 0-index)
-            const DESIRED_ODD_INDEX = 1;  // 'Desired Odd' (Cuota a la que apostamos, en este caso Over 2.5)
-            const HOME_DANGER_INDEX = 5;  // 'Home Danger'
-            const AWAY_DANGER_INDEX = 7;  // 'Away Danger'
-            const TOTAL_SCORE_INDEX = 14; // 'Total Score' (Resultado final de goles)
+            // 1. Obtener parámetros de la estrategia del usuario
+            const MIN_ODD_THRESHOLD = parseFloat(minOddInput.value);
+            const MIN_ATTACK_THRESHOLD = parseFloat(minCombinedAttackInput.value);
             
             let totalApuestas = 0;
             let saldoFinal = 0;
-            const STAKE_SIZE = 1; // Apuesta fija de 1 unidad
+            let aciertos = 0;
 
-            // 2. Procesar cada partido (empezamos en 1 para saltar los encabezados)
+            // 2. Procesar cada partido
             for (let i = 1; i < lines.length; i++) {
                 const values = lines[i].split(',');
 
-                // Validación básica de fila
-                if (values.length < Math.max(DESIRED_ODD_INDEX, HOME_DANGER_INDEX, AWAY_DANGER_INDEX, TOTAL_SCORE_INDEX) + 1) {
-                    continue; 
-                }
+                // Validación de fila incompleta
+                if (values.length < TOTAL_SCORE_INDEX + 1) continue; 
 
-                // Obtener los datos clave del partido
+                // Obtener y Parsear datos clave
                 const desiredOdd = parseFloat(values[DESIRED_ODD_INDEX]);
+                const homeAttack = parseFloat(values[HOME_ATTACK_INDEX]);
+                const awayAttack = parseFloat(values[AWAY_ATTACK_INDEX]);
                 const homeDanger = parseFloat(values[HOME_DANGER_INDEX]);
                 const awayDanger = parseFloat(values[AWAY_DANGER_INDEX]);
                 const totalScore = parseFloat(values[TOTAL_SCORE_INDEX]);
 
-                // Calcular el indicador clave
-                const combinedDanger = homeDanger + awayDanger;
+                // 3. Crear el Indicador de Valor (el corazón de la estrategia)
+                const combinedAttackIndex = homeAttack + awayAttack + homeDanger + awayDanger;
 
                 // ----------------------------------------------------------------
-                // 🚀 ESTRATEGIA DE BACKTESTING: Over 2.5 Goles
+                // 🚀 CONDICIONES DE VALUE BETTING (OVER 2.5)
                 // ----------------------------------------------------------------
                 
-                // Aplicar el filtro de la estrategia
-                if (combinedDanger > DANGER_THRESHOLD) {
+                // CONDICIÓN 1: La cuota tiene valor percibido (la casa subestima el riesgo)
+                const isHighOdd = desiredOdd >= MIN_ODD_THRESHOLD;
+
+                // CONDICIÓN 2: Las métricas fundamentales justifican la apuesta (el partido es un "tiro al aire")
+                const isHighAttack = combinedAttackIndex >= MIN_ATTACK_THRESHOLD;
+                
+                // Si ambas condiciones se cumplen, ¡APOSTAMOS!
+                if (isHighOdd && isHighAttack) {
                     
                     totalApuestas++;
-                    let ganancia = -STAKE_SIZE; // Inicialmente, perdemos el Stake
+                    let ganancia = -STAKE_SIZE; // Perdedora
 
-                    // Chequear si se cumplió la apuesta (Over 2.5)
-                    // Apostamos a Over 2.5, por lo que necesitamos 3 o más goles.
                     const IS_WINNER = (totalScore >= 3); 
 
                     if (IS_WINNER) { 
-                        // Ganancia = (Cuota * Stake) - Stake
-                        ganancia = (desiredOdd * STAKE_SIZE) - STAKE_SIZE;
+                        // Ganancia = (Cuota - 1) * Stake
+                        ganancia = (desiredOdd - 1) * STAKE_SIZE;
+                        aciertos++;
                     }
                     
                     saldoFinal += ganancia;
                 }
             }
 
-            // 3. Mostrar Resultados
+            // 4. Mostrar Resultados Finales
             const totalInvested = totalApuestas * STAKE_SIZE;
             const profitabilityClass = (saldoFinal > 0) ? 'profit' : (saldoFinal < 0 ? 'loss' : 'neutral');
             const totalReturn = (totalInvested > 0) ? (saldoFinal / totalInvested) * 100 : 0;
+            const winRate = (totalApuestas > 0) ? (aciertos / totalApuestas) * 100 : 0;
+
 
             let htmlOutput = `
-                <h3>Resultados del Backtesting</h3>
-                <p><strong>Estrategia aplicada:</strong> Apuesta a **Over 2.5 Goles** si la suma de 'Home Danger' + 'Away Danger' es mayor a **${DANGER_THRESHOLD}**.</p>
+                <h3>Resultados del Value Backtesting</h3>
+                <p><strong>Estrategia aplicada:</strong> Apostar a **Over 2.5 Goles** si:</p>
+                <ul>
+                    <li>Cuota $\\ge$ **${MIN_ODD_THRESHOLD.toFixed(2)}** (Buscando Valor)</li>
+                    <li>Suma de (Attack + Danger) $\\ge$ **${MIN_ATTACK_THRESHOLD}** (Justificación Estadística)</li>
+                </ul>
                 <hr>
-                <p>➡️ Total de partidos analizados (filas): **${lines.length - 1}**</p>
-                <p>➡️ Total de apuestas realizadas por la estrategia: **${totalApuestas}**</p>
-                <p>➡️ Total invertido (unidades): **${totalInvested.toFixed(2)}**</p>
+                <p>➡️ Total de apuestas realizadas: **${totalApuestas}**</p>
+                <p>➡️ Tasa de acierto (Win Rate): **${winRate.toFixed(2)}%** (${aciertos} de ${totalApuestas})</p>
+                <p>➡️ Cuota promedio ganadora: **${(totalInvested / aciertos).toFixed(2)}**</p> 
                 <hr>
-                <h4>Balance Final</h4>
+                <h4>Balance Final (Unidades)</h4>
                 <p>G / P Netas (unidades): <span class="${profitabilityClass}">${saldoFinal.toFixed(2)} unidades</span></p>
                 <p>Retorno de Inversión (ROI): <span class="${profitabilityClass}">${totalReturn.toFixed(2)}%</span></p>
             `;
 
             resultsDiv.innerHTML = htmlOutput;
         }
+
     </script>
 
 </body>
