@@ -179,6 +179,7 @@
             statusMessage.classList.add('text-red-600');
             setTimeout(() => {
                 statusMessage.classList.remove('text-red-600');
+                statusMessage.textContent = ''; // Limpiar después de un tiempo
             }, 5000);
         }
 
@@ -202,28 +203,27 @@
         const leagueAnalysisEl = document.getElementById('leagueAnalysis');
         const streakAnalysisEl = document.getElementById('streakAnalysis');
 
-        // --- ASUNCIONES DE COLUMNAS (Ajustar según su CSV) ---
-        // ESTA ES LA ESTRUCTURA QUE EL CÓDIGO ASUME. AJUSTE LOS NOMBRES DE LAS PROPIEDADES 
-        // AL NOMBRE EXACTO DE LAS COLUMNAS EN SU ARCHIVO CSV.
-        // NOTA: EL PARSER AHORA ES MÁS FLEXIBLE, IGNORANDO ESPACIOS EXTRA AL COMPARAR LOS ENCABEZADOS.
+        // --- CONFIGURACIÓN DE COLUMNAS (ADAPTAR ESTO) ---
+        // CLAVE INTERNA (USADA POR EL MOTOR): 'NOMBRE EXACTO EN TU ARCHIVO CSV'
+        // ¡DEBES REVISAR QUE EL VALOR A LA DERECHA COINCIDA CON TUS ENCABEZADOS!
         const COLUMN_MAP = {
-            'Fecha': 'Date',
-            'Liga': 'League',
-            'EquipoLocal': 'HomeTeam',
-            'EquipoVisitante': 'AwayTeam',
-            'Resultado': 'FTResult', // Resultado Final: H, D, A (Local, Empate, Visitante)
-            'CuotaLocal': 'OddH',
-            'CuotaEmpate': 'OddD',
-            'CuotaVisitante': 'OddA',
+            'Date': 'Date',           // Columna de la fecha
+            'League': 'League',       // Columna del nombre de la liga
+            'HomeTeam': 'HomeTeam',   // Columna del equipo local (ej: Real Madrid)
+            'AwayTeam': 'AwayTeam',   // Columna del equipo visitante (ej: Barcelona)
+            'FTResult': 'FTR',        // Columna del resultado final ('H', 'D', o 'A')
+            'OddH': 'MaxH',           // Cuota de la victoria local (ej: Máxima Cuota Local)
+            'OddD': 'MaxD',           // Cuota del empate (ej: Máxima Cuota Empate)
+            'OddA': 'MaxA',           // Cuota de la victoria visitante (ej: Máxima Cuota Visitante)
         };
-        const REQUIRED_KEYS = Object.values(COLUMN_MAP); // Las claves internas que necesitamos
+        const INTERNAL_KEYS = Object.keys(COLUMN_MAP); // Las claves internas que necesitamos
 
 
         // --- FUNCIONES DE UTILIDAD Y CORE ---
 
         /**
          * Parsea el contenido de un archivo CSV a un array de objetos.
-         * Se ha mejorado para ser más robusto ante espacios en blanco y para reportar columnas faltantes.
+         * Usa el COLUMN_MAP para mapear los encabezados del CSV a las claves internas.
          * @param {string} csvText - Contenido crudo del archivo CSV.
          * @returns {Array<Object>} Array de objetos donde cada objeto es una fila.
          */
@@ -238,27 +238,28 @@
 
             // 1. Obtener cabeceras y limpiarlas (trim)
             const headerLine = lines[0].trim();
-            const rawHeaders = headerLine.split(',').map(h => h.trim());
+            // Asumiendo delimitador ',' (coma). Si usas ';', cambia aquí.
+            const rawHeaders = headerLine.split(',').map(h => h.trim()); 
 
-            // 2. Mapear las columnas requeridas (REQUIRED_KEYS) a los índices del CSV
+            // 2. Mapear las columnas requeridas (INTERNAL_KEYS) a los índices del CSV
             const headerIndexMap = {}; // Mapa: Clave Interna (ej: 'OddH') -> Índice de Columna
-            const missingColumns = [];
+            const missingCsvHeaders = [];
 
-            REQUIRED_KEYS.forEach(requiredKey => {
-                // Buscamos la columna en los encabezados crudos (ignorando espacios extra)
-                const index = rawHeaders.findIndex(rawHeader => rawHeader === requiredKey);
+            for (const internalKey of INTERNAL_KEYS) {
+                const csvHeaderName = COLUMN_MAP[internalKey]; 
+                
+                // Buscamos el nombre de la columna en los encabezados del archivo
+                const index = rawHeaders.findIndex(rawHeader => rawHeader === csvHeaderName);
                 
                 if (index === -1) {
-                    // Columna requerida no encontrada
-                    missingColumns.push(requiredKey);
+                    missingCsvHeaders.push(csvHeaderName);
                 } else {
-                    // Almacenar el índice
-                    headerIndexMap[requiredKey] = index;
+                    headerIndexMap[internalKey] = index;
                 }
-            });
+            }
             
-            if (missingColumns.length > 0) {
-                statusMessage.textContent = 'ERROR DE FORMATO: Faltan las siguientes columnas: ' + missingColumns.join(', ');
+            if (missingCsvHeaders.length > 0) {
+                statusMessage.textContent = `ERROR DE FORMATO: No se encontraron las columnas CSV: ${missingCsvHeaders.join(', ')}. Por favor, revise el COLUMN_MAP en el código.`;
                 runBacktestBtn.disabled = true;
                 return [];
             }
@@ -266,18 +267,19 @@
             // 3. Procesar las filas de datos
             const data = [];
             for (let i = 1; i < lines.length; i++) {
-                const values = lines[i].trim().split(',');
+                // Asumiendo delimitador ',' (coma). Si usas ';', cambia aquí.
+                const values = lines[i].trim().split(','); 
                 if (values.length !== rawHeaders.length) continue; // Saltar líneas con conteo incorrecto
 
                 const row = {};
                 
                 // Iterar sobre las claves internas que nos interesan
-                for (const requiredKey of REQUIRED_KEYS) {
-                    const index = headerIndexMap[requiredKey];
+                for (const internalKey of INTERNAL_KEYS) {
+                    const index = headerIndexMap[internalKey];
                     const val = values[index].trim();
                     
-                    // Convertir a número si es posible (importante para cuotas y resultados)
-                    row[requiredKey] = isNaN(parseFloat(val)) || val.length === 0 ? val : parseFloat(val);
+                    // Convertir a número si es posible (importante para cuotas)
+                    row[internalKey] = isNaN(parseFloat(val)) || val.length === 0 ? val : parseFloat(val);
                 }
                 data.push(row);
             }
@@ -292,6 +294,7 @@
          */
         function applyStrategy(match) {
             // EJEMPLO DE ESTRATEGIA: Apostar a la Victoria Local (H) si la cuota es >= 2.50
+            // Asegúrese de que la propiedad 'OddH' es un número
             
             const requiredOdd = 2.50;
 
@@ -317,6 +320,7 @@
             const actualResult = match.FTResult; // H, D, A
             let isWin = false;
 
+            // La propiedad FTResult debe contener 'H', 'D', o 'A'
             if (bet.betType === actualResult) {
                 isWin = true;
             }
@@ -402,7 +406,6 @@
                     if (currentCapital > peakCapital) {
                         peakCapital = currentCapital;
                     }
-                    // Evitar división por cero si el capital inicial es 0 (aunque el input lo impide)
                     const drawdown = peakCapital > 0 ? (peakCapital - currentCapital) / peakCapital : 0;
                     if (drawdown > maxDrawdown) {
                         maxDrawdown = drawdown;
@@ -652,7 +655,7 @@
                     } else {
                          // Si rawData está vacío, el error de parsing ya lo reportó en statusMessage
                         runBacktestBtn.disabled = true;
-                        buttonText.textContent = 'CSV Inválido. Reintentar.';
+                        buttonText.textContent = 'Corregir el COLUMN_MAP para Reintentar.';
                     }
                 };
                 reader.readAsText(file);
