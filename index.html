@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>⚽️ Analizador de Probabilidades de Goles (Largo y Corto Plazo)</title>
+    <title>⚽️ Analizador de Probabilidades de Goles (Multi-Métrica)</title>
     <style>
         /* --- Estilos CSS --- */
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; background-color: #eef2f7; }
@@ -99,6 +99,12 @@
         const RECENT_MATCH_COUNT = 10; 
         const WEIGHT_RECENT = 0.6; 
         const WEIGHT_HISTORICAL = 0.4; 
+
+        // Umbrales para la decisión final
+        const THRESHOLD_OVER_25 = 0.65; // 65% o más para recomendar fuerte +2.5
+        const THRESHOLD_UNDER_25 = 0.45; // 45% o menos para recomendar fuerte -2.5
+        const THRESHOLD_BTTS = 0.60; // 60% o más para recomendar fuerte BTTS Sí
+        const THRESHOLD_BTTS_NO = 0.40; // 40% o menos para recomendar fuerte BTTS No
 
 
         let matchHistory = [];
@@ -250,7 +256,7 @@
 
 
         // ---------------------------------------------
-        // FUNCIONES DE CÁLCULO DE PLAZOS
+        // FUNCIONES DE CÁLCULO DE PLAZOS Y POISSON
         // ---------------------------------------------
 
         /**
@@ -299,19 +305,11 @@
             };
         }
 
-        /**
-         * Calcula la probabilidad de que se anote un número específico de goles (x)
-         * utilizando la distribución de Poisson.
-         */
         function poissonProbability(x, lambda) {
             if (lambda === 0) return x === 0 ? 1 : 0;
-            // P(x; λ) = (λ^x * e^-λ) / x!
             return (Math.pow(lambda, x) * Math.exp(-lambda)) / factorial(x);
         }
 
-        /**
-         * Calcula el factorial de un número.
-         */
         function factorial(n) {
             if (n === 0 || n === 1) return 1;
             let result = 1;
@@ -335,7 +333,7 @@
                 return;
             }
 
-            // 1. Filtrar partidos de la liga y calcular la media de goles de la liga (Largo Plazo Base)
+            // 1. Goles Liga y Partidos de la Liga (Largo Plazo Base)
             const leagueMatches = matchHistory.filter(match => match.liga === selectedLeague);
             
             let totalLeagueGoals = 0;
@@ -352,28 +350,27 @@
             const historicalMatches = leagueMatches; 
             const recentMatches = leagueMatches.slice(-RECENT_MATCH_COUNT);
             
-            // 3. Calcular Índices para Largo Plazo
+            // 3. Calcular Índices para Largo y Corto Plazo
             const localIndicesHist = calculateTeamIndices(localTeam, visitorTeam, historicalMatches, avgLeagueGoals);
             const visitorIndicesHist = calculateTeamIndices(visitorTeam, localTeam, historicalMatches, avgLeagueGoals);
             
-            // 4. Calcular Índices para Corto Plazo (Reciente)
             const localIndicesRec = calculateTeamIndices(localTeam, visitorTeam, recentMatches, avgLeagueGoals);
             const visitorIndicesRec = calculateTeamIndices(visitorTeam, localTeam, recentMatches, avgLeagueGoals);
             
-            // 5. Aplicar Ponderación para obtener los Índices Finales (Mediano Plazo)
+            // 4. Aplicar Ponderación para obtener los Índices Finales (Mediano Plazo)
             const localAttackFinal = (localIndicesHist.attackIndex * WEIGHT_HISTORICAL) + (localIndicesRec.attackIndex * WEIGHT_RECENT);
             const localDefenseFinal = (localIndicesHist.defenseIndex * WEIGHT_HISTORICAL) + (localIndicesRec.defenseIndex * WEIGHT_RECENT);
             
             const visitorAttackFinal = (visitorIndicesHist.attackIndex * WEIGHT_HISTORICAL) + (visitorIndicesRec.attackIndex * WEIGHT_RECENT);
             const visitorDefenseFinal = (visitorIndicesHist.defenseIndex * WEIGHT_HISTORICAL) + (visitorIndicesRec.defenseIndex * WEIGHT_RECENT);
             
-            // 6. Calcular Goles Esperados (Lambda)
+            // 5. Calcular Goles Esperados (Lambda)
             const lambdaLocal = localAttackFinal * visitorDefenseFinal * avgLeagueGoals;
             const lambdaVisitor = visitorAttackFinal * localDefenseFinal * avgLeagueGoals;
             
             const totalXGoals = lambdaLocal + lambdaVisitor;
 
-            // 7. Calcular Probabilidades (Poisson)
+            // 6. Calcular Probabilidades (Poisson)
             let probOver25 = 0;
             let probBTTS = 0;
 
@@ -394,18 +391,20 @@
                 }
             }
             
-            const prob25_pct = (probOver25 * 100).toFixed(2);
-            const probBTTS_pct = (probBTTS * 100).toFixed(2);
+            const prob25_num = probOver25;
+            const probBTTS_num = probBTTS;
+            const prob25_pct = (prob25_num * 100).toFixed(2);
+            const probBTTS_pct = (probBTTS_num * 100).toFixed(2);
 
 
-            // --- 8. Mostrar Resultados ---
+            // --- 7. Mostrar Resultados ---
             document.getElementById('xGoals').textContent = `${localTeam}: ${lambdaLocal.toFixed(2)} | ${visitorTeam}: ${lambdaVisitor.toFixed(2)} (Total Esperado: ${totalXGoals.toFixed(2)})`;
             document.getElementById('prob25').textContent = `${prob25_pct}%`;
             document.getElementById('probBTTS').textContent = `${probBTTS_pct}%`;
             document.getElementById('results').style.display = 'block';
 
-            // --- 9. Análisis Personalizado y Recomendación Concreta ---
-            const analysisText = generatePlazosAnalysis(localTeam, visitorTeam, localIndicesHist, visitorIndicesHist, localIndicesRec, visitorIndicesRec, totalXGoals, avgLeagueGoals, prob25_pct, probBTTS_pct);
+            // --- 8. Análisis y Recomendación Concreta ---
+            const analysisText = generatePlazosAnalysis(localTeam, visitorTeam, localIndicesHist, visitorIndicesHist, localIndicesRec, visitorIndicesRec, totalXGoals, avgLeagueGoals, prob25_num, probBTTS_num);
             document.getElementById('personalAnalysis').innerHTML = analysisText.desglose;
             document.getElementById('finalRecommendation').innerHTML = `**DECISIÓN FINAL:** ${analysisText.recomendacion}`;
         }
@@ -421,58 +420,81 @@
             desglose += `* **Histórico (Largo Plazo):** Ataque: ${lH.attackIndex.toFixed(2)} | Defensa: ${lH.defenseIndex.toFixed(2)}<br>`;
             desglose += `* **Reciente (Corto Plazo, Últimos ${RECENT_MATCH_COUNT}):** Ataque: ${lR.attackIndex.toFixed(2)} | Defensa: ${lR.defenseIndex.toFixed(2)}<br>`;
 
-            if (lR.attackIndex > lH.attackIndex) {
-                desglose += `  - 📈 **Ataque en Forma:** El ataque de ${localT} ha **mejorado**.<br>`;
-            } else if (lR.attackIndex < lH.attackIndex) {
-                desglose += `  - 📉 **Ataque en Baja:** El ataque de ${localT} se ha **debilitado**.<br>`;
+            const localAttackForm = lR.attackIndex - lH.attackIndex;
+            const localDefenseForm = lH.defenseIndex - lR.defenseIndex; // Positivo = mejora (menos conceded)
+
+            if (localAttackForm > 0.1) {
+                desglose += `  - 📈 **Ataque en Forma (Fuerte):** El ataque de ${localT} ha **mejorado** significativamente.<br>`;
+            } else if (localAttackForm < -0.1) {
+                desglose += `  - 📉 **Ataque en Baja (Fuerte):** El ataque de ${localT} se ha **debilitado**.<br>`;
             }
-            if (lR.defenseIndex < lH.defenseIndex) {
-                desglose += `  - 🛡️ **Defensa Sólida:** La defensa de ${localT} ha **mejorado** (índice más bajo).<br>`;
-            } else if (lR.defenseIndex > lH.defenseIndex) {
-                desglose += `  - 🚨 **Defensa Débil:** La defensa de ${localT} se ha **debilitado** (índice más alto).<br>`;
+            if (localDefenseForm > 0.1) {
+                desglose += `  - 🛡️ **Defensa Sólida (Fuerte):** La defensa de ${localT} ha **mejorado**.<br>`;
+            } else if (localDefenseForm < -0.1) {
+                desglose += `  - 🚨 **Defensa Débil (Fuerte):** La defensa de ${localT} se ha **debilitado**.<br>`;
             }
             
             desglose += `<br>**Análisis de Plazos (${visitorT}):**<br>`;
             desglose += `* **Histórico (Largo Plazo):** Ataque: ${vH.attackIndex.toFixed(2)} | Defensa: ${vH.defenseIndex.toFixed(2)}<br>`;
             desglose += `* **Reciente (Corto Plazo, Últimos ${RECENT_MATCH_COUNT}):** Ataque: ${vR.attackIndex.toFixed(2)} | Defensa: ${vR.defenseIndex.toFixed(2)}<br>`;
 
-            if (vR.attackIndex > vH.attackIndex) {
-                desglose += `  - 📈 **Ataque en Forma:** El ataque de ${visitorT} ha **mejorado**.<br>`;
-            } else if (vR.attackIndex < vH.attackIndex) {
-                desglose += `  - 📉 **Ataque en Baja:** El ataque de ${visitorT} se ha **debilitado**.<br>`;
+            const visitorAttackForm = vR.attackIndex - vH.attackIndex;
+            const visitorDefenseForm = vH.defenseIndex - vR.defenseIndex; // Positivo = mejora
+
+            if (visitorAttackForm > 0.1) {
+                desglose += `  - 📈 **Ataque en Forma (Fuerte):** El ataque de ${visitorT} ha **mejorado** significativamente.<br>`;
+            } else if (visitorAttackForm < -0.1) {
+                desglose += `  - 📉 **Ataque en Baja (Fuerte):** El ataque de ${visitorT} se ha **debilitado**.<br>`;
             }
-            if (vR.defenseIndex < vH.defenseIndex) {
-                desglose += `  - 🛡️ **Defensa Sólida:** La defensa de ${visitorT} ha **mejorado** (índice más bajo).<br>`;
-            } else if (vR.defenseIndex > vH.defenseIndex) {
-                desglose += `  - 🚨 **Defensa Débil:** La defensa de ${visitorT} se ha **debilitado** (índice más alto).<br>`;
+            if (visitorDefenseForm > 0.1) {
+                desglose += `  - 🛡️ **Defensa Sólida (Fuerte):** La defensa de ${visitorT} ha **mejorado**.<br>`;
+            } else if (visitorDefenseForm < -0.1) {
+                desglose += `  - 🚨 **Defensa Débil (Fuerte):** La defensa de ${visitorT} se ha **debilitado**.<br>`;
             }
             
             desglose += `<br>---<br>`;
             
-            // --- Recomendación Concreta ---
+            // --- Lógica de Recomendación Concreta (Multi-Métrica) ---
             let recomendacion = '';
-            const p25_num = parseFloat(p25);
-            const pBTTS_num = parseFloat(pBTTS);
             
-            if (xG >= 2.8 || p25_num >= 65) {
-                if (pBTTS_num >= 60) {
-                    recomendacion = `¡ALTA PROBABILIDAD DE GOLES! ✅ Pronóstico: **Más de 2.5 Goles y Ambos Anotan (BTTS Sí)**.`;
-                } else if (lambdaLocal >= 2.0 || lambdaVisitor >= 2.0) {
-                    recomendacion = `¡GOLEADA UNILATERAL! ⚠️ Pronóstico: **Más de 2.5 Goles** (Goles Esperados: ${xG.toFixed(2)}).`;
+            const isLocalAttackingWell = localAttackForm > 0.1;
+            const isLocalDefendingBadly = localDefenseForm < -0.1;
+            const isVisitorAttackingWell = visitorAttackForm > 0.1;
+            const isVisitorDefendingBadly = visitorDefenseForm < -0.1;
+
+            const isHighGoalRisk = p25 >= THRESHOLD_OVER_25;
+            const isLowGoalRisk = p25 <= THRESHOLD_UNDER_25;
+            const isHighBTTS = pBTTS >= THRESHOLD_BTTS;
+            const isLowBTTS = pBTTS <= THRESHOLD_BTTS_NO;
+
+            // CASO 1: ALTO RIESGO DE GOLES (OFENSIVA)
+            if (isHighGoalRisk || xG >= 2.9) {
+                if (isHighBTTS) {
+                    recomendacion = `¡ALTA CONFIANZA! ✅ Pronóstico: **Más de 2.5 Goles y Ambos Anotan (BTTS Sí)**. La ofensiva de ambos equipos es fuerte.`;
+                } else if (isLocalAttackingWell && isVisitorDefendingBadly) {
+                    recomendacion = `GOLEADA LOCAL PROBABLE. ⚠️ Pronóstico: **Más de 2.5 Goles** (El Local está en mejor forma).`;
+                } else if (isVisitorAttackingWell && isLocalDefendingBadly) {
+                     recomendacion = `GOLEADA VISITANTE PROBABLE. ⚠️ Pronóstico: **Más de 2.5 Goles** (El Visitante está en mejor forma).`;
                 } else {
-                    recomendacion = `BUENA OPCIÓN DE GOL. ✅ Pronóstico: **Más de 2.5 Goles**.`;
+                    recomendacion = `BUENA OPCIÓN DE GOL. ✅ Pronóstico: **Más de 2.5 Goles**. (Goles Esperados: ${xG.toFixed(2)}).`;
                 }
-            } else if (xG <= 2.2 || p25_num <= 45) {
-                if (pBTTS_num <= 45) {
-                    recomendacion = `PARTIDO CERRADO Y TÁCTICO. ❌ Pronóstico: **Menos de 2.5 Goles y Ambos Anotan (BTTS No)**.`;
+            } 
+            // CASO 2: BAJO RIESGO DE GOLES (DEFENSIVA)
+            else if (isLowGoalRisk || xG <= 2.1) {
+                if (isLowBTTS) {
+                    recomendacion = `PARTIDO CERRADO Y SEGURO. ❌ Pronóstico: **Menos de 2.5 Goles y Ambos Anotan (BTTS No)**.`;
                 } else {
-                    recomendacion = `TENDENCIA AL BAJO. 🟡 Pronóstico: **Menos de 2.5 Goles**.`;
+                    recomendacion = `TENDENCIA AL BAJO. 🟡 Pronóstico: **Menos de 2.5 Goles**. (Defensas en buena forma).`;
                 }
-            } else { // Rango medio (2.2 < xG < 2.8)
-                if (pBTTS_num >= 60) {
-                     recomendacion = `POSIBLE 1-1 O 2-1 AJUSTADO. 🤝 Pronóstico: **Ambos Anotan (BTTS Sí)**. La línea 2.5 es un riesgo.`;
+            } 
+            // CASO 3: RANGO MEDIO (INCERTEZA EN EL 2.5)
+            else { 
+                if (isHighBTTS) {
+                     recomendacion = `ENFRENTAMIENTO EQUILIBRADO Y CON GOLES. 🤝 Pronóstico: **Ambos Anotan (BTTS Sí)**. La línea 2.5 es muy ajustada.`;
+                } else if (isLowBTTS) {
+                    recomendacion = `ESPERAMOS UN GANADOR SIN RESPUESTA. 🟨 Pronóstico: **Menos de 3.5 Goles**. (Posible 1-0 o 2-0).`;
                 } else {
-                     recomendacion = `PREDICCIÓN INCIERTA. ❓ Se recomienda **revisar el mercado de Menos de 3.5 Goles** o buscar apuestas individuales por equipo.`;
+                     recomendacion = `PREDICCIÓN INCIERTA. ❓ Se recomienda cautela. Analizar si la forma reciente (corto plazo) tiene más peso que el historial.`;
                 }
             }
 
