@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>📊 Calculadora Poisson Ponderada (Pura)</title>
+    <title>📊 Calculadora Poisson Ponderada (Pura) - Corregido</title>
     <style>
         /* --- Estilos Globales Dark Mode (Azul Rey) --- */
         :root {
@@ -260,12 +260,12 @@
                             <td id="visitorAvgConceded"></td>
                         </tr>
                         <tr>
-                            <td>Índice de Ataque (vs. Base Ponderada)</td>
+                            <td>Índice de Ataque (para este partido)</td>
                             <td id="localAttackIndex"></td>
                             <td id="visitorAttackIndex"></td>
                         </tr>
                         <tr>
-                            <td>Índice de Defensa (vs. Base Ponderada)</td>
+                            <td>Índice de Defensa (para este partido)</td>
                             <td id="localDefenseIndex"></td>
                             <td id="visitorDefenseIndex"></td>
                         </tr>
@@ -284,6 +284,7 @@
         const THRESHOLD_UNDER_25 = 0.45; // 45% o menos para recomendar UNDER
         const THRESHOLD_BTTS = 0.60;    // 60% o más para recomendar BTTS SÍ
         const THRESHOLD_BTTS_NO = 0.40; // 40% o menos para recomendar BTTS NO
+        const MAX_GOALS = 10; // ampliado para cubrir la mayor parte del soporte de Poisson
 
         let matchHistory = [];
         const leagueSelect = document.getElementById('leagueSelect');
@@ -455,64 +456,89 @@
             
             // 1. CALCULAR LA BASE PONDERADA DE LA LIGA (ÚLTIMOS 10 POR EQUIPO)
             const teamNames = Array.from(new Set(leagueMatches.flatMap(m => [m.local, m.visitante])));
-            
-            let totalWeightedLocalGoals = 0;
-            let totalWeightedVisitorGoals = 0;
-            let totalWeightedMatches = 0;
+
+            // VARIABLES PARA ACUMULAR CORRECTAMENTE
+            let totalWeightedLocalGoals = 0; // suma de goles anotados por equipos CUANDO juegan de LOCAL
+            let totalWeightedVisitorGoals = 0; // suma de goles anotados por equipos CUANDO juegan de VISITANTE
+            let totalWeightedLocalMatches = 0; // partidos usados como local
+            let totalWeightedVisitorMatches = 0; // partidos usados como visitante
 
             teamNames.forEach(team => {
+                // obtenemos los últimos RECENT_MATCH_COUNT partidos donde el equipo aparece (ordenados por fecha asc)
                 const recentMatches = leagueMatches
                     .filter(m => m.local.toLowerCase() === team.toLowerCase() || m.visitante.toLowerCase() === team.toLowerCase())
                     .slice(-RECENT_MATCH_COUNT);
                 
                 recentMatches.forEach(match => {
-                    totalWeightedLocalGoals += match.golesLocal;
-                    totalWeightedVisitorGoals += match.golesVisitante;
-                    totalWeightedMatches++;
+                    // Si en este partido el equipo fue local -> sumar goles locales a totalWeightedLocalGoals
+                    if (match.local.toLowerCase() === team.toLowerCase()) {
+                        totalWeightedLocalGoals += match.golesLocal;
+                        totalWeightedLocalMatches++;
+                    }
+                    // Si en este partido el equipo fue visitante -> sumar goles visitantes a totalWeightedVisitorGoals
+                    if (match.visitante.toLowerCase() === team.toLowerCase()) {
+                        totalWeightedVisitorGoals += match.golesVisitante;
+                        totalWeightedVisitorMatches++;
+                    }
                 });
             });
 
-            if (totalWeightedMatches === 0) {
-                 alert("No hay suficientes datos recientes en esta liga para la ponderación.");
+            if (totalWeightedLocalMatches === 0 || totalWeightedVisitorMatches === 0) {
+                 alert("No hay suficientes datos recientes en esta liga para la ponderación o la división de local/visitante.");
                  return;
             }
 
-            // Promedios Ponderados de la Liga
-            const avgLocalScoredPonderado = totalWeightedMatches > 0 ? (totalWeightedLocalGoals / totalWeightedMatches) : 1;
-            const avgVisitorScoredPonderado = totalWeightedMatches > 0 ? (totalWeightedVisitorGoals / totalWeightedMatches) : 1;
+            // Promedios Ponderados de la Liga (Goles por Partido en la muestra de 10)
+            const avgLeagueLocalScored = totalWeightedLocalGoals / totalWeightedLocalMatches;
+            const avgLeagueVisitorScored = totalWeightedVisitorGoals / totalWeightedVisitorMatches;
             
-            // Invertimos las concedidas, ya que en la liga:
-            const avgLocalConcededPonderado = avgVisitorScoredPonderado; 
-            const avgVisitorConcededPonderado = avgLocalScoredPonderado; 
+            // La media de Goles Concedidos por local es igual a la media de Goles Anotados por visitante.
+            const avgLeagueLocalConceded = avgLeagueVisitorScored; 
+            // La media de Goles Concedidos por visitante es igual a la media de Goles Anotados por local.
+            const avgLeagueVisitorConceded = avgLeagueLocalScored; 
+            
+            // ----------------------------------------------------------------------------------------------------------------
+            // 2. OBTENER ESTADÍSTICAS Y CÁLCULAR ÍNDICES ESPECÍFICOS PARA EL ENCUENTRO
+            // Se calcula el índice del Local jugando de Local y el índice del Visitante jugando de Visitante.
+            // ----------------------------------------------------------------------------------------------------------------
 
-            
-            // 2. Obtener Partidos Recientes y Estadísticas del Equipo
-            const localRecentMatches = leagueMatches.filter(m => m.local.toLowerCase() === localTeam.toLowerCase() || m.visitante.toLowerCase() === localTeam.toLowerCase()).slice(-RECENT_MATCH_COUNT);
-            const visitorRecentMatches = leagueMatches.filter(m => m.local.toLowerCase() === visitorTeam.toLowerCase() || m.visitante.toLowerCase() === visitorTeam.toLowerCase()).slice(-RECENT_MATCH_COUNT);
-            
-            // 3. Calcular Índices del Equipo usando la Base Ponderada de la Liga
-            const localRecStats = calculateTeamIndicesAndStats(
-                localTeam, localRecentMatches, 
-                avgLocalScoredPonderado, avgLocalConcededPonderado, 
-                avgVisitorScoredPonderado, avgVisitorConcededPonderado
-            );
-            const visitorRecStats = calculateTeamIndicesAndStats(
-                visitorTeam, visitorRecentMatches, 
-                avgLocalScoredPonderado, avgLocalConcededPonderado, 
-                avgVisitorScoredPonderado, avgVisitorConcededPonderado
+            const localStats = calculateTeamIndicesAndStats(
+                localTeam, leagueMatches, 
+                'LOCAL', avgLeagueLocalScored, avgLeagueLocalConceded, 
+                avgLeagueVisitorScored, avgLeagueVisitorConceded
             );
             
-            // 4. Calcular Goles Esperados (Lambda) - Modelo de Corto Plazo (Poisson)
-            const lambdaLocal = localRecStats.attackIndex * visitorRecStats.defenseIndex * avgLocalScoredPonderado;
-            const lambdaVisitor = visitorRecStats.attackIndex * localRecStats.defenseIndex * avgVisitorScoredPonderado;
+            const visitorStats = calculateTeamIndicesAndStats(
+                visitorTeam, leagueMatches, 
+                'VISITOR', avgLeagueLocalScored, avgLeagueLocalConceded, 
+                avgLeagueVisitorScored, avgLeagueVisitorConceded
+            );
+            
+            // ----------------------------------------------------------------------------------------------------------------
+            // 3. CALCULAR GOLES ESPERADOS (LAMBDA) - MODELO POISSON
+            // ----------------------------------------------------------------------------------------------------------------
+            
+            // Local vs Visitante (índices específicos)
+            const attackLocal = localStats.attackIndex; 
+            const defenseLocal = localStats.defenseIndex;
+
+            const attackVisitor = visitorStats.attackIndex;
+            const defenseVisitor = visitorStats.defenseIndex;
+            
+            // Goles Esperados para el Local: Ataque_Local * Defensa_Visitante * Base_Local_Anotados
+            const lambdaLocal = attackLocal * defenseVisitor * avgLeagueLocalScored;
+            // Goles Esperados para el Visitante: Ataque_Visitante * Defensa_Local * Base_Visitante_Anotados
+            const lambdaVisitor = attackVisitor * defenseLocal * avgLeagueVisitorScored;
+            
             const totalXGoals = lambdaLocal + lambdaVisitor;
 
-            // 5. Calcular Probabilidades (Poisson)
+            // 4. Calcular Probabilidades (Poisson)
             let poissonProb25 = 0;
             let poissonProbBTTS = 0;
 
-            for (let G_local = 0; G_local <= 5; G_local++) {
-                for (let G_visitor = 0; G_visitor <= 5; G_visitor++) {
+            // BARRIDO AMPLIADO HASTA MAX_GOALS
+            for (let G_local = 0; G_local <= MAX_GOALS; G_local++) {
+                for (let G_visitor = 0; G_visitor <= MAX_GOALS; G_visitor++) {
                     const P_local = poissonProbability(G_local, lambdaLocal);
                     const P_visitor = poissonProbability(G_visitor, lambdaVisitor);
                     const P_match = P_local * P_visitor;
@@ -526,10 +552,10 @@
                 }
             }
             
-            // --- 6. Mostrar Resultados en la Interfaz ---
+            // --- 5. Mostrar Resultados en la Interfaz ---
             
-            document.getElementById('leagueWeightedAvg').textContent = `Local: ${avgLocalScoredPonderado.toFixed(3)} Goles | Visitante: ${avgVisitorScoredPonderado.toFixed(3)} Goles`;
-            document.getElementById('xGoals').textContent = `${localTeam} (${lambdaLocal.toFixed(2)}) | ${visitorTeam} (${lambdaVisitor.toFixed(2)}) - Total Esperado: ${totalXGoals.toFixed(2)} Goles.`;
+            document.getElementById('leagueWeightedAvg').textContent = `Local Anota: ${avgLeagueLocalScored.toFixed(3)} | Visitante Anota: ${avgLeagueVisitorScored.toFixed(3)}`;
+            document.getElementById('xGoals').textContent = `${localTeam} ($\\lambda$: ${lambdaLocal.toFixed(2)}) | ${visitorTeam} ($\\lambda$: ${lambdaVisitor.toFixed(2)}) - Total Esperado: ${totalXGoals.toFixed(2)} Goles.`;
             
             document.getElementById('prob25Poisson').innerHTML = `<span class="prob-badge">${(poissonProb25 * 100).toFixed(2)}%</span>`;
             document.getElementById('probBTTSPoisson').innerHTML = `<span class="prob-badge">${(poissonProbBTTS * 100).toFixed(2)}%</span>`;
@@ -537,26 +563,25 @@
             // Rellenar la tabla de estadísticas observadas
             document.getElementById('localTeamStatHeader').textContent = localTeam;
             document.getElementById('visitorTeamStatHeader').textContent = visitorTeam;
-            document.getElementById('localAvgScored').textContent = localRecStats.avgScored;
-            document.getElementById('visitorAvgScored').textContent = visitorRecStats.avgScored;
-            document.getElementById('localAvgConceded').textContent = localRecStats.avgConceded;
-            document.getElementById('visitorAvgConceded').textContent = visitorRecStats.avgConceded;
-            document.getElementById('localAttackIndex').textContent = localRecStats.attackIndex.toFixed(3);
-            document.getElementById('visitorAttackIndex').textContent = visitorRecStats.attackIndex.toFixed(3);
-            document.getElementById('localDefenseIndex').textContent = localRecStats.defenseIndex.toFixed(3);
-            document.getElementById('visitorDefenseIndex').textContent = visitorRecStats.defenseIndex.toFixed(3);
+            document.getElementById('localAvgScored').textContent = localStats.avgScored;
+            document.getElementById('visitorAvgScored').textContent = visitorStats.avgScored;
+            document.getElementById('localAvgConceded').textContent = localStats.avgConceded;
+            document.getElementById('visitorAvgConceded').textContent = visitorStats.avgConceded;
+            document.getElementById('localAttackIndex').textContent = localStats.attackIndex.toFixed(3);
+            document.getElementById('visitorAttackIndex').textContent = visitorStats.attackIndex.toFixed(3);
+            document.getElementById('localDefenseIndex').textContent = localStats.defenseIndex.toFixed(3);
+            document.getElementById('visitorDefenseIndex').textContent = visitorStats.defenseIndex.toFixed(3);
 
             document.getElementById('results').style.display = 'block';
 
-            // --- 7. Recomendación Concreta ---
-            // Solo pasamos el totalXGoals (para el texto) y las probabilidades Poisson
+            // --- 6. Recomendación Concreta ---
             const recomendacion = generateRecommendation(totalXGoals, poissonProb25, poissonProbBTTS);
             const recElement = document.getElementById('finalRecommendation');
             
             recElement.className = 'recommendation'; 
             recElement.innerHTML = `**DECISIÓN FINAL:** ${recomendacion.texto}`;
 
-            // Aplicar estilo dinámico (basado PUREMENTE en Poisson)
+            // Aplicar estilo dinámico
             if (poissonProb25 >= THRESHOLD_OVER_25) {
                 recElement.classList.add('rec-over');
             } else if (poissonProb25 <= THRESHOLD_UNDER_25) {
@@ -569,60 +594,62 @@
         }
         
         /**
-         * Calcula índices de Ataque/Defensa separando Local/Visitante usando la Base Ponderada.
+         * Calcula el índice de Ataque/Defensa para un equipo, considerando su condición (LOCAL o VISITOR) en el partido actual.
          */
-        function calculateTeamIndicesAndStats(teamName, matches, avgLocalScored, avgLocalConceded, avgVisitorScored, avgVisitorConceded) {
+        function calculateTeamIndicesAndStats(teamName, leagueMatches, condition, avgLeagueLocalScored, avgLeagueLocalConceded, avgLeagueVisitorScored, avgLeagueVisitorConceded) {
+            
+            const teamLC = teamName.toLowerCase();
+            
+            // Filtramos solo los partidos que coinciden con la condición (Local vs Visitante)
+            const filteredMatches = leagueMatches
+                .filter(m => {
+                    const isTeamMatch = m.local.toLowerCase() === teamLC || m.visitante.toLowerCase() === teamLC;
+                    if (condition === 'LOCAL') {
+                        return isTeamMatch && m.local.toLowerCase() === teamLC;
+                    } else if (condition === 'VISITOR') {
+                        return isTeamMatch && m.visitante.toLowerCase() === teamLC;
+                    }
+                    return false;
+                })
+                .slice(-RECENT_MATCH_COUNT); // Últimos N partidos en esa condición (Local/Visitante)
+
             let matchesCount = 0;
-            let scored = 0;
-            let conceded = 0;
-            
-            let attackIndexSum = 0;
-            let defenseIndexSum = 0;
-            
-            if (matches.length === 0) {
+            let totalScored = 0;
+            let totalConceded = 0;
+
+            if (filteredMatches.length === 0) {
+                 // Si no hay partidos con esa condición, usamos el índice neutro (1) y promedios 0.
                  return { attackIndex: 1, defenseIndex: 1, matchesCount: 0, avgScored: 0, avgConceded: 0 }; 
             }
             
-            const teamLC = teamName.toLowerCase();
-
-            matches.forEach(match => {
+            filteredMatches.forEach(match => {
                 const isLocal = match.local.toLowerCase() === teamLC;
                 
-                if (isLocal || match.visitante.toLowerCase() === teamLC) {
-                    matchesCount++;
-                    
-                    const G_scored = isLocal ? match.golesLocal : match.golesVisitante;
-                    const G_conceded = isLocal ? match.golesVisitante : match.golesLocal;
-                    
-                    scored += G_scored;
-                    conceded += G_conceded;
-
-                    // Cálculo de índices por condición 
-                    let attackIndex_match = 1;
-                    let defenseIndex_match = 1;
-                    
-                    if (isLocal) {
-                        attackIndex_match = (avgLocalScored > 0) ? (G_scored / avgLocalScored) : 1;
-                        defenseIndex_match = (avgLocalConceded > 0) ? (G_conceded / avgLocalConceded) : 1; 
-                    } else { 
-                        attackIndex_match = (avgVisitorScored > 0) ? (G_scored / avgVisitorScored) : 1;
-                        defenseIndex_match = (avgVisitorConceded > 0) ? (G_conceded / avgVisitorConceded) : 1; 
-                    }
-                    
-                    attackIndexSum += attackIndex_match;
-                    defenseIndexSum += defenseIndex_match;
-                }
+                const G_scored = isLocal ? match.golesLocal : match.golesVisitante;
+                const G_conceded = isLocal ? match.golesVisitante : match.golesLocal;
+                
+                totalScored += G_scored;
+                totalConceded += G_conceded;
+                matchesCount++;
             });
             
-            if (matchesCount === 0) {
-                return { attackIndex: 1, defenseIndex: 1, matchesCount: 0, avgScored: 0, avgConceded: 0 }; 
+            const avgScored = totalScored / matchesCount;
+            const avgConceded = totalConceded / matchesCount;
+
+            let attackIndex = 1;
+            let defenseIndex = 1;
+            
+            if (condition === 'LOCAL') {
+                // Índice Ataque Local = (Goles Anotados/P. Jugados como Local) / (Media de Goles Anotados por Local en la Liga)
+                attackIndex = (avgLeagueLocalScored > 0) ? (avgScored / avgLeagueLocalScored) : 1;
+                // Índice Defensa Local = (Goles Recibidos/P. Jugados como Local) / (Media de Goles Recibidos por Local en la Liga)
+                defenseIndex = (avgLeagueLocalConceded > 0) ? (avgConceded / avgLeagueLocalConceded) : 1; 
+            } else if (condition === 'VISITOR') {
+                // Índice Ataque Visitante = (Goles Anotados/P. Jugados como Visitante) / (Media de Goles Anotados por Visitante en la Liga)
+                attackIndex = (avgLeagueVisitorScored > 0) ? (avgScored / avgLeagueVisitorScored) : 1;
+                // Índice Defensa Visitante = (Goles Recibidos/P. Jugados como Visitante) / (Media de Goles Recibidos por Visitante en la Liga)
+                defenseIndex = (avgLeagueVisitorConceded > 0) ? (avgConceded / avgLeagueVisitorConceded) : 1; 
             }
-
-            const avgScored = scored / matchesCount;
-            const avgConceded = conceded / matchesCount;
-
-            const attackIndex = attackIndexSum / matchesCount;
-            const defenseIndex = defenseIndexSum / matchesCount;
             
             return {
                 attackIndex: parseFloat(attackIndex.toFixed(3)), 
@@ -635,9 +662,6 @@
 
         /**
          * Genera la recomendación final basada SÓLO en las probabilidades Poisson.
-         * @param {number} xG Goles esperados (solo para el texto).
-         * @param {number} p25 Probabilidad Poisson de Más de 2.5 goles.
-         * @param {number} pBTTS Probabilidad Poisson de Ambos Anotan.
          */
         function generateRecommendation(xG, p25, pBTTS) {
             let texto = '';
@@ -648,7 +672,6 @@
             const isLowBTTS = pBTTS <= THRESHOLD_BTTS_NO;
 
             if (isHighGoalRisk) {
-                // Foco principal: OVER 2.5
                 if (isHighBTTS) {
                     texto = `¡ALTA OFENSIVA! ✅ **OVER 2.5 Goles y Ambos Anotan (BTTS Sí)**. El modelo Poisson Ponderado anticipa un marcador abultado.`;
                 } else {
@@ -656,7 +679,6 @@
                 }
             } 
             else if (isLowGoalRisk) {
-                // Foco principal: UNDER 2.5
                 if (isLowBTTS) {
                     texto = `PARTIDO CERRADO Y SEGURO. 🛑 **UNDER 2.5 Goles y BTTS No**. Las probabilidades del modelo sugieren un marcador bajo y defensivo.`;
                 } else {
@@ -664,7 +686,6 @@
                 }
             } 
             else { 
-                // OVER/UNDER 2.5 está en zona gris (entre 45% y 65%)
                 if (isHighBTTS) {
                      texto = `EQUILIBRADO CON GOLES MUTUOS. 🤝 **Ambos Anotan (BTTS Sí)**. El Poisson sitúa el Over/Under 2.5 en un volado, pero la probabilidad de que ambos marquen es fuerte.`;
                 } else {
