@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>⚽️ Analizador de Probabilidades de Goles (JSON) - Final</title>
+    <title>⚽️ Analizador de Probabilidades de Goles (JSON) - Final Corregido</title>
     <style>
         /* --- Estilos CSS --- */
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; background-color: #eef2f7; }
@@ -43,7 +43,7 @@
 
         <label for="jsonFile">**1. Cargar Historial de Partidos (JSON):**</label>
         <input type="file" id="jsonFile" accept=".json">
-        <p class="info">El JSON ahora necesita una clave **`liga`**, además de `local`, `visitante`, `golesLocal`, `golesVisitante`.</p>
+        <p class="info">El JSON debe incluir las claves `local`, `visitante`, `golesLocal`, `golesVisitante` y **opcionalmente** `liga` (si no está, se agrupa como "Sin Liga").</p>
 
         <hr>
 
@@ -53,12 +53,11 @@
         </select>
 
         <label for="localTeam">**3. Equipo Local:**</label>
-        <input type="text" id="localTeam" list="localTeamsList" placeholder="Seleccione la liga para ver los equipos" disabled>
-        <datalist id="localTeamsList"></datalist>
+        <input type="text" id="localTeam" list="teamsList" placeholder="Seleccione la liga para ver los equipos" disabled>
+        <datalist id="teamsList"></datalist>
 
         <label for="visitorTeam">**4. Equipo Visitante:**</label>
-        <input type="text" id="visitorTeam" list="visitorTeamsList" placeholder="Seleccione la liga para ver los equipos" disabled>
-        <datalist id="visitorTeamsList"></datalist>
+        <input type="text" id="visitorTeam" list="teamsList" placeholder="Seleccione la liga para ver los equipos" disabled>
 
         <button onclick="analyzeData()">Analizar Probabilidades</button>
 
@@ -78,25 +77,26 @@
     </div>
 
     <script>
-        // --- Lógica JavaScript Final ---
+        // --- Lógica JavaScript Final Corregida ---
         
         let matchHistory = [];
         const leagueSelect = document.getElementById('leagueSelect');
         const localTeamInput = document.getElementById('localTeam');
         const visitorTeamInput = document.getElementById('visitorTeam');
-        const localTeamsList = document.getElementById('localTeamsList');
-        const visitorTeamsList = document.getElementById('visitorTeamsList');
-
+        const teamsList = document.getElementById('teamsList');
 
         // Función para limpiar y estandarizar los datos del JSON
         function cleanAndMapData(data) {
             return data.map(match => ({
-                liga: match.liga ? match.liga.trim() : 'Sin Liga', // Nuevo campo 'liga'
-                local: match.local ? match.local.trim() : '',
-                visitante: match.visitante ? match.visitante.trim() : '',
+                // Intenta obtener 'liga'; si no existe, usa 'Sin Liga'.
+                liga: match.liga ? String(match.liga).trim() : 'Sin Liga', 
+                // Aseguramos que los nombres sean cadenas y estén limpios
+                local: match.local ? String(match.local).trim() : '',
+                visitante: match.visitante ? String(match.visitante).trim() : '',
+                // Aseguramos que los goles sean números enteros
                 golesLocal: parseInt(match.golesLocal) || 0,
                 golesVisitante: parseInt(match.golesVisitante) || 0,
-            }));
+            })).filter(match => match.local && match.visitante); // Filtramos partidos sin equipos
         }
 
         // Manejador para la carga de archivo JSON
@@ -119,6 +119,7 @@
                         alert("❌ Error al parsear el archivo JSON. Asegúrate de que el formato sea un array de objetos válido.");
                         console.error("Error de parseo JSON:", error);
                         matchHistory = []; 
+                        leagueSelect.disabled = true;
                     }
                 };
                 reader.readAsText(file);
@@ -134,6 +135,8 @@
             const uniqueLeagues = new Set();
             matchHistory.forEach(match => uniqueLeagues.add(match.liga));
 
+            console.log("Ligas detectadas:", Array.from(uniqueLeagues));
+
             // Limpiar selector y añadir opción por defecto
             leagueSelect.innerHTML = '<option value="">-- Seleccione una Liga --</option>';
             uniqueLeagues.forEach(league => {
@@ -142,6 +145,7 @@
                 option.textContent = league;
                 leagueSelect.appendChild(option);
             });
+            
             leagueSelect.disabled = false;
         }
 
@@ -154,8 +158,7 @@
             if (!selectedLeague) {
                 localTeamInput.disabled = true;
                 visitorTeamInput.disabled = true;
-                localTeamsList.innerHTML = '';
-                visitorTeamsList.innerHTML = '';
+                teamsList.innerHTML = '';
                 return;
             }
 
@@ -168,17 +171,14 @@
                 if (match.visitante) uniqueTeams.add(match.visitante);
             });
 
-            // Rellenar Datalists
-            localTeamsList.innerHTML = '';
-            visitorTeamsList.innerHTML = '';
+            console.log(`Equipos en ${selectedLeague}:`, Array.from(uniqueTeams));
+
+            // Rellenar Datalist
+            teamsList.innerHTML = '';
             uniqueTeams.forEach(team => {
-                const optionLocal = document.createElement('option');
-                optionLocal.value = team;
-                localTeamsList.appendChild(optionLocal);
-                
-                const optionVisitor = document.createElement('option');
-                optionVisitor.value = team;
-                visitorTeamsList.appendChild(optionVisitor);
+                const option = document.createElement('option');
+                option.value = team;
+                teamsList.appendChild(option);
             });
 
             localTeamInput.disabled = false;
@@ -194,6 +194,7 @@
 
         function analyzeData() {
             const selectedLeague = leagueSelect.value;
+            // Usamos .toLowerCase() en los valores de entrada para asegurar coincidencia
             const localTeam = localTeamInput.value.trim();
             const visitorTeam = visitorTeamInput.value.trim();
             
@@ -215,19 +216,26 @@
                 return;
             }
 
+            const localTeamLC = localTeam.toLowerCase();
+            const visitorTeamLC = visitorTeam.toLowerCase();
+
 
             // 2. Filtrar partidos relevantes: SOLO de la liga seleccionada, donde participen AMBOS equipos.
-            const relevantMatches = matchHistory.filter(match => 
-                match.liga === selectedLeague && (
-                    (match.local.toLowerCase() === localTeam.toLowerCase() || match.visitante.toLowerCase() === localTeam.toLowerCase()) &&
-                    (match.local.toLowerCase() === visitorTeam.toLowerCase() || match.visitante.toLowerCase() === visitorTeam.toLowerCase())
-                )
-            );
+            const relevantMatches = matchHistory.filter(match => {
+                const matchLocalLC = match.local.toLowerCase();
+                const matchVisitorLC = match.visitante.toLowerCase();
+
+                // Debe pertenecer a la liga seleccionada Y deben ser los dos equipos los que jugaron
+                return match.liga === selectedLeague && (
+                    (matchLocalLC === localTeamLC && matchVisitorLC === visitorTeamLC) ||
+                    (matchLocalLC === visitorTeamLC && matchVisitorLC === localTeamLC)
+                );
+            });
 
             if (relevantMatches.length === 0) {
                 document.getElementById('prob25').textContent = "N/A";
                 document.getElementById('probBTTS').textContent = "N/A";
-                document.getElementById('personalAnalysis').innerHTML = `No se encontraron enfrentamientos directos (${localTeam} vs ${visitorTeam}) en la liga **${selectedLeague}** dentro del historial cargado.`;
+                document.getElementById('personalAnalysis').innerHTML = `No se encontraron **enfrentamientos directos** (${localTeam} vs ${visitorTeam}) en la liga **${selectedLeague}** dentro del historial cargado. Asegúrate de usar los nombres completos de la lista.`;
                 document.getElementById('results').style.display = 'block';
                 return;
             }
@@ -249,38 +257,38 @@
                 const G_local = match.golesLocal; 
                 const G_visitor = match.golesVisitante;
                 
-                // a) Goles Totales
+                // Goles Totales
                 const totalGoles = G_local + G_visitor;
                 if (totalGoles > 2.5) {
                     countOver25++;
                 }
                 totalGoals += totalGoles;
 
-                // b) Ambos Anotan (BTTS)
+                // Ambos Anotan (BTTS)
                 if (G_local > 0 && G_visitor > 0) {
                     countBTTS++;
                 }
 
-                // c) Conteo de Goles y Concedidos (enfrentamientos directos)
+                // Conteo de Goles y Concedidos (ajustado para usar las variables LC)
                 
                 // Si el Local del partido es el Local del análisis
-                if (match.local.toLowerCase() === localTeam.toLowerCase()) {
+                if (match.local.toLowerCase() === localTeamLC) {
                     localScored += G_local;
                     localConceded += G_visitor;
                 } 
                 // Si el Visitante del partido es el Local del análisis
-                else if (match.visitante.toLowerCase() === localTeam.toLowerCase()) {
+                else if (match.visitante.toLowerCase() === localTeamLC) {
                     localScored += G_visitor;
                     localConceded += G_local;
                 }
 
                 // Si el Local del partido es el Visitante del análisis
-                if (match.local.toLowerCase() === visitorTeam.toLowerCase()) {
+                if (match.local.toLowerCase() === visitorTeamLC) {
                     visitorScored += G_local;
                     visitorConceded += G_visitor;
                 }
                 // Si el Visitante del partido es el Visitante del análisis
-                else if (match.visitante.toLowerCase() === visitorTeam.toLowerCase()) {
+                else if (match.visitante.toLowerCase() === visitorTeamLC) {
                     visitorScored += G_visitor;
                     visitorConceded += G_local;
                 }
@@ -309,15 +317,13 @@
             document.getElementById('personalAnalysis').innerHTML = analysisText;
         }
 
-        /**
-         * Genera un análisis y deducción personalizada.
-         */
+        // Función de Análisis (la lógica de deducción sigue siendo la misma)
         function generatePersonalAnalysis(localTeam, visitorTeam, p25, pBTTS, avgG, laI, vaI, ldI, vdI) {
             let analysis = "";
 
             analysis += `**🎯 Sobre el Total de Goles (Más de 2.5):**<br>`;
             if (p25 >= 70) {
-                analysis += `Con una probabilidad histórica muy alta (**${p25.toFixed(0)}%**) en enfrentamientos directos, y un promedio de **${avgG}** goles, es casi seguro que será un partido con **marcador abultado**. <br><br>`;
+                analysis += `Con una probabilidad histórica muy alta (**${p25.toFixed(0)}%**), y un promedio de **${avgG}** goles, es casi seguro que será un partido con **marcador abultado**. <br><br>`;
             } else if (p25 >= 50) {
                 analysis += `La probabilidad de Más de 2.5 Goles es moderada (**${p25.toFixed(0)}%**). El riesgo es alto, pero el historial de **${avgG}** goles sugiere que la línea podría superarse. <br><br>`;
             } else {
@@ -339,7 +345,7 @@
             } else if (p25 < 50 && pBTTS < 50) {
                 analysis += `**❌ ALTA DEFENSIVA (El peor escenario):** Ambas probabilidades son bajas. Esto es un pronóstico de **Menos de 2.5 Goles** y posiblemente un resultado de 1-0 o 0-0. Cierre táctico total.<br>`;
             } else if (p25 >= 60 && pBTTS < 50) {
-                analysis += `**⚠️ GOLEADA UNILATERAL:** Alta probabilidad de muchos goles, pero bajo BTTS. El historial sugiere una **dominación total** de un equipo sobre el otro (Ej: 3-0, 4-0). El equipo con el mejor índice de ataque/defensa es el favorito.<br>`;
+                analysis += `**⚠️ GOLEADA UNILATERAL:** Alta probabilidad de muchos goles, pero bajo BTTS. El historial sugiere una **dominación total** de un equipo sobre el otro (Ej: 3-0, 4-0). El equipo superior probablemente dominará el marcador.<br>`;
             } else {
                 analysis += `**🤔 RESULTADO MIXTO:** El partido es incierto. Una métrica es alta y la otra baja. Se debe priorizar el dato de **BTTS**; si es bajo, indica que un equipo anula al otro; si es alto, indica que los ataques pueden sorprender en un partido que, por total de goles, sería bajo.<br>`;
             }
