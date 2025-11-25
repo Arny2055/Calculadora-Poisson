@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>⚽️ Analizador de Corto Plazo (Dark Mode)</title>
+    <title>⚽️ Analizador de Corto Plazo (Dark Mode - Corregido)</title>
     <style>
         /* --- Estilos Globales Dark Mode --- */
         :root {
@@ -48,7 +48,8 @@
         input[type="file"], button, select { 
             width: 100%; padding: 12px; margin: 10px 0; border-radius: 6px; 
             border: 1px solid var(--color-border); 
-            box-sizing: border-box; font-size: 16px;
+            box-sizing: border-box; 
+            font-size: 16px;
             background-color: var(--color-bg-primary);
             color: var(--color-text-primary);
         }
@@ -146,7 +147,7 @@
 
         <label for="jsonFile">**1. Cargar Historial de Partidos (JSON):**</label>
         <input type="file" id="jsonFile" accept=".json">
-        <p class="info">⚠️ **Análisis basado ÚNICAMENTE en los últimos 10 partidos** de cada equipo en la liga.</p>
+        <p class="info">✅ **Corrección Mayor Aplicada:** Los índices de ataque/defensa ahora son calculados por condición (Local/Visitante), lo que incrementa la precisión del modelo Poisson.</p>
 
         <hr>
 
@@ -420,18 +421,20 @@
         }
 
         // ---------------------------------------------
-        // CÁLCULOS ESPECÍFICOS DE LA FORMA RECIENTE
+        // CÁLCULOS ESPECÍFICOS DE LA FORMA RECIENTE (CORREGIDO)
         // ---------------------------------------------
 
         /**
-         * Calcula el rendimiento (Ataque, Defensa, Estadísticas) de un equipo en un conjunto de partidos.
-         * @returns {Object} { attackIndex, defenseIndex, matchesCount, avgScored, avgConceded, statOver25 }
+         * CORRECCIÓN PRINCIPAL: Calcula índices de Ataque/Defensa separando Local/Visitante.
          */
-        function calculateTeamIndicesAndStats(teamName, matches, avgLeagueGoals) {
+        function calculateTeamIndicesAndStats(teamName, matches, avgLocalScored, avgLocalConceded, avgVisitorScored, avgVisitorConceded) {
             let matchesCount = 0;
             let scored = 0;
             let conceded = 0;
             let countOver25 = 0;
+            
+            let attackIndexSum = 0;
+            let defenseIndexSum = 0;
             
             if (matches.length === 0) {
                  return { attackIndex: 1, defenseIndex: 1, matchesCount: 0, avgScored: 0, avgConceded: 0, statOver25: 0 }; 
@@ -442,7 +445,7 @@
             matches.forEach(match => {
                 const isLocal = match.local.toLowerCase() === teamLC;
                 const isVisitor = match.visitante.toLowerCase() === teamLC;
-
+                
                 if (isLocal || isVisitor) {
                     matchesCount++;
                     
@@ -455,6 +458,23 @@
                     if (match.golesLocal + match.golesVisitante > 2) {
                         countOver25++;
                     }
+
+                    // Cálculo de índices por condición para mayor precisión
+                    let attackIndex_match = 1;
+                    let defenseIndex_match = 1;
+                    
+                    if (isLocal) {
+                        // Juega en Casa: Compara su ataque con la media local, su defensa con la media visitante.
+                        attackIndex_match = (avgLocalScored > 0) ? (G_scored / avgLocalScored) : 1;
+                        defenseIndex_match = (avgVisitorConceded > 0) ? (G_conceded / avgVisitorConceded) : 1; 
+                    } else { // isVisitor
+                        // Juega Fuera: Compara su ataque con la media visitante, su defensa con la media local.
+                        attackIndex_match = (avgVisitorScored > 0) ? (G_scored / avgVisitorScored) : 1;
+                        defenseIndex_match = (avgLocalConceded > 0) ? (G_conceded / avgLocalConceded) : 1; 
+                    }
+                    
+                    attackIndexSum += attackIndex_match;
+                    defenseIndexSum += defenseIndex_match;
                 }
             });
             
@@ -465,8 +485,9 @@
             const avgScored = scored / matchesCount;
             const avgConceded = conceded / matchesCount;
 
-            const attackIndex = avgLeagueGoals > 0 ? (avgScored / avgLeagueGoals) : 1;
-            const defenseIndex = avgLeagueGoals > 0 ? (avgConceded / avgLeagueGoals) : 1;
+            // Índices finales (promedio de los índices por partido)
+            const attackIndex = attackIndexSum / matchesCount;
+            const defenseIndex = defenseIndexSum / matchesCount;
             const statOver25 = countOver25 / matchesCount;
             
             return {
@@ -534,16 +555,28 @@
                 return;
             }
 
-            // 1. Goles Liga (Base)
+            // 1. CÁLCULO DE PROMEDIOS DE LA LIGA (PARA NORMALIZACIÓN)
             const leagueMatches = matchHistory.filter(match => match.liga === selectedLeague);
             
-            let totalLeagueGoals = 0;
-            leagueMatches.forEach(m => totalLeagueGoals += (m.golesLocal + m.golesVisitante));
-            
-            const avgLeagueGoals = leagueMatches.length > 0 ? (totalLeagueGoals / leagueMatches.length) : 0;
+            let totalLocalGoals = 0;
+            let totalVisitorGoals = 0;
+            let localMatchesCount = 0;
 
-            if (avgLeagueGoals === 0) {
-                 alert("No hay suficientes datos de goles en esta liga para el análisis.");
+            leagueMatches.forEach(m => {
+                totalLocalGoals += m.golesLocal;
+                totalVisitorGoals += m.golesVisitante;
+                localMatchesCount++; 
+            });
+
+            // Promedios por condición (clave para la corrección)
+            const avgLocalScored = localMatchesCount > 0 ? (totalLocalGoals / localMatchesCount) : 1;
+            const avgLocalConceded = localMatchesCount > 0 ? (totalVisitorGoals / localMatchesCount) : 1;
+            const avgVisitorScored = localMatchesCount > 0 ? (totalVisitorGoals / localMatchesCount) : 1;
+            const avgVisitorConceded = localMatchesCount > 0 ? (totalLocalGoals / localMatchesCount) : 1;
+            const avgLeagueGoals = avgLocalScored; // La lambda base de Poisson será la media de goles local (para el local)
+
+            if (localMatchesCount === 0) {
+                 alert("No hay suficientes datos de partidos en esta liga para el análisis.");
                  return;
             }
 
@@ -551,20 +584,24 @@
             const localRecentMatches = leagueMatches.filter(m => m.local.toLowerCase() === localTeam.toLowerCase() || m.visitante.toLowerCase() === localTeam.toLowerCase()).slice(-RECENT_MATCH_COUNT);
             const visitorRecentMatches = leagueMatches.filter(m => m.local.toLowerCase() === visitorTeam.toLowerCase() || m.visitante.toLowerCase() === visitorTeam.toLowerCase()).slice(-RECENT_MATCH_COUNT);
             
-            // Calculamos índices y estadísticas usando SOLO los partidos recientes
-            const localRecStats = calculateTeamIndicesAndStats(localTeam, localRecentMatches, avgLeagueGoals);
-            const visitorRecStats = calculateTeamIndicesAndStats(visitorTeam, visitorRecentMatches, avgLeagueGoals);
+            // Calculamos índices y estadísticas usando la nueva función corregida
+            const localRecStats = calculateTeamIndicesAndStats(localTeam, localRecentMatches, avgLocalScored, avgLocalConceded, avgVisitorScored, avgVisitorConceded);
+            const visitorRecStats = calculateTeamIndicesAndStats(visitorTeam, visitorRecentMatches, avgLocalScored, avgLocalConceded, avgVisitorScored, avgVisitorConceded);
 
             if (localRecStats.matchesCount < RECENT_MATCH_COUNT || visitorRecStats.matchesCount < RECENT_MATCH_COUNT) {
-                 // No bloqueamos, solo advertimos
+                 // Advertencia de datos recientes insuficientes
             }
             
             // 3. Análisis Directo (H2H)
             const h2hAnalysis = analyzeH2H(localTeam, visitorTeam, leagueMatches);
             
             // 4. Calcular Goles Esperados (Lambda) - Modelo de Corto Plazo (Poisson)
-            const lambdaLocal = localRecStats.attackIndex * visitorRecStats.defenseIndex * avgLeagueGoals;
-            const lambdaVisitor = visitorRecStats.attackIndex * localRecStats.defenseIndex * avgLeagueGoals;
+            // Lógica de Poisson:
+            // Lambda_Local = Ataque_Local * Defensa_Visitante * Media_Goles_Local
+            // Lambda_Visitante = Ataque_Visitante * Defensa_Local * Media_Goles_Visitante
+            
+            const lambdaLocal = localRecStats.attackIndex * visitorRecStats.defenseIndex * avgLocalScored;
+            const lambdaVisitor = visitorRecStats.attackIndex * localRecStats.defenseIndex * avgVisitorScored;
             const totalXGoals = lambdaLocal + lambdaVisitor;
 
             // 5. Calcular Probabilidades (Poisson)
@@ -613,7 +650,7 @@
             document.getElementById('results').style.display = 'block';
 
             // --- 7. Análisis y Recomendación Concreta ---
-            const analysisText = generateAnalysis(localTeam, visitorTeam, localRecStats, visitorRecStats, h2hAnalysis, totalXGoals, avgLeagueGoals, poissonProb25, poissonProbBTTS);
+            const analysisText = generateAnalysis(localTeam, visitorTeam, localRecStats, visitorRecStats, h2hAnalysis, totalXGoals, avgLocalScored, poissonProb25, poissonProbBTTS);
             document.getElementById('personalAnalysis').innerHTML = analysisText.desglose;
             document.getElementById('finalRecommendation').innerHTML = `**DECISIÓN FINAL:** ${analysisText.recomendacion}`;
         }
