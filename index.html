@@ -1,1523 +1,177 @@
-<!DOCTYPE html>
-<html lang="es">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Motor de Backtesting Deportivo O2.5 - Cazador Avanzado</title>
-    <!-- Tailwind CSS CDN -->
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <!-- Chart.js CDN para la visualización de la curva de capital -->
-    <style>
-        /* Estilos personalizados para la tipografía Inter y la apariencia general */
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap');
-        body {
-            font-family: 'Inter', sans-serif;
-            background-color: #f7f7f9;
-        }
-        /* Clase para el scrollbar */
-        .custom-scroll::-webkit-scrollbar {
-            width: 8px;
-            height: 8px;
-        }
-        .custom-scroll::-webkit-scrollbar-thumb {
-            background-color: #93c5fd; /* blue-300 */
-            border-radius: 4px;
-        }
-        .custom-scroll::-webkit-scrollbar-track {
-            background: #e0f2fe; /* light blue */
-        }
-        .metric-card {
-            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.06);
-            transition: transform 0.2s;
-        }
-        .metric-card:hover {
-            transform: translateY(-2px);
-        }
-        /* Estilo para el acordeón (simulación de transición) */
-        .accordion-content {
-            transition: max-height 0.3s ease-out, opacity 0.3s ease-out;
-            overflow: hidden;
-            max-height: 0;
-            opacity: 0;
-        }
-        .accordion-content.active {
-            max-height: 3000px; /* Suficientemente grande para contener todo */
-            opacity: 1;
-        }
-        .accordion-header.active {
-            background-color: #e0f2fe; /* light blue when active */
-            border-bottom-left-radius: 0;
-            border-bottom-right-radius: 0;
-        }
-        /* Clase para resaltar el indicador de cumplimiento */
-        .indicator-pass {
-            background-color: #d1fae5; /* green-100 */
-            color: #059669; /* green-600 */
-            border-color: #34d399; /* green-400 */
-        }
-        .indicator-fail {
-            background-color: #fee2e2; /* red-100 */
-            color: #ef4444; /* red-500 */
-            border-color: #f87171; /* red-400 */
-        }
-    </style>
-</head>
-<body class="p-4 sm:p-8">
+// Variable global para almacenar los datos cargados del JSON
+let matchHistory = [];
 
-    <div class="max-w-7xl mx-auto">
-        <header class="text-center mb-8">
-            <h1 class="text-4xl font-extrabold text-gray-800">Motor de Backtesting <span class="text-indigo-600">Cazador Avanzado (OOS)</span></h1>
-            <p class="text-lg text-gray-500 mt-2">Valida equipos rentables incorporando filtros de intensidad de juego (Ataques, Tiros, Córners).</p>
-        </header>
-
-        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
-            <!-- Columna 1: Configuración y Carga de Archivo -->
-            <div class="lg:col-span-1 p-6 bg-white rounded-xl shadow-2xl h-full border border-indigo-100">
-                <h2 class="text-2xl font-semibold mb-6 text-indigo-700 border-b pb-2">1. Configuración del Backtest</h2>
-
-                <!-- Carga de Archivo JSON/CSV (ACTUALIZADO) -->
-                <div class="mb-6">
-                    <label class="block text-sm font-medium text-gray-700 mb-2" for="dataFile">Cargar Archivo de Datos (JSON o CSV)</label>
-                    <input type="file" id="dataFile" accept=".json, .csv" class="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 transition duration-150 rounded-lg border border-gray-300 p-2">
-                </div>
-                
-                <!-- Filtro de Fechas (Entrenamiento/Formación) -->
-                <div class="mb-6 space-y-4 p-4 bg-green-50 rounded-lg border border-green-300">
-                    <h3 class="text-xl font-medium text-green-700">Periodo de Validación</h3>
-                    <p class="text-sm text-gray-600">Define dónde termina la fase de **Formación** (para encontrar equipos).</p>
-                    <div class="grid grid-cols-1 gap-4">
-                        <div>
-                            <label for="trainingEndDate" class="block text-sm font-bold text-green-700">Fecha de Fin de Formación (YYYY-MM-DD)</label>
-                            <input type="date" id="trainingEndDate" class="mt-1 block w-full rounded-md border-green-500 shadow-sm p-3 focus:ring-green-600 focus:border-green-600 border-2">
-                            <p class="text-xs text-gray-500 mt-1">Los partidos posteriores se usan para la **Prueba (Out-of-Sample)**.</p>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Parámetros de Estrategia O2.5 y Umbral de ROI -->
-                <div class="mb-6 space-y-4 p-4 bg-blue-50 rounded-lg border border-blue-200">
-                    <h3 class="text-xl font-medium text-blue-700">Filtro de Cuotas y ROI</h3>
-                    <div>
-                        <label for="minOdd" class="block text-sm font-medium text-gray-700">Cuota Mínima O2.5</label>
-                        <input type="number" id="minOdd" value="1.80" step="0.01" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-3 focus:ring-blue-500 focus:border-blue-500 border">
-                    </div>
-                    <div>
-                        <label for="maxOdd" class="block text-sm font-medium text-gray-700">Cuota Máxima O2.5</label>
-                        <input type="number" id="maxOdd" value="2.20" step="0.01" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-3 focus:ring-blue-500 focus:border-blue-500 border">
-                    </div>
-                    <div class="pt-4 border-t border-blue-200">
-                        <label for="minRoiFilterInput" class="block text-sm font-bold text-blue-700">Umbral de ROI Mínimo de Equipo en Formación (%)</label>
-                        <input type="number" id="minRoiFilterInput" value="5.0" step="0.1" min="0" class="mt-1 block w-full rounded-md border-blue-500 shadow-sm p-3 focus:ring-blue-500 focus:border-blue-500 border-2">
-                        <p class="text-xs text-gray-500 mt-1">Solo equipos que superen este ROI en la fase de **Formación** se seleccionan para la Prueba.</p>
-                    </div>
-                </div>
-
-                <!-- Filtros de Rendimiento (NUEVOS) -->
-                <div class="mb-6 space-y-4 p-4 bg-yellow-50 rounded-lg border border-yellow-300">
-                    <h3 class="text-xl font-medium text-yellow-800">Filtros de Rendimiento (Métricas FT)</h3>
-                    <p class="text-sm text-gray-600">La apuesta solo se realiza si el partido cumple estas métricas *combinadas*.</p>
-                    <div>
-                        <label for="minDangerousAttacks" class="block text-sm font-bold text-yellow-800">Ataques Peligrosos Totales Mínimos</label>
-                        <input type="number" id="minDangerousAttacks" value="1" min="0" class="mt-1 block w-full rounded-md border-yellow-500 shadow-sm p-3 focus:ring-yellow-600 focus:border-yellow-600 border-2">
-                        <p class="text-xs text-gray-500 mt-1">Suma de Ataques Peligrosos de Home y Away.</p>
-                    </div>
-                    <div>
-                        <label for="minShotsOnTarget" class="block text-sm font-bold text-yellow-800">Tiros a Puerta Totales Mínimos</label>
-                        <input type="number" id="minShotsOnTarget" value="8" min="0" class="mt-1 block w-full rounded-md border-yellow-500 shadow-sm p-3 focus:ring-yellow-600 focus:border-yellow-600 border-2">
-                        <p class="text-xs text-gray-500 mt-1">Suma de Tiros a Puerta de Home y Away.</p>
-                    </div>
-                    <div>
-                        <label for="minCorners" class="block text-sm font-bold text-yellow-800">Córners Totales Mínimos</label>
-                        <input type="number" id="minCorners" value="1" min="0" class="mt-1 block w-full rounded-md border-yellow-500 shadow-sm p-3 focus:ring-yellow-600 focus:border-yellow-600 border-2">
-                        <p class="text-xs text-gray-500 mt-1">Suma de Córners de Home y Away.</p>
-                    </div>
-                </div>
-
-                <!-- Parámetros Financieros -->
-                <div class="mb-6 space-y-4">
-                    <h3 class="text-xl font-medium text-gray-700">Parámetros de Capital</h3>
-                    <div>
-                        <label for="initialCapital" class="block text-sm font-medium text-gray-700">Capital Inicial (€)</label>
-                        <input type="number" id="initialCapital" value="1000" min="1" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-3 focus:ring-indigo-500 focus:border-indigo-500 border">
-                    </div>
-                    <div>
-                        <label for="stakeSize" class="block text-sm font-medium text-gray-700">Tamaño de Apuesta (Stake Fijo)</label>
-                        <input type="number" id="stakeSize" value="10" min="0.1" step="0.1" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-3 focus:ring-indigo-500 focus:border-indigo-500 border">
-                    </div>
-                </div>
-
-                <!-- Botón de Ejecución -->
-                <button id="runBacktestBtn" class="w-full py-3 px-4 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl transition duration-300 shadow-lg disabled:bg-indigo-300" disabled>
-                    <span id="buttonText">Cargar Datos para Ejecutar Backtesting</span>
-                </button>
-                <div id="statusMessage" class="mt-3 text-center text-sm font-medium text-gray-600"></div>
-
-            </div>
-
-            <!-- Columna 2 y 3: Resultados y Gráfico -->
-            <div class="lg:col-span-2 space-y-8">
-                
-                <!-- RESULTADOS DE PRUEBA (TEST) -->
-                <div class="p-6 bg-white rounded-xl shadow-2xl border-2 border-green-500">
-                    <h2 class="text-2xl font-extrabold mb-4 text-green-700">2. Resultados de Validación (Out-of-Sample)</h2>
-                    <p class="text-gray-600 mb-4">
-                        <span class="font-bold">Periodo de Prueba:</span> <span id="testPeriodRange">Sin definir</span>. 
-                        Solo se simulan las apuestas de los <span id="qualifiedTeamsCount" class="font-bold">0</span> equipos rentables encontrados en la fase de Formación.
-                    </p>
-                    <div id="testMetricsOutput" class="grid grid-cols-2 sm:grid-cols-4 gap-4">
-                        <!-- Métricas de Prueba -->
-                        <div class="metric-card p-4 bg-green-50 rounded-lg text-center border border-green-200">
-                            <p class="text-xs text-gray-500 font-medium">ROI Prueba (%)</p>
-                            <p id="testRoi" class="text-xl font-bold text-gray-800">0.00 %</p>
-                        </div>
-                        <div class="metric-card p-4 bg-green-50 rounded-lg text-center border border-green-200">
-                            <p class="text-xs text-gray-500 font-medium">Beneficio Prueba</p>
-                            <p id="testNetProfit" class="text-xl font-bold text-gray-800">0.00 €</p>
-                        </div>
-                        <div class="metric-card p-4 bg-green-50 rounded-lg text-center border border-green-200">
-                            <p class="text-xs text-gray-500 font-medium">Drawdown Máx. Prueba</p>
-                            <p id="testMaxDrawdown" class="text-xl font-bold text-red-600">0.00 %</p>
-                        </div>
-                        <div class="metric-card p-4 bg-green-50 rounded-lg text-center border border-green-200">
-                            <p class="text-xs text-gray-500 font-medium">Apuestas Prueba</p>
-                            <p id="testTotalBets" class="text-xl font-bold text-gray-800">0</p>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Gráfico de Evolución de Capital (TOTAL) -->
-                <div class="p-6 bg-white rounded-xl shadow-lg border border-gray-200">
-                    <h2 class="text-2xl font-semibold mb-4 text-indigo-700">3. Curva de Capital (Formación + Prueba)</h2>
-                    <div class="relative h-96">
-                        <canvas id="equityChart"></canvas>
-                    </div>
-                    <p class="text-xs text-gray-500 mt-2">
-                        La línea vertical discontinua marca el fin del periodo de Formación e inicio de Prueba.
-                    </p>
-                </div>
-
-                <!-- Gráfico de Drawdown (TOTAL) -->
-                <div class="p-6 bg-white rounded-xl shadow-lg border border-gray-200">
-                    <h2 class="text-2xl font-semibold mb-4 text-red-700">4. Historia del Drawdown (Riesgo Total)</h2>
-                    <div class="relative h-96">
-                        <canvas id="drawdownChart"></canvas>
-                    </div>
-                </div>
-                
-                <!-- Análisis de Equipos Rentables (Formación) -->
-                <div class="p-6 bg-white rounded-xl shadow-lg border border-gray-200">
-                    <h2 class="text-2xl font-semibold mb-4 text-indigo-700">5. Equipos Calificados para la Prueba (ROI Formación ≥ <span id="roiFilterDisplayTeams">5.0%</span>)</h2>
-                    
-                    <!-- Contenedor del Acordeón por Liga -->
-                    <div id="leagueAccordionContainer" class="space-y-3">
-                        <p class="text-sm text-gray-500 italic p-2">Ejecute el backtesting para ver los equipos que pasaron el filtro.</p>
-                    </div>
-                    
-                    <div class="mt-6 p-4 bg-yellow-50 rounded-lg text-sm text-yellow-800 font-medium">
-                        <p>💡 Estos equipos fueron rentables en la fase de **Formación** y se usaron para apostar en la fase de **Prueba**, siempre que el partido cumpliera los **Filtros de Rendimiento**.</p>
-                    </div>
-                </div>
-            </div>
-        </div>
-        
-        <!-- SECCIÓN DE CAZADOR EN VIVO (Fuera del grid de 3 columnas) -->
-        <div class="mt-12 p-8 bg-white rounded-xl shadow-2xl border-2 border-blue-500">
-            <h2 class="text-3xl font-extrabold mb-6 text-blue-700 flex items-center">
-                <svg class="w-8 h-8 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
-                6. Cazador en Vivo: Validador de Estrategia
-            </h2>
-            <p class="text-gray-600 mb-6">
-                Utiliza esta herramienta para verificar si un partido en **BetMines** o tu Live Score cumple los **Filtros de Rendimiento (Métricas FT)** que resultaron rentables en el backtest.
-            </p>
-            
-            <div class="grid grid-cols-1 md:grid-cols-4 gap-6">
-                <!-- Inputs de Métricas en Vivo -->
-                <div class="space-y-3 p-4 bg-gray-50 rounded-lg border border-gray-200 md:col-span-3">
-                    <h3 class="text-xl font-semibold text-gray-700 mb-3 border-b pb-2">Métricas Totales del Partido (Live Score)</h3>
-                    <div class="grid grid-cols-3 gap-4">
-                        <div>
-                            <label for="liveDangerousAttacks" class="block text-sm font-bold text-yellow-800">Ataques Peligrosos</label>
-                            <input type="number" id="liveDangerousAttacks" value="0" min="0" class="mt-1 block w-full rounded-md border-yellow-500 shadow-sm p-3 focus:ring-yellow-600 focus:border-yellow-600 border-2 text-lg text-center" oninput="checkLiveMetrics()">
-                        </div>
-                        <div>
-                            <label for="liveShotsOnTarget" class="block text-sm font-bold text-yellow-800">Tiros a Puerta</label>
-                            <input type="number" id="liveShotsOnTarget" value="0" min="0" class="mt-1 block w-full rounded-md border-yellow-500 shadow-sm p-3 focus:ring-yellow-600 focus:border-yellow-600 border-2 text-lg text-center" oninput="checkLiveMetrics()">
-                        </div>
-                        <div>
-                            <label for="liveCorners" class="block text-sm font-bold text-yellow-800">Córners Totales</label>
-                            <input type="number" id="liveCorners" value="0" min="0" class="mt-1 block w-full rounded-md border-yellow-500 shadow-sm p-3 focus:ring-yellow-600 focus:border-yellow-600 border-2 text-lg text-center" oninput="checkLiveMetrics()">
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Resultados y Decisión -->
-                <div class="p-4 rounded-lg flex flex-col justify-center items-center text-center shadow-lg transition-all duration-300 md:col-span-1" id="liveDecisionPanel">
-                    <div class="text-4xl mb-2" id="liveStatusIcon">❓</div>
-                    <h4 class="text-xl font-bold mb-2 text-gray-700">Decisión de Apuesta</h4>
-                    <p class="text-lg font-extrabold" id="liveDecisionText">Esperando datos...</p>
-                    <p class="text-xs text-gray-500 mt-2">¡Recuerda que también debe ser un **Equipo Calificado**!</p>
-                </div>
-            </div>
-
-            <!-- Resumen de Requisitos -->
-            <div class="mt-6 border-t pt-4">
-                <h4 class="text-lg font-semibold text-gray-700 mb-2">Requisitos de Estrategia (Mínimos)</h4>
-                <div class="grid grid-cols-3 gap-4">
-                    <div class="p-3 border rounded-lg text-center" id="reqDA">DA ≥ <span id="reqDangerousAttacks" class="font-bold">80</span></div>
-                    <div class="p-3 border rounded-lg text-center" id="reqSOT">Tiros Puerta ≥ <span id="reqShotsOnTarget" class="font-bold">8</span></div>
-                    <div class="p-3 border rounded-lg text-center" id="reqCR">Córners ≥ <span id="reqCorners" class="font-bold">10</span></div>
-                </div>
-            </div>
-
-        </div>
-
-    </div>
-
-    <script>
-        // Función auxiliar para reemplazar alert() y gestionar mensajes de estado
-        function showMessage(message, isError = true) {
-            const statusMessage = document.getElementById('statusMessage');
-            if (statusMessage) {
-                statusMessage.textContent = message;
-                statusMessage.classList.toggle('text-red-600', isError);
-                statusMessage.classList.toggle('text-green-600', !isError);
-                setTimeout(() => {
-                    if (statusMessage.textContent === message) { // Solo limpia si no ha sido sobrescrito
-                        statusMessage.classList.remove('text-red-600', 'text-green-600');
-                        statusMessage.textContent = ''; 
-                    }
-                }, 5000);
-            }
-        }
-
-        // --- VARIABLES GLOBALES Y CONFIGURACIÓN ---
-        let rawData = [];
-        let equityChartInstance = null;
-        let drawdownChartInstance = null;
-        
-        // Referencias del DOM (ACTUALIZADO: dataFile en lugar de jsonFile)
-        const dataFile = document.getElementById('dataFile'); 
-        const runBacktestBtn = document.getElementById('runBacktestBtn');
-        const buttonText = document.getElementById('buttonText');
-        
-        // Métricas de Prueba (Test)
-        const testRoiEl = document.getElementById('testRoi');
-        const testNetProfitEl = document.getElementById('testNetProfit');
-        const testMaxDrawdownEl = document.getElementById('testMaxDrawdown');
-        const testTotalBetsEl = document.getElementById('testTotalBets');
-        const testPeriodRangeEl = document.getElementById('testPeriodRange');
-        const qualifiedTeamsCountEl = document.getElementById('qualifiedTeamsCount');
-        
-        const leagueAccordionContainerEl = document.getElementById('leagueAccordionContainer');
-        const roiFilterDisplayTeamsEl = document.getElementById('roiFilterDisplayTeams');
-        
-        const MIN_ROI_FILTER_EL = document.getElementById('minRoiFilterInput'); // Input dinámico
-
-        
-        /**
-         * Actualiza el gráfico de la curva de capital y marca la división de Formación/Prueba.
-         */
-        function updateChart(data, initialCapital, splitIndex) {
-            const ctx = document.getElementById('equityChart').getContext('2d');
-            const labels = Array.from({length: data.length}, (_, i) => i + 1); 
-
-            if (equityChartInstance) {
-                equityChartInstance.destroy();
-            }
-
-            const isProfitable = data.length > 1 ? data[data.length - 1] >= initialCapital : true;
-            const color = isProfitable ? 'rgba(16, 185, 129, 1)' : 'rgba(239, 68, 68, 1)'; // green-500 or red-500
-            
-            equityChartInstance = new Chart(ctx, {
-                type: 'line',
-                data: {
-                    labels: labels,
-                    datasets: [{
-                        label: 'Evolución del Capital (€)',
-                        data: data,
-                        borderColor: color,
-                        backgroundColor: isProfitable ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)',
-                        tension: 0.2,
-                        fill: true,
-                        pointRadius: 0,
-                        borderWidth: 2,
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    scales: {
-                        y: {
-                            beginAtZero: false,
-                            title: {
-                                display: true,
-                                text: 'Capital (€)'
-                            }
-                        },
-                        x: {
-                            title: {
-                                display: true,
-                                text: 'Apuestas Calificadas (N)'
-                            },
-                            ticks: {
-                                maxTicksLimit: 10
-                            }
-                        }
-                    },
-                    plugins: {
-                        legend: { display: false },
-                        tooltip: {
-                            callbacks: {
-                                title: function(tooltipItems) {
-                                    const index = tooltipItems[0].dataIndex;
-                                    return (index < splitIndex) ? `Formación (N° ${index + 1})` : `Prueba (N° ${index + 1})`;
-                                },
-                                label: function(context) {
-                                    if (context.parsed.y !== null) {
-                                        return new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR' }).format(context.parsed.y);
-                                    }
-                                    return '';
-                                }
-                            }
-                        },
-                        annotation: {
-                            annotations: {
-                                line1: {
-                                    type: 'line',
-                                    mode: 'vertical',
-                                    scaleID: 'x',
-                                    value: splitIndex, // Índice donde termina Formación e inicia Prueba
-                                    borderColor: 'rgba(20, 184, 166, 1)', // Color Teal
-                                    borderWidth: 2,
-                                    borderDash: [6, 6],
-                                    label: {
-                                        content: 'FIN FORMACIÓN',
-                                        enabled: true,
-                                        position: 'top',
-                                        backgroundColor: 'rgba(20, 184, 166, 0.8)',
-                                        font: {
-                                            weight: 'bold'
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            });
-        }
-        
-        /**
-         * Actualiza el gráfico de Drawdown (Pérdida Máxima)
-         */
-        function updateDrawdownChart(data, splitIndex) {
-            const ctx = document.getElementById('drawdownChart').getContext('2d');
-            const labels = Array.from({length: data.length}, (_, i) => i + 1); 
-
-            if (drawdownChartInstance) {
-                drawdownChartInstance.destroy();
-            }
-            
-            drawdownChartInstance = new Chart(ctx, {
-                type: 'line',
-                data: {
-                    labels: labels,
-                    datasets: [{
-                        label: 'Drawdown (%)',
-                        data: data,
-                        borderColor: 'rgba(239, 68, 68, 1)', // Red
-                        backgroundColor: 'rgba(239, 68, 68, 0.1)',
-                        tension: 0.2,
-                        fill: true,
-                        pointRadius: 0,
-                        borderWidth: 2,
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    scales: {
-                        y: {
-                            beginAtZero: true,
-                            max: 100,
-                            title: {
-                                display: true,
-                                text: 'Drawdown (%)'
-                            }
-                        },
-                        x: {
-                            title: {
-                                display: true,
-                                text: 'Apuestas Calificadas (N)'
-                            },
-                            ticks: {
-                                maxTicksLimit: 10
-                            }
-                        }
-                    },
-                    plugins: {
-                        legend: { display: false },
-                        tooltip: {
-                            callbacks: {
-                                title: function(tooltipItems) {
-                                    const index = tooltipItems[0].dataIndex;
-                                    return (index < splitIndex) ? `Formación (N° ${index + 1})` : `Prueba (N° ${index + 1})`;
-                                },
-                                label: function(context) {
-                                    if (context.parsed.y !== null) {
-                                        return context.parsed.y.toFixed(2) + ' %';
-                                    }
-                                    return '';
-                                }
-                            }
-                        },
-                        annotation: {
-                            annotations: {
-                                line1: {
-                                    type: 'line',
-                                    mode: 'vertical',
-                                    scaleID: 'x',
-                                    value: splitIndex, 
-                                    borderColor: 'rgba(20, 184, 166, 1)', 
-                                    borderWidth: 2,
-                                    borderDash: [6, 6]
-                                }
-                            }
-                        }
-                    }
-                }
-            });
-        }
-
-
-        // --- CONFIGURACIÓN DE COLUMNAS (ADAPTADA PARA CSV) ---
-        // Mapea las claves internas requeridas (izquierda) a los nombres de las columnas en tu archivo CSV (derecha)
-        const COLUMN_MAP = {
-            'Date': 'Date',           
-            'League': 'League',       
-            'Match': 'Match',         
-            'ScoreFT': 'Result FT',   
-            'OddO25': 'Odd',          
-            'HomeDangerousAttacks': 'Home Dangerous Attacks at FT',
-            'AwayDangerousAttacks': 'Away Dangerous Attacks at FT',
-            'HomeOnGoalShots': 'Home OnGoal Shots at FT',
-            'AwayOnGoalShots': 'Away OnGoal Shots at FT',
-            'HomeCorners': 'Home Corners at FT',
-            'AwayCorners': 'Away Corners at FT',
-        };
-        const REQUIRED_INTERNAL_KEYS = Object.keys(COLUMN_MAP);
-        
-        // --- FUNCIONES DE UTILIDAD Y CORE ---
-        
-        /**
-         * Limpia y convierte un valor a un número.
-         */
-        function cleanAndParseNumber(val, isFloat = true) {
-            if (val === undefined || val === null || val === '') return null;
-            
-            // Reemplaza comas por puntos (formato español/europeo a americano)
-            let strVal = String(val).trim().replace(',', '.');
-            
-            // Intenta extraer solo números para métricas de conteo (Ataques, Tiros, etc.)
-            if (!isFloat) {
-                const numVal = parseInt(strVal.replace(/\D/g, ''));
-                return isNaN(numVal) ? null : numVal;
-            } 
-            
-            // Para cuotas y floats
-            const numVal = parseFloat(strVal);
-            return isNaN(numVal) ? null : numVal;
-        }
-
-        /**
-         * Intenta parsear una fecha en formato español (e.g., "dom., 23 nov. 2025 13:00") o ISO (YYYY-MM-DD).
-         * Retorna un timestamp.
-         */
-        function parseMatchDate(dateString) {
-            if (!dateString) return 0;
-            
-            let timestamp = Date.parse(dateString);
-            if (!isNaN(timestamp)) {
-                return timestamp;
-            }
-
-            // Mapeo para formatos en español (ej: "dom., 23 nov. 2025 13:00")
-            const monthMap = {
-                'ene.': 'Jan', 'feb.': 'Feb', 'mar.': 'Mar', 'abr.': 'Apr', 'may.': 'May', 'jun.': 'Jun',
-                'jul.': 'Jul', 'ago.': 'Aug', 'sep.': 'Sep', 'oct.': 'Oct', 'nov.': 'Nov', 'dic.': 'Dec'
-            };
-            
-            const parts = dateString.split(' ');
-            if (parts.length >= 5) {
-                const day = parts[1];
-                const monthES = parts[2];
-                const year = parts[3];
-                const time = parts[4] || '00:00';
-                const monthEN = monthMap[monthES.toLowerCase()] || monthES; 
-                const reformattedDate = `${monthEN} ${day} ${year} ${time}`;
-                timestamp = Date.parse(reformattedDate);
-                
-                if (!isNaN(timestamp)) {
-                    return timestamp;
-                }
-            }
-            
-            return new Date(dateString).getTime();
-        }
-
-        /**
-         * Determina si el partido terminó en Over 2.5 (Win) o Under 2.5 (Loss).
-         * Retorna un objeto con el resultado O2.5 y los goles.
-         */
-        function getMatchResultDetails(score) {
-            if (!score || typeof score !== 'string' || !score.includes('-')) {
-                return { isOver2_5: false, homeGoals: null, awayGoals: null, totalGoals: null };
-            }
-            
-            // Intenta manejar "X-Y" o "X_Y"
-            const parts = score.split(/-|_/).map(s => parseInt(s.trim()));
-            
-            if (parts.length !== 2 || isNaN(parts[0]) || isNaN(parts[1])) {
-                return { isOver2_5: false, homeGoals: null, awayGoals: null, totalGoals: null };
-            }
-
-            const homeGoals = parts[0];
-            const awayGoals = parts[1];
-            const totalGoals = homeGoals + awayGoals;
-            
-            return {
-                isOver2_5: totalGoals >= 3,
-                homeGoals,
-                awayGoals,
-                totalGoals
-            };
-        }
-        
-        /**
-         * Parsea el contenido de un archivo CSV a un array de objetos.
-         */
-        function parseCSV(csvText) {
-            const lines = csvText.split('\n').filter(line => line.trim() !== '');
-            if (lines.length < 2) {
-                showMessage('El archivo CSV debe contener al menos una cabecera y una fila de datos.', true);
-                return [];
-            }
-
-            // Limpieza de cabeceras: elimina espacios extra y posibles comillas
-            const rawHeaders = lines[0].split(',').map(h => h.trim().replace(/^"|"$/g, '').trim());
-            const data = [];
-            let rowsParsed = 0;
-            let rowsSkipped = 0;
-
-            for (let i = 1; i < lines.length; i++) {
-                // Función simple para manejar comas dentro de comillas (no perfecto, pero funcional)
-                const values = lines[i].match(/(".*?"|[^",\r\n]+)(?=\s*,|\s*$)/g);
-                
-                if (!values || values.length !== rawHeaders.length) {
-                    rowsSkipped++;
-                    continue; // Saltar filas con número incorrecto de columnas
-                }
-                
-                const row = {};
-                let isValid = true;
-                
-                // Mapear el valor de la columna a la clave interna
-                const matchObject = {};
-                rawHeaders.forEach((header, index) => {
-                    matchObject[header] = values[index] ? values[index].trim().replace(/^"|"$/g, '') : null;
-                });
-
-                for (const internalKey in COLUMN_MAP) {
-                    const csvKey = COLUMN_MAP[internalKey]; 
-                    let val = matchObject[csvKey];
-
-                    if (val === undefined || val === null || (typeof val === 'string' && val.trim() === '')) {
-                        if (REQUIRED_INTERNAL_KEYS.includes(internalKey)) {
-                            isValid = false; 
-                            break; // Rompe el loop de keys si falta una requerida
-                        }
-                        continue; // Salta a la siguiente clave si es opcional
-                    }
-
-                    if (internalKey.includes('OddO25')) {
-                        row[internalKey] = cleanAndParseNumber(val, true);
-                    } else if (internalKey.includes('Attacks') || internalKey.includes('Shots') || internalKey.includes('Corners')) {
-                        row[internalKey] = cleanAndParseNumber(val, false); // Números enteros sin decimales
-                    } else {
-                        row[internalKey] = String(val).trim();
-                    }
-                    
-                    if (row[internalKey] === null) {
-                        isValid = false;
-                        break;
-                    }
-                }
-                
-                if (!isValid) {
-                    rowsSkipped++;
-                    continue; // Salta a la siguiente fila
-                }
-
-                // --- Procesamiento de resultado y métricas combinadas ---
-                const resultDetails = getMatchResultDetails(row.ScoreFT);
-
-                if (resultDetails.totalGoals === null) {
-                    rowsSkipped++;
-                    continue; // No se pudo parsear el resultado
-                }
-
-                const finalRow = {};
-                REQUIRED_INTERNAL_KEYS.forEach(key => {
-                    finalRow[key] = row[key];
-                });
-
-                // Agregar detalles de resultado y métricas combinadas
-                finalRow.ActualO25Result = resultDetails.isOver2_5;
-                finalRow.HomeGoals = resultDetails.homeGoals;
-                finalRow.AwayGoals = resultDetails.awayGoals;
-                finalRow.TotalGoals = resultDetails.totalGoals;
-                
-                finalRow.TotalDangerousAttacks = row.HomeDangerousAttacks + row.AwayDangerousAttacks;
-                finalRow.TotalShotsOnTarget = row.HomeOnGoalShots + row.AwayOnGoalShots;
-                finalRow.TotalCorners = row.HomeCorners + row.AwayCorners;
-
-                finalRow.Timestamp = parseMatchDate(row.Date); 
-                
-                if (isNaN(finalRow.Timestamp) || finalRow.Timestamp === 0) {
-                    rowsSkipped++;
-                    continue;
-                }
-
-                data.push(finalRow);
-                rowsParsed++;
-            }
-            
-            if (data.length === 0) {
-                 showMessage(`El archivo cargado no tiene datos válidos después de la limpieza. ${rowsSkipped} filas omitidas.`, true);
-                 return [];
-            }
-            
-            // Ordenar por fecha para asegurar el backtesting progresivo
-            data.sort((a, b) => a.Timestamp - b.Timestamp);
-            
-            showMessage(`¡Datos cargados! ${data.length} filas listas para la validación. (${rowsSkipped} filas omitidas)`, false);
-            return data;
-        }
-
-        // Función para parsear JSON (simplificada ya que el foco es CSV)
-        function parseJSON(jsonText) {
-            let jsonArray;
+document.getElementById('jsonFile').addEventListener('change', function(event) {
+    const file = event.target.files[0];
+    if (file) {
+        const reader = new FileReader();
+        reader.onload = function(e) {
             try {
-                jsonArray = JSON.parse(jsonText);
-            } catch (e) {
-                return []; // Fallo de JSON
-            }
-            
-            if (!Array.isArray(jsonArray)) {
-                if (typeof jsonArray === 'object' && jsonArray !== null) {
-                    jsonArray = [jsonArray];
-                } else {
-                    return [];
-                }
-            }
-            
-            // Se asume que la estructura JSON ya usa las claves del COLUMN_MAP como headers
-            const data = [];
-            jsonArray.forEach(matchObject => {
-                const row = {};
-                let isValid = true;
-
-                for (const internalKey in COLUMN_MAP) {
-                    const jsonKey = COLUMN_MAP[internalKey]; 
-                    let val = matchObject[jsonKey];
-
-                    if (val === undefined || val === null || (typeof val === 'string' && val.trim() === '')) {
-                        if (REQUIRED_INTERNAL_KEYS.includes(internalKey)) {
-                            isValid = false; 
-                        }
-                        continue; 
-                    }
-
-                    if (internalKey.includes('OddO25')) {
-                        row[internalKey] = cleanAndParseNumber(val, true);
-                    } else if (internalKey.includes('Attacks') || internalKey.includes('Shots') || internalKey.includes('Corners')) {
-                        row[internalKey] = cleanAndParseNumber(val, false);
-                    } else {
-                        row[internalKey] = String(val).trim();
-                    }
-                    
-                    if (row[internalKey] === null) {
-                        isValid = false;
-                    }
-                }
-                
-                if (!isValid) return;
-                
-                const resultDetails = getMatchResultDetails(row.ScoreFT);
-
-                if (resultDetails.totalGoals === null) return; 
-                
-                const finalRow = {};
-                REQUIRED_INTERNAL_KEYS.forEach(key => {
-                    finalRow[key] = row[key];
-                });
-
-                finalRow.ActualO25Result = resultDetails.isOver2_5;
-                finalRow.HomeGoals = resultDetails.homeGoals;
-                finalRow.AwayGoals = resultDetails.awayGoals;
-                finalRow.TotalGoals = resultDetails.totalGoals;
-                
-                finalRow.TotalDangerousAttacks = row.HomeDangerousAttacks + row.AwayDangerousAttacks;
-                finalRow.TotalShotsOnTarget = row.HomeOnGoalShots + row.AwayOnGoalShots;
-                finalRow.TotalCorners = row.HomeCorners + row.AwayCorners;
-
-                finalRow.Timestamp = parseMatchDate(row.Date); 
-                
-                if (isNaN(finalRow.Timestamp) || finalRow.Timestamp === 0) return;
-
-                data.push(finalRow);
-            });
-
-            data.sort((a, b) => a.Timestamp - b.Timestamp);
-            return data;
-        }
-        
-
-        /**
-         * Obtiene el equipo local y visitante a partir del string del partido (e.g., "Inter - Milan").
-         */
-        function parseTeams(matchString) {
-            if (!matchString || typeof matchString !== 'string' || !matchString.includes('-')) {
-                return { home: 'Desconocido', away: 'Desconocido' };
-            }
-            const teams = matchString.split('-').map(t => t.trim()).filter(t => t.length > 0);
-            
-            const homeTeam = teams.length > 0 ? teams[0] : 'Desconocido';
-            const awayTeam = teams.length > 1 ? teams[1] : 'Desconocido';
-            
-            return { home: homeTeam, away: awayTeam };
-        }
-
-        /**
-         * LÓGICA DE LA ESTRATEGIA AVANZADA: Define si se realiza una apuesta en Over 2.5 en un partido.
-         * Incorpora filtros de rendimiento.
-         */
-        function applyStrategy(match, params) {
-            const { minOdd, maxOdd, minDangerousAttacks, minShotsOnTarget, minCorners } = params;
-
-            const odd = match.OddO25;
-            
-            // 1. Filtro de Cuota
-            const passesOddFilter = (typeof odd === 'number' && odd >= minOdd && odd <= maxOdd);
-            
-            // 2. Filtro de Rendimiento
-            const passesPerformanceFilter = (
-                match.TotalDangerousAttacks >= minDangerousAttacks &&
-                match.TotalShotsOnTarget >= minShotsOnTarget &&
-                match.TotalCorners >= minCorners
-            );
-
-            if (passesOddFilter && passesPerformanceFilter) {
-                return { betOdd: odd };
-            }
-            return null; 
-        }
-
-        /**
-         * Calcula el resultado de la apuesta O2.5.
-         */
-        function calculateProfit(match, bet, stake) {
-            const isWin = match.ActualO25Result;
-            return isWin ? stake * (bet.betOdd - 1) : -stake;
-        }
-
-        /**
-         * Retorna la estructura de estadísticas inicial (vacía).
-         */
-        const initialStats = () => ({ 
-            bets: 0, 
-            wins: 0, 
-            profit: 0, 
-            stakeSum: 0,
-            sumDangerousAttacks: 0,
-            sumShotsOnTarget: 0,
-            sumTotalGoals: 0 
-        });
-
-        /**
-         * Calcula el ROI (Return on Investment) a partir de un objeto de estadísticas.
-         */
-        function getROI(statsObject) {
-            return statsObject.stakeSum > 0 ? (statsObject.profit / statsObject.stakeSum) * 100 : 0;
-        }
-        
-        /**
-         * Inicializa o recupera las estadísticas de un equipo.
-         */
-        const getTeamStats = (team, league, statsStore) => {
-            if (!statsStore[league]) statsStore[league] = {};
-            if (!statsStore[league][team]) {
-                statsStore[league][team] = {
-                    overall: initialStats()
-                };
-            }
-            return statsStore[league][team];
-        };
-        
-        /**
-         * Actualiza las estadísticas de un equipo.
-         */
-        const updateTeamStats = (statsObject, profit, stakeSize, isWin, match) => {
-            statsObject.bets++;
-            statsObject.profit += profit;
-            statsObject.stakeSum += stakeSize;
-            if (isWin) {
-                statsObject.wins++;
-            }
-            
-            // Recolección de métricas de rendimiento para el promedio
-            const { home: homeTeam, away: awayTeam } = parseTeams(match.Match);
-            const isHomeTeam = homeTeam === statsObject.teamName;
-
-            // Para el equipo local, sumamos sus métricas; para el visitante, sumamos las suyas.
-            statsObject.sumTotalGoals += isHomeTeam ? match.HomeGoals : match.AwayGoals;
-            statsObject.sumDangerousAttacks += isHomeTeam ? match.HomeDangerousAttacks : match.AwayDangerousAttacks;
-            statsObject.sumShotsOnTarget += isHomeTeam ? match.HomeOnGoalShots : match.AwayOnGoalShots;
-
-        };
-
-        // ----------------------------------------------------
-        // 1. FUNCIÓN DE BACKTEST CORE (PARA FORMACIÓN Y PRUEBA)
-        // ----------------------------------------------------
-        /**
-         * Función core que ejecuta el backtesting progresivo sobre un set de datos.
-         */
-        function coreBacktest(data, strategyParams, initialCapital, minRoiFilter, qualifiedTeamsSet, progressiveStats) {
-            let currentCapital = initialCapital;
-            let peakCapital = initialCapital;
-            let maxDrawdown = 0;
-            let equityHistory = [initialCapital];
-            let drawdownHistory = [0];
-            let totalBets = 0; 
-            let wins = 0;
-            let losses = 0;
-            let currentLossStreak = 0;
-            let maxLossStreak = 0;
-            let currentProfitStreak = 0; 
-            let maxProfitStreak = 0;
-            
-            data.forEach(match => {
-                const bet = applyStrategy(match, strategyParams);
-                
-                if (bet) { 
-                    const profit = calculateProfit(match, bet, strategyParams.stakeSize);
-                    const isWin = profit > 0;
-                    
-                    const { home: homeTeam, away: awayTeam } = parseTeams(match.Match);
-                    const league = match.League;
-                    
-                    // --- 1. ACTUALIZACIÓN DE ESTADÍSTICAS PROGRESIVAS DE EQUIPOS (SIEMPRE si la cuota y rendimiento están en rango) ---
-                    // Esto alimenta el filtro para el siguiente partido de FORMACIÓN.
-                    if (minRoiFilter !== undefined) {
-                        // Solo actualizamos las stats en la FASE DE FORMACIÓN
-                        const homeTeamStats = getTeamStats(homeTeam, league, progressiveStats);
-                        const awayTeamStats = getTeamStats(awayTeam, league, progressiveStats);
-                        
-                        // Añadir nombre del equipo para el cálculo de métricas individuales
-                        homeTeamStats.overall.teamName = homeTeam;
-                        awayTeamStats.overall.teamName = awayTeam;
-
-                        if (homeTeam !== 'Desconocido' && league) {
-                            updateTeamStats(homeTeamStats.overall, profit, strategyParams.stakeSize, isWin, match);
-                        }
-                        if (awayTeam !== 'Desconocido' && league) {
-                            updateTeamStats(awayTeamStats.overall, profit, strategyParams.stakeSize, isWin, match);
-                        }
-                    }
-                    
-                    // --- 2. LÓGICA DE FILTRO DE VALIDACIÓN Y APUESTA REAL ---
-                    let isQualifiedBet = false;
-                    
-                    if (qualifiedTeamsSet) {
-                        // FASE DE PRUEBA (OOS): Solo apuesto si el equipo fue rentable en la Formación
-                        const homeKey = `${league}|${homeTeam}`;
-                        const awayKey = `${league}|${awayTeam}`;
-                        isQualifiedBet = qualifiedTeamsSet.has(homeKey) || qualifiedTeamsSet.has(awayKey);
-                        
-                    } else if (minRoiFilter !== undefined) {
-                        // FASE DE FORMACIÓN (IN-SAMPLE): Apuesto si el ROI progresivo actual supera el umbral
-                        
-                        const homeOverallStats = progressiveStats[league]?.[homeTeam]?.overall;
-                        const awayOverallStats = progressiveStats[league]?.[awayTeam]?.overall;
-
-                        // Solo califico para la apuesta si al menos un equipo TENÍA el ROI mínimo ANTES del partido.
-                        // Usamos las stats antes de actualizar el partido actual.
-                        const isHomeQualified = homeOverallStats && homeOverallStats.bets > 0 && getROI(homeOverallStats) >= minRoiFilter;
-                        const isAwayQualified = awayOverallStats && awayOverallStats.bets > 0 && getROI(awayOverallStats) >= minRoiFilter;
-                        
-                        // Nota: Si es el primer partido, o no hay suficientes datos, no califica.
-                        isQualifiedBet = isHomeQualified || isAwayQualified;
-                        
-                    } else {
-                        // No debería ocurrir
-                        isQualifiedBet = false;
-                    }
-
-
-                    // --- 3. ACTUALIZACIÓN DE MÉTRICAS GLOBALES (SOLO SI ES CALIFICADA Y APOSTADA) ---
-                    if (isQualifiedBet) {
-                        totalBets++;
-                        currentCapital += profit;
-
-                        // Drawdown y Equity History
-                        equityHistory.push(currentCapital);
-                        
-                        if (currentCapital > peakCapital) {
-                            peakCapital = currentCapital;
-                        }
-                        
-                        const drawdown = peakCapital > 0 ? (peakCapital - currentCapital) / peakCapital : 0;
-                        if (drawdown > maxDrawdown) {
-                            maxDrawdown = drawdown;
-                        }
-                        drawdownHistory.push(drawdown * 100); 
-                        
-                        // Victorias/Derrotas y Rachas
-                        if (isWin) {
-                            wins++;
-                            currentLossStreak = 0;
-                            currentProfitStreak++;
-                        } else {
-                            losses++;
-                            currentLossStreak++;
-                            currentProfitStreak = 0;
-                        }
-
-                        if (currentLossStreak > maxLossStreak) maxLossStreak = currentLossStreak;
-                        if (currentProfitStreak > maxProfitStreak) maxProfitStreak = currentProfitStreak;
-                    }
-                }
-            });
-            
-            const netProfit = currentCapital - initialCapital;
-            const totalStake = totalBets * strategyParams.stakeSize;
-            const roi = totalStake > 0 ? (netProfit / totalStake) * 100 : 0;
-            const winRate = totalBets > 0 ? (wins / totalBets) * 100 : 0;
-
-            return {
-                finalCapital: currentCapital,
-                netProfit,
-                roi,
-                maxDrawdown: maxDrawdown * 100,
-                totalBets,
-                wins,
-                losses,
-                winRate,
-                maxLossStreak,
-                maxProfitStreak,
-                equityHistory,
-                drawdownHistory,
-                progressiveStats 
-            };
-        }
-
-
-        // ----------------------------------------------------
-        // 2. FUNCIÓN PRINCIPAL DE VALIDACIÓN PROSPECTIVA
-        // ----------------------------------------------------
-        function runValidationBacktest() {
-            if (rawData.length === 0) {
-                showMessage('Por favor, cargue un archivo de datos válido y que contenga datos.');
-                return;
-            }
-
-            // --- 1. CONFIGURACIÓN Y VALIDACIÓN ---
-            const trainingEndDateStr = document.getElementById('trainingEndDate').value;
-            const trainingEndTimestamp = trainingEndDateStr ? new Date(trainingEndDateStr).setHours(23, 59, 59, 999) : 0;
-            
-            if (!trainingEndDateStr || isNaN(trainingEndTimestamp)) {
-                 showMessage('Debe especificar una Fecha de Fin de Formación válida (YYYY-MM-DD).', true);
-                 return;
-            }
-
-            const initialCapital = parseFloat(document.getElementById('initialCapital').value);
-            const stakeSize = parseFloat(document.getElementById('stakeSize').value);
-            const minOdd = parseFloat(document.getElementById('minOdd').value);
-            const maxOdd = parseFloat(document.getElementById('maxOdd').value);
-            const minRoiFilterValue = parseFloat(MIN_ROI_FILTER_EL.value);
-            
-            const minDangerousAttacks = parseInt(document.getElementById('minDangerousAttacks').value);
-            const minShotsOnTarget = parseInt(document.getElementById('minShotsOnTarget').value);
-            const minCorners = parseInt(document.getElementById('minCorners').value);
-            
-            const MIN_ROI_FILTER = minRoiFilterValue;
-
-            if (isNaN(initialCapital) || initialCapital <= 0 || isNaN(stakeSize) || stakeSize <= 0 || isNaN(minOdd) || isNaN(maxOdd) || minOdd > maxOdd || isNaN(MIN_ROI_FILTER) || MIN_ROI_FILTER < 0 || isNaN(minDangerousAttacks) || isNaN(minShotsOnTarget) || isNaN(minCorners)) {
-                 showMessage('Revise que todos los parámetros (cuotas, capital, ROI y rendimiento) sean números válidos.', true);
-                return;
-            }
-            
-            // Parámetros de la estrategia (incluyendo los nuevos filtros)
-            const strategyParams = {
-                stakeSize,
-                minOdd,
-                maxOdd,
-                minDangerousAttacks,
-                minShotsOnTarget,
-                minCorners
-            };
-
-            // Actualizar la visualización del filtro dinámico
-            roiFilterDisplayTeamsEl.textContent = MIN_ROI_FILTER.toFixed(1) + '%';
-            
-            // Actualizar los requisitos del Cazador en Vivo
-            document.getElementById('reqDangerousAttacks').textContent = minDangerousAttacks;
-            document.getElementById('reqShotsOnTarget').textContent = minShotsOnTarget;
-            document.getElementById('reqCorners').textContent = minCorners;
-            
-            // --- 2. DIVIDIR DATOS ---
-            const dataTraining = rawData.filter(match => match.Timestamp <= trainingEndTimestamp);
-            const dataTest = rawData.filter(match => match.Timestamp > trainingEndTimestamp);
-
-            if (dataTraining.length === 0) {
-                 showMessage('No hay partidos en el Periodo de Formación. Ajuste la Fecha de Fin.', true);
-                 return;
-            }
-            if (dataTest.length === 0) {
-                 showMessage('No hay partidos en el Periodo de Prueba. Ajuste la Fecha de Fin.', true);
-                 return;
-            }
-
-            // --- 3. FASE 1: FORMACIÓN (IN-SAMPLE) ---
-            let currentCapital = initialCapital;
-            const trainingStatsStore = {};
-            
-            const trainingResults = coreBacktest(
-                dataTraining, 
-                strategyParams, 
-                currentCapital, 
-                MIN_ROI_FILTER, 
-                null, 
-                trainingStatsStore // Se actualiza progresivamente
-            );
-
-            // --- 4. SELECCIÓN DE EQUIPOS RENTABLES ---
-            const qualifiedTeamsSet = new Set();
-            const finalTrainingStats = trainingResults.progressiveStats;
-
-            // Iterar sobre las estadísticas finales de la Formación para encontrar los equipos que calificaron
-            for (const league in finalTrainingStats) {
-                for (const team in finalTrainingStats[league]) {
-                    const stats = finalTrainingStats[league][team].overall;
-                    if (stats.bets > 0) {
-                        const finalRoi = getROI(stats);
-                        if (finalRoi >= MIN_ROI_FILTER) {
-                            // La clave de calificación es LEAGUE|TEAM
-                            qualifiedTeamsSet.add(`${league}|${team}`);
-                        }
-                    }
-                }
-            }
-            
-            qualifiedTeamsCountEl.textContent = qualifiedTeamsSet.size;
-
-            if (qualifiedTeamsSet.size === 0) {
-                showMessage(`La Fase de Formación NO encontró equipos con ROI ≥ ${MIN_ROI_FILTER.toFixed(1)}%. No se puede proceder a la Prueba.`, true);
-                
-                // Mostrar resultados vacíos en el test
-                displayTestResults({
-                    finalCapital: initialCapital, netProfit: 0, roi: 0, maxDrawdown: 0, totalBets: 0,
-                }, {
-                    initialCapital, finalCapital: initialCapital, equityHistory: [initialCapital], drawdownHistory: [0], splitIndex: 1
-                }, finalTrainingStats, MIN_ROI_FILTER, dataTest);
-                return;
-            }
-
-            // --- 5. FASE 2: PRUEBA (OUT-OF-SAMPLE) ---
-            currentCapital = trainingResults.finalCapital; // El capital final de la Formación es el inicial de la Prueba
-            const progressiveTestStats = {}; 
-            
-            const testResults = coreBacktest(
-                dataTest, 
-                strategyParams, 
-                currentCapital, 
-                undefined, // No se usa el filtro de ROI progresivo en la prueba
-                qualifiedTeamsSet, // Usar solo los equipos calificados
-                progressiveTestStats // Stats temporales, no usadas para filtrado futuro
-            );
-
-            // --- 6. AGREGAR RESULTADOS TOTALES Y DISPLAY ---
-            
-            // Unir historiales de capital y drawdown
-            const totalEquityHistory = trainingResults.equityHistory.concat(testResults.equityHistory.slice(1));
-            const totalDrawdownHistory = trainingResults.drawdownHistory.concat(testResults.drawdownHistory.slice(1));
-
-            const totalInitialCapital = initialCapital;
-            const totalFinalCapital = testResults.finalCapital;
-            const totalNetProfit = totalFinalCapital - totalInitialCapital;
-            const totalBets = trainingResults.totalBets + testResults.totalBets;
-            const totalStake = totalBets * stakeSize;
-            const totalRoi = totalStake > 0 ? (totalNetProfit / totalStake) * 100 : 0;
-            
-            // Recalcular el maxDrawdown en el historial combinado
-            let combinedPeakCapital = initialCapital;
-            let combinedMaxDrawdown = 0;
-            totalEquityHistory.forEach(cap => {
-                if (cap > combinedPeakCapital) combinedPeakCapital = cap;
-                const drawdown = combinedPeakCapital > 0 ? (combinedPeakCapital - cap) / combinedPeakCapital : 0;
-                if (drawdown > combinedMaxDrawdown) combinedMaxDrawdown = drawdown;
-            });
-
-            // Resultados totales (para la curva)
-            const combinedResults = {
-                initialCapital: totalInitialCapital,
-                finalCapital: totalFinalCapital,
-                netProfit: totalNetProfit,
-                roi: totalRoi,
-                maxDrawdown: combinedMaxDrawdown * 100,
-                totalBets,
-                equityHistory: totalEquityHistory,
-                drawdownHistory: totalDrawdownHistory,
-                splitIndex: trainingResults.equityHistory.length - 1 // Índice de la última apuesta de formación
-            };
-
-            displayTestResults(testResults, combinedResults, finalTrainingStats, MIN_ROI_FILTER, dataTest);
-            
-            showMessage(`Validación completada. ${trainingResults.totalBets} apuestas en Formación, ${testResults.totalBets} en Prueba.`, false);
-            
-            // Ejecutar la verificación en vivo con los nuevos umbrales
-            checkLiveMetrics();
-        }
-        
-        // --- FUNCIONES DE DISPLAY ---
-
-        function displayTestResults(test, combined, finalTrainingStats, minRoiFilter, dataTest) {
-            const formatter = new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR' });
-            
-            // 1. Resultados de PRUEBA
-            testRoiEl.textContent = test.roi.toFixed(2) + ' %';
-            testRoiEl.classList.toggle('text-green-600', test.roi >= 0);
-            testRoiEl.classList.toggle('text-red-600', test.roi < 0);
-
-            testNetProfitEl.textContent = formatter.format(test.netProfit);
-            testNetProfitEl.classList.toggle('text-green-600', test.netProfit >= 0);
-            testNetProfitEl.classList.toggle('text-red-600', test.netProfit < 0);
-
-            testMaxDrawdownEl.textContent = test.maxDrawdown.toFixed(2) + ' %';
-            testTotalBetsEl.textContent = test.totalBets;
-            
-            // Rango de Fechas de Prueba
-            const testStart = dataTest[0] ? new Date(dataTest[0].Timestamp).toISOString().split('T')[0] : 'N/A';
-            const testEnd = dataTest[dataTest.length - 1] ? new Date(dataTest[dataTest.length - 1].Timestamp).toISOString().split('T')[0] : 'N/A';
-            testPeriodRangeEl.textContent = `${testStart} - ${testEnd}`;
-
-            // 2. Gráficos (TOTALES)
-            updateChart(combined.equityHistory, combined.initialCapital, combined.splitIndex);
-            updateDrawdownChart(combined.drawdownHistory, combined.splitIndex); 
-            
-            // 3. Análisis por Equipos (Solo los que calificaron en Formación)
-            displayTeamAnalysis(finalTrainingStats, formatter, minRoiFilter);
-        }
-        
-        const generateTableContent = (data, formatter) => {
-            const minRoiFilter = parseFloat(MIN_ROI_FILTER_EL.value);
-            if (data.length === 0) {
-                return `<p class="text-sm text-gray-500 italic p-2">No se encontraron equipos con un ROI final ≥ ${minRoiFilter.toFixed(1)}%.</p>`;
-            }
-
-            // Ordenar por ROI descendente
-            data.sort((a, b) => b.roi - a.roi);
-
-            const tableRows = data.map(stats => {
-                const profitText = formatter.format(stats.profit);
-                const roiColorClass = stats.roi >= 0 ? 'text-green-600' : 'text-red-600'; 
-                const avgGoals = stats.bets > 0 ? (stats.sumTotalGoals / stats.bets).toFixed(2) : '0.00';
-                const avgDA = stats.bets > 0 ? (stats.sumDangerousAttacks / stats.bets).toFixed(0) : '0';
-                const avgSOT = stats.bets > 0 ? (stats.sumShotsOnTarget / stats.bets).toFixed(1) : '0.0';
-
-                return `
-                    <tr class="hover:bg-gray-50">
-                        <td class="px-3 py-2 whitespace-nowrap text-sm font-medium text-gray-900">${stats.team}</td>
-                        <td class="px-3 py-2 whitespace-nowrap text-sm font-bold ${roiColorClass}">${stats.roi.toFixed(2)} %</td>
-                        <td class="px-3 py-2 whitespace-nowrap text-sm text-gray-700">${profitText}</td>
-                        <td class="px-3 py-2 whitespace-nowrap text-sm text-gray-700 text-center">${stats.bets}</td>
-                        <td class="px-3 py-2 whitespace-nowrap text-sm text-gray-700 text-center">${stats.winRate.toFixed(1)} %</td>
-                        <td class="px-3 py-2 whitespace-nowrap text-sm text-yellow-800 font-bold text-center">${avgGoals}</td>
-                        <td class="px-3 py-2 whitespace-nowrap text-sm text-yellow-800 text-center">${avgDA}</td>
-                        <td class="px-3 py-2 whitespace-nowrap text-sm text-yellow-800 text-center">${avgSOT}</td>
-                    </tr>
-                `;
-            }).join('');
-
-            const tableHeader = `
-                <thead class="bg-gray-100">
-                    <tr>
-                        <th scope="col" class="px-3 py-2 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider rounded-tl-lg">Equipo</th>
-                        <th scope="col" class="px-3 py-2 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">ROI (%)</th>
-                        <th scope="col" class="px-3 py-2 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Beneficio</th>
-                        <th scope="col" class="px-3 py-2 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider">Apuestas (N)</th>
-                        <th scope="col" class="px-3 py-2 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider">Acierto (%)</th>
-                        <th scope="col" class="px-3 py-2 text-center text-xs font-semibold text-yellow-800 uppercase tracking-wider">Avg. Goles FT</th>
-                        <th scope="col" class="px-3 py-2 text-center text-xs font-semibold text-yellow-800 uppercase tracking-wider">Avg. Att. Pel.</th>
-                        <th scope="col" class="px-3 py-2 text-center text-xs font-semibold text-yellow-800 uppercase tracking-wider rounded-tr-lg">Avg. Tiros Puerta</th>
-                    </tr>
-                </thead>
-            `;
-
-            return `
-                <div class="overflow-x-auto custom-scroll mt-2 mb-4 border border-gray-200 rounded-lg shadow-sm">
-                    <table class="min-w-full divide-y divide-gray-200">
-                        ${tableHeader}
-                        <tbody class="bg-white divide-y divide-gray-200">
-                            ${tableRows}
-                        </tbody>
-                    </table>
-                </div>
-            `;
-        };
-
-        function displayTeamAnalysis(leagueTeamStats, formatter, minRoiFilter) {
-            leagueAccordionContainerEl.innerHTML = '';
-            const leagueNames = Object.keys(leagueTeamStats).sort();
-            let totalQualifiedTeams = 0;
-
-            if (leagueNames.length === 0) {
-                leagueAccordionContainerEl.innerHTML = `<p class="text-sm text-gray-500 italic p-2">No se encontraron equipos calificados en la Fase de Formación.</p>`;
-                return;
-            }
-
-            leagueNames.forEach((league, index) => {
-                const teamsInLeague = leagueTeamStats[league];
-                
-                const teamData = { overall: [] }; 
-                let qualifiedInLeague = 0;
-
-                for (const team in teamsInLeague) {
-                    const stats = teamsInLeague[team].overall;
-                    const roi = getROI(stats);
-                    
-                    // Aplicar filtro de ROI FINAL y asegurar que haya apuestas
-                    if (stats.bets > 0 && roi >= minRoiFilter) {
-                        qualifiedInLeague++;
-                        teamData.overall.push({ 
-                            team, 
-                            ...stats, 
-                            roi: roi,
-                            winRate: stats.bets > 0 ? (stats.wins / stats.bets) * 100 : 0
-                        });
-                    }
-                }
-                
-                if (qualifiedInLeague === 0) return; 
-
-                const overallTable = generateTableContent(teamData.overall, formatter);
-                totalQualifiedTeams += qualifiedInLeague;
-
-                const accordionItem = document.createElement('div');
-                accordionItem.className = 'bg-white rounded-xl border border-indigo-300 shadow-md';
-                accordionItem.innerHTML = `
-                    <button class="accordion-header w-full p-4 flex justify-between items-center text-left transition duration-150 rounded-xl" data-target="content-${index}">
-                        <h3 class="text-lg font-bold text-gray-800">${league} (${qualifiedInLeague} equipos calificados)</h3>
-                        <span class="text-indigo-600 font-semibold transition-transform duration-300 transform"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg></span>
-                    </button>
-                    
-                    <div id="content-${index}" class="accordion-content px-4 py-2">
-                        <div class="space-y-6">
-                            <!-- OVERALL -->
-                            <h4 class="text-xl font-semibold text-indigo-700 mt-4 border-b pb-1">Análisis de Rendimiento y ROI en Formación</h4>
-                            ${overallTable}
-                        </div>
-                    </div>
-                `;
-                leagueAccordionContainerEl.appendChild(accordionItem);
-            });
-            
-            // Actualizar el contador global
-            qualifiedTeamsCountEl.textContent = totalQualifiedTeams;
-
-            document.querySelectorAll('.accordion-header').forEach(header => {
-                header.addEventListener('click', (e) => {
-                    const contentId = header.getAttribute('data-target');
-                    const content = document.getElementById(contentId);
-                    const arrow = header.querySelector('span svg');
-                    
-                    if (content.classList.contains('active')) {
-                        content.classList.remove('active');
-                        header.classList.remove('active');
-                        arrow.style.transform = 'rotate(0deg)';
-                    } else {
-                        document.querySelectorAll('.accordion-content.active').forEach(openContent => {
-                            openContent.classList.remove('active');
-                            const openHeader = openContent.previousElementSibling;
-                            openHeader.classList.remove('active');
-                            openHeader.querySelector('span svg').style.transform = 'rotate(0deg)';
-                        });
-                        
-                        content.classList.add('active');
-                        header.classList.add('active');
-                        arrow.style.transform = 'rotate(180deg)';
-                    }
-                });
-            });
-        }
-        
-        // ----------------------------------------------------
-        // 3. FUNCIÓN DEL CAZADOR EN VIVO
-        // ----------------------------------------------------
-        function checkLiveMetrics() {
-            // Obtener los umbrales del Backtest
-            const minDangerousAttacks = parseInt(document.getElementById('minDangerousAttacks').value);
-            const minShotsOnTarget = parseInt(document.getElementById('minShotsOnTarget').value);
-            const minCorners = parseInt(document.getElementById('minCorners').value);
-            
-            // Actualizar los requisitos del Cazador en Vivo
-            document.getElementById('reqDangerousAttacks').textContent = minDangerousAttacks;
-            document.getElementById('reqShotsOnTarget').textContent = minShotsOnTarget;
-            document.getElementById('reqCorners').textContent = minCorners;
-
-            // Obtener las métricas en vivo (inputs)
-            const liveDA = parseInt(document.getElementById('liveDangerousAttacks').value) || 0;
-            const liveSOT = parseInt(document.getElementById('liveShotsOnTarget').value) || 0;
-            const liveCR = parseInt(document.getElementById('liveCorners').value) || 0;
-
-            const decisionPanel = document.getElementById('liveDecisionPanel');
-            const decisionText = document.getElementById('liveDecisionText');
-            const statusIcon = document.getElementById('liveStatusIcon');
-            
-            // Lógica de Validación
-            const passesDA = liveDA >= minDangerousAttacks;
-            const passesSOT = liveSOT >= minShotsOnTarget;
-            const passesCR = liveCR >= minCorners;
-            
-            const totalPasses = passesDA && passesSOT && passesCR;
-
-            // Actualizar indicadores individuales
-            document.getElementById('reqDA').classList.toggle('indicator-pass', passesDA);
-            document.getElementById('reqDA').classList.toggle('indicator-fail', !passesDA);
-            document.getElementById('reqSOT').classList.toggle('indicator-pass', passesSOT);
-            document.getElementById('reqSOT').classList.toggle('indicator-fail', !passesSOT);
-            document.getElementById('reqCR').classList.toggle('indicator-pass', passesCR);
-            document.getElementById('reqCR').classList.toggle('indicator-fail', !passesCR);
-
-
-            // Actualizar el panel de decisión
-            decisionPanel.classList.remove('indicator-pass', 'indicator-fail');
-
-            if (liveDA === 0 && liveSOT === 0 && liveCR === 0) {
-                // Estado inicial
-                decisionPanel.style.backgroundColor = 'white';
-                decisionPanel.style.borderColor = '#9ca3af'; // gray-400
-                decisionText.textContent = 'Ingresa las métricas';
-                statusIcon.textContent = '❓';
-            } else if (totalPasses) {
-                // Pasa los filtros
-                decisionPanel.classList.add('indicator-pass');
-                decisionPanel.style.borderColor = '#34d399';
-                decisionText.textContent = '¡APUESTA CONFIRMADA!';
-                statusIcon.textContent = '✅';
-            } else {
-                // Falla algún filtro
-                decisionPanel.classList.add('indicator-fail');
-                decisionPanel.style.borderColor = '#f87171';
-                decisionText.textContent = 'NO CUMPLE FILTROS';
-                statusIcon.textContent = '❌';
-            }
-        }
-
-
-        // 1. Manejar la carga del archivo (CSV/JSON unificado)
-        dataFile.addEventListener('change', async (event) => {
-            rawData = [];
-            runBacktestBtn.disabled = true;
-            buttonText.textContent = 'Cargando y Procesando Datos...';
-            
-            const file = event.target.files[0];
-            if (!file) {
-                buttonText.textContent = 'Cargar Datos para Ejecutar Backtesting';
-                return;
-            }
-
-            const isCSV = file.name.toLowerCase().endsWith('.csv');
-
-            try {
-                const reader = new FileReader();
-                reader.onload = (e) => {
-                    const textContent = e.target.result;
-                    
-                    if (isCSV) {
-                        rawData = parseCSV(textContent);
-                    } else {
-                        // Intentar parsear como JSON
-                        rawData = parseJSON(textContent);
-                        if (rawData.length === 0) {
-                            showMessage('Error de formato JSON: El archivo no es un JSON válido o está mal estructurado.', true);
-                        }
-                    }
-                    
-                    if (rawData.length > 0) {
-                        runBacktestBtn.disabled = false;
-                        buttonText.textContent = `Ejecutar Validación (${rawData.length} partidos)`;
-                        
-                        // Determinar y sugerir una fecha de Formación (ej. el punto medio)
-                        const earliestDate = new Date(rawData[0].Timestamp);
-                        const latestDate = new Date(rawData[rawData.length - 1].Timestamp);
-                        
-                        const midTime = new Date((earliestDate.getTime() + latestDate.getTime()) / 2);
-                        const midDateStr = midTime.toISOString().split('T')[0];
-                        document.getElementById('trainingEndDate').value = midDateStr;
-                        
-                    } else {
-                        runBacktestBtn.disabled = true;
-                        buttonText.textContent = 'Corregir el formato del archivo y Reintentar.';
-                    }
-                };
-                reader.readAsText(file);
+                // Guarda los datos en la variable global
+                matchHistory = JSON.parse(e.target.result);
+                console.log("Datos cargados correctamente:", matchHistory.length, "partidos.");
             } catch (error) {
-                console.error('Error al cargar el archivo:', error);
-                showMessage('Error crítico al leer el archivo. Revise la consola del navegador.');
-                runBacktestBtn.disabled = true;
-                buttonText.textContent = 'Cargar Datos para Ejecutar Backtesting';
+                alert("Error al parsear el archivo JSON. Asegúrate de que el formato sea correcto.");
+                console.error(error);
             }
-        });
-
-        // 2. Manejar la ejecución del backtesting
-        runBacktestBtn.addEventListener('click', () => {
-            if (rawData.length > 0) {
-                buttonText.textContent = 'Ejecutando Validación...';
-                runBacktestBtn.disabled = true;
-                
-                setTimeout(() => {
-                    try {
-                        runValidationBacktest();
-                        runBacktestBtn.disabled = false;
-                        buttonText.textContent = 'Volver a Ejecutar Validación';
-                    } catch (error) {
-                        console.error('Error durante la ejecución del backtesting:', error);
-                        showMessage('Error en el motor de backtesting. Revisa la consola para más detalles.');
-                        runBacktestBtn.disabled = false;
-                        buttonText.textContent = 'Volver a Ejecutar Validación';
-                    }
-                }, 50);
-            }
-        });
-        
-        // 3. Inicializar el gráfico y el display del ROI Filter
-        window.onload = () => {
-            const initialCapital = parseFloat(document.getElementById('initialCapital').value);
-            const minRoiFilterValue = parseFloat(MIN_ROI_FILTER_EL.value);
-            
-            updateChart([initialCapital], initialCapital, 0);
-            updateDrawdownChart([0], 0); 
-            
-            roiFilterDisplayTeamsEl.textContent = minRoiFilterValue.toFixed(1) + '%';
-            showMessage(`Carga tu archivo CSV o JSON para comenzar la simulación de caza de apuestas.`, false);
-            
-            // Inicializar el Cazador en Vivo
-            checkLiveMetrics();
         };
-        
-    </script>
-</body>
-</html>
+        reader.readAsText(file);
+    }
+});
+
+function analyzeData() {
+    const localTeam = document.getElementById('localTeam').value.trim();
+    const visitorTeam = document.getElementById('visitorTeam').value.trim();
+
+    // 1. Validaciones
+    if (!matchHistory.length) {
+        alert("Primero debes cargar el archivo JSON con el historial de partidos.");
+        return;
+    }
+    if (!localTeam || !visitorTeam) {
+        alert("Por favor, ingresa el nombre del equipo Local y Visitante.");
+        return;
+    }
+
+    // 2. Filtrar partidos relevantes
+    // Obtenemos los partidos donde participó el local o el visitante.
+    const relevantMatches = matchHistory.filter(match =>
+        (match.local.toLowerCase() === localTeam.toLowerCase() || match.visitante.toLowerCase() === localTeam.toLowerCase()) ||
+        (match.local.toLowerCase() === visitorTeam.toLowerCase() || match.visitante.toLowerCase() === visitorTeam.toLowerCase())
+    );
+
+    if (relevantMatches.length === 0) {
+        document.getElementById('prob25').textContent = "N/A";
+        document.getElementById('probBTTS').textContent = "N/A";
+        document.getElementById('personalAnalysis').textContent = "No se encontraron partidos en el historial para los equipos ingresados. No se puede realizar el análisis.";
+        document.getElementById('results').style.display = 'block';
+        return;
+    }
+
+    // --- 3. Cálculo de Probabilidades ---
+    let countOver25 = 0;
+    let countBTTS = 0;
+    let totalMatchesForAnalysis = relevantMatches.length;
+
+    // Métricas para el análisis personal
+    let localScored = 0;
+    let visitorScored = 0;
+    let localConceded = 0;
+    let visitorConceded = 0;
+    
+    // Total de goles esperados/promedio
+    let totalGoals = 0;
+
+    relevantMatches.forEach(match => {
+        // Asegúrate de que los nombres de las propiedades coincidan con tu JSON
+        const G_local = parseInt(match.golesLocal || 0); 
+        const G_visitor = parseInt(match.golesVisitante || 0);
+
+        // a) Más de 2.5 Goles
+        const totalGoles = G_local + G_visitor;
+        if (totalGoles > 2.5) {
+            countOver25++;
+        }
+        totalGoals += totalGoles;
+
+        // b) Ambos Anotan (BTTS: Both Teams To Score)
+        if (G_local > 0 && G_visitor > 0) {
+            countBTTS++;
+        }
+
+        // c) Métricas por equipo
+        // Si el partido involucra al equipo local del análisis
+        if (match.local.toLowerCase() === localTeam.toLowerCase()) {
+            localScored += G_local;
+            localConceded += G_visitor;
+        } else if (match.visitante.toLowerCase() === localTeam.toLowerCase()) {
+            localScored += G_visitor;
+            localConceded += G_local;
+        }
+
+        // Si el partido involucra al equipo visitante del análisis
+        if (match.local.toLowerCase() === visitorTeam.toLowerCase()) {
+            visitorScored += G_local;
+            visitorConceded += G_visitor;
+        } else if (match.visitante.toLowerCase() === visitorTeam.toLowerCase()) {
+            visitorScored += G_visitor;
+            visitorConceded += G_local;
+        }
+    });
+
+    // Calcular promedios
+    const probOver25 = (countOver25 / totalMatchesForAnalysis) * 100;
+    const probBTTS = (countBTTS / totalMatchesForAnalysis) * 100;
+    
+    const avgGoals = (totalGoals / totalMatchesForAnalysis).toFixed(2);
+    
+    // El número de partidos para calcular los promedios de ataque/defensa es distinto. 
+    // Para simplificar, calcularemos un índice general sobre el total de partidos relevantes
+    // (Esto puede mejorarse usando solo los partidos donde el equipo es Local/Visitante).
+    const localAttackIndex = (localScored / totalMatchesForAnalysis).toFixed(2);
+    const visitorAttackIndex = (visitorScored / totalMatchesForAnalysis).toFixed(2);
+    const localDefenseIndex = (localConceded / totalMatchesForAnalysis).toFixed(2);
+    const visitorDefenseIndex = (visitorConceded / totalMatchesForAnalysis).toFixed(2);
+
+
+    // --- 4. Mostrar Resultados ---
+    document.getElementById('prob25').textContent = `${probOver25.toFixed(2)}% (${countOver25} de ${totalMatchesForAnalysis} partidos)`;
+    document.getElementById('probBTTS').textContent = `${probBTTS.toFixed(2)}% (${countBTTS} de ${totalMatchesForAnalysis} partidos)`;
+    document.getElementById('results').style.display = 'block';
+
+    // --- 5. Análisis Personalizado (Deducción) ---
+    const analysisText = generatePersonalAnalysis(localTeam, visitorTeam, probOver25, probBTTS, avgGoals, localAttackIndex, visitorAttackIndex, localDefenseIndex, visitorDefenseIndex);
+    document.getElementById('personalAnalysis').innerHTML = analysisText;
+}
+
+/**
+ * Genera un análisis y deducción personalizada.
+ * @param {string} localTeam - Nombre del equipo local.
+ * @param {string} visitorTeam - Nombre del equipo visitante.
+ * @param {number} p25 - Probabilidad de Más de 2.5 Goles.
+ * @param {number} pBTTS - Probabilidad de Ambos Anotan.
+ * @param {number} avgG - Promedio de goles total.
+ * @param {number} laI - Índice de ataque del local.
+ * @param {number} vaI - Índice de ataque del visitante.
+ * @param {number} ldI - Índice de defensa del local.
+ * @param {number} vdI - Índice de defensa del visitante.
+ * @returns {string} El texto del análisis.
+ */
+function generatePersonalAnalysis(localTeam, visitorTeam, p25, pBTTS, avgG, laI, vaI, ldI, vdI) {
+    let analysis = "";
+
+    // Análisis de Goles Totales (Más de 2.5)
+    analysis += `**🎯 Sobre el Total de Goles (Más de 2.5):**<br>`;
+    if (p25 >= 70) {
+        analysis += `Dado que la probabilidad histórica de un Más de 2.5 es alta (**${p25.toFixed(0)}%**), y el promedio de goles por partido analizado es de **${avgG}**, todo indica que será un partido con un **marcador abultado**. Ambos equipos tienen tendencias ofensivas que históricamente suelen superar la línea.<br><br>`;
+    } else if (p25 >= 50) {
+        analysis += `La probabilidad de Más de 2.5 Goles está en un rango moderado (**${p25.toFixed(0)}%**). Es un 50/50, lo que sugiere que podría definirse por un gol de diferencia (2-1 o 1-2). El promedio de **${avgG}** goles es prometedor, pero hay un riesgo considerable de un marcador bajo (1-0 o 1-1).<br><br>`;
+    } else {
+        analysis += `La probabilidad de Más de 2.5 Goles es baja (**${p25.toFixed(0)}%**), con un promedio de **${avgG}** goles por partido. Parece que el partido tenderá al **Menos de 2.5 Goles**. Esto puede deberse a defensas sólidas o ataques poco contundentes en los historiales.<br><br>`;
+    }
+
+    // Análisis de Ambos Anotan (BTTS)
+    analysis += `**🤝 Sobre Ambos Anotan (BTTS):**<br>`;
+    if (pBTTS >= 70) {
+        analysis += `Una probabilidad tan alta (**${pBTTS.toFixed(0)}%**) de BTTS sugiere que **ambos equipos son muy propensos a marcar**. El índice de ataque del local (${laI}) y del visitante (${vaI}) parecen superar el índice de defensa del rival, lo que hace muy probable que el marcador se abra por ambos lados.<br><br>`;
+    } else if (pBTTS >= 50) {
+        analysis += `La probabilidad moderada de BTTS (**${pBTTS.toFixed(0)}%**) indica que, aunque tienen potencial ofensivo, uno de los dos equipos suele mantener la portería a cero con frecuencia. Hay que ver si **${localTeam}** (${laI} goles marcados) logra superar a la defensa de **${visitorTeam}** (${vdI} goles encajados).<br><br>`;
+    } else {
+        analysis += `La baja probabilidad de BTTS (**${pBTTS.toFixed(0)}%**) sugiere que la defensa o el portero de al menos un equipo es excepcionalmente sólido, o uno de los ataques es muy débil. La tendencia es que **solo un equipo (o ninguno) marque**.<br><br>`;
+    }
+
+    // Deducción Final
+    analysis += `**💡 Deducción Final del Analista:**<br>`;
+    if (p25 >= 60 && pBTTS >= 60) {
+        analysis += `**¡Recomendación Ofensiva!** La combinación de alta probabilidad en ambas métricas apunta a un **espectáculo de goles** donde ambos equipos marcarán (Ej: 2-1, 2-2, 3-1). El historial nos dice que ambos suelen conceder y anotar.<br>`;
+    } else if (p25 < 50 && pBTTS < 50) {
+        analysis += `**¡Recomendación Defensiva!** Ambas probabilidades son bajas. Esto sugiere un partido muy cerrado, táctico y con pocas ocasiones. Es muy probable un **Menos de 2.5 Goles** y que **solo un equipo gane por la mínima** (Ej: 1-0).<br>`;
+    } else if (p25 >= 60 && pBTTS < 50) {
+        analysis += `**¡Cuidado con la Paliza!** Una alta probabilidad de Más de 2.5 y una baja de BTTS es la señal clásica de una **goleada unilateral** (Ej: 3-0, 4-0). El equipo con mejor índice de ataque probablemente anote mucho, mientras que el otro se quedará en blanco.<br>`;
+    } else {
+        analysis += `**¡Partido Incierto!** Las probabilidades están divididas, con una métrica alta y otra baja. Se recomienda un análisis más profundo en la **condición de local/visitante** y la **forma reciente** de ambos equipos para tomar una decisión final.<br>`;
+    }
+    
+    return analysis;
+}
 
