@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Backtester Poisson por Fuerza (Attack/Defense Strength)</title>
+  <title>Backtester Poisson por Fuerza (Attack/Defense Strength) — Normalización Corregida</title>
   <style>
     body { font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, Arial; margin: 18px; background:#f6f7fb; color:#111; }
     header { display:flex; align-items:center; gap:12px; margin-bottom:16px; }
@@ -26,8 +26,8 @@
 <body>
   <header>
     <div>
-      <h1>Backtester Poisson por Fuerza (Attack/Defense Strength) — Corregido</h1>
-      <div class="muted">El backtesting ahora usa la fuerza ofensiva y defensiva de los equipos en toda la liga para pronosticar.</div>
+      <h1>Backtester Poisson por Fuerza — Normalización de Datos Corregida (Resultado Real)</h1>
+      <div class="muted">El backtesting ahora asegura que el resultado real sea parseado correctamente.</div>
     </div>
   </header>
 
@@ -79,8 +79,7 @@
       <h3>Nota / Metodología (Fuerza de Ataque/Defensa)</h3>
       <div class="muted">
         - **Metodología:** Modelo de Poisson Bivariado ajustado por Fuerza de Ataque (AS) y Fuerza de Defensa (DS).<br>
-        - **Cálculo de Fuerzas:** Se utilizan **todos** los partidos jugados *antes* de la fecha objetivo para calcular el AS y DS de todos los equipos de la liga.<br>
-        - **Cálculo &lambda;:** $\lambda_{\text{Home}} = \text{AvgHome} \times AS_{\text{Home}} \times DS_{\text{Away}}$.
+        - **Cálculo de Fuerzas:** Se utilizan **todos** los partidos jugados *antes* de la fecha objetivo para calcular el AS y DS de todos los equipos de la liga.
       </div>
     </div>
   </div>
@@ -99,7 +98,8 @@ const MONTHS_ES = {
   'sep':8,'sep.':8,'sept':8,'sept.':8, 'oct':9,'oct.':9, 'nov':10,'nov.':10, 'dic':11,'dic.':11
 };
 
-// Data Normalization (kept robust)
+// --- NORMALIZACIÓN DE DATOS (CON PARSING DE GOLES MEJORADO) ---
+
 function parseFlexibleDate(s) {
     if (!s) return null;
     if (s instanceof Date) return s;
@@ -137,6 +137,8 @@ function normalizeMatch(entry) {
         const e = {};
         e.league = entry.league || entry.League || '';
         const matchRaw = entry.Match || '';
+        
+        // 1. Parsear Equipos
         if (matchRaw && typeof matchRaw === 'string' && matchRaw.includes('-')) {
             const parts = matchRaw.split('-').map(s => s.trim());
             e.home_team = parts[0] || '';
@@ -145,23 +147,49 @@ function normalizeMatch(entry) {
             e.home_team = entry.home_team || entry['Home'] || '';
             e.away_team = entry.away_team || entry['Away'] || '';
         }
-        const resFT = (entry['Result FT'] || entry.result_ft || '').toString().trim();
+
+        // 2. Parsear Goles (Lógica Corregida y Reforzada)
+        let homeGoals = NaN;
+        let awayGoals = NaN;
+        
+        const resFT = (entry['Result FT'] || entry.result_ft || entry.result || entry['Result'] || '').toString().trim();
+        
+        // Intento 1: Parsear "X-Y"
         if (resFT && resFT.includes('-')) {
-            const parts = resFT.split('-').map(s => s.trim());
-            e.home_goals = Number(parts[0]) || 0;
-            e.away_goals = Number(parts[1]) || 0;
-        } else {
-            e.home_goals = Number(entry.home_goals ?? entry.HomeTotal ?? NaN);
-            e.away_goals = Number(entry.away_goals ?? entry.AwayTotal ?? NaN);
+            // Usa una regex más estricta para asegurar que solo sean dígitos
+            const match = resFT.match(/(\d+)\s*-\s*(\d+)/);
+            if (match) {
+                homeGoals = Number(match[1]);
+                awayGoals = Number(match[2]);
+            }
         }
-        if (isNaN(e.home_goals) || isNaN(e.away_goals)) return null; 
-        e.date = parseFlexibleDate(entry.Date || '');
-        if (!e.league || !e.home_team || !e.away_team || !e.date) return null;
+        
+        // Intento 2: Fallback a campos explícitos si Intento 1 falló
+        if (isNaN(homeGoals) || isNaN(awayGoals)) {
+            homeGoals = Number(entry.home_goals ?? entry.HomeTotal ?? entry['Home Goals'] ?? NaN);
+            awayGoals = Number(entry.away_goals ?? entry.AwayTotal ?? entry['Away Goals'] ?? NaN);
+        }
+
+        e.home_goals = homeGoals;
+        e.away_goals = awayGoals;
+
+        // 3. Parsear Fecha
+        e.date = parseFlexibleDate(entry.Date || entry.date || '');
+
+        // 4. Validación Final (Asegurar que los goles sean números válidos)
+        if (!e.league || !e.home_team || !e.away_team || !e.date || isNaN(e.home_goals) || isNaN(e.away_goals)) {
+            // console.warn('Entrada omitida (datos incompletos/inválidos):', entry);
+            return null;
+        }
+
         return e;
     } catch (err) {
+        console.error('Error al normalizar la entrada:', err, entry);
         return null;
     }
 }
+
+// --- FIN NORMALIZACIÓN DE DATOS ---
 
 fileInput.addEventListener('change', async (e) => {
   const f = e.target.files[0];
@@ -170,7 +198,8 @@ fileInput.addEventListener('change', async (e) => {
   try {
     const raw = JSON.parse(text);
     if (!Array.isArray(raw)) throw new Error('JSON debe ser un array de partidos');
-    matches = raw.map(normalizeMatch).filter(m => m && m.date);
+    // Filtramos para asegurar que los goles sean >= 0
+    matches = raw.map(normalizeMatch).filter(m => m && m.date && m.home_goals >= 0 && m.away_goals >= 0);
     matches.sort((a,b) => a.date - b.date);
     populateLeagueAndTeams();
     alert('Archivo cargado. Partidos reconocidos: ' + matches.length);
@@ -179,6 +208,44 @@ fileInput.addEventListener('change', async (e) => {
   }
 });
 
+// Las demás funciones (población de selects, PoissonP, probTotalGreaterThanOrEqual3, probBTTSYes, round)
+// Se mantienen del modelo anterior de fuerza, ya que son matemáticamente correctas.
+// Se omiten aquí por brevedad, pero se incluyen en el bloque de script final.
+
+// --- FUNCIONES MATEMÁTICAS (POISSON VERIFICADO) ---
+function poissonP(k, lambda) {
+  if (lambda <= 0 && k === 0) return 1;
+  if (lambda <= 0 && k > 0) return 0;
+  let logP = -lambda + k * Math.log(lambda);
+  for(let i=1; i<=k; i++) logP -= Math.log(i);
+  return Math.exp(logP);
+}
+
+function probTotalGreaterThanOrEqual3(lambdaH, lambdaA) {
+  if (lambdaH <= 0 && lambdaA <= 0) return 0;
+  let probGolesMenorOIgual2 = 0;
+  probGolesMenorOIgual2 += poissonP(0, lambdaH) * poissonP(0, lambdaA);
+  probGolesMenorOIgual2 += poissonP(1, lambdaH) * poissonP(0, lambdaA);
+  probGolesMenorOIgual2 += poissonP(0, lambdaH) * poissonP(1, lambdaA);
+  probGolesMenorOIgual2 += poissonP(2, lambdaH) * poissonP(0, lambdaA);
+  probGolesMenorOIgual2 += poissonP(1, lambdaH) * poissonP(1, lambdaA);
+  probGolesMenorOIgual2 += poissonP(0, lambdaH) * poissonP(2, lambdaA);
+  return 1 - probGolesMenorOIgual2;
+}
+
+function probBTTSYes(lambdaH, lambdaA) {
+  if (lambdaH <= 0 || lambdaA <= 0) return 0;
+  const pHome0 = poissonP(0, lambdaH);
+  const pAway0 = poissonP(0, lambdaA);
+  return 1 - pHome0 - pAway0 + pHome0 * pAway0;
+}
+
+function round(x,d=4) {
+  return Math.round(x * Math.pow(10,d)) / Math.pow(10,d);
+}
+// --- FIN FUNCIONES MATEMÁTICAS ---
+
+// Funciones de control y renderizado (mantienen la lógica del modelo de fuerza)
 function populateLeagueAndTeams(){
   const leagues = Array.from(new Set(matches.map(m=>m.league))).sort();
   leagueSelect.innerHTML = '<option value="">-- seleccionar liga --</option>';
@@ -214,40 +281,6 @@ analyzeBtn.addEventListener('click', () => {
   runBacktest(league, homeTeam, awayTeam);
 });
 
-// --- FUNCIONES MATEMÁTICAS (POISSON VERIFICADO) ---
-function poissonP(k, lambda) {
-  if (lambda <= 0 && k === 0) return 1;
-  if (lambda <= 0 && k > 0) return 0;
-  let logP = -lambda + k * Math.log(lambda);
-  for(let i=1; i<=k; i++) logP -= Math.log(i);
-  return Math.exp(logP);
-}
-
-function probTotalGreaterThanOrEqual3(lambdaH, lambdaA) {
-  if (lambdaH <= 0 && lambdaA <= 0) return 0;
-  let probGolesMenorOIgual2 = 0;
-  probGolesMenorOIgual2 += poissonP(0, lambdaH) * poissonP(0, lambdaA);
-  probGolesMenorOIgual2 += poissonP(1, lambdaH) * poissonP(0, lambdaA);
-  probGolesMenorOIgual2 += poissonP(0, lambdaH) * poissonP(1, lambdaA);
-  probGolesMenorOIgual2 += poissonP(2, lambdaH) * poissonP(0, lambdaA);
-  probGolesMenorOIgual2 += poissonP(1, lambdaH) * poissonP(1, lambdaA);
-  probGolesMenorOIgual2 += poissonP(0, lambdaH) * poissonP(2, lambdaA);
-  return 1 - probGolesMenorOIgual2;
-}
-
-function probBTTSYes(lambdaH, lambdaA) {
-  if (lambdaH <= 0 || lambdaA <= 0) return 0;
-  const pHome0 = poissonP(0, lambdaH);
-  const pAway0 = poissonP(0, lambdaA);
-  return 1 - pHome0 - pAway0 + pHome0 * pAway0;
-}
-
-function round(x,d=4) {
-  return Math.round(x * Math.pow(10,d)) / Math.pow(10,d);
-}
-// --- FIN FUNCIONES MATEMÁTICAS ---
-
-// --- FUNCIÓN CLAVE: CÁLCULO DE FUERZAS (AS/DS) ---
 function calculateTeamStrengths(allLeagueMatches) {
   const teams = Array.from(new Set(allLeagueMatches.flatMap(m => [m.home_team, m.away_team])));
   if (teams.length < 2) return null;
@@ -261,11 +294,7 @@ function calculateTeamStrengths(allLeagueMatches) {
   
   const avgHomeScored = totalHomeGoals / totalMatches; 
   const avgAwayScored = totalAwayGoals / totalMatches;
-  const avgHomeConceded = totalAwayGoals / totalMatches; 
-  const avgAwayConceded = totalHomeGoals / totalMatches; 
 
-  const avgGoals = (totalHomeGoals + totalAwayGoals) / (2 * totalMatches); 
-  
   // 2. Acumular Goles de cada Equipo
   const teamStats = {};
   teams.forEach(t => teamStats[t] = { 
@@ -275,12 +304,10 @@ function calculateTeamStrengths(allLeagueMatches) {
   });
 
   allLeagueMatches.forEach(m => {
-    // Equipo Local
     teamStats[m.home_team].homeScored += m.home_goals;
     teamStats[m.home_team].homeConceded += m.away_goals;
     teamStats[m.home_team].homeGames++;
 
-    // Equipo Visitante
     teamStats[m.away_team].awayScored += m.away_goals;
     teamStats[m.away_team].awayConceded += m.home_goals;
     teamStats[m.away_team].awayGames++;
@@ -296,29 +323,26 @@ function calculateTeamStrengths(allLeagueMatches) {
     let asAway = (s.awayGames > 0 && avgAwayScored > 0) ? (s.awayScored / s.awayGames) / avgAwayScored : 1;
     
     // Fuerza de Defensa (DS)
-    let dsHome = (s.homeGames > 0 && avgAwayScored > 0) ? (s.homeConceded / s.homeGames) / avgAwayScored : 1;
-    let dsAway = (s.awayGames > 0 && avgHomeScored > 0) ? (s.awayConceded / s.awayGames) / avgHomeScored : 1;
+    let dsHome = (s.homeGames > 0 && avgAwayScored > 0) ? (s.homeConceded / s.homeGames) / avgAwayScored : 1; // avgAwayScored es avgHomeConceded de la liga
+    let dsAway = (s.awayGames > 0 && avgHomeScored > 0) ? (s.awayConceded / s.awayGames) / avgHomeScored : 1; // avgHomeScored es avgAwayConceded de la liga
 
     strengths[t] = { asHome, asAway, dsHome, dsAway };
   });
 
   return { strengths, avgHomeScored, avgAwayScored };
 }
-// --- FIN CÁLCULO DE FUERZAS ---
 
 function backtestForLeague(league) {
   const leagueMatches = matches.filter(m => m.league === league);
   leagueMatches.sort((a,b) => a.date - b.date);
   
   const results = [];
-  const minMatchesRequired = 5; // Mínimo de partidos para calcular la fuerza
+  const minMatchesRequired = 5; 
 
   for(let idx=0; idx<leagueMatches.length; idx++){
     const target = leagueMatches[idx];
-    // Partidos que ocurrieron ANTES del partido objetivo
     const priorMatches = leagueMatches.slice(0, idx);
 
-    // Salta si no hay suficientes datos históricos
     if (priorMatches.length < minMatchesRequired * 2) continue;
 
     const strengthData = calculateTeamStrengths(priorMatches);
@@ -333,10 +357,7 @@ function backtestForLeague(league) {
     const S_H = strengths[homeTeam];
     const S_A = strengths[awayTeam];
 
-    // CÁLCULO DE LAMBDA POR FUERZA
-    // Lambda Home = AvgHome * AS_Home * DS_Away
     const lambdaH = avgHomeScored * S_H.asHome * S_A.dsAway;
-    // Lambda Away = AvgAway * AS_Away * DS_Home
     const lambdaA = avgAwayScored * S_A.asAway * S_H.dsHome;
 
     if (lambdaH <= 0 || lambdaA <= 0) continue;
@@ -374,10 +395,6 @@ function backtestForLeague(league) {
 function runBacktest(league, homeTeam, awayTeam) {
   const { results, summary } = backtestForLeague(league);
 
-  // Filtramos los resultados para los equipos específicos
-  const teamResults = results.filter(r => (r.home_team === homeTeam && r.away_team === awayTeam) || (r.home_team === awayTeam && r.away_team === homeTeam));
-
-  // Predicción final
   const currentMatches = matches.filter(m => m.league === league);
   const strengthData = calculateTeamStrengths(currentMatches);
   let finalPrediction = {ok:false, reason:'Sin suficientes datos históricos en la liga para calcular la fuerza.'};
@@ -413,8 +430,7 @@ function runBacktest(league, homeTeam, awayTeam) {
   window._lastBacktest = { league, fullResults: results, finalPrediction };
 }
 
-// --- RENDERIZADO DE RESULTADOS ---
-
+// Funciones de renderizado (se mantienen)
 function renderSummary(summary) {
   const s = document.getElementById('summaryStats');
   s.innerHTML = '';
@@ -488,7 +504,6 @@ function renderFinalPrediction(pred, homeTeam, awayTeam){
   </div>`;
 }
 
-// CSV export (adapted for new structure)
 document.getElementById('exportCsv').addEventListener('click', ()=>{
   const data = window._lastBacktest;
   if(!data || !data.fullResults) { alert('No hay resultados para exportar'); return; }
@@ -509,7 +524,7 @@ document.getElementById('exportCsv').addEventListener('click', ()=>{
   const blob = new Blob([rows.join('\n')], {type:'text/csv'});
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
-  a.href = url; a.download = `backtest_strength_model_${data.league.replace(/\s/g,'_')}.csv`; document.body.appendChild(a); a.click(); a.remove();
+  a.href = url; a.download = `backtest_strength_model_fixed_parsing_${data.league.replace(/\s/g,'_')}.csv`; document.body.appendChild(a); a.click(); a.remove();
   URL.revokeObjectURL(url);
 });
 
