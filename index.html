@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>⚽️ Analizador de Probabilidades de Goles (JSON) - Versión Final Select</title>
+    <title>⚽️ Analizador de Probabilidades de Goles (Largo y Corto Plazo)</title>
     <style>
         /* --- Estilos CSS --- */
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; background-color: #eef2f7; }
@@ -43,7 +43,7 @@
 
         <label for="jsonFile">**1. Cargar Historial de Partidos (JSON):**</label>
         <input type="file" id="jsonFile" accept=".json">
-        <p class="info">El script espera las claves **"League"**, **"Match"** (Ej: Equipo A - Equipo B) y **"Result FT"** (Ej: 2-1).</p>
+        <p class="info">El script usará el rendimiento histórico de cada equipo en la liga.</p>
 
         <hr>
 
@@ -61,18 +61,21 @@
         <select id="visitorTeam" disabled>
             <option value="">Seleccione la liga para ver los equipos</option>
         </select>
+        
+        <p class="info">⚠️ Análisis basado en rendimiento **histórico (Largo Plazo)** y **últimos 10 partidos (Corto Plazo)**.</p>
 
         <button onclick="analyzeData()">Analizar Probabilidades</button>
 
         <hr>
 
         <div id="results" class="result-box" style="display: none;">
-            <h3>📊 Resultados del Análisis</h3>
+            <h3>📊 Predicción de Goles (Modelo de Ataque/Defensa)</h3>
+            <p><strong>Goles Esperados (Media Ponderada):</strong> <span id="xGoals"></span></p>
             <p><strong>Probabilidad de Más de 2.5 Goles:</strong> <span id="prob25"></span></p>
             <p><strong>Probabilidad de Ambos Anotan (BTTS):</strong> <span id="probBTTS"></span></p>
 
             <div class="analysis">
-                <h4>🧠 Deducción y Análisis Personalizado:</h4>
+                <h4>🧠 Desglose del Análisis (Largo vs. Corto Plazo):</h4>
                 <p id="personalAnalysis"></p>
             </div>
         </div>
@@ -80,16 +83,19 @@
     </div>
 
     <script>
-        // --- Lógica JavaScript con SELECT ---
-        
+        // --- Constantes para la ponderación del análisis ---
+        const RECENT_MATCH_COUNT = 10; // Definición del "Corto Plazo" (últimos N partidos)
+        const WEIGHT_RECENT = 0.6; // Peso dado a los últimos 10 partidos (60%)
+        const WEIGHT_HISTORICAL = 0.4; // Peso dado al historial completo (40%)
+
+
         let matchHistory = [];
         const leagueSelect = document.getElementById('leagueSelect');
-        const localTeamSelect = document.getElementById('localTeam'); // Ahora es un SELECT
-        const visitorTeamSelect = document.getElementById('visitorTeam'); // Ahora es un SELECT
+        const localTeamSelect = document.getElementById('localTeam');
+        const visitorTeamSelect = document.getElementById('visitorTeam');
 
         /**
-         * Función para limpiar, mapear y normalizar los datos del JSON
-         * Se basa en las claves "League", "Match", y "Result FT".
+         * Función para limpiar, mapear y normalizar los datos del JSON.
          */
         function cleanAndMapData(data) {
             
@@ -102,7 +108,6 @@
                 let golesLocal = 0;
                 let golesVisitante = 0;
                 
-                // 1. EXTRAER EQUIPOS DE "Match" (Ej: "Flamengo - Bragantino")
                 if (matchString && matchString.includes(' - ')) {
                     const parts = matchString.split(' - ').map(p => p.trim());
                     if (parts.length === 2) {
@@ -111,7 +116,6 @@
                     }
                 }
                 
-                // 2. EXTRAER GOLES DE "Result FT" (Ej: "1-0")
                 if (resultString && resultString.includes('-')) {
                     const scoreParts = resultString.split('-').map(p => parseInt(p.trim()));
                     if (scoreParts.length === 2 && !isNaN(scoreParts[0]) && !isNaN(scoreParts[1])) {
@@ -121,16 +125,23 @@
                 }
                 
                 return {
+                    // Mantener el resto de datos, pero necesitamos la fecha si queremos un análisis riguroso de "recientes"
+                    ...match, 
                     liga: match.League ? String(match.League).trim() : 'Sin Liga',
                     local: local,
                     visitante: visitante,
                     golesLocal: golesLocal,
                     golesVisitante: golesVisitante,
+                    // Intentamos obtener una fecha para ordenar los partidos
+                    date: new Date(match.Date), 
+                    rawDate: match.Date
                 };
             });
             
-            // Filtramos partidos que no tienen equipos válidos
-            const validMatches = cleanedData.filter(match => match.local && match.visitante);
+            // Filtramos y ordenamos por fecha (asumiendo que 'Date' es válido y queremos los más recientes al final)
+            const validMatches = cleanedData
+                .filter(match => match.local && match.visitante && !isNaN(match.golesLocal) && !isNaN(match.date))
+                .sort((a, b) => a.date - b.date);
             
             return validMatches;
         }
@@ -143,13 +154,12 @@
                 reader.onload = function(e) {
                     try {
                         const rawData = JSON.parse(e.target.result);
-                        
                         const dataArray = Array.isArray(rawData) ? rawData : [rawData];
                         
                         matchHistory = cleanAndMapData(dataArray);
                         
                         if (matchHistory.length === 0) {
-                             alert("⚠️ Archivo JSON cargado, pero no se encontraron partidos válidos. Revisa el formato.");
+                             alert("⚠️ Archivo JSON cargado, pero no se encontraron partidos válidos. Revisa el formato y la fecha.");
                         } else {
                             alert(`✅ ¡Archivo cargado! ${matchHistory.length} partidos listos para analizar.`);
                             populateLeagueSelector();
@@ -166,7 +176,7 @@
         });
 
         // ---------------------------------------------
-        // FUNCIONES DE INTERFAZ
+        // FUNCIONES DE INTERFAZ (SELECTS)
         // ---------------------------------------------
 
         function populateLeagueSelector() {
@@ -186,7 +196,6 @@
             visitorTeamSelect.disabled = true;
         }
 
-        // FUNCIÓN CLAVE: HABILITA Y CARGA LOS EQUIPOS EN LOS SELECTS
         function populateTeams() {
             const selectedLeague = leagueSelect.value;
             
@@ -194,7 +203,6 @@
             visitorTeamSelect.innerHTML = ''; 
 
             if (!selectedLeague) {
-                // Si no hay liga seleccionada, deshabilitar y poner mensaje
                 localTeamSelect.disabled = true;
                 visitorTeamSelect.disabled = true;
                 localTeamSelect.innerHTML = '<option value="">Seleccione la liga para ver los equipos</option>';
@@ -202,7 +210,6 @@
                 return;
             }
 
-            // 1. Recolectar equipos únicos
             const leagueMatches = matchHistory.filter(match => match.liga === selectedLeague);
             const uniqueTeams = new Set();
 
@@ -211,7 +218,6 @@
                 if (match.visitante) uniqueTeams.add(match.visitante);
             });
             
-            // Opción por defecto
             const defaultOption = document.createElement('option');
             defaultOption.value = "";
             defaultOption.textContent = "-- Seleccione un Equipo --";
@@ -219,7 +225,6 @@
             localTeamSelect.appendChild(defaultOption.cloneNode(true));
             visitorTeamSelect.appendChild(defaultOption.cloneNode(true));
 
-            // 2. Rellenar los SELECTs con los equipos únicos
             uniqueTeams.forEach(team => {
                 const option = document.createElement('option');
                 option.value = team;
@@ -228,11 +233,94 @@
                 visitorTeamSelect.appendChild(option.cloneNode(true));
             });
 
-            // 3. HABILITAR CAMPOS DE EQUIPO
             localTeamSelect.disabled = false;
             visitorTeamSelect.disabled = false;
         }
 
+
+        // ---------------------------------------------
+        // FUNCIONES DE CÁLCULO DE PLAZOS
+        // ---------------------------------------------
+
+        /**
+         * Calcula el rendimiento (Ataque y Defensa) de un equipo en un conjunto de partidos.
+         * @param {string} teamName - Nombre del equipo.
+         * @param {string} opponentName - Nombre del oponente.
+         * @param {Array<Object>} matches - Array de partidos a analizar.
+         * @param {number} avgLeagueGoals - Goles promedio de toda la liga para normalización.
+         * @returns {Object} { attackIndex, defenseIndex }
+         */
+        function calculateTeamIndices(teamName, opponentName, matches, avgLeagueGoals) {
+            let matchesCount = 0;
+            let scored = 0;
+            let conceded = 0;
+            
+            if (matches.length === 0) {
+                 return { attackIndex: 1, defenseIndex: 1 }; // Neutral si no hay datos
+            }
+            
+            const teamLC = teamName.toLowerCase();
+
+            matches.forEach(match => {
+                const isLocal = match.local.toLowerCase() === teamLC;
+                const isVisitor = match.visitante.toLowerCase() === teamLC;
+
+                if (isLocal || isVisitor) {
+                    matchesCount++;
+                    
+                    // Asegurarse de que no estamos contando goles en H2H si solo queremos el rendimiento del equipo
+                    const G_scored = isLocal ? match.golesLocal : match.golesVisitante;
+                    const G_conceded = isLocal ? match.golesVisitante : match.golesLocal;
+                    
+                    scored += G_scored;
+                    conceded += G_conceded;
+                }
+            });
+
+            if (matchesCount === 0) {
+                return { attackIndex: 1, defenseIndex: 1 }; // Neutral si no jugó
+            }
+
+            const avgScored = scored / matchesCount;
+            const avgConceded = conceded / matchesCount;
+
+            // Índice de Ataque = (Goles Anotados / Partidos) / (Goles Liga / Partidos Liga)
+            const attackIndex = avgLeagueGoals > 0 ? (avgScored / avgLeagueGoals) : 1;
+            // Índice de Defensa = (Goles Recibidos / Partidos) / (Goles Liga / Partidos Liga)
+            // Se invierte para que un índice bajo signifique una mejor defensa
+            const defenseIndex = avgLeagueGoals > 0 ? (avgConceded / avgLeagueGoals) : 1;
+            
+            return {
+                attackIndex: parseFloat(attackIndex.toFixed(3)), 
+                defenseIndex: parseFloat(defenseIndex.toFixed(3)),
+                matchesCount: matchesCount
+            };
+        }
+
+        /**
+         * Calcula la probabilidad de que se anote un número específico de goles (x)
+         * utilizando la distribución de Poisson.
+         * @param {number} x - Número de goles.
+         * @param {number} lambda - Goles esperados (media).
+         * @returns {number} Probabilidad.
+         */
+        function poissonProbability(x, lambda) {
+            if (lambda === 0) return x === 0 ? 1 : 0;
+            // P(x; λ) = (λ^x * e^-λ) / x!
+            return (Math.pow(lambda, x) * Math.exp(-lambda)) / factorial(x);
+        }
+
+        /**
+         * Calcula el factorial de un número.
+         */
+        function factorial(n) {
+            if (n === 0 || n === 1) return 1;
+            let result = 1;
+            for (let i = 2; i <= n; i++) {
+                result *= i;
+            }
+            return result;
+        }
 
         // ---------------------------------------------
         // FUNCIÓN PRINCIPAL DE ANÁLISIS
@@ -240,145 +328,138 @@
 
         function analyzeData() {
             const selectedLeague = leagueSelect.value;
-            // Obtener el valor de los SELECTs
             const localTeam = localTeamSelect.value.trim();
             const visitorTeam = visitorTeamSelect.value.trim();
             
-            // 1. Validaciones
-            if (!matchHistory.length) {
-                alert("Primero debes cargar el archivo JSON.");
-                return;
-            }
-            if (!selectedLeague) {
-                alert("Por favor, selecciona una Liga.");
-                return;
-            }
-            if (!localTeam || !visitorTeam) {
-                alert("Por favor, selecciona el Equipo Local y Visitante.");
-                return;
-            }
-            if (localTeam.toLowerCase() === visitorTeam.toLowerCase()) {
-                alert("El equipo local no puede ser el mismo que el visitante.");
+            if (!localTeam || !visitorTeam || !selectedLeague) {
+                alert("Por favor, selecciona la Liga, el Equipo Local y el Visitante.");
                 return;
             }
 
-            const localTeamLC = localTeam.toLowerCase();
-            const visitorTeamLC = visitorTeam.toLowerCase();
-
-
-            // 2. Filtrar partidos relevantes
-            const relevantMatches = matchHistory.filter(match => {
-                const matchLocalLC = match.local.toLowerCase();
-                const matchVisitorLC = match.visitante.toLowerCase();
-
-                return match.liga === selectedLeague && (
-                    (matchLocalLC === localTeamLC && matchVisitorLC === visitorTeamLC) ||
-                    (matchLocalLC === visitorTeamLC && matchVisitorLC === localTeamLC)
-                );
-            });
-
-            if (relevantMatches.length === 0) {
-                document.getElementById('prob25').textContent = "N/A";
-                document.getElementById('probBTTS').textContent = "N/A";
-                document.getElementById('personalAnalysis').innerHTML = `No se encontraron **enfrentamientos directos** (${localTeam} vs ${visitorTeam}) en la liga **${selectedLeague}**.`;
-                document.getElementById('results').style.display = 'block';
-                return;
-            }
+            // 1. Filtrar partidos de la liga y calcular la media de goles de la liga (Largo Plazo Base)
+            const leagueMatches = matchHistory.filter(match => match.liga === selectedLeague);
             
-            // --- 3. Cálculo de Métricas (Misma lógica) ---
-            let countOver25 = 0;
-            let countBTTS = 0;
-            let totalMatchesForAnalysis = relevantMatches.length;
-
-            let localScored = 0;
-            let visitorScored = 0;
-            let localConceded = 0;
-            let visitorConceded = 0;
-            let totalGoals = 0;
-
-            relevantMatches.forEach(match => {
-                const G_local = match.golesLocal; 
-                const G_visitor = match.golesVisitante;
-                
-                const totalGoles = G_local + G_visitor;
-                if (totalGoles > 2.5) {
-                    countOver25++;
-                }
-                totalGoals += totalGoles;
-
-                if (G_local > 0 && G_visitor > 0) {
-                    countBTTS++;
-                }
-
-                if (match.local.toLowerCase() === localTeamLC) {
-                    localScored += G_local;
-                    localConceded += G_visitor;
-                } else if (match.visitante.toLowerCase() === localTeamLC) {
-                    localScored += G_visitor;
-                    localConceded += G_local;
-                }
-
-                if (match.local.toLowerCase() === visitorTeamLC) {
-                    visitorScored += G_local;
-                    visitorConceded += G_visitor;
-                } else if (match.visitante.toLowerCase() === visitorTeamLC) {
-                    visitorScored += G_visitor;
-                    visitorConceded += G_local;
-                }
-            });
-
-            const probOver25 = (countOver25 / totalMatchesForAnalysis) * 100;
-            const probBTTS = (countBTTS / totalMatchesForAnalysis) * 100;
+            let totalLeagueGoals = 0;
+            leagueMatches.forEach(m => totalLeagueGoals += (m.golesLocal + m.golesVisitante));
             
-            const avgGoals = (totalGoals / totalMatchesForAnalysis).toFixed(2);
-            const localAttackIndex = (localScored / totalMatchesForAnalysis).toFixed(2);
-            const visitorAttackIndex = (visitorScored / totalMatchesForAnalysis).toFixed(2);
-            const localDefenseIndex = (localConceded / totalMatchesForAnalysis).toFixed(2);
-            const visitorDefenseIndex = (visitorConceded / totalMatchesForAnalysis).toFixed(2);
+            // Promedio de Goles de la Liga por partido
+            const avgLeagueGoals = leagueMatches.length > 0 ? (totalLeagueGoals / leagueMatches.length) : 0;
 
+            if (avgLeagueGoals === 0) {
+                 alert("No hay suficientes datos de goles en esta liga para el análisis.");
+                 return;
+            }
 
-            // --- 4. Mostrar Resultados ---
-            document.getElementById('prob25').textContent = `${probOver25.toFixed(2)}% (${countOver25} de ${totalMatchesForAnalysis} partidos)`;
-            document.getElementById('probBTTS').textContent = `${probBTTS.toFixed(2)}% (${countBTTS} de ${totalMatchesForAnalysis} partidos)`;
+            // 2. Definir conjuntos de partidos
+            // Partidos Históricos (Largo Plazo)
+            const historicalMatches = leagueMatches; 
+            // Partidos Recientes (Corto Plazo): Los últimos N partidos de la liga.
+            const recentMatches = leagueMatches.slice(-RECENT_MATCH_COUNT);
+            
+            // 3. Calcular Índices para Largo Plazo
+            const localIndicesHist = calculateTeamIndices(localTeam, visitorTeam, historicalMatches, avgLeagueGoals);
+            const visitorIndicesHist = calculateTeamIndices(visitorTeam, localTeam, historicalMatches, avgLeagueGoals);
+            
+            // 4. Calcular Índices para Corto Plazo (Reciente)
+            const localIndicesRec = calculateTeamIndices(localTeam, visitorTeam, recentMatches, avgLeagueGoals);
+            const visitorIndicesRec = calculateTeamIndices(visitorTeam, localTeam, recentMatches, avgLeagueGoals);
+            
+            // 5. Aplicar Ponderación para obtener los Índices Finales (Mediano Plazo)
+            const localAttackFinal = (localIndicesHist.attackIndex * WEIGHT_HISTORICAL) + (localIndicesRec.attackIndex * WEIGHT_RECENT);
+            const localDefenseFinal = (localIndicesHist.defenseIndex * WEIGHT_HISTORICAL) + (localIndicesRec.defenseIndex * WEIGHT_RECENT);
+            
+            const visitorAttackFinal = (visitorIndicesHist.attackIndex * WEIGHT_HISTORICAL) + (visitorIndicesRec.attackIndex * WEIGHT_RECENT);
+            const visitorDefenseFinal = (visitorIndicesHist.defenseIndex * WEIGHT_HISTORICAL) + (visitorIndicesRec.defenseIndex * WEIGHT_RECENT);
+            
+            // 6. Calcular Goles Esperados (Lambda)
+            
+            // Goles esperados del Local (lambda_L) = Local_Ataque * Visitante_Defensa * Liga_Goles
+            const lambdaLocal = localAttackFinal * visitorDefenseFinal * avgLeagueGoals;
+            
+            // Goles esperados del Visitante (lambda_V) = Visitante_Ataque * Local_Defensa * Liga_Goles
+            const lambdaVisitor = visitorAttackFinal * localDefenseFinal * avgLeagueGoals;
+            
+            const totalXGoals = lambdaLocal + lambdaVisitor;
+
+            // 7. Calcular Probabilidades (Poisson)
+            
+            // Simulación hasta 5 goles (normalmente cubre > 99% de los casos)
+            let probOver25 = 0;
+            let probBTTS = 0;
+
+            for (let G_local = 0; G_local <= 5; G_local++) {
+                for (let G_visitor = 0; G_visitor <= 5; G_visitor++) {
+                    
+                    const P_local = poissonProbability(G_local, lambdaLocal);
+                    const P_visitor = poissonProbability(G_visitor, lambdaVisitor);
+                    const P_match = P_local * P_visitor;
+
+                    // Probabilidad de Más de 2.5 Goles (P(Goles > 2))
+                    if (G_local + G_visitor > 2) {
+                        probOver25 += P_match;
+                    }
+
+                    // Probabilidad de Ambos Anotan (P(G_L > 0 AND G_V > 0))
+                    if (G_local > 0 && G_visitor > 0) {
+                        probBTTS += P_match;
+                    }
+                }
+            }
+
+            // --- 8. Mostrar Resultados ---
+            document.getElementById('xGoals').textContent = `${localTeam}: ${lambdaLocal.toFixed(2)} | ${visitorTeam}: ${lambdaVisitor.toFixed(2)} (Total Esperado: ${totalXGoals.toFixed(2)})`;
+            document.getElementById('prob25').textContent = `${(probOver25 * 100).toFixed(2)}%`;
+            document.getElementById('probBTTS').textContent = `${(probBTTS * 100).toFixed(2)}%`;
             document.getElementById('results').style.display = 'block';
 
-            // --- 5. Análisis Personalizado (Deducción) ---
-            const analysisText = generatePersonalAnalysis(localTeam, visitorTeam, probOver25, probBTTS, avgGoals, localAttackIndex, visitorAttackIndex, localDefenseIndex, visitorDefenseIndex);
+            // --- 9. Análisis Personalizado (Deducción) ---
+            const analysisText = generatePlazosAnalysis(localTeam, visitorTeam, localIndicesHist, visitorIndicesHist, localIndicesRec, visitorIndicesRec, totalXGoals, avgLeagueGoals);
             document.getElementById('personalAnalysis').innerHTML = analysisText;
         }
 
-        function generatePersonalAnalysis(localTeam, visitorTeam, p25, pBTTS, avgG, laI, vaI, ldI, vdI) {
-            let analysis = "";
+        function generatePlazosAnalysis(localT, visitorT, lH, vH, lR, vR, xG, avgLG) {
+            let analysis = `**Media Goles de la Liga (Largo Plazo Base):** ${avgLG.toFixed(2)} Goles. <br><br>`;
+            
+            analysis += `**Análisis de Plazos (${localT}):**<br>`;
+            analysis += `* **Histórico (Largo Plazo):** Ataque: ${lH.attackIndex.toFixed(2)} | Defensa: ${lH.defenseIndex.toFixed(2)}<br>`;
+            analysis += `* **Reciente (Corto Plazo, Últimos ${RECENT_MATCH_COUNT}):** Ataque: ${lR.attackIndex.toFixed(2)} | Defensa: ${lR.defenseIndex.toFixed(2)}<br>`;
 
-            analysis += `**🎯 Sobre el Total de Goles (Más de 2.5):**<br>`;
-            if (p25 >= 70) {
-                analysis += `Con una probabilidad histórica muy alta (**${p25.toFixed(0)}%**), y un promedio de **${avgG}** goles, es casi seguro que será un partido con **marcador abultado**. <br><br>`;
-            } else if (p25 >= 50) {
-                analysis += `La probabilidad de Más de 2.5 Goles es moderada (**${p25.toFixed(0)}%**). El riesgo es alto, pero el historial de **${avgG}** goles sugiere que la línea podría superarse. <br><br>`;
-            } else {
-                analysis += `La probabilidad de Más de 2.5 Goles es baja (**${p25.toFixed(0)}%**). La tendencia clara en sus duelos es al **Menos de 2.5 Goles**, sugiriendo un partido táctico y cerrado. <br><br>`;
+            if (lR.attackIndex > lH.attackIndex) {
+                analysis += `  - 📈 **Ataque en Forma:** El ataque de ${localT} ha **mejorado** recientemente.<br>`;
+            } else if (lR.attackIndex < lH.attackIndex) {
+                analysis += `  - 📉 **Ataque en Baja:** El ataque de ${localT} se ha **debilitado** recientemente.<br>`;
             }
-
-            analysis += `**🤝 Sobre Ambos Anotan (BTTS):**<br>`;
-            if (pBTTS >= 70) {
-                analysis += `Con una altísima probabilidad (**${pBTTS.toFixed(0)}%**), es evidente que **ambos equipos se hacen daño mutuamente**. <br><br>`;
-            } else if (pBTTS >= 50) {
-                analysis += `La probabilidad moderada (**${pBTTS.toFixed(0)}%**) de BTTS indica que un equipo puede fallar en su ataque o que la defensa contraria es intermitentemente sólida. Es un riesgo moderado. <br><br>`;
-            } else {
-                analysis += `La baja probabilidad de BTTS (**${pBTTS.toFixed(0)}%**) sugiere que en sus enfrentamientos directos, **uno de los dos equipos suele dominar o anular al otro**. <br><br>`;
-            }
-
-            analysis += `**💡 Deducción Final del Analista:**<br>`;
-            if (p25 >= 60 && pBTTS >= 60) {
-                analysis += `**✅ ALTA OFENSIVA:** La combinación perfecta para un **festival de goles**. El historial sugiere un resultado como 2-1, 2-2 o 3-2. <br>`;
-            } else if (p25 < 50 && pBTTS < 50) {
-                analysis += `**❌ ALTA DEFENSIVA:** Ambas probabilidades son bajas. Esto es un pronóstico de **Menos de 2.5 Goles** y posiblemente un resultado de 1-0 o 0-0. <br>`;
-            } else if (p25 >= 60 && pBTTS < 50) {
-                analysis += `**⚠️ GOLEADA UNILATERAL:** Alta probabilidad de muchos goles, pero bajo BTTS. El historial sugiere una **dominación total** de un equipo sobre el otro (Ej: 3-0, 4-0).<br>`;
-            } else {
-                analysis += `**🤔 RESULTADO MIXTO:** El partido es incierto. Una métrica es alta y la otra baja. Se recomienda un análisis detallado de la forma actual de los equipos.<br>`;
+            if (lR.defenseIndex < lH.defenseIndex) {
+                analysis += `  - 🛡️ **Defensa Sólida:** La defensa de ${localT} ha **mejorado** (índice más bajo).<br>`;
+            } else if (lR.defenseIndex > lH.defenseIndex) {
+                analysis += `  - 🚨 **Defensa Débil:** La defensa de ${localT} se ha **debilitado** (índice más alto).<br>`;
             }
             
+            analysis += `<br>**Análisis de Plazos (${visitorT}):**<br>`;
+            analysis += `* **Histórico (Largo Plazo):** Ataque: ${vH.attackIndex.toFixed(2)} | Defensa: ${vH.defenseIndex.toFixed(2)}<br>`;
+            analysis += `* **Reciente (Corto Plazo, Últimos ${RECENT_MATCH_COUNT}):** Ataque: ${vR.attackIndex.toFixed(2)} | Defensa: ${vR.defenseIndex.toFixed(2)}<br>`;
+
+            if (vR.attackIndex > vH.attackIndex) {
+                analysis += `  - 📈 **Ataque en Forma:** El ataque de ${visitorT} ha **mejorado** recientemente.<br>`;
+            } else if (vR.attackIndex < vH.attackIndex) {
+                analysis += `  - 📉 **Ataque en Baja:** El ataque de ${visitorT} se ha **debilitado** recientemente.<br>`;
+            }
+            if (vR.defenseIndex < vH.defenseIndex) {
+                analysis += `  - 🛡️ **Defensa Sólida:** La defensa de ${visitorT} ha **mejorado** (índice más bajo).<br>`;
+            } else if (vR.defenseIndex > vH.defenseIndex) {
+                analysis += `  - 🚨 **Defensa Débil:** La defensa de ${visitorT} se ha **debilitado** (índice más alto).<br>`;
+            }
+            
+            analysis += `<br>---<br>`;
+
+            if (xG > 3.0) {
+                 analysis += `**🔥 Predicción Fuerte:** Los Goles Esperados (${xG.toFixed(2)}) son muy altos. Las tendencias recientes y el historial apuntan a un partido **muy abierto y de muchos goles**.`
+            } else if (xG > 2.5) {
+                 analysis += `**🟡 Predicción Media:** Los Goles Esperados (${xG.toFixed(2)}) están justo por encima de la línea. La combinación de buen ataque y defensa débil reciente podría forzar el **Más de 2.5 Goles**.`
+            } else {
+                 analysis += `**🧊 Predicción Baja:** Los Goles Esperados (${xG.toFixed(2)}) están por debajo de la línea. Los índices sugieren un partido **más cerrado y con menos goles**.`
+            }
+
             return analysis;
         }
 
