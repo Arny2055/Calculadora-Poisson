@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>⚽️ Analizador de Probabilidades de Goles (Multi-Métrica Corregido)</title>
+    <title>⚽️ Analizador de Probabilidades (H2H y Forma Reciente)</title>
     <style>
         /* --- Estilos CSS --- */
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; background-color: #eef2f7; }
@@ -54,7 +54,7 @@
 
         <label for="jsonFile">**1. Cargar Historial de Partidos (JSON):**</label>
         <input type="file" id="jsonFile" accept=".json">
-        <p class="info">El script usará el rendimiento histórico de cada equipo en la liga.</p>
+        <p class="info">El script analiza el historial completo, la forma reciente (últimos 10) y el H2H.</p>
 
         <hr>
 
@@ -73,20 +73,20 @@
             <option value="">Seleccione la liga para ver los equipos</option>
         </select>
         
-        <p class="info">⚠️ Análisis basado en rendimiento **histórico (Largo Plazo)** y **últimos 10 partidos (Corto Plazo)**.</p>
+        <p class="info">⚠️ La predicción se pondera usando **últimos 10 partidos (60%)** y **historial (40%)**.</p>
 
         <button onclick="analyzeData()">Analizar Probabilidades</button>
 
         <hr>
 
         <div id="results" class="result-box" style="display: none;">
-            <h3>📊 Predicción de Goles (Modelo de Ataque/Defensa)</h3>
+            <h3>📊 Predicción de Goles (Modelo Ponderado)</h3>
             <p><strong>Goles Esperados (Media Ponderada):</strong> <span id="xGoals"></span></p>
-            <p><strong>Probabilidad de Más de 2.5 Goles:</strong> <span id="prob25"></span></p>
-            <p><strong>Probabilidad de Ambos Anotan (BTTS):</strong> <span id="probBTTS"></span></p>
+            <p><strong>Probabilidad Ponderada de Más de 2.5 Goles:</strong> <span id="prob25"></span></p>
+            <p><strong>Probabilidad Ponderada de Ambos Anotan (BTTS):</strong> <span id="probBTTS"></span></p>
 
             <div class="analysis">
-                <h4>🧠 Desglose del Análisis (Largo vs. Corto Plazo):</h4>
+                <h4>🧠 Desglose del Análisis:</h4>
                 <p id="personalAnalysis"></p>
                 <div id="finalRecommendation" class="recommendation"></div>
             </div>
@@ -149,7 +149,6 @@
                     visitante: visitante,
                     golesLocal: golesLocal,
                     golesVisitante: golesVisitante,
-                    // Intentamos obtener una fecha para ordenar los partidos
                     date: new Date(match.Date), 
                     rawDate: match.Date
                 };
@@ -260,11 +259,7 @@
         // ---------------------------------------------
 
         /**
-         * CORRECCIÓN: Ahora solo cuenta partidos en los que el equipo participó.
          * Calcula el rendimiento (Ataque y Defensa) de un equipo en un conjunto de partidos.
-         * @param {string} teamName - Nombre del equipo a analizar.
-         * @param {Array<Object>} matches - Array de partidos a analizar (ej: todos o los últimos 10).
-         * @param {number} avgLeagueGoals - Promedio de goles de la liga para normalización.
          */
         function calculateTeamIndices(teamName, matches, avgLeagueGoals) {
             let matchesCount = 0;
@@ -281,7 +276,6 @@
                 const isLocal = match.local.toLowerCase() === teamLC;
                 const isVisitor = match.visitante.toLowerCase() === teamLC;
 
-                // **LA CORRECCIÓN ESTÁ AQUÍ** -> Solo contamos el partido si el equipo jugó.
                 if (isLocal || isVisitor) {
                     matchesCount++;
                     
@@ -300,9 +294,7 @@
             const avgScored = scored / matchesCount;
             const avgConceded = conceded / matchesCount;
 
-            // Índice de Ataque: Promedio de Goles Anotados del Equipo / Promedio de Goles de la Liga
             const attackIndex = avgLeagueGoals > 0 ? (avgScored / avgLeagueGoals) : 1;
-            // Índice de Defensa: Promedio de Goles Recibidos del Equipo / Promedio de Goles de la Liga
             const defenseIndex = avgLeagueGoals > 0 ? (avgConceded / avgLeagueGoals) : 1;
             
             return {
@@ -310,6 +302,46 @@
                 defenseIndex: parseFloat(defenseIndex.toFixed(3)),
                 matchesCount: matchesCount
             };
+        }
+
+        /**
+         * Función para analizar las probabilidades de los enfrentamientos directos (H2H).
+         * @returns {Object} { h2hProb25, h2hProbBTTS, h2hMatchesCount }
+         */
+        function analyzeH2H(localTeam, visitorTeam, leagueMatches) {
+            const localLC = localTeam.toLowerCase();
+            const visitorLC = visitorTeam.toLowerCase();
+
+            const h2hMatches = leagueMatches.filter(match => {
+                const matchLocalLC = match.local.toLowerCase();
+                const matchVisitorLC = match.visitante.toLowerCase();
+                
+                return (matchLocalLC === localLC && matchVisitorLC === visitorLC) ||
+                       (matchLocalLC === visitorLC && matchVisitorLC === localLC);
+            });
+
+            let countOver25 = 0;
+            let countBTTS = 0;
+            const h2hMatchesCount = h2hMatches.length;
+
+            if (h2hMatchesCount === 0) {
+                return { h2hProb25: 0, h2hProbBTTS: 0, h2hMatchesCount: 0 };
+            }
+
+            h2hMatches.forEach(match => {
+                const totalGoles = match.golesLocal + match.golesVisitante;
+                if (totalGoles > 2) {
+                    countOver25++;
+                }
+                if (match.golesLocal > 0 && match.golesVisitante > 0) {
+                    countBTTS++;
+                }
+            });
+
+            const h2hProb25 = countOver25 / h2hMatchesCount;
+            const h2hProbBTTS = countBTTS / h2hMatchesCount;
+            
+            return { h2hProb25, h2hProbBTTS, h2hMatchesCount };
         }
 
         function poissonProbability(x, lambda) {
@@ -350,7 +382,6 @@
             let totalLeagueGoals = 0;
             leagueMatches.forEach(m => totalLeagueGoals += (m.golesLocal + m.golesVisitante));
             
-            // Promedio de Goles de la Liga por Partido
             const avgLeagueGoals = leagueMatches.length > 0 ? (totalLeagueGoals / leagueMatches.length) : 0;
 
             if (avgLeagueGoals === 0) {
@@ -358,43 +389,44 @@
                  return;
             }
 
-            // 2. Definir conjuntos de partidos
+            // 2. Definir conjuntos de partidos y calcular Índices
             const historicalMatches = leagueMatches; 
-            const recentMatches = leagueMatches.slice(-15); // Aumentamos la muestra reciente a 15 por si 10 era muy pequeña
             
-            // 3. Calcular Índices para Largo y Corto Plazo (¡USANDO LA FUNCIÓN CORREGIDA!)
+            // Tomamos los últimos N partidos de CADA EQUIPO en la liga, no los últimos N de la liga entera.
+            const localRecentMatches = historicalMatches.filter(m => m.local.toLowerCase() === localTeam.toLowerCase() || m.visitante.toLowerCase() === localTeam.toLowerCase()).slice(-RECENT_MATCH_COUNT);
+            const visitorRecentMatches = historicalMatches.filter(m => m.local.toLowerCase() === visitorTeam.toLowerCase() || m.visitante.toLowerCase() === visitorTeam.toLowerCase()).slice(-RECENT_MATCH_COUNT);
+            
+            
             const localIndicesHist = calculateTeamIndices(localTeam, historicalMatches, avgLeagueGoals);
             const visitorIndicesHist = calculateTeamIndices(visitorTeam, historicalMatches, avgLeagueGoals);
             
-            const localIndicesRec = calculateTeamIndices(localTeam, recentMatches, avgLeagueGoals);
-            const visitorIndicesRec = calculateTeamIndices(visitorTeam, recentMatches, avgLeagueGoals);
-            
-            // Comprobación de que el equipo local/visitante tiene partidos
-            if (localIndicesHist.matchesCount === 0) {
-                 alert(`El equipo local (${localTeam}) no tiene partidos registrados en esta liga.`);
-                 return;
-            }
-             if (visitorIndicesHist.matchesCount === 0) {
-                 alert(`El equipo visitante (${visitorTeam}) no tiene partidos registrados en esta liga.`);
+            const localIndicesRec = calculateTeamIndices(localTeam, localRecentMatches, avgLeagueGoals);
+            const visitorIndicesRec = calculateTeamIndices(visitorTeam, visitorRecentMatches, avgLeagueGoals);
+
+            // Comprobaciones de datos
+            if (localIndicesHist.matchesCount === 0 || visitorIndicesHist.matchesCount === 0) {
+                 alert(`Al menos uno de los equipos no tiene historial de partidos válidos en esta liga.`);
                  return;
             }
             
-            // 4. Aplicar Ponderación para obtener los Índices Finales (Mediano Plazo)
+            // 3. Análisis Directo (H2H)
+            const h2hAnalysis = analyzeH2H(localTeam, visitorTeam, leagueMatches);
+            
+            // 4. Aplicar Ponderación y calcular Goles Esperados (Lambda)
             const localAttackFinal = (localIndicesHist.attackIndex * WEIGHT_HISTORICAL) + (localIndicesRec.attackIndex * WEIGHT_RECENT);
             const localDefenseFinal = (localIndicesHist.defenseIndex * WEIGHT_HISTORICAL) + (localIndicesRec.defenseIndex * WEIGHT_RECENT);
             
             const visitorAttackFinal = (visitorIndicesHist.attackIndex * WEIGHT_HISTORICAL) + (visitorIndicesRec.attackIndex * WEIGHT_RECENT);
             const visitorDefenseFinal = (visitorIndicesHist.defenseIndex * WEIGHT_HISTORICAL) + (visitorIndicesRec.defenseIndex * WEIGHT_RECENT);
             
-            // 5. Calcular Goles Esperados (Lambda)
             const lambdaLocal = localAttackFinal * visitorDefenseFinal * avgLeagueGoals;
             const lambdaVisitor = visitorAttackFinal * localDefenseFinal * avgLeagueGoals;
             
             const totalXGoals = lambdaLocal + lambdaVisitor;
 
-            // 6. Calcular Probabilidades (Poisson)
-            let probOver25 = 0;
-            let probBTTS = 0;
+            // 5. Calcular Probabilidades (Poisson)
+            let poissonProb25 = 0;
+            let poissonProbBTTS = 0;
 
             for (let G_local = 0; G_local <= 5; G_local++) {
                 for (let G_visitor = 0; G_visitor <= 5; G_visitor++) {
@@ -404,29 +436,42 @@
                     const P_match = P_local * P_visitor;
 
                     if (G_local + G_visitor > 2) {
-                        probOver25 += P_match;
+                        poissonProb25 += P_match;
                     }
 
                     if (G_local > 0 && G_visitor > 0) {
-                        probBTTS += P_match;
+                        poissonProbBTTS += P_match;
                     }
                 }
             }
             
-            const prob25_num = probOver25;
-            const probBTTS_num = probBTTS;
+            // 6. PONDERACIÓN FINAL DE PROBABILIDADES
+            let finalProb25, finalProbBTTS;
+            
+            if (h2hAnalysis.h2hMatchesCount >= 3) {
+                // Si hay H2H suficiente (3 o más partidos), le damos peso a la media.
+                finalProb25 = (poissonProb25 * 0.7) + (h2hAnalysis.h2hProb25 * 0.3);
+                finalProbBTTS = (poissonProbBTTS * 0.7) + (h2hAnalysis.h2hProbBTTS * 0.3);
+            } else {
+                // Si el H2H es débil o nulo, usamos solo Poisson (Modelo Ataque/Defensa)
+                finalProb25 = poissonProb25;
+                finalProbBTTS = poissonProbBTTS;
+            }
+
+            const prob25_num = finalProb25;
+            const probBTTS_num = finalProbBTTS;
             const prob25_pct = (prob25_num * 100).toFixed(2);
             const probBTTS_pct = (probBTTS_num * 100).toFixed(2);
 
 
             // --- 7. Mostrar Resultados ---
             document.getElementById('xGoals').textContent = `${localTeam}: ${lambdaLocal.toFixed(2)} | ${visitorTeam}: ${lambdaVisitor.toFixed(2)} (Total Esperado: ${totalXGoals.toFixed(2)})`;
-            document.getElementById('prob25').textContent = `${prob25_pct}%`;
-            document.getElementById('probBTTS').textContent = `${probBTTS_pct}%`;
+            document.getElementById('prob25').textContent = `${prob25_pct}% (H2H ${h2hAnalysis.h2hMatchesCount > 0 ? h2hAnalysis.h2hProb25 * 100 : 0}%)`;
+            document.getElementById('probBTTS').textContent = `${probBTTS_pct}% (H2H ${h2hAnalysis.h2hMatchesCount > 0 ? h2hAnalysis.h2hProbBTTS * 100 : 0}%)`;
             document.getElementById('results').style.display = 'block';
 
             // --- 8. Análisis y Recomendación Concreta ---
-            const analysisText = generatePlazosAnalysis(localTeam, visitorTeam, localIndicesHist, visitorIndicesHist, localIndicesRec, visitorIndicesRec, totalXGoals, avgLeagueGoals, prob25_num, probBTTS_num);
+            const analysisText = generatePlazosAnalysis(localTeam, visitorTeam, localIndicesHist, visitorIndicesHist, localIndicesRec, visitorIndicesRec, h2hAnalysis, totalXGoals, avgLeagueGoals, prob25_num, probBTTS_num);
             document.getElementById('personalAnalysis').innerHTML = analysisText.desglose;
             document.getElementById('finalRecommendation').innerHTML = `**DECISIÓN FINAL:** ${analysisText.recomendacion}`;
         }
@@ -434,44 +479,53 @@
         /**
          * Genera el desglose del análisis y la recomendación final.
          */
-        function generatePlazosAnalysis(localT, visitorT, lH, vH, lR, vR, xG, avgLG, p25, pBTTS) {
-            let desglose = `**Media Goles de la Liga (Largo Plazo Base):** ${avgLG.toFixed(2)} Goles. <br><br>`;
+        function generatePlazosAnalysis(localT, visitorT, lH, vH, lR, vR, h2h, xG, avgLG, p25, pBTTS) {
+            let desglose = `**Media Goles de la Liga (Largo Plazo Base):** ${avgLG.toFixed(2)} Goles. <br>`;
             
+            // --- Desglose H2H ---
+            if (h2h.h2hMatchesCount > 0) {
+                 desglose += `**Enfrentamiento Directo (H2H):** ${h2h.h2hMatchesCount} partidos.<br>`;
+                 desglose += `* Prob. H2H +2.5 Goles: ${(h2h.h2hProb25 * 100).toFixed(1)}%<br>`;
+                 desglose += `* Prob. H2H BTTS: ${(h2h.h2hProbBTTS * 100).toFixed(1)}%<br><br>`;
+            } else {
+                 desglose += `**Enfrentamiento Directo (H2H):** ❌ No se encontraron partidos directos. La predicción es solo por forma.<br><br>`;
+            }
+
             // --- Desglose de Plazos ---
             desglose += `**Análisis de Plazos (${localT}):**<br>`;
-            desglose += `* **Histórico (Largo Plazo):** Ataque: ${lH.attackIndex.toFixed(2)} | Defensa: ${lH.defenseIndex.toFixed(2)} (${lH.matchesCount} partidos)<br>`;
-            desglose += `* **Reciente (Corto Plazo, Últimos ${lR.matchesCount}):** Ataque: ${lR.attackIndex.toFixed(2)} | Defensa: ${lR.defenseIndex.toFixed(2)} (${lR.matchesCount} partidos)<br>`;
+            desglose += `* **Histórico (Largo Plazo):** Ataque: ${lH.attackIndex.toFixed(2)} | Defensa: ${lH.defenseIndex.toFixed(2)} (${lH.matchesCount} P.)<br>`;
+            desglose += `* **Reciente (Últimos ${lR.matchesCount}):** Ataque: ${lR.attackIndex.toFixed(2)} | Defensa: ${lR.defenseIndex.toFixed(2)} (${lR.matchesCount} P.)<br>`;
 
             const localAttackForm = lR.attackIndex - lH.attackIndex;
             const localDefenseForm = lH.defenseIndex - lR.defenseIndex; 
 
             if (localAttackForm > 0.1) {
-                desglose += `  - 📈 **Ataque en Forma (Fuerte):** El ataque de ${localT} ha **mejorado** significativamente.<br>`;
+                desglose += `  - 📈 **Ataque en Forma:** Mejoró significativamente.<br>`;
             } else if (localAttackForm < -0.1) {
-                desglose += `  - 📉 **Ataque en Baja (Fuerte):** El ataque de ${localT} se ha **debilitado**.<br>`;
+                desglose += `  - 📉 **Ataque en Baja:** Se debilitó significativamente.<br>`;
             }
             if (localDefenseForm > 0.1) {
-                desglose += `  - 🛡️ **Defensa Sólida (Fuerte):** La defensa de ${localT} ha **mejorado**.<br>`;
+                desglose += `  - 🛡️ **Defensa Sólida:** Mejoró su defensa.<br>`;
             } else if (localDefenseForm < -0.1) {
-                desglose += `  - 🚨 **Defensa Débil (Fuerte):** La defensa de ${localT} se ha **debilitado**.<br>`;
+                desglose += `  - 🚨 **Defensa Débil:** Empeoró su defensa.<br>`;
             }
             
             desglose += `<br>**Análisis de Plazos (${visitorT}):**<br>`;
-            desglose += `* **Histórico (Largo Plazo):** Ataque: ${vH.attackIndex.toFixed(2)} | Defensa: ${vH.defenseIndex.toFixed(2)} (${vH.matchesCount} partidos)<br>`;
-            desglose += `* **Reciente (Corto Plazo, Últimos ${vR.matchesCount}):** Ataque: ${vR.attackIndex.toFixed(2)} | Defensa: ${vR.defenseIndex.toFixed(2)} (${vR.matchesCount} partidos)<br>`;
+            desglose += `* **Histórico (Largo Plazo):** Ataque: ${vH.attackIndex.toFixed(2)} | Defensa: ${vH.defenseIndex.toFixed(2)} (${vH.matchesCount} P.)<br>`;
+            desglose += `* **Reciente (Últimos ${vR.matchesCount}):** Ataque: ${vR.attackIndex.toFixed(2)} | Defensa: ${vR.defenseIndex.toFixed(2)} (${vR.matchesCount} P.)<br>`;
 
             const visitorAttackForm = vR.attackIndex - vH.attackIndex;
             const visitorDefenseForm = vH.defenseIndex - vR.defenseIndex; 
 
             if (visitorAttackForm > 0.1) {
-                desglose += `  - 📈 **Ataque en Forma (Fuerte):** El ataque de ${visitorT} ha **mejorado** significativamente.<br>`;
+                desglose += `  - 📈 **Ataque en Forma:** Mejoró significativamente.<br>`;
             } else if (visitorAttackForm < -0.1) {
-                desglose += `  - 📉 **Ataque en Baja (Fuerte):** El ataque de ${visitorT} se ha **debilitado**.<br>`;
+                desglose += `  - 📉 **Ataque en Baja:** Se debilitó significativamente.<br>`;
             }
             if (visitorDefenseForm > 0.1) {
-                desglose += `  - 🛡️ **Defensa Sólida (Fuerte):** La defensa de ${visitorT} ha **mejorado**.<br>`;
+                desglose += `  - 🛡️ **Defensa Sólida:** Mejoró su defensa.<br>`;
             } else if (visitorDefenseForm < -0.1) {
-                desglose += `  - 🚨 **Defensa Débil (Fuerte):** La defensa de ${visitorT} se ha **debilitado**.<br>`;
+                desglose += `  - 🚨 **Defensa Débil:** Empeoró su defensa.<br>`;
             }
             
             desglose += `<br>---<br>`;
