@@ -280,10 +280,10 @@
 
     <script>
         const RECENT_MATCH_COUNT = 10; 
-        const THRESHOLD_OVER_25 = 0.65; 
-        const THRESHOLD_UNDER_25 = 0.45; 
-        const THRESHOLD_BTTS = 0.60; 
-        const THRESHOLD_BTTS_NO = 0.40; 
+        const THRESHOLD_OVER_25 = 0.65; // 65% o más para recomendar OVER
+        const THRESHOLD_UNDER_25 = 0.45; // 45% o menos para recomendar UNDER
+        const THRESHOLD_BTTS = 0.60;    // 60% o más para recomendar BTTS SÍ
+        const THRESHOLD_BTTS_NO = 0.40; // 40% o menos para recomendar BTTS NO
 
         let matchHistory = [];
         const leagueSelect = document.getElementById('leagueSelect');
@@ -304,7 +304,7 @@
             return result;
         }
 
-        // --- Carga de Archivo (Sin Cambios) ---
+        // --- Carga de Archivo ---
         document.getElementById('jsonFile').addEventListener('change', function(event) {
             const file = event.target.files[0];
             if (file) {
@@ -549,13 +549,14 @@
             document.getElementById('results').style.display = 'block';
 
             // --- 7. Recomendación Concreta ---
-            const recomendacion = generateRecommendation(localTeam, visitorTeam, totalXGoals, poissonProb25, poissonProbBTTS);
+            // Solo pasamos el totalXGoals (para el texto) y las probabilidades Poisson
+            const recomendacion = generateRecommendation(totalXGoals, poissonProb25, poissonProbBTTS);
             const recElement = document.getElementById('finalRecommendation');
             
             recElement.className = 'recommendation'; 
             recElement.innerHTML = `**DECISIÓN FINAL:** ${recomendacion.texto}`;
 
-            // Aplicar estilo dinámico
+            // Aplicar estilo dinámico (basado PUREMENTE en Poisson)
             if (poissonProb25 >= THRESHOLD_OVER_25) {
                 recElement.classList.add('rec-over');
             } else if (poissonProb25 <= THRESHOLD_UNDER_25) {
@@ -596,7 +597,7 @@
                     scored += G_scored;
                     conceded += G_conceded;
 
-                    // Cálculo de índices por condición (CORREGIDO)
+                    // Cálculo de índices por condición 
                     let attackIndex_match = 1;
                     let defenseIndex_match = 1;
                     
@@ -633,9 +634,12 @@
         }
 
         /**
-         * Genera la recomendación final.
+         * Genera la recomendación final basada SÓLO en las probabilidades Poisson.
+         * @param {number} xG Goles esperados (solo para el texto).
+         * @param {number} p25 Probabilidad Poisson de Más de 2.5 goles.
+         * @param {number} pBTTS Probabilidad Poisson de Ambos Anotan.
          */
-        function generateRecommendation(localT, visitorT, xG, p25, pBTTS) {
+        function generateRecommendation(xG, p25, pBTTS) {
             let texto = '';
             
             const isHighGoalRisk = p25 >= THRESHOLD_OVER_25;
@@ -644,24 +648,27 @@
             const isLowBTTS = pBTTS <= THRESHOLD_BTTS_NO;
 
             if (isHighGoalRisk) {
+                // Foco principal: OVER 2.5
                 if (isHighBTTS) {
-                    texto = `¡ALTA OFENSIVA! ✅ **OVER 2.5 Goles y Ambos Anotan (BTTS Sí)**. El modelo ponderado sugiere un partido con muchos goles.`;
+                    texto = `¡ALTA OFENSIVA! ✅ **OVER 2.5 Goles y Ambos Anotan (BTTS Sí)**. El modelo Poisson Ponderado anticipa un marcador abultado.`;
                 } else {
-                    texto = `FUERTE TENDENCIA AL GOL. ✅ **OVER 2.5 Goles**. (Goles Esperados: ${xG.toFixed(2)}). Uno de los equipos tiene un ataque muy superior.`;
+                    texto = `FUERTE TENDENCIA AL GOL. ✅ **OVER 2.5 Goles**. (Goles Esperados: ${xG.toFixed(2)}). La probabilidad de muchos goles es alta, aunque el BTTS es moderado.`;
                 }
             } 
             else if (isLowGoalRisk) {
+                // Foco principal: UNDER 2.5
                 if (isLowBTTS) {
-                    texto = `PARTIDO CERRADO Y SEGURO. 🛑 **UNDER 2.5 Goles y BTTS No**. Las defensas dominan, se espera bajo marcador.`;
+                    texto = `PARTIDO CERRADO Y SEGURO. 🛑 **UNDER 2.5 Goles y BTTS No**. Las probabilidades del modelo sugieren un marcador bajo y defensivo.`;
                 } else {
-                    texto = `PREDOMINIO DEFENSIVO. 🟡 **UNDER 2.5 Goles**. Ambas defensas están fuertes, pero el BTTS sigue siendo posible.`;
+                    texto = `PREDOMINIO DEFENSIVO. 🟡 **UNDER 2.5 Goles**. La probabilidad de bajo marcador es clara, pero el BTTS es moderado y no se puede descartar.`;
                 }
             } 
             else { 
+                // OVER/UNDER 2.5 está en zona gris (entre 45% y 65%)
                 if (isHighBTTS) {
-                     texto = `EQUILIBRADO CON GOLES MUTUOS. 🤝 **Ambos Anotan (BTTS Sí)**. La línea 2.5 es muy justa, pero hay buena probabilidad de que ambos marquen.`;
+                     texto = `EQUILIBRADO CON GOLES MUTUOS. 🤝 **Ambos Anotan (BTTS Sí)**. El Poisson sitúa el Over/Under 2.5 en un volado, pero la probabilidad de que ambos marquen es fuerte.`;
                 } else {
-                     texto = `PREDICCIÓN NEUTRA. ❓ La probabilidad de OVER 2.5 no es contundente. Cautela recomendada.`;
+                     texto = `PREDICCIÓN NEUTRA. ❓ Las probabilidades Poisson no son concluyentes para ninguna apuesta principal. Se recomienda cautela.`;
                 }
             }
 
