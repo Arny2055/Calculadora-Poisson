@@ -3,9 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>⚽️ Analizador de Probabilidades de Goles (JSON)</title>
+    <title>⚽️ Analizador de Probabilidades de Goles (JSON) - Búsqueda Parcial</title>
     <style>
-        /* --- Estilos CSS para la Interfaz --- */
+        /* (CSS Styles remain the same) */
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; background-color: #eef2f7; }
         .container { background: #ffffff; padding: 30px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
         input[type="text"], input[type="file"], button { 
@@ -47,10 +47,10 @@
         <hr>
 
         <label for="localTeam">**2. Equipo Local:**</label>
-        <input type="text" id="localTeam" placeholder="Ej: Manchester City">
+        <input type="text" id="localTeam" placeholder="Ej: Poner 'Madrid' buscará 'Real Madrid'">
 
         <label for="visitorTeam">**3. Equipo Visitante:**</label>
-        <input type="text" id="visitorTeam" placeholder="Ej: Liverpool">
+        <input type="text" id="visitorTeam" placeholder="Ej: Poner 'Barca' buscará 'Barcelona'">
 
         <button onclick="analyzeData()">Analizar Probabilidades</button>
 
@@ -70,29 +70,19 @@
     </div>
 
     <script>
-        // --- Lógica JavaScript CORREGIDA ---
+        // --- Lógica JavaScript CORREGIDA con Coincidencia Parcial ---
         
-        // Variable global para almacenar los datos cargados y LIMPIOS
         let matchHistory = [];
 
-        /**
-         * Función para limpiar y estandarizar los datos del JSON.
-         * Esto previene errores de parseo con valores nulos o cadenas en los goles.
-         */
         function cleanAndMapData(data) {
             return data.map(match => ({
                 local: match.local ? match.local.trim() : '',
                 visitante: match.visitante ? match.visitante.trim() : '',
-                // Aseguramos que los goles sean números enteros, si no, es 0
                 golesLocal: parseInt(match.golesLocal) || 0,
                 golesVisitante: parseInt(match.golesVisitante) || 0,
             }));
         }
 
-        /**
-         * Manejador para el campo de archivo JSON.
-         * Lee el contenido del archivo y lo guarda en la variable matchHistory.
-         */
         document.getElementById('jsonFile').addEventListener('change', function(event) {
             const file = event.target.files[0];
             if (file) {
@@ -100,7 +90,7 @@
                 reader.onload = function(e) {
                     try {
                         const rawData = JSON.parse(e.target.result);
-                        matchHistory = cleanAndMapData(rawData); // Limpiar y mapear datos
+                        matchHistory = cleanAndMapData(rawData);
                         
                         console.log("Datos cargados correctamente:", matchHistory.length, "partidos.");
                         if (matchHistory.length === 0) {
@@ -123,7 +113,7 @@
             const localTeam = document.getElementById('localTeam').value.trim();
             const visitorTeam = document.getElementById('visitorTeam').value.trim();
             
-            console.log(`Analizando: ${localTeam} vs ${visitorTeam}`); // Log de depuración
+            console.log(`Analizando: ${localTeam} vs ${visitorTeam}`);
 
             // 1. Validaciones
             if (!matchHistory.length) {
@@ -135,21 +125,32 @@
                 return;
             }
 
-            // 2. Filtrar partidos relevantes: donde participó el local O el visitante.
-            const relevantMatches = matchHistory.filter(match =>
-                (match.local.toLowerCase() === localTeam.toLowerCase() || match.visitante.toLowerCase() === localTeam.toLowerCase()) ||
-                (match.local.toLowerCase() === visitorTeam.toLowerCase() || match.visitante.toLowerCase() === visitorTeam.toLowerCase())
-            );
+            // 2. Filtrar partidos relevantes
+            // *** ESTA ES LA SECCIÓN CORREGIDA ***
+            const relevantMatches = matchHistory.filter(match => {
+                const teamLocalLC = localTeam.toLowerCase();
+                const teamVisitorLC = visitorTeam.toLowerCase();
+                const matchLocalLC = match.local.toLowerCase();
+                const matchVisitorLC = match.visitante.toLowerCase();
+
+                // Coincidencia para el equipo local (el nombre en el JSON incluye lo ingresado)
+                const isLocalMatch = matchLocalLC.includes(teamLocalLC) || matchVisitorLC.includes(teamLocalLC);
+                // Coincidencia para el equipo visitante
+                const isVisitorMatch = matchLocalLC.includes(teamVisitorLC) || matchVisitorLC.includes(teamVisitorLC);
+
+                return isLocalMatch || isVisitorMatch;
+            });
+            // *** FIN DE SECCIÓN CORREGIDA ***
 
             if (relevantMatches.length === 0) {
                 document.getElementById('prob25').textContent = "0%";
                 document.getElementById('probBTTS').textContent = "0%";
-                document.getElementById('personalAnalysis').innerHTML = "No se encontraron partidos en el historial para los equipos ingresados. **Asegúrate de que los nombres coincidan exactamente** con los del JSON.";
+                document.getElementById('personalAnalysis').innerHTML = "No se encontraron partidos en el historial para los equipos ingresados. **Asegúrate de usar al menos una parte clave del nombre**.";
                 document.getElementById('results').style.display = 'block';
                 return;
             }
             
-            console.log(`Partidos relevantes encontrados: ${relevantMatches.length}`); // Log de depuración
+            console.log(`Partidos relevantes encontrados: ${relevantMatches.length}`);
 
             // --- 3. Inicialización y Conteo de Métricas ---
             let countOver25 = 0;
@@ -163,7 +164,6 @@
             let totalGoals = 0;
 
             relevantMatches.forEach(match => {
-                // *** USO DE DATOS YA LIMPIOS ***
                 const G_local = match.golesLocal; 
                 const G_visitor = match.golesVisitante;
 
@@ -182,21 +182,25 @@
                 // c) Conteo de Goles y Concedidos
                 
                 // Si el partido involucra al equipo LOCAL del análisis
-                if (match.local.toLowerCase() === localTeam.toLowerCase()) {
-                    localScored += G_local;
-                    localConceded += G_visitor;
-                } else if (match.visitante.toLowerCase() === localTeam.toLowerCase()) {
-                    localScored += G_visitor;
-                    localConceded += G_local;
+                if (match.local.toLowerCase().includes(localTeam.toLowerCase()) || match.visitante.toLowerCase().includes(localTeam.toLowerCase())) {
+                    if (match.local.toLowerCase().includes(localTeam.toLowerCase())) {
+                        localScored += G_local;
+                        localConceded += G_visitor;
+                    } else if (match.visitante.toLowerCase().includes(localTeam.toLowerCase())) {
+                        localScored += G_visitor;
+                        localConceded += G_local;
+                    }
                 }
 
                 // Si el partido involucra al equipo VISITANTE del análisis
-                if (match.local.toLowerCase() === visitorTeam.toLowerCase()) {
-                    visitorScored += G_local;
-                    visitorConceded += G_visitor;
-                } else if (match.visitante.toLowerCase() === visitorTeam.toLowerCase()) {
-                    visitorScored += G_visitor;
-                    visitorConceded += G_local;
+                if (match.local.toLowerCase().includes(visitorTeam.toLowerCase()) || match.visitante.toLowerCase().includes(visitorTeam.toLowerCase())) {
+                    if (match.local.toLowerCase().includes(visitorTeam.toLowerCase())) {
+                        visitorScored += G_local;
+                        visitorConceded += G_visitor;
+                    } else if (match.visitante.toLowerCase().includes(visitorTeam.toLowerCase())) {
+                        visitorScored += G_visitor;
+                        visitorConceded += G_local;
+                    }
                 }
             });
 
@@ -224,7 +228,7 @@
         }
 
         /**
-         * Genera un análisis y deducción personalizada.
+         * Genera un análisis y deducción personalizada. (Sin cambios en la lógica de análisis)
          */
         function generatePersonalAnalysis(localTeam, visitorTeam, p25, pBTTS, avgG, laI, vaI, ldI, vdI) {
             let analysis = "";
