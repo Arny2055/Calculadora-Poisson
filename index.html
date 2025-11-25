@@ -138,7 +138,7 @@
         <label for="jsonFile">**1. Cargar Historial de Partidos (JSON):**</label>
         <input type="file" id="jsonFile" accept=".json">
         <p class="info">
-            **Ventana Histórica:** Para cada pronóstico, se usarán los **10 partidos más recientes** de los equipos de interés **dentro de la liga seleccionada**.
+            **Ventana Histórica (10 P.):** Para cada pronóstico, se usarán los **10 partidos más recientes** de los equipos de interés, y la **Base de Goles de la Liga** se calcula con *todos* los partidos anteriores de esa liga.
         </p>
 
         <hr>
@@ -178,7 +178,7 @@
                         <tr>
                             <th>#</th>
                             <th>Partido Analizado</th>
-                            <th>Ventana Histórica</th>
+                            <th>Base Histórica</th>
                             <th>$\lambda_L$ / $\lambda_V$</th>
                             <th>Prob. OVER 2.5</th>
                             <th>Resultado Real</th>
@@ -320,7 +320,6 @@
                 return;
             }
 
-            // Filtra los equipos solo de la liga seleccionada
             const leagueMatches = matchHistory.filter(match => match.liga === selectedLeague);
             const uniqueTeams = new Set();
 
@@ -351,41 +350,34 @@
 
 
         // ---------------------------------------------
-        // FUNCIÓN PRINCIPAL DE BACKTESTING
+        // FUNCIÓN PRINCIPAL DE BACKTESTING (CORREGIDA)
         // ---------------------------------------------
         function runBacktestSequential() {
             const selectedLeague = leagueSelect.value;
             const localTeam = localTeamSelect.value.trim();
             const visitorTeam = visitorTeamSelect.value.trim();
             
-            if (!selectedLeague) {
-                alert("Por favor, seleccione una Liga.");
-                return;
-            }
-            if (!localTeam || !visitorTeam) {
-                alert("Por favor, selecciona los dos equipos de interés.");
-                return;
-            }
-             if (localTeam.toLowerCase() === visitorTeam.toLowerCase()) {
-                alert("Los equipos local y visitante deben ser diferentes.");
+            if (!selectedLeague || !localTeam || !visitorTeam || localTeam.toLowerCase() === visitorTeam.toLowerCase()) {
+                alert("Por favor, seleccione una Liga y dos Equipos diferentes.");
                 return;
             }
 
-            // 1. Filtrar TODOS los partidos de la liga seleccionada
-            const allLeagueMatches = matchHistory.filter(m => m.liga === selectedLeague);
+            // 1. Filtrar TODOS los partidos de la liga seleccionada y ordenarlos cronológicamente.
+            const allLeagueMatches = matchHistory
+                .filter(m => m.liga === selectedLeague)
+                .sort((a, b) => a.date - b.date); 
             
-            // 2. Filtrar solo los partidos donde participa A o B, de la liga, y ordenarlos cronológicamente
+            // 2. Filtrar solo los partidos donde participa A o B (dentro de la liga)
             const relevantMatches = allLeagueMatches
                 .filter(m => 
                     m.local.toLowerCase() === localTeam.toLowerCase() || 
                     m.visitante.toLowerCase() === localTeam.toLowerCase() ||
                     m.local.toLowerCase() === visitorTeam.toLowerCase() ||
                     m.visitante.toLowerCase() === visitorTeam.toLowerCase()
-                )
-                .sort((a, b) => a.date - b.date); 
+                ); 
 
             if (relevantMatches.length < RECENT_MATCH_COUNT + 1) {
-                alert(`Insuficientes datos en ${selectedLeague}. Se requieren ${RECENT_MATCH_COUNT + 1} partidos (de los equipos seleccionados) para iniciar el backtesting.`);
+                alert(`Insuficientes datos de ${localTeam} y ${visitorTeam} en esta liga. Se requieren ${RECENT_MATCH_COUNT + 1} partidos para iniciar el backtesting.`);
                 return;
             }
             
@@ -393,40 +385,49 @@
             let totalSuccesses = 0;
             let totalPredictions = 0;
 
-            // 3. Iteración secuencial (inicia en el índice RECENT_MATCH_COUNT para predecir el partido N+1)
+            // 3. Iteración secuencial: i itera sobre los partidos relevantes de A y B
             for (let i = RECENT_MATCH_COUNT; i < relevantMatches.length; i++) {
                 
                 const matchToPredict = relevantMatches[i];
                 
-                // La Ventana Histórica: los 10 partidos anteriores de estos dos equipos, dentro de la liga.
-                const historicalWindow = relevantMatches.slice(i - RECENT_MATCH_COUNT, i);
+                // a. Definir el Histórico de la LIGA (Todos los partidos de la liga ANTES del partido actual)
+                // Se encuentra el índice del partido actual en el array de TODOS los partidos de la liga.
+                const matchIndexInLeague = allLeagueMatches.findIndex(m => m === matchToPredict);
+                const leagueHistoricalBase = allLeagueMatches.slice(0, matchIndexInLeague); 
                 
-                // Nota: La media de la liga (Base) se calcula sobre la ventana histórica (los 10 partidos anteriores)
-                // para simular la ponderación por forma en ese momento.
+                // b. Definir la Ventana Histórica (los 10 partidos anteriores de los equipos de interés A/B)
+                const historicalWindowAB = relevantMatches.slice(i - RECENT_MATCH_COUNT, i);
+                
+                if (leagueHistoricalBase.length < 50) { // Criterio mínimo para una base de liga estable
+                    // Saltamos si no hay suficientes datos de toda la liga para una base confiable
+                    continue; 
+                }
+
+                // c. Calcular la Base de la Liga (Medias Ponderadas de la Liga Histórica)
                 const { avgLeagueLocalScored, avgLeagueVisitorScored, avgLeagueLocalConceded, avgLeagueVisitorConceded, totalMatchesCount } = 
-                    calculateLeagueWeightedAvg(historicalWindow);
+                    calculateLeagueWeightedAvg(leagueHistoricalBase);
                 
-                // Calcular Índices Específicos
+                // d. Calcular Índices Específicos (Fuerza de Ataque/Defensa) usando la ventana de 10 P. de A/B
                 const localStats = calculateTeamIndicesAndStats(
-                    matchToPredict.local, historicalWindow, 
+                    matchToPredict.local, historicalWindowAB, 
                     'LOCAL', avgLeagueLocalScored, avgLeagueLocalConceded, 
                     avgLeagueVisitorScored, avgLeagueVisitorConceded
                 );
                 
                 const visitorStats = calculateTeamIndicesAndStats(
-                    matchToPredict.visitante, historicalWindow, 
+                    matchToPredict.visitante, historicalWindowAB, 
                     'VISITOR', avgLeagueLocalScored, avgLeagueLocalConceded, 
                     avgLeagueVisitorScored, avgLeagueVisitorConceded
                 );
 
-                // Calcular GOLES ESPERADOS (Lambda)
+                // e. Calcular GOLES ESPERADOS (Lambda)
                 const lambdaLocal = localStats.attackIndex * visitorStats.defenseIndex * avgLeagueLocalScored;
                 const lambdaVisitor = visitorStats.attackIndex * localStats.defenseIndex * avgLeagueVisitorScored;
 
-                // Calcular Probabilidad de OVER 2.5
+                // f. Calcular Probabilidad de OVER 2.5
                 let probOver25 = calculateOver25Probability(lambdaLocal, lambdaVisitor);
 
-                // Evaluar el Resultado
+                // g. Evaluar el Resultado
                 const totalGoalsReal = matchToPredict.golesLocal + matchToPredict.golesVisitante;
                 const predictionReal = totalGoalsReal > 2 ? 'OVER 2.5' : 'UNDER 2.5';
                 
@@ -439,7 +440,7 @@
                 backtestResults.push({
                     index: i + 1,
                     match: `${matchToPredict.local} vs ${matchToPredict.visitante} (${matchToPredict.rawDate || ''})`,
-                    windowSize: totalMatchesCount,
+                    windowSize: historicalWindowAB.length,
                     lambdaL: lambdaLocal.toFixed(2),
                     lambdaV: lambdaVisitor.toFixed(2),
                     probOver25: (probOver25 * 100).toFixed(2) + '%',
@@ -454,49 +455,63 @@
         }
 
         // ---------------------------------------------
-        // FUNCIONES DE APOYO AL CÁLCULO (Se mantienen igual)
+        // FUNCIONES DE APOYO AL CÁLCULO
         // ---------------------------------------------
         
-        function calculateLeagueWeightedAvg(historicalWindow) {
+        /**
+         * Calcula las medias de goles de la LIGA basándose en la base histórica de TODA la liga.
+         */
+        function calculateLeagueWeightedAvg(leagueHistoricalBase) {
             
             let totalWeightedLocalGoals = 0; 
             let totalWeightedVisitorGoals = 0; 
-            let totalWeightedLocalMatches = 0; 
-            let totalWeightedVisitorMatches = 0; 
+            let totalMatches = leagueHistoricalBase.length; 
 
-            historicalWindow.forEach(match => {
+            leagueHistoricalBase.forEach(match => {
                 totalWeightedLocalGoals += match.golesLocal;
                 totalWeightedVisitorGoals += match.golesVisitante;
-                totalWeightedLocalMatches++;
-                totalWeightedVisitorMatches++;
             });
 
-            const avgLeagueLocalScored = totalWeightedLocalGoals / totalWeightedLocalMatches;
-            const avgLeagueVisitorScored = totalWeightedVisitorGoals / totalWeightedVisitorMatches;
+            // Si hay 0 partidos, forzamos un valor mínimo para evitar NaNs
+            if (totalMatches === 0) {
+                 return {
+                    avgLeagueLocalScored: 0.001, avgLeagueVisitorScored: 0.001,
+                    avgLeagueLocalConceded: 0.001, avgLeagueVisitorConceded: 0.001,
+                    totalMatchesCount: 0
+                };
+            }
+
+            const avgLeagueLocalScored = totalWeightedLocalGoals / totalMatches;
+            const avgLeagueVisitorScored = totalWeightedVisitorGoals / totalMatches;
             
+            // La media de Goles Concedidos por local es igual a la media de Goles Anotados por visitante.
             const avgLeagueLocalConceded = avgLeagueVisitorScored; 
             const avgLeagueVisitorConceded = avgLeagueLocalScored; 
             
             return {
+                // Se asegura que ninguna base sea 0 para evitar Infinity al calcular los Índices
                 avgLeagueLocalScored: avgLeagueLocalScored || 0.001, 
                 avgLeagueVisitorScored: avgLeagueVisitorScored || 0.001,
                 avgLeagueLocalConceded: avgLeagueLocalConceded || 0.001,
                 avgLeagueVisitorConceded: avgLeagueVisitorConceded || 0.001,
-                totalMatchesCount: totalWeightedLocalMatches 
+                totalMatchesCount: totalMatches 
             };
         }
 
+        /**
+         * Calcula el índice de Ataque/Defensa para un equipo basándose en su rendimiento en la ventana de 10 P.
+         */
         function calculateTeamIndicesAndStats(teamName, historicalWindow, condition, avgLeagueLocalScored, avgLeagueLocalConceded, avgLeagueVisitorScored, avgLeagueVisitorConceded) {
             
             const teamLC = teamName.toLowerCase();
             
+            // Se filtra la ventana de 10 P. para quedarse solo con los partidos donde el equipo es Local/Visitante.
             const filteredMatches = historicalWindow
                 .filter(m => {
-                    const isTeamMatch = m.local.toLowerCase() === teamLC || m.visitante.toLowerCase() === teamLC;
                     if (condition === 'LOCAL') {
-                        return isTeamMatch && m.local.toLowerCase() === teamLC;
+                        return m.local.toLowerCase() === teamLC;
                     } else if (condition === 'VISITOR') {
-                        return isTeamMatch && m.visitante.toLowerCase() === teamLC;
+                        return m.visitante.toLowerCase() === teamLC;
                     }
                     return false;
                 });
@@ -506,6 +521,7 @@
             let totalConceded = 0;
 
             if (matchesCount === 0) {
+                 // Si no tiene partidos en la ventana de 10, se usa el índice neutro (1).
                  return { attackIndex: 1, defenseIndex: 1, matchesCount: 0 }; 
             }
             
@@ -522,6 +538,7 @@
             let attackIndex = 1;
             let defenseIndex = 1;
             
+            // Cálculo de Índices comparando el promedio del equipo vs. el promedio de la liga base.
             if (condition === 'LOCAL') {
                 attackIndex = avgScored / avgLeagueLocalScored;
                 defenseIndex = avgConceded / avgLeagueLocalConceded; 
