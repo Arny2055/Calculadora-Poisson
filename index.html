@@ -218,8 +218,8 @@
 
     <script>
         const RECENT_MATCH_COUNT = 10; 
-        const THRESHOLD_OVER_25 = 0.65; // Criterio: 65% o más para predecir OVER 2.5
-        const MIN_LEAGUE_BASE_MATCHES = 50; // Mínimo de partidos en la liga histórica para empezar a pronosticar
+        const THRESHOLD_OVER_25 = 0.65; 
+        const MIN_LEAGUE_BASE_MATCHES = 50; 
         const MAX_GOALS = 10; 
 
         let matchHistory = [];
@@ -232,7 +232,6 @@
             if (lambda <= 0) return x === 0 ? 1 : 0;
             if (x === 0) return Math.exp(-lambda);
             
-            // Usamos logaritmos para evitar desbordamiento con números grandes
             let logProb = -lambda + x * Math.log(lambda) - logFactorial(x);
             return Math.exp(logProb);
         }
@@ -305,7 +304,6 @@
                     visitante: visitante,
                     golesLocal: golesLocal,
                     golesVisitante: golesVisitante,
-                    // Asegura que la fecha es un objeto Date válido para la ordenación
                     date: new Date(match.Date || match.Index || 0), 
                     rawDate: match.Date 
                 };
@@ -403,7 +401,7 @@
                 ); 
 
             if (relevantMatches.length < RECENT_MATCH_COUNT + 1) {
-                alert(`Insuficientes datos de ${localTeam} y ${visitorTeam} en esta liga. Se requieren ${RECENT_MATCH_COUNT + 1} partidos para iniciar el backtesting.`);
+                alert(`Insuficientes datos de ${localTeam} y ${visitorTeam} en esta liga. Se requieren ${RECENT_MATCH_COUNT + 1} partidos combinados para iniciar el backtesting.`);
                 return;
             }
             
@@ -470,7 +468,7 @@
             }
             // --- FIN: BACKTESTING SECUENCIAL ---
 
-            // --- INICIO: PRONÓSTICO FINAL (Usando todos los datos disponibles) ---
+            // --- INICIO: PRONÓSTICO FINAL ---
             const finalPredictionData = performFinalPrediction(localTeam, visitorTeam, allLeagueMatches);
             // --- FIN: PRONÓSTICO FINAL ---
             
@@ -478,20 +476,37 @@
             displayResults(backtestResults, totalSuccesses, totalPredictions, finalPredictionData);
         }
 
+        /**
+         * Realiza el pronóstico final utilizando la base histórica completa de la liga
+         * y la forma más reciente (últimos 10 partidos) de cada equipo.
+         * @param {string} localTeam - Nombre del equipo local.
+         * @param {string} visitorTeam - Nombre del equipo visitante.
+         * @param {Array<Object>} allLeagueMatches - Todos los partidos de la liga, ordenados cronológicamente.
+         * @returns {Object|null} El pronóstico final.
+         */
         function performFinalPrediction(localTeam, visitorTeam, allLeagueMatches) {
             
             if (allLeagueMatches.length < MIN_LEAGUE_BASE_MATCHES) {
                 return null;
             }
+            const teamLocalLC = localTeam.toLowerCase();
+            const teamVisitorLC = visitorTeam.toLowerCase();
 
             // 1. Base de la Liga: Usamos TODOS los partidos para la media base más estable.
             const leagueHistoricalBaseForFinal = allLeagueMatches; 
 
-            // 2. Ventana de Equipos: Usamos los últimos 10 partidos de CADA equipo para sus índices (forma actual).
-            const teamHistoricalWindow = allLeagueMatches.filter(m => 
-                m.local.toLowerCase() === localTeam.toLowerCase() || m.visitante.toLowerCase() === localTeam.toLowerCase() ||
-                m.local.toLowerCase() === visitorTeam.toLowerCase() || m.visitante.toLowerCase() === visitorTeam.toLowerCase()
-            ).slice(-RECENT_MATCH_COUNT * 2); // Tomamos una ventana grande para asegurar los 10 de cada uno.
+            // 2. Ventana de Equipos: Obtener los ÚLTIMOS 10 partidos para cada equipo individualmente.
+            const localTeamLast10 = allLeagueMatches
+                .filter(m => m.local.toLowerCase() === teamLocalLC || m.visitante.toLowerCase() === teamLocalLC)
+                .slice(-RECENT_MATCH_COUNT);
+            
+            const visitorTeamLast10 = allLeagueMatches
+                .filter(m => m.local.toLowerCase() === teamVisitorLC || m.visitante.toLowerCase() === teamVisitorLC)
+                .slice(-RECENT_MATCH_COUNT);
+            
+            // Combinar para crear la ventana de forma actual.
+            const finalWindowForIndices = [...new Set([...localTeamLast10, ...visitorTeamLast10])].sort((a, b) => a.date - b.date);
+
 
             // 3. Cálculo de Promedios Base de Liga
             const { avgLeagueLocalScored, avgLeagueVisitorScored, avgLeagueLocalConceded, avgLeagueVisitorConceded } = 
@@ -499,13 +514,13 @@
             
             // 4. Cálculo de Índices de Equipo (posición específica)
             const localStats = calculateTeamIndicesAndStats(
-                localTeam, teamHistoricalWindow, 
+                localTeam, finalWindowForIndices, // Usamos la ventana combinada de los últimos 10
                 'LOCAL', avgLeagueLocalScored, avgLeagueLocalConceded, 
                 avgLeagueVisitorScored, avgLeagueVisitorConceded
             );
             
             const visitorStats = calculateTeamIndicesAndStats(
-                visitorTeam, teamHistoricalWindow, 
+                visitorTeam, finalWindowForIndices, // Usamos la ventana combinada de los últimos 10
                 'VISITOR', avgLeagueLocalScored, avgLeagueLocalConceded, 
                 avgLeagueVisitorScored, avgLeagueVisitorConceded
             );
@@ -557,12 +572,10 @@
             const avgLeagueLocalScored = totalWeightedLocalGoals / totalMatches;
             const avgLeagueVisitorScored = totalWeightedVisitorGoals / totalMatches;
             
-            // La media de Goles Concedidos por local es igual a la media de Goles Anotados por visitante.
             const avgLeagueLocalConceded = avgLeagueVisitorScored; 
             const avgLeagueVisitorConceded = avgLeagueLocalScored; 
             
             return {
-                // Se asegura que ninguna base sea 0 para evitar Infinity al calcular los Índices
                 avgLeagueLocalScored: avgLeagueLocalScored || 0.001, 
                 avgLeagueVisitorScored: avgLeagueVisitorScored || 0.001,
                 avgLeagueLocalConceded: avgLeagueLocalConceded || 0.001,
@@ -578,15 +591,12 @@
             
             const teamLC = teamName.toLowerCase();
             
-            // Se filtra la ventana para quedarse solo con los partidos donde el equipo participa en la condición dada.
+            // Filtrado: solo usa partidos donde el equipo es Local/Visitante según 'condition', dentro de la ventana.
             const filteredMatches = historicalWindow
                 .filter(m => {
-                    // Si buscamos las estadísticas del Local (condition='LOCAL'), filtramos por sus partidos de local
                     if (condition === 'LOCAL') {
                         return m.local.toLowerCase() === teamLC;
-                    } 
-                    // Si buscamos las estadísticas del Visitante (condition='VISITOR'), filtramos por sus partidos de visitante
-                    else if (condition === 'VISITOR') {
+                    } else if (condition === 'VISITOR') {
                         return m.visitante.toLowerCase() === teamLC;
                     }
                     return false;
@@ -597,14 +607,12 @@
             let totalConceded = 0;
 
             if (matchesCount === 0) {
-                 // Si no tiene partidos en la ventana en esa condición, se usa el índice neutro (1).
                  return { attackIndex: 1, defenseIndex: 1, matchesCount: 0 }; 
             }
             
             filteredMatches.forEach(match => {
                 const isLocal = match.local.toLowerCase() === teamLC;
                 
-                // Las estadísticas se toman desde la perspectiva del equipo 'teamName'
                 totalScored += isLocal ? match.golesLocal : match.golesVisitante;
                 totalConceded += isLocal ? match.golesVisitante : match.golesLocal;
             });
@@ -638,7 +646,6 @@
         function calculateOver25Probability(lambdaLocal, lambdaVisitor) {
             let probOver25 = 0;
             
-            // Calculamos hasta 10 goles (cubre más del 99.9% de los casos)
             for (let G_local = 0; G_local <= MAX_GOALS; G_local++) {
                 for (let G_visitor = 0; G_visitor <= MAX_GOALS; G_visitor++) {
                     const P_local = poissonProbability(G_local, lambdaLocal);
