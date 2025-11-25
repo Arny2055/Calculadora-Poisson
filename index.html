@@ -138,7 +138,7 @@
         <label for="jsonFile">**1. Cargar Historial de Partidos (JSON):**</label>
         <input type="file" id="jsonFile" accept=".json">
         <p class="info">
-            **Ventana Histórica (10 P.):** Para cada pronóstico, se usarán los **10 partidos más recientes** de los equipos de interés, y la **Base de Goles de la Liga** se calcula con *todos* los partidos anteriores de esa liga.
+            **Ventana Histórica (10 P.):** Para cada pronóstico, se usarán los **10 partidos más recientes** de los equipos de interés, y la **Base de Goles de la Liga** se calcula con *todos* los partidos anteriores de esa liga. Se requieren al menos 50 partidos en la liga histórica para una base estable.
         </p>
 
         <hr>
@@ -196,6 +196,7 @@
     <script>
         const RECENT_MATCH_COUNT = 10; 
         const THRESHOLD_OVER_25 = 0.65; // Criterio: 65% o más para predecir OVER 2.5
+        const MIN_LEAGUE_BASE_MATCHES = 50; // Mínimo de partidos en la liga histórica para empezar a pronosticar
         const MAX_GOALS = 10; 
 
         let matchHistory = [];
@@ -280,6 +281,7 @@
                     visitante: visitante,
                     golesLocal: golesLocal,
                     golesVisitante: golesVisitante,
+                    // Asegura que la fecha es un objeto Date válido para la ordenación
                     date: new Date(match.Date || match.Index || 0), 
                     rawDate: match.Date 
                 };
@@ -367,7 +369,7 @@
                 .filter(m => m.liga === selectedLeague)
                 .sort((a, b) => a.date - b.date); 
             
-            // 2. Filtrar solo los partidos donde participa A o B (dentro de la liga)
+            // 2. Filtrar solo los partidos donde participa A o B (dentro de la liga), ya ordenados cronológicamente.
             const relevantMatches = allLeagueMatches
                 .filter(m => 
                     m.local.toLowerCase() === localTeam.toLowerCase() || 
@@ -386,19 +388,24 @@
             let totalPredictions = 0;
 
             // 3. Iteración secuencial: i itera sobre los partidos relevantes de A y B
+            // Comenzamos después de la ventana histórica (10 partidos)
             for (let i = RECENT_MATCH_COUNT; i < relevantMatches.length; i++) {
                 
                 const matchToPredict = relevantMatches[i];
                 
-                // a. Definir el Histórico de la LIGA (Todos los partidos de la liga ANTES del partido actual)
+                // a. Definir la Ventana Histórica (los 10 partidos anteriores de los equipos de interés A/B)
+                const historicalWindowAB = relevantMatches.slice(i - RECENT_MATCH_COUNT, i);
+
+                // b. Definir el Histórico de la LIGA (Todos los partidos de la liga ANTES del partido actual)
                 // Se encuentra el índice del partido actual en el array de TODOS los partidos de la liga.
                 const matchIndexInLeague = allLeagueMatches.findIndex(m => m === matchToPredict);
+                
+                // Si el partido no se encuentra, saltamos (esto no debería ocurrir si el filtro es correcto)
+                if (matchIndexInLeague === -1) continue; 
+
                 const leagueHistoricalBase = allLeagueMatches.slice(0, matchIndexInLeague); 
                 
-                // b. Definir la Ventana Histórica (los 10 partidos anteriores de los equipos de interés A/B)
-                const historicalWindowAB = relevantMatches.slice(i - RECENT_MATCH_COUNT, i);
-                
-                if (leagueHistoricalBase.length < 50) { // Criterio mínimo para una base de liga estable
+                if (leagueHistoricalBase.length < MIN_LEAGUE_BASE_MATCHES) { 
                     // Saltamos si no hay suficientes datos de toda la liga para una base confiable
                     continue; 
                 }
@@ -408,6 +415,7 @@
                     calculateLeagueWeightedAvg(leagueHistoricalBase);
                 
                 // d. Calcular Índices Específicos (Fuerza de Ataque/Defensa) usando la ventana de 10 P. de A/B
+                // El Local se calcula usando sus datos de Local, el Visitante usando sus datos de Visitante.
                 const localStats = calculateTeamIndicesAndStats(
                     matchToPredict.local, historicalWindowAB, 
                     'LOCAL', avgLeagueLocalScored, avgLeagueLocalConceded, 
@@ -420,8 +428,11 @@
                     avgLeagueVisitorScored, avgLeagueVisitorConceded
                 );
 
-                // e. Calcular GOLES ESPERADOS (Lambda)
+                // e. Calcular GOLES ESPERADOS (Lambda) - Asegurando posición
+                // Lambda Local = FA_Local * FD_Visitante * Base_Local_Anotados
                 const lambdaLocal = localStats.attackIndex * visitorStats.defenseIndex * avgLeagueLocalScored;
+                
+                // Lambda Visitante = FA_Visitante * FD_Local * Base_Visitante_Anotados
                 const lambdaVisitor = visitorStats.attackIndex * localStats.defenseIndex * avgLeagueVisitorScored;
 
                 // f. Calcular Probabilidad de OVER 2.5
@@ -472,7 +483,6 @@
                 totalWeightedVisitorGoals += match.golesVisitante;
             });
 
-            // Si hay 0 partidos, forzamos un valor mínimo para evitar NaNs
             if (totalMatches === 0) {
                  return {
                     avgLeagueLocalScored: 0.001, avgLeagueVisitorScored: 0.001,
@@ -521,7 +531,7 @@
             let totalConceded = 0;
 
             if (matchesCount === 0) {
-                 // Si no tiene partidos en la ventana de 10, se usa el índice neutro (1).
+                 // Si no tiene partidos en la ventana de 10 en esa condición, se usa el índice neutro (1).
                  return { attackIndex: 1, defenseIndex: 1, matchesCount: 0 }; 
             }
             
@@ -547,6 +557,10 @@
                 defenseIndex = avgConceded / avgLeagueVisitorConceded; 
             }
             
+            // Manejo de índices NaN o Infinity (si por alguna razón avgLeague... es 0), forzando a 1
+            if (isNaN(attackIndex) || !isFinite(attackIndex)) attackIndex = 1;
+            if (isNaN(defenseIndex) || !isFinite(defenseIndex)) defenseIndex = 1;
+
             return {
                 attackIndex: attackIndex, 
                 defenseIndex: defenseIndex,
@@ -581,7 +595,7 @@
             body.innerHTML = '';
             
             if (totalPredictions === 0) {
-                summary.innerHTML = '<p>No se pudieron generar predicciones válidas con los datos y la ventana seleccionada.</p>';
+                summary.innerHTML = '<p>No se pudieron generar predicciones válidas con los datos y la ventana seleccionada. Asegúrese de tener suficientes partidos en la liga histórica ('+MIN_LEAGUE_BASE_MATCHES+' requeridos).</p>';
                 document.getElementById('results').style.display = 'block';
                 return;
             }
