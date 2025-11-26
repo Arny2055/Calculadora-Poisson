@@ -1,533 +1,304 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="es">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Backtester Poisson por Fuerza (Attack/Defense Strength) — Normalización Corregida</title>
-  <style>
-    body { font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, Arial; margin: 18px; background:#f6f7fb; color:#111; }
-    header { display:flex; align-items:center; gap:12px; margin-bottom:16px; }
-    h1 { margin:0; font-size:20px; }
-    .card { background:white; padding:14px; border-radius:10px; box-shadow:0 6px 18px rgba(20,30,60,0.06); margin-bottom:12px; }
-    label { display:block; margin:8px 0 6px; font-weight:600; font-size:13px; }
-    select,input[type=file],button { padding:8px 10px; border-radius:8px; border:1px solid #d7dbe7; background:white; font-size:14px; }
-    button { cursor:pointer; }
-    .row { display:flex; gap:12px; flex-wrap:wrap; align-items:center; }
-    table { width:100%; border-collapse:collapse; margin-top:10px; font-size:13px; }
-    th,td { padding:8px 6px; border-bottom:1px solid #eee; text-align:left; }
-    th { background:#fafbff; font-weight:700; }
-    .muted { color:#666; font-size:13px; }
-    .stats { display:flex; gap:12px; margin-top:10px; flex-wrap:wrap; }
-    .stat { background:#0f172a; color:white; padding:10px;border-radius:8px; min-width:140px; }
-    .good { color: #00d66c; font-weight:700; }
-    .bad { color: #d6004b; font-weight:700; }
-  </style>
-</head>
-<body>
-  <header>
-    <div>
-      <h1>Backtester Poisson por Fuerza — Normalización de Datos Corregida (Resultado Real)</h1>
-      <div class="muted">El backtesting ahora asegura que el resultado real sea parseado correctamente.</div>
-    </div>
-  </header>
-
-  <div class="card">
-    <label>Archivo JSON</label>
-    <input id="fileInput" type="file" accept=".json" />
-  </div>
-
-  <div class="card">
-    <div class="row">
-      <div style="flex:1">
-        <label>Liga</label>
-        <select id="leagueSelect"><option value="">-- carga un JSON primero --</option></select>
-      </div>
-      <div style="flex:1">
-        <label>Local</label>
-        <select id="homeSelect"><option value="">-- liga --</option></select>
-      </div>
-      <div style="flex:1">
-        <label>Visitante</label>
-        <select id="awaySelect"><option value="">-- liga --</option></select>
-      </div>
-      <div style="align-self:flex-end">
-        <button id="analyzeBtn">Analizar Backtesting</button>
-      </div>
-    </div>
-  </div>
-
-  <div id="results" style="display:none;">
-    <div class="card">
-      <h3>Resumen de Aciertos del Backtest (Modelo por Fuerza)</h3>
-      <div class="stats" id="summaryStats"></div>
-      <div style="margin-top:10px;">
-        <button id="exportCsv">Exportar resultados a CSV</button>
-      </div>
-    </div>
-
-    <div class="card">
-      <h3>Resultados — Backtest Partido por Partido</h3>
-      <div id="fullResultsTable"></div>
-    </div>
-
-    <div class="card">
-      <h3>Predicción para el partido seleccionado</h3>
-      <div id="finalPrediction"></div>
-    </div>
-
-    <div class="card">
-      <h3>Nota / Metodología (Fuerza de Ataque/Defensa)</h3>
-      <div class="muted">
-        - **Metodología:** Modelo de Poisson Bivariado ajustado por Fuerza de Ataque (AS) y Fuerza de Defensa (DS).<br>
-        - **Cálculo de Fuerzas:** Se utilizan **todos** los partidos jugados *antes* de la fecha objetivo para calcular el AS y DS de todos los equipos de la liga.
-      </div>
-    </div>
-  </div>
-
-<script>
-let matches = [];
-const fileInput = document.getElementById('fileInput');
-const leagueSelect = document.getElementById('leagueSelect');
-const homeSelect = document.getElementById('homeSelect');
-const awaySelect = document.getElementById('awaySelect');
-const analyzeBtn = document.getElementById('analyzeBtn');
-
-const MONTHS_ES = {
-  'ene':0,'ene.':0, 'feb':1,'feb.':1, 'mar':2,'mar.':2, 'abr':3,'abr.':3, 
-  'may':4,'may.':4, 'jun':5,'jun.':5, 'jul':6,'jul.':6, 'ago':7,'ago.':7, 
-  'sep':8,'sep.':8,'sept':8,'sept.':8, 'oct':9,'oct.':9, 'nov':10,'nov.':10, 'dic':11,'dic.':11
-};
-
-// --- NORMALIZACIÓN DE DATOS (CON PARSING DE GOLES MEJORADO) ---
-
-function parseFlexibleDate(s) {
-    if (!s) return null;
-    if (s instanceof Date) return s;
-    s = s.toString().trim();
-    const d1 = new Date(s);
-    if (!isNaN(d1.getTime())) return d1;
-    let cleaned = s.replace(/^[^0-9]*,\s*/,'').replace(/^[A-Za-záéíóúñüÁÉÍÓÚÑÜ]+\.?,\s*/,'');
-    const re = /(\d{1,2})\s+([a-zA-ZñÑ\.]+)\s+(\d{4})\s+(\d{1,2}):(\d{2})/i;
-    const m = cleaned.match(re);
-    if (m) {
-        const day = Number(m[1]);
-        const monRaw = m[2].toLowerCase();
-        const month = MONTHS_ES[monRaw] ?? MONTHS_ES[monRaw.replace(/\./,'')] ?? null;
-        const year = Number(m[3]);
-        const hour = Number(m[4]);
-        const minute = Number(m[5]);
-        if (month !== null && !isNaN(day)) return new Date(year, month, day, hour, minute);
-    }
-    const re2 = /(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})\s+(\d{1,2}):(\d{2})/;
-    const m2 = cleaned.match(re2);
-    if (m2) {
-        const day = Number(m2[1]);
-        const month = Number(m2[2]) - 1;
-        let year = Number(m2[3]);
-        if (year < 100) year += 2000;
-        const hour = Number(m2[4]);
-        const minute = Number(m2[5]);
-        return new Date(year, month, day, hour, minute);
-    }
-    return null;
-}
-
-function normalizeMatch(entry) {
-    try {
-        const e = {};
-        e.league = entry.league || entry.League || '';
-        const matchRaw = entry.Match || '';
-        
-        // 1. Parsear Equipos
-        if (matchRaw && typeof matchRaw === 'string' && matchRaw.includes('-')) {
-            const parts = matchRaw.split('-').map(s => s.trim());
-            e.home_team = parts[0] || '';
-            e.away_team = parts[1] || '';
-        } else {
-            e.home_team = entry.home_team || entry['Home'] || '';
-            e.away_team = entry.away_team || entry['Away'] || '';
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Análisis Predictivo de Fútbol para Apuestas</title>
+    <style>
+        /* --- ESTILOS CSS --- */
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f0f4f8; /* Fondo más neutro */
+            color: #333;
+            padding: 20px;
         }
 
-        // 2. Parsear Goles (Lógica Corregida y Reforzada)
-        let homeGoals = NaN;
-        let awayGoals = NaN;
+        h1 {
+            text-align: center;
+            color: #004c8c; /* Azul más serio */
+            margin-bottom: 20px;
+            font-size: 2.2em;
+        }
         
-        const resFT = (entry['Result FT'] || entry.result_ft || entry.result || entry['Result'] || '').toString().trim();
+        #match-info {
+            text-align: center;
+            margin-bottom: 20px;
+            padding: 15px;
+            background-color: #fff;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+        }
+
+        #retrospective-board {
+            display: flex;
+            justify-content: space-around;
+            gap: 15px;
+            flex-wrap: wrap;
+        }
+
+        .column {
+            background-color: #fff;
+            border-radius: 8px;
+            padding: 15px;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+            width: 30%;
+            min-width: 280px;
+            margin-bottom: 20px;
+        }
+
+        .column h2 {
+            text-align: center;
+            padding-bottom: 10px;
+            border-bottom: 2px solid;
+            margin-top: 0;
+            font-size: 1.3em;
+        }
         
-        // Intento 1: Parsear "X-Y"
-        if (resFT && resFT.includes('-')) {
-            // Usa una regex más estricta para asegurar que solo sean dígitos
-            const match = resFT.match(/(\d+)\s*-\s*(\d+)/);
-            if (match) {
-                homeGoals = Number(match[1]);
-                awayGoals = Number(match[2]);
+        /* Colores específicos */
+        #positive-col h2 { border-bottom-color: #4caf50; color: #4caf50; } /* Verde */
+        #negative-col h2 { border-bottom-color: #f44336; color: #f44336; } /* Rojo */
+        #neutral-col h2 { border-bottom-color: #ff9800; color: #ff9800; } /* Naranja */
+
+        .notes-container {
+            min-height: 100px;
+            margin-bottom: 10px;
+            padding: 5px;
+            border: 1px dashed #ccc;
+            background-color: #fafafa;
+        }
+
+        .note {
+            padding: 8px;
+            margin-bottom: 6px;
+            border-radius: 4px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 0.9em;
+            cursor: pointer;
+        }
+        
+        .note.positive { background-color: #e8f5e9; border-left: 4px solid #4caf50; }
+        .note.negative { background-color: #ffebee; border-left: 4px solid #f44336; }
+        .note.neutral { background-color: #fff3e0; border-left: 4px solid #ff9800; }
+
+        .note-content {
+            flex-grow: 1;
+        }
+
+        .score-input {
+            width: 40px;
+            text-align: center;
+            margin-left: 10px;
+            border: 1px solid #ccc;
+            border-radius: 3px;
+            padding: 2px;
+        }
+
+        .delete-btn {
+            background: none;
+            border: none;
+            color: #999;
+            font-weight: bold;
+            cursor: pointer;
+            margin-left: 5px;
+            font-size: 14px;
+        }
+
+        textarea {
+            width: 95%;
+            padding: 8px;
+            margin-bottom: 8px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            resize: vertical;
+            min-height: 40px;
+        }
+
+        button {
+            background-color: #007bff;
+            color: white;
+            padding: 8px 12px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            width: 100%;
+            transition: background-color 0.3s;
+        }
+
+        button:hover {
+            background-color: #0056b3;
+        }
+        
+        #score-summary {
+            text-align: center;
+            margin-top: 20px;
+            padding: 15px;
+            background-color: #e3f2fd;
+            border-radius: 8px;
+            border: 2px solid #90caf9;
+            font-size: 1.2em;
+        }
+        #score-summary strong {
+            font-size: 1.5em;
+            color: #007bff;
+        }
+
+        /* Media Query para pantallas más pequeñas */
+        @media (max-width: 900px) {
+            #retrospective-board {
+                flex-direction: column;
+                align-items: center;
+            }
+            .column {
+                width: 90%;
+                min-width: unset;
             }
         }
+        /* --- FIN ESTILOS CSS --- */
+    </style>
+</head>
+<body>
+    <h1>⚽ Análisis Predictivo para Apuestas</h1>
+    
+    <div id="match-info">
+        <label for="teamA">Equipo A:</label>
+        <input type="text" id="teamA" value="Local" size="10">
+        vs.
+        <label for="teamB">Equipo B:</label>
+        <input type="text" id="teamB" value="Visitante" size="10">
+        <p>Introduce las variables que afectan a tu pronóstico (por ejemplo, victoria del Equipo A).</p>
+    </div>
+
+    <div id="retrospective-board">
         
-        // Intento 2: Fallback a campos explícitos si Intento 1 falló
-        if (isNaN(homeGoals) || isNaN(awayGoals)) {
-            homeGoals = Number(entry.home_goals ?? entry.HomeTotal ?? entry['Home Goals'] ?? NaN);
-            awayGoals = Number(entry.away_goals ?? entry.AwayTotal ?? entry['Away Goals'] ?? NaN);
+        <div class="column" id="positive-col">
+            <h2>✅ Factores Positivos (Puntaje: <span id="positive-score">0</span>)</h2>
+            <p style="font-size: 0.8em; color: #555;">(Puntuación de 1 a 10)</p>
+            <div class="notes-container" id="positive-notes">
+            </div>
+            <textarea id="positive-input" placeholder="Ej: Equipo A ganó los últimos 5 partidos."></textarea>
+            <button onclick="addNote('positive')">Añadir Ventaja</button>
+        </div>
+
+        <div class="column" id="negative-col">
+            <h2>❌ Factores Negativos (Puntaje: <span id="negative-score">0</span>)</h2>
+            <p style="font-size: 0.8em; color: #555;">(Puntuación de -1 a -10)</p>
+            <div class="notes-container" id="negative-notes">
+            </div>
+            <textarea id="negative-input" placeholder="Ej: Delantero clave del Equipo A está lesionado."></textarea>
+            <button onclick="addNote('negative')">Añadir Riesgo</button>
+        </div>
+
+        <div class="column" id="neutral-col">
+            <h2>⚖️ Factores Neutros (Puntaje: <span id="neutral-score">0</span>)</h2>
+            <p style="font-size: 0.8em; color: #555;">(Puntuación -1 a +1)</p>
+            <div class="notes-container" id="neutral-notes">
+            </div>
+            <textarea id="neutral-input" placeholder="Ej: Histórico de empates entre estos equipos."></textarea>
+            <button onclick="addNote('neutral')">Añadir Incógnita</button>
+        </div>
+
+    </div>
+
+    <div id="score-summary">
+        Puntuación Total del Pronóstico: <strong id="total-score">0</strong>
+        <p style="font-size: 0.9em; margin-top: 5px;">*Un puntaje alto sugiere mayor confianza en tu pronóstico base.</p>
+    </div>
+    
+    <script>
+        // --- CÓDIGO JAVASCRIPT ---
+        
+        // Función para recalcular y actualizar los puntajes totales
+        function updateScores() {
+            const types = ['positive', 'negative', 'neutral'];
+            let totalScore = 0;
+
+            types.forEach(type => {
+                let columnScore = 0;
+                const notes = document.querySelectorAll(`#${type}-notes .note`);
+                
+                notes.forEach(note => {
+                    const scoreInput = note.querySelector('.score-input');
+                    // Asegúrate de que el valor sea un número, si no es válido usa 0
+                    const scoreValue = parseInt(scoreInput.value) || 0; 
+                    columnScore += scoreValue;
+                });
+
+                // Actualiza el puntaje de la columna
+                document.getElementById(`${type}-score`).textContent = columnScore;
+                totalScore += columnScore;
+            });
+
+            // Actualiza el puntaje total
+            document.getElementById('total-score').textContent = totalScore;
         }
 
-        e.home_goals = homeGoals;
-        e.away_goals = awayGoals;
+        // Función para añadir una nueva nota (variable)
+        function addNote(type) {
+            const inputElement = document.getElementById(`${type}-input`);
+            const noteText = inputElement.value.trim();
 
-        // 3. Parsear Fecha
-        e.date = parseFlexibleDate(entry.Date || entry.date || '');
+            if (noteText === "") {
+                return;
+            }
 
-        // 4. Validación Final (Asegurar que los goles sean números válidos)
-        if (!e.league || !e.home_team || !e.away_team || !e.date || isNaN(e.home_goals) || isNaN(e.away_goals)) {
-            // console.warn('Entrada omitida (datos incompletos/inválidos):', entry);
-            return null;
+            const notesContainer = document.getElementById(`${type}-notes`);
+            const noteDiv = document.createElement('div');
+            noteDiv.classList.add('note', type);
+            
+            // Contenido del texto de la nota
+            const textSpan = document.createElement('span');
+            textSpan.classList.add('note-content');
+            textSpan.textContent = noteText;
+            
+            // Input para la puntuación
+            const scoreInput = document.createElement('input');
+            scoreInput.type = 'number';
+            scoreInput.classList.add('score-input');
+            scoreInput.min = (type === 'negative' ? -10 : -1);
+            scoreInput.max = (type === 'positive' ? 10 : 1);
+            scoreInput.value = (type === 'positive' ? 5 : (type === 'negative' ? -5 : 0)); // Valores por defecto
+
+            // Listener para actualizar scores cuando se cambia la puntuación
+            scoreInput.addEventListener('input', updateScores);
+            
+            // Botón para eliminar la nota
+            const deleteButton = document.createElement('button');
+            deleteButton.classList.add('delete-btn');
+            deleteButton.textContent = '✖';
+            deleteButton.onclick = function() {
+                noteDiv.remove();
+                updateScores(); // Recalcula después de eliminar
+            };
+
+            // Ensamblar la nota
+            noteDiv.appendChild(textSpan);
+            noteDiv.appendChild(scoreInput);
+            noteDiv.appendChild(deleteButton);
+            notesContainer.appendChild(noteDiv);
+
+            // Limpiar y recalcular
+            inputElement.value = "";
+            updateScores(); 
         }
 
-        return e;
-    } catch (err) {
-        console.error('Error al normalizar la entrada:', err, entry);
-        return null;
-    }
-}
-
-// --- FIN NORMALIZACIÓN DE DATOS ---
-
-fileInput.addEventListener('change', async (e) => {
-  const f = e.target.files[0];
-  if (!f) return;
-  const text = await f.text();
-  try {
-    const raw = JSON.parse(text);
-    if (!Array.isArray(raw)) throw new Error('JSON debe ser un array de partidos');
-    // Filtramos para asegurar que los goles sean >= 0
-    matches = raw.map(normalizeMatch).filter(m => m && m.date && m.home_goals >= 0 && m.away_goals >= 0);
-    matches.sort((a,b) => a.date - b.date);
-    populateLeagueAndTeams();
-    alert('Archivo cargado. Partidos reconocidos: ' + matches.length);
-  } catch(err){
-    alert('Error parseando JSON: ' + err.message);
-  }
-});
-
-// Las demás funciones (población de selects, PoissonP, probTotalGreaterThanOrEqual3, probBTTSYes, round)
-// Se mantienen del modelo anterior de fuerza, ya que son matemáticamente correctas.
-// Se omiten aquí por brevedad, pero se incluyen en el bloque de script final.
-
-// --- FUNCIONES MATEMÁTICAS (POISSON VERIFICADO) ---
-function poissonP(k, lambda) {
-  if (lambda <= 0 && k === 0) return 1;
-  if (lambda <= 0 && k > 0) return 0;
-  let logP = -lambda + k * Math.log(lambda);
-  for(let i=1; i<=k; i++) logP -= Math.log(i);
-  return Math.exp(logP);
-}
-
-function probTotalGreaterThanOrEqual3(lambdaH, lambdaA) {
-  if (lambdaH <= 0 && lambdaA <= 0) return 0;
-  let probGolesMenorOIgual2 = 0;
-  probGolesMenorOIgual2 += poissonP(0, lambdaH) * poissonP(0, lambdaA);
-  probGolesMenorOIgual2 += poissonP(1, lambdaH) * poissonP(0, lambdaA);
-  probGolesMenorOIgual2 += poissonP(0, lambdaH) * poissonP(1, lambdaA);
-  probGolesMenorOIgual2 += poissonP(2, lambdaH) * poissonP(0, lambdaA);
-  probGolesMenorOIgual2 += poissonP(1, lambdaH) * poissonP(1, lambdaA);
-  probGolesMenorOIgual2 += poissonP(0, lambdaH) * poissonP(2, lambdaA);
-  return 1 - probGolesMenorOIgual2;
-}
-
-function probBTTSYes(lambdaH, lambdaA) {
-  if (lambdaH <= 0 || lambdaA <= 0) return 0;
-  const pHome0 = poissonP(0, lambdaH);
-  const pAway0 = poissonP(0, lambdaA);
-  return 1 - pHome0 - pAway0 + pHome0 * pAway0;
-}
-
-function round(x,d=4) {
-  return Math.round(x * Math.pow(10,d)) / Math.pow(10,d);
-}
-// --- FIN FUNCIONES MATEMÁTICAS ---
-
-// Funciones de control y renderizado (mantienen la lógica del modelo de fuerza)
-function populateLeagueAndTeams(){
-  const leagues = Array.from(new Set(matches.map(m=>m.league))).sort();
-  leagueSelect.innerHTML = '<option value="">-- seleccionar liga --</option>';
-  for(const l of leagues){
-    const opt = document.createElement('option'); opt.value = l; opt.textContent = l;
-    leagueSelect.appendChild(opt);
-  }
-  homeSelect.innerHTML = '<option value="">-- liga --</option>';
-  awaySelect.innerHTML = '<option value="">-- liga --</option>';
-}
-
-leagueSelect.addEventListener('change', () => {
-  const league = leagueSelect.value;
-  if(!league) return;
-  const teams = Array.from(new Set(matches.filter(m=>m.league===league).flatMap(m=>[m.home_team,m.away_team]))).sort();
-  homeSelect.innerHTML = '<option value="">-- seleccionar local --</option>';
-  awaySelect.innerHTML = '<option value="">-- seleccionar visitante --</option>';
-  for(const t of teams){
-    const o1 = document.createElement('option'); o1.value=t; o1.textContent=t;
-    const o2 = o1.cloneNode(true);
-    homeSelect.appendChild(o1); awaySelect.appendChild(o2);
-  }
-});
-
-analyzeBtn.addEventListener('click', () => {
-  const league = leagueSelect.value;
-  const homeTeam = homeSelect.value;
-  const awayTeam = awaySelect.value;
-  if(!league || !homeTeam || !awayTeam || homeTeam === awayTeam) { 
-    alert('Selecciona liga, local y visitante (deben ser diferentes)'); 
-    return; 
-  }
-  runBacktest(league, homeTeam, awayTeam);
-});
-
-function calculateTeamStrengths(allLeagueMatches) {
-  const teams = Array.from(new Set(allLeagueMatches.flatMap(m => [m.home_team, m.away_team])));
-  if (teams.length < 2) return null;
-  
-  const totalMatches = allLeagueMatches.length;
-  if (totalMatches === 0) return null;
-
-  // 1. Promedios de Goles de la Liga
-  const totalHomeGoals = allLeagueMatches.reduce((s, m) => s + m.home_goals, 0);
-  const totalAwayGoals = allLeagueMatches.reduce((s, m) => s + m.away_goals, 0);
-  
-  const avgHomeScored = totalHomeGoals / totalMatches; 
-  const avgAwayScored = totalAwayGoals / totalMatches;
-
-  // 2. Acumular Goles de cada Equipo
-  const teamStats = {};
-  teams.forEach(t => teamStats[t] = { 
-    homeScored: 0, homeConceded: 0, 
-    awayScored: 0, awayConceded: 0, 
-    homeGames: 0, awayGames: 0 
-  });
-
-  allLeagueMatches.forEach(m => {
-    teamStats[m.home_team].homeScored += m.home_goals;
-    teamStats[m.home_team].homeConceded += m.away_goals;
-    teamStats[m.home_team].homeGames++;
-
-    teamStats[m.away_team].awayScored += m.away_goals;
-    teamStats[m.away_team].awayConceded += m.home_goals;
-    teamStats[m.away_team].awayGames++;
-  });
-
-  // 3. Calcular Fuerzas (AS/DS)
-  const strengths = {};
-  teams.forEach(t => {
-    const s = teamStats[t];
-    
-    // Fuerza de Ataque (AS)
-    let asHome = (s.homeGames > 0 && avgHomeScored > 0) ? (s.homeScored / s.homeGames) / avgHomeScored : 1;
-    let asAway = (s.awayGames > 0 && avgAwayScored > 0) ? (s.awayScored / s.awayGames) / avgAwayScored : 1;
-    
-    // Fuerza de Defensa (DS)
-    let dsHome = (s.homeGames > 0 && avgAwayScored > 0) ? (s.homeConceded / s.homeGames) / avgAwayScored : 1; // avgAwayScored es avgHomeConceded de la liga
-    let dsAway = (s.awayGames > 0 && avgHomeScored > 0) ? (s.awayConceded / s.awayGames) / avgHomeScored : 1; // avgHomeScored es avgAwayConceded de la liga
-
-    strengths[t] = { asHome, asAway, dsHome, dsAway };
-  });
-
-  return { strengths, avgHomeScored, avgAwayScored };
-}
-
-function backtestForLeague(league) {
-  const leagueMatches = matches.filter(m => m.league === league);
-  leagueMatches.sort((a,b) => a.date - b.date);
-  
-  const results = [];
-  const minMatchesRequired = 5; 
-
-  for(let idx=0; idx<leagueMatches.length; idx++){
-    const target = leagueMatches[idx];
-    const priorMatches = leagueMatches.slice(0, idx);
-
-    if (priorMatches.length < minMatchesRequired * 2) continue;
-
-    const strengthData = calculateTeamStrengths(priorMatches);
-    if (!strengthData) continue;
-
-    const { strengths, avgHomeScored, avgAwayScored } = strengthData;
-    const homeTeam = target.home_team;
-    const awayTeam = target.away_team;
-    
-    if (!strengths[homeTeam] || !strengths[awayTeam]) continue;
-
-    const S_H = strengths[homeTeam];
-    const S_A = strengths[awayTeam];
-
-    const lambdaH = avgHomeScored * S_H.asHome * S_A.dsAway;
-    const lambdaA = avgAwayScored * S_A.asAway * S_H.dsHome;
-
-    if (lambdaH <= 0 || lambdaA <= 0) continue;
-
-    const pOver = probTotalGreaterThanOrEqual3(lambdaH, lambdaA);
-    const pBTTS = probBTTSYes(lambdaH, lambdaA);
-    
-    const predOver = pOver >= 0.5;
-    const predBTTS = pBTTS >= 0.5;
-    const actualOver = (target.home_goals + target.away_goals) > 2.5;
-    const actualBTTS = (target.home_goals > 0) && (target.away_goals > 0);
-
-    results.push({
-      date: target.date.toISOString().slice(0,10),
-      home_team: homeTeam,
-      away_team: awayTeam,
-      result: `${target.home_goals}-${target.away_goals}`,
-      lambdaHome: round(lambdaH,4),
-      lambdaAway: round(lambdaA,4),
-      pOver: round(pOver,4),
-      pBTTS: round(pBTTS,4),
-      predOver, predBTTS,
-      actualOver, actualBTTS
-    });
-  }
-
-  const summary = {
-    total: results.length,
-    correctOver: results.filter(r=>r.predOver === r.actualOver).length,
-    correctBTTS: results.filter(r=>r.predBTTS === r.actualBTTS).length
-  };
-  return {results, summary};
-}
-
-function runBacktest(league, homeTeam, awayTeam) {
-  const { results, summary } = backtestForLeague(league);
-
-  const currentMatches = matches.filter(m => m.league === league);
-  const strengthData = calculateTeamStrengths(currentMatches);
-  let finalPrediction = {ok:false, reason:'Sin suficientes datos históricos en la liga para calcular la fuerza.'};
-
-  if (strengthData) {
-    const { strengths, avgHomeScored, avgAwayScored } = strengthData;
-    const S_H = strengths[homeTeam];
-    const S_A = strengths[awayTeam];
-
-    if (S_H && S_A) {
-      const lambdaH = avgHomeScored * S_H.asHome * S_A.dsAway;
-      const lambdaA = avgAwayScored * S_A.asAway * S_H.dsHome;
-
-      const pOver = probTotalGreaterThanOrEqual3(lambdaH, lambdaA);
-      const pBTTS = probBTTSYes(lambdaH, lambdaA);
-
-      finalPrediction = {
-        ok:true,
-        lambdaHome: round(lambdaH,4),
-        lambdaAway: round(lambdaA,4),
-        pOver: round(pOver,4),
-        pBTTS: round(pBTTS,4),
-        predOver: pOver >= 0.5 ? 'Over 2.5' : 'Under 2.5',
-        predBTTS: pBTTS >= 0.5 ? 'BTTS Yes' : 'BTTS No'
-      };
-    }
-  }
-
-  document.getElementById('results').style.display = 'block';
-  renderSummary(summary);
-  renderFullResultsTable('fullResultsTable', results, homeTeam, awayTeam);
-  renderFinalPrediction(finalPrediction, homeTeam, awayTeam);
-  window._lastBacktest = { league, fullResults: results, finalPrediction };
-}
-
-// Funciones de renderizado (se mantienen)
-function renderSummary(summary) {
-  const s = document.getElementById('summaryStats');
-  s.innerHTML = '';
-  const make = (title, value) => {
-    const d = document.createElement('div'); d.className='stat';
-    d.innerHTML = `<div style="font-size:12px;color:#cbd5e1">${title}</div><div style="font-size:18px;margin-top:6px">${value}</div>`;
-    return d;
-  };
-
-  const total = summary.total;
-  const accOver = total ? Math.round(100 * summary.correctOver / total) + '%' : 'N/A';
-  const accBTTS = total ? Math.round(100 * summary.correctBTTS / total) + '%' : 'N/A';
-  
-  s.appendChild(make(`Total Partidos Backtested`, total));
-  s.appendChild(make(`Acierto Over 2.5 (Liga)`, `${accOver} (${summary.correctOver}/${total})`));
-  s.appendChild(make(`Acierto BTTS (Liga)`, `${accBTTS} (${summary.correctBTTS}/${total})`));
-}
-
-function renderFullResultsTable(containerId, results, selectedHome, selectedAway){
-  const container = document.getElementById(containerId);
-  if(!results || results.length===0) {
-    container.innerHTML = '<div class="muted">Sin resultados para backtesting (no hubo suficientes datos históricos para calcular la fuerza).</div>';
-    return;
-  }
-  let html = `<table><thead><tr>
-    <th>Fecha</th><th>Home</th><th>Away</th><th>Res</th><th>&lambda;H</th><th>&lambda;A</th>
-    <th>p(Over)</th><th>Pred Over</th><th>Real Over</th>
-    <th>p(BTTS)</th><th>Pred BTTS</th><th>Real BTTS</th>
-  </tr></thead><tbody>`;
-  
-  for(const r of results){
-    const isSelected = (r.home_team === selectedHome && r.away_team === selectedAway) || (r.home_team === selectedAway && r.away_team === selectedHome);
-    const rowClass = isSelected ? 'style="background:#f0f4ff;"' : '';
-    
-    html += `<tr ${rowClass}>
-      <td>${r.date}</td>
-      <td>${r.home_team}</td>
-      <td>${r.away_team}</td>
-      <td>${r.result}</td>
-      <td>${r.lambdaHome}</td>
-      <td>${r.lambdaAway}</td>
-      <td>${r.pOver}</td>
-      <td><span class="${r.predOver === r.actualOver ? 'good' : 'bad'}">${r.predOver ? 'Over' : 'Under'}</span></td>
-      <td>${r.actualOver ? 'Over' : 'Under'}</td>
-      <td>${r.pBTTS}</td>
-      <td><span class="${r.predBTTS === r.actualBTTS ? 'good' : 'bad'}">${r.predBTTS ? 'Yes' : 'No'}</span></td>
-      <td>${r.actualBTTS ? 'Yes' : 'No'}</td>
-    </tr>`;
-  }
-  html += '</tbody></table>';
-  container.innerHTML = html;
-}
-
-function renderFinalPrediction(pred, homeTeam, awayTeam){
-  const el = document.getElementById('finalPrediction');
-  if(!pred.ok) {
-    el.innerHTML = `<div class="muted">No hay suficientes datos para predecir el partido ${homeTeam} vs ${awayTeam}. ${pred.reason || ''}</div>`;
-    return;
-  }
-  el.innerHTML = `<div>
-    <strong>${homeTeam} vs ${awayTeam}</strong>
-    <div style="margin-top:8px;">
-      Goles Esperados (Lambda) ${homeTeam}: <strong>${pred.lambdaHome}</strong> — Goles Esperados (Lambda) ${awayTeam}: <strong>${pred.lambdaAway}</strong>
-    </div>
-    <div style="margin-top:8px;">
-      Probabilidad Over 2.5: <strong>${pred.pOver}</strong> → <span class="good">${pred.predOver}</span>
-    </div>
-    <div style="margin-top:6px;">
-      Probabilidad BTTS Yes: <strong>${pred.pBTTS}</strong> → <span class="good">${pred.predBTTS}</span>
-    </div>
-  </div>`;
-}
-
-document.getElementById('exportCsv').addEventListener('click', ()=>{
-  const data = window._lastBacktest;
-  if(!data || !data.fullResults) { alert('No hay resultados para exportar'); return; }
-  
-  let rows = [];
-  rows.push(['date','home','away','result','lambdaHome','lambdaAway','pOver','predOver','actualOver','CorrectOver','pBTTS','predBTTS','actualBTTS','CorrectBTTS'].join(','));
-  
-  const toCsv = (r) => [
-    r.date, r.home_team, r.away_team, r.result, r.lambdaHome, r.lambdaAway, 
-    r.pOver, r.predOver ? 'Over' : 'Under', r.actualOver ? 'Over' : 'Under', r.predOver === r.actualOver ? 'TRUE' : 'FALSE',
-    r.pBTTS, r.predBTTS ? 'Yes' : 'No', r.actualBTTS ? 'Yes' : 'No', r.predBTTS === r.actualBTTS ? 'TRUE' : 'FALSE'
-  ];
-
-  for(const r of data.fullResults){
-    rows.push(toCsv(r).join(','));
-  }
-  
-  const blob = new Blob([rows.join('\n')], {type:'text/csv'});
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url; a.download = `backtest_strength_model_fixed_parsing_${data.league.replace(/\s/g,'_')}.csv`; document.body.appendChild(a); a.click(); a.remove();
-  URL.revokeObjectURL(url);
-});
-
-</script>
+        // Permitir añadir notas presionando Enter
+        document.addEventListener('DOMContentLoaded', () => {
+            const inputs = ['positive', 'negative', 'neutral'];
+            inputs.forEach(type => {
+                const inputElement = document.getElementById(`${type}-input`);
+                inputElement.addEventListener('keypress', function(e) {
+                    if (e.key === 'Enter' && !e.shiftKey) { 
+                        e.preventDefault(); 
+                        addNote(type);
+                    }
+                });
+            });
+            // Inicializar puntuaciones a cero al cargar
+            updateScores(); 
+        });
+        // --- FIN CÓDIGO JAVASCRIPT ---
+    </script>
 </body>
 </html>
