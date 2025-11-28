@@ -11,7 +11,7 @@
             background-color: #f4f4f9;
         }
         .container {
-            max-width: 1250px; /* Ajuste para mejor visualización */
+            max-width: 1250px;
             margin: auto;
             background: #fff;
             padding: 20px;
@@ -64,11 +64,11 @@
         #resultsTable th, #resultsTable td {
             border: 1px solid #ddd;
             padding: 8px;
-            text-align: center; /* Centrar para mejor lectura de números y recuentos */
+            text-align: center;
             font-size: 14px;
         }
         #resultsTable td:nth-child(2) {
-            text-align: left; /* Dejar el nombre del partido a la izquierda */
+            text-align: left;
         }
         #resultsTable th {
             background-color: #4CAF50;
@@ -100,6 +100,18 @@
             color: #555;
             margin-top: 2px;
         }
+        .warning-icon {
+            cursor: help;
+            margin-left: 5px;
+            font-size: 1em;
+            color: orange;
+        }
+        .risk-icon {
+            cursor: help;
+            margin-left: 5px;
+            font-size: 1em;
+            color: red;
+        }
     </style>
 </head>
 <body>
@@ -121,7 +133,7 @@
         <button onclick="processFiles()">Calcular y Ordenar Partidos Futuros por ROI</button>
 
         <p>
-            **Nota:** Las columnas de ROI Histórico Local/Visitante ahora muestran el **ROI (%) y el número de partidos de la muestra** entre paréntesis.
+            **Nota de Advertencia:** 🔥 indica que el **ROI Teórico es muy alto** (cuota $\ge 3.00$), lo que implica alto riesgo. ⚠️ indica que la **Muestra Histórica es baja** (menos de 10 partidos), lo que reduce la fiabilidad del ROI.
         </p>
         
         <h2>🚀 Partidos Futuros Ordenados por Prioridad</h2>
@@ -232,10 +244,6 @@
             };
         }
 
-        /**
-         * Genera un mapa de ROIs Históricos por equipo, incluyendo el conteo de partidos.
-         * Retorna: { 'Equipo - Local': { roi: 15.5, count: 12 }, ...}
-         */
         function getTeamRoiMap(matches) {
             const teamStats = {};
             
@@ -278,7 +286,11 @@
                 return;
             }
 
-            // PASO 1: Calcular el mapa de ROIs del historial (incluyendo conteos)
+            // Advertencia si falta el historial
+            if (historicalMatches.length === 0) {
+                 alert("Advertencia: No se cargó el Historial. Las columnas de ROI Histórico se mostrarán como 'N/D'.");
+            }
+
             const teamRoiMap = getTeamRoiMap(historicalMatches);
             
             // PASO 2: Enriquecer los partidos futuros
@@ -287,12 +299,12 @@
                     match.DesiredOutcome = match.DesiredOutcome || 'N/A';
                     match.Odd = match.Odd || '1.00'; 
                     match.Match = match.Match || 'N/A';
+                    match.oddValue = parseFloat(match.Odd); // Convertir a número aquí para la validación
 
                     match.calculatedROI = calculateTheoreticalScore(match);
                     
                     const { homeTeam, awayTeam } = parseTeams(match.Match);
                     
-                    // Buscar ROI Histórico y conteo de muestra. Si no existe, es null.
                     match.homeRoiData = teamRoiMap[`${homeTeam} - Local`] || null;
                     match.awayRoiData = teamRoiMap[`${awayTeam} - Visitante`] || null;
 
@@ -337,14 +349,20 @@
                 row.insertCell().textContent = match.Odd;
                 row.insertCell().textContent = match.DesiredOutcome;
                 
-                // ROI Teórico (Prioridad)
+                // ROI Teórico (Prioridad) con Advertencia de Cuota Extrema
                 const roiCell = row.insertCell();
-                roiCell.textContent = `${scorePercentage}%`;
+                let roiContent = `${scorePercentage}%`;
+                
+                // VALIDACIÓN 1: Cuota extrema (ROI Teórico inflado, cuota >= 3.00)
+                if (match.oddValue && match.oddValue >= 3.00) {
+                    roiContent += `<span class="risk-icon" title="Advertencia: Cuota muy alta (${match.Odd}), el ROI Teórico está inflado y representa un alto riesgo.">🔥</span>`;
+                }
+                roiCell.innerHTML = roiContent;
                 roiCell.style.fontWeight = 'bold';
 
                 row.insertCell().textContent = match.Date || 'N/A';
                 
-                // Función auxiliar para agregar las celdas de ROI Histórico con conteo
+                // Función auxiliar para agregar las celdas de ROI Histórico con conteo y ADVERTENCIA
                 const addRoiCellWithCount = (roiData) => {
                     const cell = row.insertCell();
                     
@@ -353,13 +371,18 @@
                         const count = roiData.count;
                         const isRoiPositive = roiValue >= 0;
 
-                        // Aplicar clase para el color de fondo
                         cell.className = isRoiPositive ? 'positive-roi' : 'negative-roi';
                         
-                        // Insertar el valor y el conteo en líneas separadas
+                        let countHtml = `(${count} partidos)`;
+                        
+                        // VALIDACIÓN 2: Muestra baja (count < 10)
+                        if (count < 10) {
+                            countHtml += `<span class="warning-icon" title="Advertencia: Muestra histórica muy pequeña (sólo ${count} partidos). El ROI puede no ser estadísticamente fiable.">⚠️</span>`;
+                        }
+                        
                         cell.innerHTML = `
                             <span class="roi-info">${roiValue.toFixed(2)}%</span>
-                            <span class="sample-count">(${count} partidos)</span>
+                            <span class="sample-count">${countHtml}</span>
                         `;
                     } else {
                         cell.textContent = 'N/D';
