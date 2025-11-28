@@ -11,7 +11,7 @@
             background-color: #f4f4f9;
         }
         .container {
-            max-width: 1000px;
+            max-width: 1200px; /* Aumentado para las nuevas columnas */
             margin: auto;
             background: #fff;
             padding: 20px;
@@ -86,7 +86,7 @@
 <body>
 
     <div class="container">
-        <h1>⚽ Calculadora de ROI para Partidos Futuros</h1>
+        <h1>⚽ Calculadora de ROI Estratégico</h1>
 
         <div class="file-input-group">
             <div>
@@ -101,9 +101,12 @@
 
         <button onclick="processFiles()">Calcular y Ordenar Partidos Futuros por ROI</button>
 
+        <p>
+            **Nota:** El ROI Histórico (Real) se calcula con los datos de **Historial** (`Result` y `Odd`) y se usa para informar los partidos futuros. El ROI Teórico solo usa la `Odd`.
+        </p>
+
         <div id="teamRoiContainer">
             <h2>🏆 Análisis de ROI por Equipo (Historial)</h2>
-            <p>Calculado sobre la base de la columna 'Result' y 'Odd' del historial.</p>
             <table id="teamRoiTable">
                 <thead>
                     <tr>
@@ -119,16 +122,17 @@
         </div>
         
         <h2>🚀 Partidos Futuros Ordenados por Prioridad</h2>
-        <p>Ordenado por el mayor potencial de Ganancia Neta (Cuota - 1).</p>
         <table id="resultsTable">
             <thead>
                 <tr>
                     <th>Posición por ROI</th>
-                    <th>Partido</th>
+                    <th>Partido (Local vs. Visitante)</th>
                     <th>Cuota</th>
                     <th>Resultado Deseado</th>
                     <th>**ROI Teórico (%)**</th>
                     <th>Fecha</th>
+                    <th style="background-color: #FFA500;">ROI Local (%)</th>
+                    <th style="background-color: #FFA500;">ROI Visitante (%)</th>
                 </tr>
             </thead>
             <tbody>
@@ -146,9 +150,6 @@
         document.getElementById('historicalFile').addEventListener('change', (e) => loadFile(e, 'historical'), false);
         document.getElementById('futureFile').addEventListener('change', (e) => loadFile(e, 'future'), false);
 
-        /**
-         * Lee un archivo JSON y almacena su contenido.
-         */
         function loadFile(event, type) {
             const file = event.target.files[0];
             if (!file) return;
@@ -162,7 +163,6 @@
                     if (type === 'historical') {
                         historicalMatches = matches;
                         console.log(`${historicalMatches.length} partidos de historial cargados.`);
-                        // Muestra el ROI por equipo inmediatamente después de cargar el historial
                         displayTeamRoiStats(historicalMatches);
                     } else if (type === 'future') {
                         futureMatches = matches;
@@ -174,7 +174,7 @@
                     console.error('Error:', error);
                     if (type === 'historical') {
                         historicalMatches = [];
-                        displayTeamRoiStats([]); // Limpiar tabla si falla
+                        displayTeamRoiStats([]);
                     }
                     if (type === 'future') futureMatches = [];
                 }
@@ -182,42 +182,11 @@
             reader.readAsText(file);
         }
 
-        // --- Función Principal de Procesamiento ---
-
-        function processFiles() {
-            if (futureMatches.length === 0) {
-                alert("Por favor, carga el Archivo de Partidos Futuros.");
-                return;
-            }
-            if (historicalMatches.length === 0) {
-                console.warn("No se ha cargado el archivo de historial.");
-            }
-
-            // 1. Calcular la Puntuación de Prioridad (basada en la cuota) para cada partido FUTURO.
-            const matchesWithROI = futureMatches.map(match => {
-                if (match && typeof match === 'object') { 
-                    match.DesiredOutcome = match.DesiredOutcome || 'N/A';
-                    match.Odd = match.Odd || '1.00'; 
-
-                    match.calculatedROI = calculateTheoreticalScore(match);
-                } else {
-                    match.calculatedROI = -99999;
-                    console.warn('Objeto de partido futuro es nulo o inválido, omitiendo.');
-                }
-                return match;
-            }).filter(match => match.calculatedROI !== -99999);
-
-            // 2. Ordenar los partidos por el valor calculado (Puntuación/Score) de mayor a menor
-            matchesWithROI.sort((a, b) => b.calculatedROI - a.calculatedROI);
-
-            // 3. Mostrar los resultados
-            displayResults(matchesWithROI);
-        }
-
         // --- Funciones de Cálculo de ROI ---
         
         /**
-         * Calcula el ROI real en unidades netas (1 unidad apostada)
+         * Calcula el ROI real en unidades netas (1 unidad apostada).
+         * Retorna: (Odd - 1) si gana, -1 si pierde, 0 si neutral/inválido.
          */
         function calculateRealROI(match) {
             const odd = parseFloat(match.Odd);
@@ -227,7 +196,6 @@
                 return 0; 
             }
             
-            // Retorna la ganancia neta en unidades (1 unidad apostada)
             if (result === 'Winning') {
                 return odd - 1; 
             } else if (result === 'Losing') {
@@ -250,87 +218,151 @@
             return (odd - 1) * 100;
         }
 
-        // --- LÓGICA DE ROI POR EQUIPO CORREGIDA ---
+        // --- Funciones Auxiliares de Equipo ---
 
-        function displayTeamRoiStats(matches) {
-            const teamStats = {}; // { 'Equipo - Tipo': { totalProfit: 0, count: 0 } }
-            const tbody = document.querySelector('#teamRoiTable tbody');
-            tbody.innerHTML = '';
-            
-            if (matches.length === 0) {
-                const row = tbody.insertRow();
-                const cell = row.insertCell();
-                cell.colSpan = 4;
-                cell.textContent = "Cargue el archivo de historial para ver las estadísticas por equipo.";
-                cell.style.textAlign = 'center';
-                return;
+        /**
+         * Intenta extraer los nombres de los equipos de la cadena Match.
+         */
+        function parseTeams(matchString) {
+            let teams = [];
+            if (matchString) {
+                // Prioridad de separadores: ' - ', ' — ', ' vs '
+                if (matchString.includes(' - ')) { 
+                    teams = matchString.split(' - ');
+                } else if (matchString.includes(' — ')) { 
+                    teams = matchString.split(' — ');
+                } else if (matchString.includes(' vs ')) { 
+                    teams = matchString.split(' vs ');
+                }
             }
+            
+            return {
+                homeTeam: teams.length === 2 ? teams[0].trim() : 'Desconocido',
+                awayTeam: teams.length === 2 ? teams[1].trim() : 'Desconocido'
+            };
+        }
 
+        /**
+         * Genera un mapa de ROIs Históricos por equipo.
+         * Retorna: { 'Equipo X - Local': 15.5, 'Equipo Y - Visitante': -5.0, ...}
+         */
+        function getTeamRoiMap(matches, includeCounts = false) {
+            const teamStats = {};
+            
             matches.forEach(match => {
                 const netProfit = calculateRealROI(match); 
                 
-                // Intentar separar los equipos usando diferentes separadores comunes
-                let teams = [];
-                if (match.Match) {
-                    if (match.Match.includes(' - ')) { 
-                        teams = match.Match.split(' - ');
-                    } else if (match.Match.includes(' — ')) { 
-                        teams = match.Match.split(' — ');
-                    } else if (match.Match.includes(' vs ')) { 
-                        teams = match.Match.split(' vs ');
-                    }
-                }
+                const { homeTeam, awayTeam } = parseTeams(match.Match);
                 
-                if (teams.length !== 2) {
-                    // console.warn(`No se pudo separar el partido para el cálculo de ROI por equipo: ${match.Match}`);
-                    return; 
-                }
-                
-                const homeTeam = teams[0].trim();
-                const awayTeam = teams[1].trim();
-
-                // 1. Procesar Equipo Local
-                if (homeTeam) {
+                if (homeTeam !== 'Desconocido') {
                     const key = `${homeTeam} - Local`;
                     teamStats[key] = teamStats[key] || { totalProfit: 0, count: 0 };
                     teamStats[key].totalProfit += netProfit;
                     teamStats[key].count += 1;
                 }
 
-                // 2. Procesar Equipo Visitante
-                if (awayTeam) {
+                if (awayTeam !== 'Desconocido') {
                     const key = `${awayTeam} - Visitante`;
                     teamStats[key] = teamStats[key] || { totalProfit: 0, count: 0 };
                     teamStats[key].totalProfit += netProfit;
                     teamStats[key].count += 1;
                 }
             });
-            
-            // Convertir a array para ordenar y calcular el ROI
-            const sortedTeams = Object.keys(teamStats).map(key => {
-                const parts = key.split(' - ');
-                const stats = teamStats[key];
-                
-                // Calculamos el ROI final en porcentaje: (Ganancia Neta / Unidades Apostadas) * 100
-                const finalROI = (stats.totalProfit / stats.count) * 100;
 
+            const resultMap = {};
+            Object.keys(teamStats).forEach(key => {
+                const stats = teamStats[key];
+                const finalROI = (stats.totalProfit / stats.count) * 100;
+                
+                if (includeCounts) {
+                    resultMap[key] = { roi: finalROI, count: stats.count };
+                } else {
+                    resultMap[key] = finalROI;
+                }
+            });
+            
+            return resultMap;
+        }
+
+        // --- LÓGICA DE PROCESAMIENTO PRINCIPAL ---
+        
+        function processFiles() {
+            if (futureMatches.length === 0) {
+                alert("Por favor, carga el Archivo de Partidos Futuros.");
+                return;
+            }
+            if (historicalMatches.length === 0) {
+                console.warn("No se ha cargado el archivo de historial. Los ROIs históricos por equipo se mostrarán como 'N/D'.");
+            }
+
+            // PASO 1: Calcular el mapa de ROIs del historial (solo ROI, sin conteos)
+            const teamRoiMap = getTeamRoiMap(historicalMatches);
+            
+            // PASO 2: Enriquecer los partidos futuros
+            const matchesWithROI = futureMatches.map(match => {
+                if (match && typeof match === 'object') { 
+                    match.DesiredOutcome = match.DesiredOutcome || 'N/A';
+                    match.Odd = match.Odd || '1.00'; 
+                    match.Match = match.Match || 'N/A';
+
+                    match.calculatedROI = calculateTheoreticalScore(match);
+                    
+                    // Buscar el ROI histórico de los equipos del partido futuro
+                    const { homeTeam, awayTeam } = parseTeams(match.Match);
+                    
+                    // Almacenar el ROI histórico en el objeto del partido futuro
+                    match.homeRoi = teamRoiMap[`${homeTeam} - Local`] !== undefined ? teamRoiMap[`${homeTeam} - Local`] : null;
+                    match.awayRoi = teamRoiMap[`${awayTeam} - Visitante`] !== undefined ? teamRoiMap[`${awayTeam} - Visitante`] : null;
+
+                } else {
+                    match.calculatedROI = -99999;
+                }
+                return match;
+            }).filter(match => match.calculatedROI !== -99999);
+
+            // 3. Ordenar los partidos por el valor calculado (ROI Teórico)
+            matchesWithROI.sort((a, b) => b.calculatedROI - a.calculatedROI);
+
+            // 4. Mostrar los resultados
+            displayResults(matchesWithROI);
+        }
+
+        // --- LÓGICA DE VISUALIZACIÓN ---
+
+        /**
+         * Muestra el ROI por equipo en la tabla de Historial.
+         */
+        function displayTeamRoiStats(matches) {
+            const teamRoiMapWithCounts = getTeamRoiMap(matches, true);
+            const tbody = document.querySelector('#teamRoiTable tbody');
+            tbody.innerHTML = '';
+            
+            const sortedTeams = Object.keys(teamRoiMapWithCounts).map(key => {
+                const parts = key.split(' - ');
+                const stats = teamRoiMapWithCounts[key];
+                
                 return {
                     team: parts[0],
                     type: parts[1],
-                    roi: finalROI,
+                    roi: stats.roi,
                     count: stats.count
                 };
             });
-
-            // Ordenar por ROI de mayor a menor
+            
             sortedTeams.sort((a, b) => b.roi - a.roi);
-
-            // Mostrar resultados en la tabla
+            
             if (sortedTeams.length === 0 && matches.length > 0) {
                 const row = tbody.insertRow();
                 const cell = row.insertCell();
                 cell.colSpan = 4;
-                cell.textContent = "No se pudieron calcular estadísticas por equipo. Verifique que la columna 'Match' esté en formato 'Equipo1 - Equipo2'.";
+                cell.textContent = "No se pudieron calcular estadísticas por equipo. Verifique el formato 'Equipo1 - Equipo2'.";
+                cell.style.textAlign = 'center';
+                return;
+            } else if (matches.length === 0) {
+                 const row = tbody.insertRow();
+                const cell = row.insertCell();
+                cell.colSpan = 4;
+                cell.textContent = "Cargue el archivo de historial para ver las estadísticas por equipo.";
                 cell.style.textAlign = 'center';
                 return;
             }
@@ -362,7 +394,7 @@
             if (matches.length === 0) {
                 const row = tbody.insertRow();
                 const cell = row.insertCell();
-                cell.colSpan = 6;
+                cell.colSpan = 8;
                 cell.textContent = "No se encontraron partidos futuros con cuota válida para ordenar.";
                 cell.style.textAlign = 'center';
                 return;
@@ -381,11 +413,29 @@
                 row.insertCell().textContent = match.Odd;
                 row.insertCell().textContent = match.DesiredOutcome;
                 
+                // Columna 5: ROI Teórico (Prioridad)
                 const roiCell = row.insertCell();
                 roiCell.textContent = `${scorePercentage}%`;
                 roiCell.style.fontWeight = 'bold';
 
                 row.insertCell().textContent = match.Date || 'N/A';
+                
+                // Columna 7: ROI Histórico Local (buscado en el historial)
+                const addRoiCell = (roiValue) => {
+                    const cell = row.insertCell();
+                    if (roiValue !== null) {
+                        const isRoiPositive = roiValue >= 0;
+                        cell.textContent = `${roiValue.toFixed(2)}%`;
+                        cell.className = isRoiPositive ? 'positive-roi' : 'negative-roi';
+                        cell.style.fontWeight = 'bold';
+                    } else {
+                        cell.textContent = 'N/D';
+                        cell.style.backgroundColor = '#f0f0f0';
+                    }
+                };
+                
+                addRoiCell(match.homeRoi);
+                addRoiCell(match.awayRoi);
             });
         }
     </script>
