@@ -91,18 +91,16 @@
         }
         
         /* ------------------------------------------- */
-        /* CLASES DE RESALTADO */
+        /* CLASES DE RESALTADO DE FILA (ROI TEÓRICO) */
         /* ------------------------------------------- */
-        /* Color de fondo de la fila cuando el ROI Teórico es positivo */
         .positive-roi {
-            background-color: #e6ffe6; 
+            background-color: #e6ffe6; /* Verde claro normal */
         }
-        /* Color de fondo de la fila cuando el ROI Teórico es negativo */
         .negative-roi {
-            background-color: #ffe6e6; 
+            background-color: #ffe6e6; /* Rojo claro */
         }
-        /* Verde más fuerte para el alto valor y la fiabilidad */
         .super-positive-roi {
+            /* Verde más fuerte para el alto valor y la fiabilidad */
             background-color: #a3ffac; 
             font-weight: bold;
         }
@@ -167,7 +165,7 @@
         <p>
             **Resaltado Especial:** Las filas en **verde fuerte** indican que **ambos equipos** tienen un ROI Histórico $\ge 15\%$ y una Muestra $\ge 10$ partidos.
             <br>
-            **Nota de Advertencia:** El fondo de la fila se basa en el **ROI Teórico**. Sin embargo, las celdas de **ROI Histórico Negativo** se resaltan con un **rojo más intenso** para llamar la atención.
+            **Nota de Advertencia:** El fondo de la fila se basa en el **ROI Teórico**. Las celdas de **ROI Histórico Negativo** se resaltan con un **rojo más intenso**.
         </p>
         
         <h2>🚀 Partidos Futuros Ordenados por Prioridad</h2>
@@ -261,14 +259,27 @@
             return (odd - 1) * 100;
         }
 
-        // --- Funciones Auxiliares de Equipo ---
+        // --- Funciones Auxiliares de Equipo (OPTIMIZADA) ---
 
+        /**
+         * Estandariza el nombre de un equipo eliminando caracteres especiales,
+         * convirtiendo a mayúsculas y eliminando espacios excesivos.
+         */
+        const standardizeName = (name) => {
+             // Elimina caracteres que no sean alfanuméricos o espacios. Convierte a mayúsculas y quita espacios en los extremos.
+            return name.replace(/[^a-zA-Z0-9\s]/g, '').toUpperCase().trim();
+        };
+
+        /**
+         * Parsea la cadena del partido para obtener el nombre del equipo local y visitante estandarizado.
+         */
         function parseTeams(matchString) {
             if (!matchString) {
-                return { homeTeam: 'Desconocido', awayTeam: 'Desconocido' };
+                return { homeTeam: 'DESCONOCIDO', awayTeam: 'DESCONOCIDO' };
             }
             
             let teams = [];
+            // Normaliza la cadena para manejar '—' o 'vs' como separadores comunes
             const normalizedString = matchString.trim().replace(/\s+—\s+/g, ' - ').replace(/\s+vs\s+/g, ' - ');
 
             if (normalizedString.includes(' - ')) { 
@@ -276,26 +287,32 @@
             }
             
             return {
-                homeTeam: teams.length === 2 ? teams[0].trim() : 'Desconocido',
-                awayTeam: teams.length === 2 ? teams[1].trim() : 'Desconocido'
+                homeTeam: teams.length === 2 ? standardizeName(teams[0]) : 'DESCONOCIDO',
+                awayTeam: teams.length === 2 ? standardizeName(teams[1]) : 'DESCONOCIDO'
             };
         }
 
+        /**
+         * Crea el mapa del historial con ROI y conteo, usando la clave [Equipo] - [Local/Visitante] estandarizada.
+         */
         function getTeamRoiMap(matches) {
             const teamStats = {};
             
             matches.forEach(match => {
                 const netProfit = calculateRealROI(match); 
+                // Los nombres ya están estandarizados aquí
                 const { homeTeam, awayTeam } = parseTeams(match.Match);
                 
-                if (homeTeam !== 'Desconocido') {
+                // Mapear Local
+                if (homeTeam !== 'DESCONOCIDO') {
                     const key = `${homeTeam} - Local`;
                     teamStats[key] = teamStats[key] || { totalProfit: 0, count: 0 };
                     teamStats[key].totalProfit += netProfit;
                     teamStats[key].count += 1;
                 }
 
-                if (awayTeam !== 'Desconocido') {
+                // Mapear Visitante
+                if (awayTeam !== 'DESCONOCIDO') {
                     const key = `${awayTeam} - Visitante`;
                     teamStats[key] = teamStats[key] || { totalProfit: 0, count: 0 };
                     teamStats[key].totalProfit += netProfit;
@@ -306,10 +323,13 @@
             const resultMap = {};
             Object.keys(teamStats).forEach(key => {
                 const stats = teamStats[key];
-                resultMap[key] = {
-                    roi: (stats.totalProfit / stats.count) * 100,
-                    count: stats.count
-                };
+                // Asegurar que solo se calcula si hay conteo
+                if (stats.count > 0) {
+                    resultMap[key] = {
+                        roi: (stats.totalProfit / stats.count) * 100,
+                        count: stats.count
+                    };
+                }
             });
             
             return resultMap;
@@ -341,6 +361,7 @@
                     
                     const { homeTeam, awayTeam } = parseTeams(match.Match);
                     
+                    // BÚSQUEDA CLAVE: Usar los nombres estandarizados para buscar en el mapa del historial
                     match.homeRoiData = teamRoiMap[`${homeTeam} - Local`] || null;
                     match.awayRoiData = teamRoiMap[`${awayTeam} - Visitante`] || null;
 
@@ -377,7 +398,7 @@
                 const row = tbody.insertRow();
                 
                 // --- Determinar el color de fondo de la fila (basado en ROI Teórico y Super-ROI) ---
-                let rowClassName = (match.calculatedROI > 0) ? 'positive-roi' : 'negative-roi';
+                let rowClassName;
                 
                 const homeData = match.homeRoiData;
                 const awayData = match.awayRoiData;
@@ -393,7 +414,7 @@
                     rowClassName = 'super-positive-roi';
                 } else if (match.calculatedROI <= 0) {
                     rowClassName = 'negative-roi';
-                } else if (match.calculatedROI > 0) {
+                } else {
                     rowClassName = 'positive-roi';
                 }
 
@@ -431,8 +452,8 @@
                         // Determinar la clase de la celda individual
                         if (roiValue < 0) {
                             cellClassName = 'negative-roi-cell'; // Rojo intenso para negativo
-                        } else if (roiValue >= 0) {
-                            // Si es positivo, mantiene el color de la fila (verde normal, super-verde o rojo claro)
+                        } else {
+                            // Si es positivo, mantiene el color de fondo de la fila 
                             cellClassName = rowClassName; 
                         }
 
