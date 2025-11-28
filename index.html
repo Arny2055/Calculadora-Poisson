@@ -97,7 +97,7 @@
         <button onclick="processFiles()">Calcular y Ordenar Partidos Futuros por ROI</button>
 
         <p>
-            **Nota:** El cálculo de ROI se aplica sobre el archivo de Partidos Futuros, usando el **ROI Teórico** (ganancia/pérdida basada en la cuota si se acierta el `Desired Outcome`).
+            **Nota:** La tabla ordena los partidos futuros de mayor a menor potencial. El **ROI Teórico (%)** se basa en la **Ganancia Neta Potencial (Cuota - 1)**, ya que el resultado real es desconocido.
         </p>
         
         <table id="resultsTable">
@@ -117,7 +117,7 @@
     </div>
 
     <script>
-        // Variables para almacenar los datos (aunque no se usan en el ROI simple, están listas para una lógica más compleja)
+        // Variables para almacenar los datos
         let historicalMatches = []; 
         let futureMatches = [];
         
@@ -148,7 +148,7 @@
                     }
                     
                 } catch (error) {
-                    alert(`Error al leer o parsear el archivo ${type}: ` + error.message);
+                    alert(`Error al leer o parsear el archivo ${type}. Verifica el formato JSON: ` + error.message);
                     console.error('Error:', error);
                     if (type === 'historical') historicalMatches = [];
                     if (type === 'future') futureMatches = [];
@@ -165,19 +165,10 @@
                 return;
             }
 
-            // 1. Calcular el ROI Teórico para cada partido FUTURO.
-            // Nota: Aquí se usaría la lógica compleja que aprende del historicalMatches,
-            // pero para mantener la funcionalidad se usa la lógica simple de ROI/Cuota.
+            // 1. Calcular la Puntuación de Prioridad (basada en la cuota) para cada partido FUTURO.
             const matchesWithROI = futureMatches.map(match => {
                 if (match && typeof match.DesiredOutcome === 'string' && typeof match.Odd === 'string') {
-                    // Para partidos futuros, asumimos que el resultado (ResultFT) es desconocido,
-                    // por lo que **no podemos calcular un ROI real**. 
-                    // En este punto, solo podemos usar la cuota o aplicar un modelo.
-                    
-                    // MANTENEMOS la lógica simple: si tienen cuota, asignamos ROI de 0% 
-                    // o un valor basado en la cuota para priorizar (ej: Cuota - 1).
-                    // Para ordenar, usaremos la Cuota como valor primario, ya que es el único dato conocido.
-
+                    // Usamos calculateTheoreticalScore (que usa la cuota) para ordenar los partidos futuros
                     match.calculatedROI = calculateTheoreticalScore(match);
                 } else {
                     match.calculatedROI = -99999;
@@ -186,7 +177,7 @@
                 return match;
             }).filter(match => match.calculatedROI !== -99999);
 
-            // 2. Ordenar los partidos por el valor calculado (ROI/Score) de mayor a menor
+            // 2. Ordenar los partidos por el valor calculado (Puntuación/Score) de mayor a menor
             matchesWithROI.sort((a, b) => b.calculatedROI - a.calculatedROI);
 
             // 3. Mostrar los resultados
@@ -194,29 +185,70 @@
         }
 
         // --- Funciones de Cálculo ---
+        
+        /**
+         * Calcula el ROI Teórico basado en el resultado y la cuota (LÓGICA SOLO PARA DATOS HISTÓRICOS).
+         * @param {Object} match - Objeto con los datos del partido.
+         * @returns {number} El ROI teórico en porcentaje.
+         */
+        function calculateTheoreticalROI(match) {
+            const odd = parseFloat(match.Odd);
+            const desired = match.DesiredOutcome.toLowerCase().trim(); 
+            const resultFT = match.ResultFT; // Formato "GolesCasa-GolesFuera"
+
+            if (isNaN(odd) || odd <= 1 || !resultFT) {
+                return -100;
+            }
+
+            let outcomeMet = false;
+            const parts = resultFT.split('-');
+            
+            if (parts.length === 2) {
+                const homeGoals = parseInt(parts[0]);
+                const awayGoals = parseInt(parts[1]);
+                const totalGoals = homeGoals + awayGoals;
+
+                if (desired === 'o25') {
+                    outcomeMet = totalGoals >= 3; 
+                } else if (desired === 'u25') {
+                    outcomeMet = totalGoals <= 2; 
+                } else if (desired === 'gg') { 
+                    // Lógica para Ambos Anotan (Gol/Gol)
+                    outcomeMet = homeGoals >= 1 && awayGoals >= 1;
+                }
+                // Si tienes otros resultados deseados (ej: '1', '2', 'X'), añádelos aquí
+            }
+            
+            if (outcomeMet) {
+                // Ganancia Neta / Unidad Apostada * 100
+                const profit = (odd - 1);
+                return profit * 100;
+            } else {
+                return -100; // Pérdida total
+            }
+        }
+
 
         /**
-         * Calcula una puntuación (Score) para ordenar partidos futuros.
-         * En un modelo real, esta función usaría el historial para predecir la probabilidad.
-         * Aquí, simplemente devuelve la ganancia potencial (Odd - 1) para priorizar por cuota.
+         * Calcula una Puntuación (Score) para ordenar partidos futuros.
+         * Solo usa la cuota, ya que no conocemos el Result FT (necesario para el ordenamiento).
          * @param {Object} match - Objeto con los datos del partido.
-         * @returns {number} La puntuación o ROI teórico potencial.
+         * @returns {number} La Puntuación (Ganancia Neta Potencial en porcentaje).
          */
         function calculateTheoreticalScore(match) {
             const odd = parseFloat(match.Odd);
             
             if (isNaN(odd) || odd <= 1) {
-                return 0; // No se puede calcular, puntuación cero
+                return 0; 
             }
             
-            // Para ordenar de mayor a menor potencial, usamos la Ganancia Neta Potencial (Odd - 1) * 100.
+            // Retorna la ganancia potencial (Odd - 1) * 100 para ordenar de mayor a menor potencial.
             return (odd - 1) * 100;
         }
 
 
         /**
          * Muestra los resultados ordenados en la tabla HTML.
-         * @param {Array<Object>} matches - Array de partidos futuros con la puntuación calculada.
          */
         function displayResults(matches) {
             const tbody = document.querySelector('#resultsTable tbody');
@@ -234,7 +266,6 @@
             matches.forEach((match, index) => {
                 const scorePercentage = match.calculatedROI.toFixed(2);
                 
-                // Usamos el score para simular el ROI. Los partidos con cuotas más altas tendrán un score mayor.
                 const isPositive = match.calculatedROI >= 0; 
                 const row = tbody.insertRow();
                 
