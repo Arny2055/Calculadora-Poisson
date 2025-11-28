@@ -11,7 +11,7 @@
             background-color: #f4f4f9;
         }
         .container {
-            max-width: 1200px;
+            max-width: 1250px; /* Ajuste para mejor visualización */
             margin: auto;
             background: #fff;
             padding: 20px;
@@ -64,8 +64,11 @@
         #resultsTable th, #resultsTable td {
             border: 1px solid #ddd;
             padding: 8px;
-            text-align: left;
+            text-align: center; /* Centrar para mejor lectura de números y recuentos */
             font-size: 14px;
+        }
+        #resultsTable td:nth-child(2) {
+            text-align: left; /* Dejar el nombre del partido a la izquierda */
         }
         #resultsTable th {
             background-color: #4CAF50;
@@ -84,6 +87,18 @@
         .not-available {
             background-color: #f0f0f0;
             font-style: italic;
+        }
+        .roi-info {
+            display: block;
+            font-size: 1em;
+            font-weight: bold;
+        }
+        .sample-count {
+            display: block;
+            font-size: 0.85em;
+            font-weight: normal;
+            color: #555;
+            margin-top: 2px;
         }
     </style>
 </head>
@@ -106,7 +121,7 @@
         <button onclick="processFiles()">Calcular y Ordenar Partidos Futuros por ROI</button>
 
         <p>
-            **Nota:** La tabla muestra los partidos futuros ordenados por el **ROI Teórico** (Prioridad). Las columnas de ROI Histórico Local/Visitante muestran el rendimiento real de ese equipo en partidos anteriores, bajo los criterios de tu archivo de Historial.
+            **Nota:** Las columnas de ROI Histórico Local/Visitante ahora muestran el **ROI (%) y el número de partidos de la muestra** entre paréntesis.
         </p>
         
         <h2>🚀 Partidos Futuros Ordenados por Prioridad</h2>
@@ -114,13 +129,13 @@
             <thead>
                 <tr>
                     <th>Posición por ROI</th>
-                    <th>Partido (Local vs. Visitante)</th>
+                    <th style="text-align: left;">Partido (Local vs. Visitante)</th>
                     <th>Cuota</th>
                     <th>Resultado Deseado</th>
                     <th>**ROI Teórico (%)**</th>
                     <th>Fecha</th>
-                    <th>ROI Local (%)</th>
-                    <th>ROI Visitante (%)</th>
+                    <th>ROI Local (%) (Muestra)</th>
+                    <th>ROI Visitante (%) (Muestra)</th>
                 </tr>
             </thead>
             <tbody>
@@ -151,7 +166,6 @@
                     if (type === 'historical') {
                         historicalMatches = matches;
                         console.log(`${historicalMatches.length} partidos de historial cargados.`);
-                        // Ya no se llama a displayTeamRoiStats aquí.
                     } else if (type === 'future') {
                         futureMatches = matches;
                         console.log(`${futureMatches.length} partidos futuros cargados.`);
@@ -219,7 +233,8 @@
         }
 
         /**
-         * Genera un mapa de ROIs Históricos por equipo. Solo devuelve ROI.
+         * Genera un mapa de ROIs Históricos por equipo, incluyendo el conteo de partidos.
+         * Retorna: { 'Equipo - Local': { roi: 15.5, count: 12 }, ...}
          */
         function getTeamRoiMap(matches) {
             const teamStats = {};
@@ -246,7 +261,10 @@
             const resultMap = {};
             Object.keys(teamStats).forEach(key => {
                 const stats = teamStats[key];
-                resultMap[key] = (stats.totalProfit / stats.count) * 100;
+                resultMap[key] = {
+                    roi: (stats.totalProfit / stats.count) * 100,
+                    count: stats.count
+                };
             });
             
             return resultMap;
@@ -260,7 +278,7 @@
                 return;
             }
 
-            // Aunque no se muestra, el mapa del ROI Histórico DEBE calcularse para informar la tabla de futuros.
+            // PASO 1: Calcular el mapa de ROIs del historial (incluyendo conteos)
             const teamRoiMap = getTeamRoiMap(historicalMatches);
             
             // PASO 2: Enriquecer los partidos futuros
@@ -274,9 +292,9 @@
                     
                     const { homeTeam, awayTeam } = parseTeams(match.Match);
                     
-                    // Buscar ROI Histórico. Si no existe en el mapa, es null.
-                    match.homeRoi = teamRoiMap[`${homeTeam} - Local`] !== undefined ? teamRoiMap[`${homeTeam} - Local`] : null;
-                    match.awayRoi = teamRoiMap[`${awayTeam} - Visitante`] !== undefined ? teamRoiMap[`${awayTeam} - Visitante`] : null;
+                    // Buscar ROI Histórico y conteo de muestra. Si no existe, es null.
+                    match.homeRoiData = teamRoiMap[`${homeTeam} - Local`] || null;
+                    match.awayRoiData = teamRoiMap[`${awayTeam} - Visitante`] || null;
 
                 } else {
                     match.calculatedROI = -99999;
@@ -292,8 +310,6 @@
         }
 
         // --- LÓGICA DE VISUALIZACIÓN ---
-
-        // NOTA: displayTeamRoiStats fue eliminada, ya que no se usa en la interfaz simplificada.
 
         function displayResults(matches) {
             const tbody = document.querySelector('#resultsTable tbody');
@@ -328,22 +344,31 @@
 
                 row.insertCell().textContent = match.Date || 'N/A';
                 
-                // Función auxiliar para agregar las celdas de ROI Histórico
-                const addRoiCell = (roiValue) => {
+                // Función auxiliar para agregar las celdas de ROI Histórico con conteo
+                const addRoiCellWithCount = (roiData) => {
                     const cell = row.insertCell();
-                    if (roiValue !== null) {
+                    
+                    if (roiData !== null) {
+                        const roiValue = roiData.roi;
+                        const count = roiData.count;
                         const isRoiPositive = roiValue >= 0;
-                        cell.textContent = `${roiValue.toFixed(2)}%`;
+
+                        // Aplicar clase para el color de fondo
                         cell.className = isRoiPositive ? 'positive-roi' : 'negative-roi';
-                        cell.style.fontWeight = 'bold';
+                        
+                        // Insertar el valor y el conteo en líneas separadas
+                        cell.innerHTML = `
+                            <span class="roi-info">${roiValue.toFixed(2)}%</span>
+                            <span class="sample-count">(${count} partidos)</span>
+                        `;
                     } else {
                         cell.textContent = 'N/D';
                         cell.className = 'not-available';
                     }
                 };
                 
-                addRoiCell(match.homeRoi);
-                addRoiCell(match.awayRoi);
+                addRoiCellWithCount(match.homeRoiData);
+                addRoiCellWithCount(match.awayRoiData);
             });
         }
     </script>
