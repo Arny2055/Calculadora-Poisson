@@ -45,7 +45,7 @@
         #resultsTable th {
             background-color: #4CAF50;
             color: white;
-            cursor: pointer; /* Indica que la columna puede ordenarse */
+            cursor: default; 
         }
         .positive-roi {
             background-color: #e6ffe6; /* Verde claro */
@@ -63,7 +63,7 @@
         <input type="file" id="jsonFile" accept=".json">
 
         <p>
-            **Nota:** El ROI Teórico se calcula en base a una unidad apostada. Se asume que el `Result FT` indica el resultado final y se verifica si cumplió el `Desired Outcome` para calcular el beneficio/pérdida.
+            **Nota:** El ROI Teórico se calcula asumiendo una unidad apostada. La lógica actual solo maneja los resultados **"O25"** (Over 2.5 Goles) y **"U25"** (Under 2.5 Goles) comparados con el **Result FT**.
         </p>
         
         <table id="resultsTable">
@@ -97,14 +97,21 @@
                         const jsonText = e.target.result;
                         const data = JSON.parse(jsonText);
                         
-                        // Asegura que los datos sean un array si solo se cargó un objeto
+                        // Asegura que los datos sean un array (maneja un solo objeto o un array de objetos)
                         const matches = Array.isArray(data) ? data : [data];
 
                         // 1. Calcular el ROI Teórico para cada partido
                         const matchesWithROI = matches.map(match => {
-                            match.calculatedROI = calculateTheoreticalROI(match);
+                            // Verificación de objeto válido y propiedades esenciales
+                            if (match && typeof match.DesiredOutcome === 'string' && typeof match.Odd === 'string' && typeof match.ResultFT === 'string') {
+                                match.calculatedROI = calculateTheoreticalROI(match);
+                            } else {
+                                // Asigna un ROI indicador de error y registra una advertencia
+                                match.calculatedROI = -99999;
+                                console.warn('Datos del partido inválidos o incompletos, omitiendo:', match);
+                            }
                             return match;
-                        });
+                        }).filter(match => match.calculatedROI !== -99999); // Filtra los partidos incompletos
 
                         // 2. Ordenar los partidos por ROI de mayor a menor
                         matchesWithROI.sort((a, b) => b.calculatedROI - a.calculatedROI);
@@ -129,16 +136,17 @@
          */
         function calculateTheoreticalROI(match) {
             const odd = parseFloat(match.Odd);
-            const desired = match.DesiredOutcome.toLowerCase().trim();
+            // La llamada a toLowerCase es segura gracias a la verificación previa
+            const desired = match.DesiredOutcome.toLowerCase().trim(); 
             const resultFT = match.ResultFT; // Formato "GolesCasa-GolesFuera"
 
             if (isNaN(odd) || odd <= 1) {
-                return -100; // ROI malo si la cuota es inválida
+                return -100; // Pérdida total si la cuota es inválida
             }
 
             let outcomeMet = false;
             
-            // Lógica simple para Over 2.5 FT (O25) y Under 2.5 FT (U25)
+            // Lógica para Over 2.5 FT (O25) y Under 2.5 FT (U25)
             if (desired === 'o25' || desired === 'u25') {
                 const parts = resultFT.split('-');
                 if (parts.length === 2) {
@@ -155,15 +163,14 @@
                     }
                 }
             } 
-            // Podrías añadir lógica para otros Desired Outcomes aquí (ej: "1" para local, "X" para empate, "2" para visitante)
-            // else if (desired === '1' && /*...*/)
+            // Si necesitas más lógica (ej: "1" para local, "X" para empate, "2" para visitante), añádela aquí
 
             if (outcomeMet) {
-                // Ganancia = (Cuota * 1 unidad) - 1 unidad; ROI = Ganancia / 1 unidad * 100
+                // ROI = ((Cuota * Unidad Apostada) - Unidad Apostada) / Unidad Apostada * 100
                 const profit = (odd - 1);
                 return profit * 100;
             } else {
-                // Pérdida = -1 unidad; ROI = -1 / 1 unidad * 100
+                // Pérdida total (se pierde la unidad apostada)
                 return -100; 
             }
         }
@@ -176,6 +183,15 @@
         function displayResults(matches) {
             const tbody = document.querySelector('#resultsTable tbody');
             tbody.innerHTML = ''; // Limpiar resultados anteriores
+
+            if (matches.length === 0) {
+                const row = tbody.insertRow();
+                const cell = row.insertCell();
+                cell.colSpan = 6;
+                cell.textContent = "No se encontraron partidos válidos para calcular el ROI.";
+                cell.style.textAlign = 'center';
+                return;
+            }
 
             matches.forEach((match, index) => {
                 const roiPercentage = match.calculatedROI.toFixed(2);
