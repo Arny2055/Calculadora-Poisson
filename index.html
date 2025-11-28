@@ -11,8 +11,7 @@
             background-color: #f4f4f9;
         }
         .container {
-            /* Max-width ajustada, pero el ancho real lo maneja el viewport */
-            max-width: 1250px; 
+            max-width: 1250px;
             margin: auto;
             background: #fff;
             padding: 20px;
@@ -56,33 +55,31 @@
         button:hover {
             background-color: #0056b3;
         }
-        
         /* ------------------------------------------- */
-        /* CORRECCIÓN CLAVE: Contenedor Responsivo */
+        /* Contenedor Responsivo */
         /* ------------------------------------------- */
         .table-responsive {
-            overflow-x: auto; /* Habilita el scroll horizontal si el contenido es demasiado ancho */
+            overflow-x: auto;
             margin-bottom: 20px;
-            width: 100%; /* Asegura que ocupe todo el ancho disponible */
+            width: 100%;
         }
         /* La tabla ahora debe ser más ancha que su contenedor si tiene muchas columnas */
         #resultsTable {
-            width: 800px; /* Establece un ancho mínimo para forzar el scroll en móviles */
+            width: 800px;
             min-width: 800px;
             border-collapse: collapse;
         }
-        /* ------------------------------------------- */
         
         #resultsTable th, #resultsTable td {
             border: 1px solid #ddd;
             padding: 8px;
             text-align: center;
             font-size: 14px;
-            white-space: nowrap; /* Evita que el texto de las celdas se envuelva */
+            white-space: nowrap;
         }
         #resultsTable td:nth-child(2) {
             text-align: left;
-            min-width: 250px; /* Asegura suficiente espacio para el nombre del partido */
+            min-width: 250px;
         }
         #resultsTable th {
             background-color: #4CAF50;
@@ -92,12 +89,22 @@
         #resultsTable th:nth-child(7), #resultsTable th:nth-child(8) {
             background-color: #FFA500;
         }
+        
+        /* ------------------------------------------- */
+        /* CLASES DE RESALTADO */
+        /* ------------------------------------------- */
         .positive-roi {
-            background-color: #e6ffe6;
+            background-color: #e6ffe6; /* Verde claro normal */
         }
         .negative-roi {
-            background-color: #ffe6e6;
+            background-color: #ffe6e6; /* Rojo claro */
         }
+        .super-positive-roi {
+            /* Verde más fuerte para el alto valor y la fiabilidad (ROI >= 15% y muestra >= 10) */
+            background-color: #a3ffac; 
+            font-weight: bold;
+        }
+        
         .not-available {
             background-color: #f0f0f0;
             font-style: italic;
@@ -147,7 +154,7 @@
         <button onclick="processFiles()">Calcular y Ordenar Partidos Futuros por ROI</button>
 
         <p>
-            **Nota de Advertencia:** 🔥 indica que el **ROI Teórico es muy alto** (cuota $\ge 3.00$), lo que implica alto riesgo. ⚠️ indica que la **Muestra Histórica es baja** (menos de 10 partidos), lo que reduce la fiabilidad del ROI.
+            **Resaltado Especial:** Las filas en **verde fuerte** indican que **ambos equipos** tienen un ROI Histórico $\ge 15\%$ y una Muestra $\ge 10$ partidos, indicando **Alta Fiabilidad y Valor**.
         </p>
         
         <h2>🚀 Partidos Futuros Ordenados por Prioridad</h2>
@@ -186,7 +193,7 @@
             const file = event.target.files[0];
             if (!file) return;
 
-            const reader = new FileReader();
+            const reader = new FileReaderReader();
             reader.onload = function(e) {
                 try {
                     const data = JSON.parse(e.target.result);
@@ -315,7 +322,7 @@
                     match.DesiredOutcome = match.DesiredOutcome || 'N/A';
                     match.Odd = match.Odd || '1.00'; 
                     match.Match = match.Match || 'N/A';
-                    match.oddValue = parseFloat(match.Odd); // Convertir a número aquí para la validación
+                    match.oddValue = parseFloat(match.Odd); 
 
                     match.calculatedROI = calculateTheoreticalScore(match);
                     
@@ -354,11 +361,37 @@
 
             matches.forEach((match, index) => {
                 const scorePercentage = match.calculatedROI.toFixed(2);
-                
-                const isPositive = match.calculatedROI > 0; 
                 const row = tbody.insertRow();
                 
-                row.className = isPositive ? 'positive-roi' : 'negative-roi';
+                // --- Determinar el color de fondo de la fila ---
+                let rowClassName = (match.calculatedROI > 0) ? 'positive-roi' : 'negative-roi';
+                
+                const homeData = match.homeRoiData;
+                const awayData = match.awayRoiData;
+                
+                // CONDICIÓN PARA EL RESALTADO FUERTE (Super-ROI)
+                // 1. Ambos tienen datos.
+                // 2. ROI de ambos es >= 15.0%.
+                // 3. Muestra de ambos es >= 10 partidos.
+                const isSuperRoiMatch = (
+                    homeData !== null && awayData !== null &&
+                    homeData.roi >= 15.0 && homeData.count >= 10 &&
+                    awayData.roi >= 15.0 && awayData.count >= 10
+                );
+
+                if (isSuperRoiMatch) {
+                    rowClassName = 'super-positive-roi';
+                } else if (match.calculatedROI <= 0) {
+                     // Si el ROI Teórico es negativo, no importa el ROI histórico, el fondo es rojo
+                    rowClassName = 'negative-roi';
+                } else if (match.calculatedROI > 0) {
+                    // Si el ROI Teórico es positivo, el fondo es el verde normal
+                    rowClassName = 'positive-roi';
+                }
+
+                row.className = rowClassName;
+                
+                // --- Rellenar Celdas ---
 
                 row.insertCell().textContent = index + 1; 
                 row.insertCell().textContent = `${match.Match || 'N/A'} (${match.League || 'N/A'})`;
@@ -369,7 +402,6 @@
                 const roiCell = row.insertCell();
                 let roiContent = `${scorePercentage}%`;
                 
-                // VALIDACIÓN 1: Cuota extrema (ROI Teórico inflado, cuota >= 3.00)
                 if (match.oddValue && match.oddValue >= 3.00) {
                     roiContent += `<span class="risk-icon" title="Advertencia: Cuota muy alta (${match.Odd}), el ROI Teórico está inflado y representa un alto riesgo.">🔥</span>`;
                 }
@@ -387,7 +419,8 @@
                         const count = roiData.count;
                         const isRoiPositive = roiValue >= 0;
 
-                        cell.className = isRoiPositive ? 'positive-roi' : 'negative-roi';
+                        // Aplicar la misma clase de fila para que el color de fondo sea uniforme
+                        cell.className = rowClassName; 
                         
                         let countHtml = `(${count} partidos)`;
                         
