@@ -142,15 +142,13 @@
                     if (type === 'historical') {
                         historicalMatches = matches;
                         console.log(`${historicalMatches.length} partidos de historial cargados.`);
-                        // Opcional: Calcular ROI general del historial aquí
-                        // calculateOverallROI(historicalMatches);
                     } else if (type === 'future') {
                         futureMatches = matches;
                         console.log(`${futureMatches.length} partidos futuros cargados.`);
                     }
                     
                 } catch (error) {
-                    alert(`Error al leer o parsear el archivo ${type}. Verifica el formato JSON: ` + error.message);
+                    alert(`Error al leer o parsear el archivo ${type}. Verifique el formato JSON: ` + error.message);
                     console.error('Error:', error);
                     if (type === 'historical') historicalMatches = [];
                     if (type === 'future') futureMatches = [];
@@ -167,17 +165,22 @@
                 return;
             }
             if (historicalMatches.length === 0) {
-                console.warn("No se ha cargado el archivo de historial. El cálculo se basará únicamente en la cuota.");
+                console.warn("No se ha cargado el archivo de historial. El cálculo de prioridad se basará únicamente en la cuota.");
             }
 
             // 1. Calcular la Puntuación de Prioridad (basada en la cuota) para cada partido FUTURO.
             const matchesWithROI = futureMatches.map(match => {
-                if (match && typeof match.DesiredOutcome === 'string' && typeof match.Odd === 'string') {
-                    // Usamos calculateTheoreticalScore (que usa la cuota) para ordenar los partidos futuros
+                // VALIDACIÓN ROBUSTA: Verificamos que el objeto exista y asignamos valores por defecto si faltan campos esenciales para el cálculo/tabla.
+                if (match && typeof match === 'object') { 
+                    
+                    // Asignar valores por defecto para evitar errores en el cálculo y la visualización
+                    match.DesiredOutcome = match.DesiredOutcome || 'N/A';
+                    match.Odd = match.Odd || '1.00'; 
+
                     match.calculatedROI = calculateTheoreticalScore(match);
                 } else {
                     match.calculatedROI = -99999;
-                    console.warn('Datos del partido futuro inválidos o incompletos, omitiendo:', match);
+                    console.warn('Objeto de partido futuro es nulo o inválido, omitiendo.');
                 }
                 return match;
             }).filter(match => match.calculatedROI !== -99999);
@@ -192,9 +195,8 @@
         // --- Funciones de Cálculo ---
         
         /**
-         * Calcula el ROI real basado en el campo 'Result' (USADA SOLO PARA DATOS HISTÓRICOS).
-         * @param {Object} match - Objeto con los datos del partido.
-         * @returns {number} El ROI real en porcentaje.
+         * Calcula el ROI real basado en el campo 'Result' (SOLO PARA DATOS HISTÓRICOS).
+         * Utiliza 'Winning' o 'Losing' de tu archivo de historial.
          */
         function calculateRealROI(match) {
             const odd = parseFloat(match.Odd);
@@ -205,23 +207,19 @@
             }
             
             if (result === 'Winning') {
-                // Ganancia Neta / Unidad Apostada * 100
                 const profit = (odd - 1);
                 return profit * 100;
             } else if (result === 'Losing') {
-                return -100; // Pérdida total
+                return -100;
             } else {
-                // Si hay otro resultado (ej: 'Void' o 'Push') podríamos manejarlo aquí
-                return 0; // Se asume neutro si no es ganar ni perder
+                return 0; // Resultado neutral
             }
         }
 
 
         /**
          * Calcula una Puntuación (Score) para ordenar partidos futuros.
-         * Solo usa la cuota, ya que no conocemos el Result FT (necesario para el ordenamiento).
-         * @param {Object} match - Objeto con los datos del partido.
-         * @returns {number} La Puntuación (Ganancia Neta Potencial en porcentaje).
+         * Retorna la Ganancia Neta Potencial (Odd - 1) * 100.
          */
         function calculateTheoreticalScore(match) {
             const odd = parseFloat(match.Odd);
@@ -230,8 +228,6 @@
                 return 0; 
             }
             
-            // Retorna la ganancia potencial (Odd - 1) * 100 para ordenar de mayor a menor potencial.
-            // Esta es la métrica de prioridad para los partidos futuros.
             return (odd - 1) * 100;
         }
 
@@ -247,7 +243,8 @@
                 const row = tbody.insertRow();
                 const cell = row.insertCell();
                 cell.colSpan = 6;
-                cell.textContent = futureMatches.length === 0 ? "Por favor, carga el Archivo de Partidos Futuros." : "No se encontraron partidos futuros válidos para calcular la puntuación.";
+                // Mensaje de error más preciso si no hay partidos válidos
+                cell.textContent = "Error de procesamiento: No se encontraron partidos con cuota válida. Asegúrate de que el Archivo de Partidos Futuros contenga objetos con los campos 'Odd' y 'Desired Outcome'.";
                 cell.style.textAlign = 'center';
                 return;
             }
@@ -255,16 +252,18 @@
             matches.forEach((match, index) => {
                 const scorePercentage = match.calculatedROI.toFixed(2);
                 
-                const isPositive = match.calculatedROI >= 0; 
+                // Si el score es 0, podría ser un empate o una cuota de 1.00. Lo tratamos como neutro.
+                const isPositive = match.calculatedROI > 0; 
                 const row = tbody.insertRow();
                 
+                // Clase para el color de fondo
                 row.className = isPositive ? 'positive-roi' : 'negative-roi';
 
                 // Columna 1: Posición por ROI
                 row.insertCell().textContent = index + 1; 
 
-                // Columna 2: Partido
-                row.insertCell().textContent = `${match.Match} (${match.League})`;
+                // Columna 2: Partido (Usa || 'N/A' para manejo de nulos)
+                row.insertCell().textContent = `${match.Match || 'N/A'} (${match.League || 'N/A'})`;
 
                 // Columna 3: Cuota
                 row.insertCell().textContent = match.Odd;
