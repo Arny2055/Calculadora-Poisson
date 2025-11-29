@@ -90,14 +90,14 @@
             width: 100%;
         }
         #resultsTable {
-            width: 900px; /* Aumentado para la nueva columna */
+            width: 900px;
             min-width: 900px;
             border-collapse: collapse;
             margin-top: 15px;
         }
         
         #resultsTable th, #resultsTable td {
-            border: 1px solid #E0E0E0;
+            border: 1px solid #E0E0E0; /* Líneas de cal más claras */
             padding: 10px;
             text-align: center;
             font-size: 14px;
@@ -108,13 +108,13 @@
             min-width: 250px;
         }
         #resultsTable th {
-            background-color: #007bff;
+            background-color: #007bff; /* Azul de encabezado */
             color: white;
             font-weight: 600;
             border-top: 3px solid white;
         }
         #resultsTable th:nth-child(8), #resultsTable th:nth-child(9) {
-            background-color: #FFC107;
+            background-color: #FFC107; /* Dorado de historial */
             color: #333;
         }
         
@@ -173,7 +173,7 @@
             padding: 20px;
             border: 1px solid #888;
             width: 80%;
-            max-width: 900px;
+            max-width: 1000px; /* Ancho un poco mayor para la tabla */
             border-radius: 10px;
             box-shadow: 0 5px 15px rgba(0, 0, 0, 0.5);
         }
@@ -210,17 +210,19 @@
         .modal-table th {
             background-color: #f2f2f2;
         }
+        /* Resaltado de resultados dentro del modal */
         .modal-table .winning {
-            background-color: #d4edda;
+            background-color: #d4edda; /* Verde claro */
         }
         .modal-table .losing {
-            background-color: #f8d7da;
+            background-color: #f8d7da; /* Rojo claro */
         }
         .modal-team-section {
             border: 1px solid #00BCD4;
             padding: 15px;
             margin-bottom: 20px;
             border-radius: 8px;
+            overflow-x: auto; /* Scroll horizontal si la tabla es demasiado ancha */
         }
     </style>
 </head>
@@ -359,6 +361,7 @@
         // --- Funciones Auxiliares de Equipo ---
 
         const standardizeName = (name) => {
+             // Elimina caracteres que no sean alfanuméricos o espacios. Convierte a mayúsculas y quita espacios en los extremos.
             return name.replace(/[^a-zA-Z0-9\s]/g, '').toUpperCase().trim();
         };
 
@@ -463,7 +466,7 @@
             displayResults(matchesWithROI);
         }
 
-        // --- LÓGICA DE VISUALIZACIÓN ---
+        // --- LÓGICA DE VISUALIZACIÓN DE RESULTADOS EN TABLA ---
 
         function displayResults(matches) {
             const tbody = document.querySelector('#resultsTable tbody');
@@ -482,9 +485,7 @@
                 const scorePercentage = match.calculatedROI.toFixed(2);
                 const row = tbody.insertRow();
                 
-                // --- Determinar el color de fondo de la fila (basado en ROI Teórico y Super-ROI) ---
                 let rowClassName;
-                
                 const homeData = match.homeRoiData;
                 const awayData = match.awayRoiData;
                 
@@ -504,8 +505,6 @@
 
                 row.className = rowClassName;
                 
-                // --- Rellenar Celdas ---
-
                 row.insertCell().textContent = index + 1; 
                 row.insertCell().textContent = `${match.Match || 'N/A'} (${match.League || 'N/A'})`;
                 row.insertCell().textContent = match.Odd;
@@ -564,33 +563,36 @@
         }
 
         // --- LÓGICA DEL MODAL ---
-
+        
+        // CORRECCIÓN CLAVE: Esta función ahora filtra por DesiredOutcome.
         function getHistoricalMatchesForTeam(teamName, position, desiredOutcome) {
-            const teamKey = `${teamName} - ${position}`;
             
-            // Filtrar todos los partidos del historial que coinciden con el equipo y la posición
-            const filteredMatches = historicalMatches.filter(match => {
+            // 1. Filtrar los partidos del historial por equipo y posición
+            const matchesByTeamAndPosition = historicalMatches.filter(match => {
                 const { homeTeam, awayTeam } = parseTeams(match.Match);
                 
                 if (position === 'Local') {
+                    // El equipo en el historial debe ser local
                     return homeTeam === teamName;
                 } else if (position === 'Visitante') {
+                    // El equipo en el historial debe ser visitante
                     return awayTeam === teamName;
                 }
                 return false;
             });
-            
-            // Filtrar además por el resultado deseado para asegurar que solo contamos las apuestas del tipo 'DesiredOutcome'
-            return filteredMatches.filter(match => match.DesiredOutcome === desiredOutcome);
+
+            // 2. Filtrar los resultados por el DesiredOutcome del partido futuro
+            // Esto asegura que solo se muestren los partidos que cumplen la condición de la estrategia analizada (e.g., solo 'Winning' si la estrategia era Ganar)
+            return matchesByTeamAndPosition.filter(match => match.DesiredOutcome === desiredOutcome);
         }
-        
+
         function showHistoricalSample(matchIndex) {
             const match = allFutureMatches[matchIndex];
             const modalTitle = document.getElementById('modalTitle');
             const modalBody = document.getElementById('modalBody');
             let htmlContent = '';
 
-            modalTitle.textContent = `Muestra Histórica para: ${match.Match}`;
+            modalTitle.textContent = `Muestra Histórica para: ${match.Match} (Estrategia: ${match.DesiredOutcome})`;
 
             // --- LOCAL ---
             const homeMatches = getHistoricalMatchesForTeam(match.homeTeamStandardized, 'Local', match.DesiredOutcome);
@@ -600,8 +602,7 @@
                 match.homeTeamStandardized, 
                 'Local', 
                 homeMatches, 
-                homeRoiInfo,
-                match.DesiredOutcome
+                homeRoiInfo
             );
 
             // --- VISITANTE ---
@@ -612,54 +613,61 @@
                 match.awayTeamStandardized, 
                 'Visitante', 
                 awayMatches, 
-                awayRoiInfo,
-                match.DesiredOutcome
+                awayRoiInfo
             );
 
             modalBody.innerHTML = htmlContent;
             document.getElementById('historicalModal').style.display = 'block';
         }
 
-        function buildTeamSection(teamName, position, matches, roiInfo, desiredOutcome) {
+        function buildTeamSection(teamName, position, matches, roiInfo) {
             let sectionHtml = `<div class="modal-team-section">
-                <h4>Detalle de **${teamName}** como **${position}** (Apuestas ${desiredOutcome})</h4>`;
+                <h4>Detalle de **${teamName}** como **${position}**</h4>`;
             
             if (!roiInfo) {
-                sectionHtml += `<p style="color: red;">No hay datos históricos disponibles para este equipo en esta condición.</p></div>`;
+                sectionHtml += `<p style="color: red; font-weight: bold;">No hay datos históricos disponibles para este equipo en esta condición o estrategia.</p></div>`;
                 return sectionHtml;
             }
 
             sectionHtml += `<p>
-                ROI Histórico: <span style="font-weight: bold; color: ${roiInfo.roi >= 0 ? 'green' : 'red'};">${roiInfo.roi.toFixed(2)}%</span>
-                (Muestra: ${roiInfo.count} partidos)
+                ROI Histórico Calculado: <span style="font-weight: bold; color: ${roiInfo.roi >= 0 ? 'green' : 'red'};">${roiInfo.roi.toFixed(2)}%</span>
+                (Muestra utilizada: ${roiInfo.count} partidos)
             </p>`;
 
-            sectionHtml += `<table class="modal-table">
-                <thead>
-                    <tr>
-                        <th>Fecha</th>
-                        <th>Partido Completo</th>
-                        <th>Cuota</th>
-                        <th>Resultado (Real)</th>
-                        <th>Ganancia Neta</th>
-                    </tr>
-                </thead>
-                <tbody>`;
+            // Se asegura de que la tabla se muestre solo si hay partidos en la muestra
+            if (matches.length > 0) {
+                 sectionHtml += `<table class="modal-table">
+                    <thead>
+                        <tr>
+                            <th>Fecha</th>
+                            <th>Partido Completo</th>
+                            <th>Cuota Apostada</th>
+                            <th>Resultado Real</th>
+                            <th>**Ganancia Neta**</th>
+                        </tr>
+                    </thead>
+                    <tbody>`;
 
-            matches.forEach(m => {
-                const netProfit = calculateRealROI(m);
-                const resultClass = m.Result === 'Winning' ? 'winning' : (m.Result === 'Losing' ? 'losing' : '');
-                
-                sectionHtml += `<tr class="${resultClass}">
-                    <td>${m.Date || 'N/D'}</td>
-                    <td>${m.Match || 'N/D'}</td>
-                    <td>${m.Odd || 'N/D'}</td>
-                    <td>${m.Result || 'N/D'}</td>
-                    <td>${netProfit.toFixed(2)}</td>
-                </tr>`;
-            });
+                matches.forEach(m => {
+                    // Se calcula la ganancia neta usando el resultado real del historial
+                    const netProfit = calculateRealROI(m); 
+                    const resultClass = m.Result === 'Winning' ? 'winning' : (m.Result === 'Losing' ? 'losing' : '');
+                    
+                    sectionHtml += `<tr class="${resultClass}">
+                        <td>${m.Date || 'N/D'}</td>
+                        <td>${m.Match || 'N/D'}</td>
+                        <td>${m.Odd || 'N/D'}</td>
+                        <td>${m.Result || 'N/D'}</td>
+                        <td><span style="font-weight: bold; color: ${netProfit >= 0 ? 'green' : 'red'};">${netProfit.toFixed(2)}</span></td>
+                    </tr>`;
+                });
 
-            sectionHtml += `</tbody></table></div>`;
+                sectionHtml += `</tbody></table>`;
+            } else {
+                sectionHtml += `<p>No se encontraron partidos en el historial que cumplieran la condición de **${teamName}** como **${position}** con el Resultado Deseado.</p>`;
+            }
+
+            sectionHtml += `</div>`;
             return sectionHtml;
         }
 
