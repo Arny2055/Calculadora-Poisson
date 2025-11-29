@@ -173,7 +173,7 @@
             padding: 20px;
             border: 1px solid #888;
             width: 80%;
-            max-width: 1000px; /* Ancho un poco mayor para la tabla */
+            max-width: 1000px;
             border-radius: 10px;
             box-shadow: 0 5px 15px rgba(0, 0, 0, 0.5);
         }
@@ -307,6 +307,7 @@
             reader.onload = function(e) {
                 try {
                     const data = JSON.parse(e.target.result);
+                    // Aseguramos que data es un array de objetos (partidos)
                     const matches = Array.isArray(data) ? data : [data];
                     
                     if (type === 'historical') {
@@ -360,11 +361,16 @@
 
         // --- Funciones Auxiliares de Equipo ---
 
+        /**
+         * Estandariza el nombre de un equipo para hacer coincidir el historial y los futuros.
+         */
         const standardizeName = (name) => {
-             // Elimina caracteres que no sean alfanuméricos o espacios. Convierte a mayúsculas y quita espacios en los extremos.
             return name.replace(/[^a-zA-Z0-9\s]/g, '').toUpperCase().trim();
         };
 
+        /**
+         * Parsea la cadena del partido para obtener el nombre del equipo local y visitante estandarizado.
+         */
         function parseTeams(matchString) {
             if (!matchString) {
                 return { homeTeam: 'DESCONOCIDO', awayTeam: 'DESCONOCIDO' };
@@ -383,6 +389,9 @@
             };
         }
 
+        /**
+         * Crea el mapa de estadísticas de ROI del historial.
+         */
         function getTeamRoiMap(matches) {
             const teamStats = {};
             
@@ -390,6 +399,7 @@
                 const netProfit = calculateRealROI(match); 
                 const { homeTeam, awayTeam } = parseTeams(match.Match);
                 
+                // Aseguramos que la clave incluye el nombre estandarizado y la posición
                 if (homeTeam !== 'DESCONOCIDO') {
                     const key = `${homeTeam} - Local`;
                     teamStats[key] = teamStats[key] || { totalProfit: 0, count: 0 };
@@ -445,9 +455,11 @@
                     
                     const { homeTeam, awayTeam } = parseTeams(match.Match);
                     
-                    match.homeTeamStandardized = homeTeam; // Guardar nombres estandarizados
-                    match.awayTeamStandardized = awayTeam; // Guardar nombres estandarizados
+                    // Guardar nombres estandarizados para la búsqueda en el modal
+                    match.homeTeamStandardized = homeTeam; 
+                    match.awayTeamStandardized = awayTeam; 
 
+                    // Buscar datos históricos en el mapa
                     match.homeRoiData = teamRoiMap[`${homeTeam} - Local`] || null;
                     match.awayRoiData = teamRoiMap[`${awayTeam} - Visitante`] || null;
 
@@ -466,7 +478,7 @@
             displayResults(matchesWithROI);
         }
 
-        // --- LÓGICA DE VISUALIZACIÓN DE RESULTADOS EN TABLA ---
+        // --- LÓGICA DE VISUALIZACIÓN EN TABLA ---
 
         function displayResults(matches) {
             const tbody = document.querySelector('#resultsTable tbody');
@@ -556,7 +568,7 @@
                 addRoiCellWithCount(match.homeRoiData);
                 addRoiCellWithCount(match.awayRoiData);
 
-                // Nueva columna para el botón de la muestra
+                // Botón que llama a la función para mostrar el modal
                 const sampleCell = row.insertCell();
                 sampleCell.innerHTML = `<button class="btn-muestra" onclick="showHistoricalSample(${index})">Ver Muestra</button>`;
             });
@@ -564,25 +576,28 @@
 
         // --- LÓGICA DEL MODAL ---
         
-        // CORRECCIÓN CLAVE: Esta función ahora filtra por DesiredOutcome.
+        /**
+         * Obtiene los partidos del historial que cumplen con el equipo, posición Y el resultado deseado.
+         */
         function getHistoricalMatchesForTeam(teamName, position, desiredOutcome) {
             
             // 1. Filtrar los partidos del historial por equipo y posición
             const matchesByTeamAndPosition = historicalMatches.filter(match => {
+                // Obtener los nombres estandarizados de cada partido del historial
                 const { homeTeam, awayTeam } = parseTeams(match.Match);
                 
                 if (position === 'Local') {
-                    // El equipo en el historial debe ser local
+                    // Si buscamos al Local, el nombre estandarizado debe coincidir con el homeTeam
                     return homeTeam === teamName;
                 } else if (position === 'Visitante') {
-                    // El equipo en el historial debe ser visitante
+                    // Si buscamos al Visitante, el nombre estandarizado debe coincidir con el awayTeam
                     return awayTeam === teamName;
                 }
                 return false;
             });
 
             // 2. Filtrar los resultados por el DesiredOutcome del partido futuro
-            // Esto asegura que solo se muestren los partidos que cumplen la condición de la estrategia analizada (e.g., solo 'Winning' si la estrategia era Ganar)
+            // Esto es crucial para asegurar que la muestra solo incluye partidos bajo la misma estrategia
             return matchesByTeamAndPosition.filter(match => match.DesiredOutcome === desiredOutcome);
         }
 
@@ -595,6 +610,7 @@
             modalTitle.textContent = `Muestra Histórica para: ${match.Match} (Estrategia: ${match.DesiredOutcome})`;
 
             // --- LOCAL ---
+            // Los partidos se jalan del historial, filtrados por la condición del futuro
             const homeMatches = getHistoricalMatchesForTeam(match.homeTeamStandardized, 'Local', match.DesiredOutcome);
             const homeRoiInfo = match.homeRoiData;
             
@@ -606,6 +622,7 @@
             );
 
             // --- VISITANTE ---
+            // Los partidos se jalan del historial, filtrados por la condición del futuro
             const awayMatches = getHistoricalMatchesForTeam(match.awayTeamStandardized, 'Visitante', match.DesiredOutcome);
             const awayRoiInfo = match.awayRoiData;
             
@@ -649,7 +666,6 @@
                     <tbody>`;
 
                 matches.forEach(m => {
-                    // Se calcula la ganancia neta usando el resultado real del historial
                     const netProfit = calculateRealROI(m); 
                     const resultClass = m.Result === 'Winning' ? 'winning' : (m.Result === 'Losing' ? 'losing' : '');
                     
