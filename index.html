@@ -331,6 +331,9 @@
 
         // --- Funciones de Cálculo de ROI ---
         
+        /**
+         * Calcula el ROI real. Esto se basa en la columna 'Result' y la 'Odd' del partido.
+         */
         function calculateRealROI(match) {
             const odd = parseFloat(match.Odd);
             const result = match.Result; 
@@ -348,6 +351,9 @@
             }
         }
 
+        /**
+         * Calcula el ROI teórico. Esto se basa en la 'Odd' del partido futuro.
+         */
         function calculateTheoreticalScore(match) {
             const odd = parseFloat(match.Odd);
             
@@ -382,22 +388,28 @@
             };
         }
 
+        /**
+         * Crea el mapa de estadísticas de ROI del historial. La clave incluye el DesiredOutcome
+         * para asegurar que el ROI se calcula para la estrategia específica (p.ej., 'Equipo A - Local - Winning').
+         */
         function getTeamRoiMap(matches) {
             const teamStats = {};
             
             matches.forEach(match => {
                 const netProfit = calculateRealROI(match); 
                 const { homeTeam, awayTeam } = parseTeams(match.Match);
+                const desiredOutcome = match.DesiredOutcome || 'N/A'; // Aseguramos que existe
                 
+                // Clave combinada: Equipo - Posición - DesiredOutcome
                 if (homeTeam !== 'DESCONOCIDO') {
-                    const key = `${homeTeam} - Local`;
+                    const key = `${homeTeam} - Local - ${desiredOutcome}`;
                     teamStats[key] = teamStats[key] || { totalProfit: 0, count: 0 };
                     teamStats[key].totalProfit += netProfit;
                     teamStats[key].count += 1;
                 }
 
                 if (awayTeam !== 'DESCONOCIDO') {
-                    const key = `${awayTeam} - Visitante`;
+                    const key = `${awayTeam} - Visitante - ${desiredOutcome}`;
                     teamStats[key] = teamStats[key] || { totalProfit: 0, count: 0 };
                     teamStats[key].totalProfit += netProfit;
                     teamStats[key].count += 1;
@@ -430,6 +442,7 @@
                  alert("Advertencia: No se cargó el Historial. Las columnas de ROI Histórico se mostrarán como 'N/D'.");
             }
 
+            // Mapeo de ROI Histórico por equipo, posición Y DesiredOutcome
             const teamRoiMap = getTeamRoiMap(historicalMatches);
             
             // PASO 2: Enriquecer los partidos futuros
@@ -446,9 +459,12 @@
                     
                     match.homeTeamStandardized = homeTeam; 
                     match.awayTeamStandardized = awayTeam; 
+                    
+                    const desiredOutcome = match.DesiredOutcome;
 
-                    match.homeRoiData = teamRoiMap[`${homeTeam} - Local`] || null;
-                    match.awayRoiData = teamRoiMap[`${awayTeam} - Visitante`] || null;
+                    // La búsqueda usa la clave combinada (Equipo - Posición - DesiredOutcome)
+                    match.homeRoiData = teamRoiMap[`${homeTeam} - Local - ${desiredOutcome}`] || null;
+                    match.awayRoiData = teamRoiMap[`${awayTeam} - Visitante - ${desiredOutcome}`] || null;
 
                 } else {
                     match.calculatedROI = -99999;
@@ -507,7 +523,8 @@
                 row.insertCell().textContent = index + 1; 
                 row.insertCell().textContent = `${match.Match || 'N/A'} (${match.League || 'N/A'})`;
                 row.insertCell().textContent = match.Odd;
-                row.insertCell().textContent = match.DesiredOutcome;
+                // El resultado deseado incluye GG
+                row.insertCell().textContent = match.DesiredOutcome; 
                 
                 const roiCell = row.insertCell();
                 let roiContent = `${scorePercentage}%`;
@@ -560,12 +577,10 @@
             });
         }
 
-        // --- LÓGICA DEL MODAL (CORRECCIÓN VITAL PARA FILTRADO ESTRICTO) ---
+        // --- LÓGICA DEL MODAL ---
         
         /**
-         * CORRECCIÓN: Filtra los partidos del historial por equipo, posición Y DesiredOutcome.
-         * Esta función ASUME que la columna 'DesiredOutcome' existe en el archivo de Historial, 
-         * tal como lo requiere el cálculo de ROI.
+         * Filtra los partidos del historial por equipo, posición Y DesiredOutcome.
          */
         function getHistoricalMatchesForTeam(teamName, position, desiredOutcome) {
             
@@ -576,7 +591,7 @@
                 const positionMatch = (position === 'Local' && homeTeam === teamName) ||
                                       (position === 'Visitante' && awayTeam === teamName);
                 
-                // 2. Coincidencia de estrategia (DesiredOutcome) - REQUERIDA POR EL USUARIO
+                // 2. Coincidencia de estrategia (DesiredOutcome), incluyendo 'GG'
                 const outcomeMatch = match.DesiredOutcome === desiredOutcome;
                 
                 return positionMatch && outcomeMatch;
@@ -648,7 +663,8 @@
 
                 matches.forEach(m => {
                     const netProfit = calculateRealROI(m); 
-                    const resultClass = m.Result === 'Winning' ? 'winning' : (m.Result === 'Losing' ? 'losing' : '');
+                    // El resaltado de la fila se basa en el Resultado Real (Winning/Losing)
+                    const resultClass = m.Result === 'Winning' ? 'winning' : (m.Result === 'Losing' ? 'losing' : ''); 
                     
                     sectionHtml += `<tr class="${resultClass}">
                         <td>${m.Date || 'N/D'}</td>
