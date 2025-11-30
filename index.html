@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Calculadora de ROI y Análisis Histórico por Equipo</title>
+    <title>Calculadora de ROI y Análisis Histórico (Historial Completo)</title>
     <style>
         /* Estilos generales */
         body {
@@ -140,18 +140,20 @@
         
         <div class="info-box">
             **Simulación Fija (Bankroll):** **$100.00** | **Stake Fijo por Apuesta:** **$1.00**
+            <br>
+            **Análisis Histórico:** Calcula el ROI de cada equipo sobre **TODO el historial** que coincida con la estrategia.
         </div>
 
         <div class="file-input-group">
             <div>
                 <label for="historicalFile">1. Archivo de **Historial de Apuestas** (JSON)</label>
                 <input type="file" id="historicalFile" accept=".json">
-                <small>Contiene `Odd`, `Result`, `Match` y `Desired Outcome` para el historial.</small>
+                <small>Contiene `Odd`, `Result`, `Match` y `Desired Outcome`.</small>
             </div>
             <div>
                 <label for="analysisFile">2. Archivo de **Equipos a Analizar** (JSON)</label>
                 <input type="file" id="analysisFile" accept=".json">
-                <small>Contiene los partidos futuros/de interés con `Match` (ej: "EquipoA - EquipoB").</small>
+                <small>Contiene los partidos futuros/de interés con `Match`.</small>
             </div>
         </div>
 
@@ -187,7 +189,7 @@
         </div>
 
         <div id="analysisResults" class="results-section" style="display: none;">
-            <h2>📈 2. Análisis Histórico por Equipo (Últimos 10 Partidos)</h2>
+            <h2>📈 2. Análisis Histórico por Equipo (Historial Completo)</h2>
             <p id="analysisStrategyInfo" style="font-style: italic;"></p>
             
             <div style="overflow-x: auto;">
@@ -195,8 +197,8 @@
                     <thead>
                         <tr>
                             <th>Partido Analizado</th>
-                            <th>ROI Local (%) (Muestra)</th>
-                            <th>ROI Visitante (%) (Muestra)</th>
+                            <th>ROI Local (%) (Muestra Total)</th>
+                            <th>ROI Visitante (%) (Muestra Total)</th>
                             <th>Estrategia Base</th>
                         </tr>
                     </thead>
@@ -211,7 +213,8 @@
         // --- CONSTANTES ---
         const INITIAL_BANKROLL = 100.00;
         const FIXED_STAKE = 1.00;
-        const MAX_SAMPLE_SIZE = 10; 
+        // MAX_SAMPLE_SIZE ya no se usa, pero se mantiene si se desea cambiar en el futuro
+        // const MAX_SAMPLE_SIZE = 10; 
 
         // Variables para almacenar los datos
         let historicalMatches = []; 
@@ -335,12 +338,10 @@
 
         /**
          * Determina la estrategia (DesiredOutcome) más frecuente en el historial.
-         * *** CORRECCIÓN: Usa notación de corchetes para la clave con espacio ***
          */
         function getMostFrequentStrategy(matches) {
             const outcomeCounts = {};
             matches.forEach(match => {
-                // ACCESO CORREGIDO: match["Desired Outcome"]
                 const outcome = standardizeName(match["Desired Outcome"]) || '';
                 if (outcome) { 
                     outcomeCounts[outcome] = (outcomeCounts[outcome] || 0) + 1;
@@ -361,7 +362,7 @@
 
         /**
          * Crea el mapa de estadísticas de ROI solo para la estrategia determinada.
-         * *** CORRECCIÓN: Usa notación de corchetes para la clave con espacio ***
+         * *** MODIFICACIÓN CLAVE: Se eliminó el slice (corte a 10 partidos) ***
          */
         function getTeamRoiMap(matches, strategy) {
             if (!strategy) return {}; 
@@ -370,7 +371,6 @@
             
             matches.forEach(match => {
                 const { homeTeam, awayTeam } = parseTeams(match.Match);
-                // ACCESO CORREGIDO: match["Desired Outcome"]
                 const desiredOutcome = standardizeName(match["Desired Outcome"]) || ''; 
                 
                 // 1. Filtrar por estrategia
@@ -396,15 +396,15 @@
             Object.keys(groupedStats).forEach(key => {
                 let teamMatches = groupedStats[key];
                 
-                // 3. Ordenar por Fecha (Descendente: más reciente primero)
+                // 3. (Opcional) Ordenar por Fecha, aunque ya no cortamos, es bueno para la coherencia
                 teamMatches.sort((a, b) => {
                     const dateA = a.Date ? new Date(a.Date) : new Date('1900-01-01');
                     const dateB = b.Date ? new Date(b.Date) : new Date('1900-01-01');
                     return dateB.getTime() - dateA.getTime(); 
                 });
                 
-                // 4. Tomar solo los últimos 10 partidos
-                const recentMatches = teamMatches.slice(0, MAX_SAMPLE_SIZE);
+                // 4. USAMOS LA MUESTRA COMPLETA (NO HAY SLICE)
+                const recentMatches = teamMatches;
                 
                 // 5. Calcular el ROI
                 let totalProfit = 0;
@@ -481,7 +481,7 @@
                 return;
             }
             
-            document.getElementById('analysisStrategyInfo').textContent = `ROI calculado basado en la estrategia: ${strategyToAnalyze}.`;
+            document.getElementById('analysisStrategyInfo').textContent = `ROI calculado sobre TODO EL HISTORIAL para la estrategia: ${strategyToAnalyze}.`;
             
             const teamRoiMap = getTeamRoiMap(historicalMatches, strategyToAnalyze);
             
@@ -550,10 +550,8 @@
                 classColor = 'team-roi-negative';
             }
             
-            let countHtml = `(${count} pts)`;
-            if (count < MAX_SAMPLE_SIZE) {
-                countHtml += ` <span class="sample-warning">⚠️</span>`;
-            }
+            // Ya no mostramos la advertencia de muestra baja, solo el conteo total
+            let countHtml = `(${count} pts)`; 
 
             return `<span class="roi-value ${classColor}">${roiValue.toFixed(2)}%</span> ${countHtml}`;
         }
