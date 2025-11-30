@@ -381,7 +381,7 @@
         // --- Funciones Auxiliares de Equipo ---
 
         const standardizeName = (name) => {
-            // Elimina caracteres especiales y convierte a mayúsculas
+            // Elimina caracteres especiales y convierte a mayúsculas para una coincidencia robusta
             if (typeof name !== 'string') return '';
             return name.replace(/[^a-zA-Z0-9\s]/g, '').toUpperCase().trim();
         };
@@ -407,7 +407,7 @@
 
         /**
          * Crea el mapa de estadísticas de ROI.
-         * El cálculo se basa SÓLO en los últimos 10 partidos cronológicos (MAX_SAMPLE_SIZE) 
+         * Lógica clave: El cálculo se basa SÓLO en los últimos 10 partidos cronológicos disponibles 
          * que cumplen con la Estrategia (DesiredOutcome)
          */
         function getTeamRoiMap(matches) {
@@ -416,7 +416,7 @@
             // 1. Agrupar todos los partidos por clave (Equipo - Posición - DesiredOutcome)
             matches.forEach(match => {
                 const { homeTeam, awayTeam } = parseTeams(match.Match);
-                // Asignamos 'N/A' si la columna no existe en el historial
+                // Estandarizamos el DesiredOutcome del historial (debe ser 'GG' para que coincida)
                 const desiredOutcome = standardizeName(match.DesiredOutcome) || 'N/A'; 
                 
                 if (homeTeam !== 'DESCONOCIDO') {
@@ -438,14 +438,14 @@
             Object.keys(groupedStats).forEach(key => {
                 let teamMatches = groupedStats[key];
                 
-                // 3. Ordenar por Fecha (Descendente)
+                // 3. Ordenar por Fecha (Descendente: más reciente primero)
                 teamMatches.sort((a, b) => {
                     const dateA = a.Date || '1900-01-01'; 
                     const dateB = b.Date || '1900-01-01';
                     return dateB.localeCompare(dateA); 
                 });
                 
-                // 4. Tomar solo los últimos 10 partidos (o menos si no hay suficientes)
+                // 4. Tomar solo los últimos 10 partidos (MAX_SAMPLE_SIZE)
                 const recentMatches = teamMatches.slice(0, MAX_SAMPLE_SIZE);
                 
                 // 5. Calcular el ROI y la cuenta solo de esta muestra
@@ -499,7 +499,7 @@
                     if (!match.Date) return false;
                     
                     const matchDate = new Date(match.Date);
-                    // Aseguramos que la comparación de fechas funcione correctamente
+                    // Compara solo la fecha, ignorando la hora
                     return matchDate.setHours(0,0,0,0) >= startDate.setHours(0,0,0,0); 
                 });
                 
@@ -526,13 +526,13 @@
                     match.homeTeamStandardized = homeTeam; 
                     match.awayTeamStandardized = awayTeam; 
                     
-                    // La clave de búsqueda DEBE coincidir exactamente con la clave de mapa
+                    // La clave de búsqueda DEBE ser 'GG' (estandarizado)
                     const desiredOutcomeKey = standardizeName(match.DesiredOutcome);
 
                     const homeKey = `${homeTeam} - Local - ${desiredOutcomeKey}`;
                     const awayKey = `${awayTeam} - Visitante - ${desiredOutcomeKey}`;
                     
-                    // Búsqueda en el mapa
+                    // Búsqueda en el mapa (aquí es donde se obtienen los datos calculados sobre los últimos 10)
                     match.homeRoiData = teamRoiMap[homeKey] || null;
                     match.awayRoiData = teamRoiMap[awayKey] || null;
 
@@ -608,7 +608,7 @@
                 const addRoiCellWithCount = (roiData) => {
                     const cell = row.insertCell();
                     
-                    if (roiData !== null) {
+                    if (roiData !== null && roiData.count > 0) {
                         const roiValue = roiData.roi;
                         const count = roiData.count;
                         
@@ -670,7 +670,7 @@
                 return positionMatch && outcomeMatch;
             });
             
-            // 2. Ordenar por Fecha (Descendente)
+            // 2. Ordenar por Fecha (Descendente: más reciente primero)
             filteredMatches.sort((a, b) => {
                 const dateA = a.Date || '1900-01-01'; 
                 const dateB = b.Date || '1900-01-01';
@@ -720,7 +720,7 @@
             let sectionHtml = `<div class="modal-team-section">
                 <h4>Detalle de **${teamName}** como **${position}** (Estrategia: ${desiredOutcome})</h4>`;
             
-            if (!roiInfo) {
+            if (!roiInfo || roiInfo.count === 0) {
                 sectionHtml += `<p style="color: red; font-weight: bold;">No hay datos históricos disponibles (o la muestra es 0) para este equipo bajo la estrategia **${desiredOutcome}**.</p></div>`;
                 return sectionHtml;
             }
@@ -757,6 +757,7 @@
 
                 sectionHtml += `</tbody></table>`;
             } else {
+                // Esta parte debería coincidir con el roiInfo.count > 0, pero la mantenemos por seguridad
                 sectionHtml += `<p style="color: red;">El ROI fue calculado con ${roiInfo.count} partidos. No se encontraron partidos adicionales en el historial que cumplieran las **tres condiciones**.</p>`;
             }
 
