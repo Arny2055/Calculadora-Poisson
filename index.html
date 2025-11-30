@@ -281,8 +281,8 @@
                         <th>Resultado Deseado</th>
                         <th>**ROI Teórico (%)**</th>
                         <th>Fecha</th>
-                        <th>ROI Local (%) (Muestra)</th>
-                        <th>ROI Visitante (%) (Muestra)</th>
+                        <th>ROI Local (%) (Muestra, **Últimos 10**)</th>
+                        <th>ROI Visitante (%) (Muestra, **Últimos 10**)</th>
                         <th>Muestra Histórica</th>
                     </tr>
                 </thead>
@@ -304,8 +304,9 @@
     </div>
 
     <script>
-        // --- CONSTANTE DE ESTRATEGIA: Resultado deseado fijo para los partidos futuros ---
+        // --- CONSTANTES DE ESTRATEGIA ---
         const FIXED_DESIRED_OUTCOME = "GG"; 
+        const MAX_SAMPLE_SIZE = 10; // Límite de partidos recientes para calcular el ROI histórico
 
         // Variables para almacenar los datos
         let historicalMatches = []; 
@@ -401,40 +402,60 @@
         }
 
         /**
-         * Crea el mapa de estadísticas de ROI del historial.
-         * La clave combinada es: Equipo - Posición - DesiredOutcome.
+         * Crea el mapa de estadísticas de ROI.
+         * MODIFICACIÓN CLAVE: El cálculo se basa SÓLO en los últimos 10 partidos cronológicos (MAX_SAMPLE_SIZE) 
+         * que cumplen con la Estrategia (DesiredOutcome)
          */
         function getTeamRoiMap(matches) {
-            const teamStats = {};
+            const groupedStats = {};
             
+            // 1. Agrupar todos los partidos por clave (Equipo - Posición - DesiredOutcome)
             matches.forEach(match => {
-                const netProfit = calculateRealROI(match); 
                 const { homeTeam, awayTeam } = parseTeams(match.Match);
                 const desiredOutcome = match.DesiredOutcome || 'N/A';
                 
-                // Clave combinada: Equipo - Posición - DesiredOutcome
                 if (homeTeam !== 'DESCONOCIDO') {
                     const key = `${homeTeam} - Local - ${desiredOutcome}`;
-                    teamStats[key] = teamStats[key] || { totalProfit: 0, count: 0 };
-                    teamStats[key].totalProfit += netProfit;
-                    teamStats[key].count += 1;
+                    groupedStats[key] = groupedStats[key] || [];
+                    groupedStats[key].push(match);
                 }
 
                 if (awayTeam !== 'DESCONOCIDO') {
                     const key = `${awayTeam} - Visitante - ${desiredOutcome}`;
-                    teamStats[key] = teamStats[key] || { totalProfit: 0, count: 0 };
-                    teamStats[key].totalProfit += netProfit;
-                    teamStats[key].count += 1;
+                    groupedStats[key] = groupedStats[key] || [];
+                    groupedStats[key].push(match);
                 }
             });
 
             const resultMap = {};
-            Object.keys(teamStats).forEach(key => {
-                const stats = teamStats[key];
-                if (stats.count > 0) {
+            
+            // 2. Procesar cada grupo
+            Object.keys(groupedStats).forEach(key => {
+                let teamMatches = groupedStats[key];
+                
+                // 3. Ordenar por Fecha (Descendente)
+                teamMatches.sort((a, b) => {
+                    // Usamos localeCompare para comparar strings AAAA-MM-DD
+                    const dateA = a.Date || '1900-01-01'; 
+                    const dateB = b.Date || '1900-01-01';
+                    // b.localeCompare(a) -> Orden descendente (más reciente primero)
+                    return dateB.localeCompare(dateA); 
+                });
+                
+                // 4. Tomar solo los últimos 10 partidos (o menos si no hay suficientes)
+                const recentMatches = teamMatches.slice(0, MAX_SAMPLE_SIZE);
+                
+                // 5. Calcular el ROI y la cuenta solo de esta muestra
+                let totalProfit = 0;
+                recentMatches.forEach(match => {
+                    totalProfit += calculateRealROI(match);
+                });
+                
+                const count = recentMatches.length;
+                if (count > 0) {
                     resultMap[key] = {
-                        roi: (stats.totalProfit / stats.count) * 100,
-                        count: stats.count
+                        roi: (totalProfit / count) * 100,
+                        count: count // La muestra real (máximo 10)
                     };
                 }
             });
@@ -459,7 +480,7 @@
             const startDateString = document.getElementById('startDateInput').value.trim();
             let filteredFutureMatches = futureMatches;
 
-            // 1. Filtrar por fecha
+            // 1. Filtrar por fecha de inicio
             if (startDateString) {
                 const startDate = new Date(startDateString);
                 
@@ -471,10 +492,7 @@
                 filteredFutureMatches = futureMatches.filter(match => {
                     if (!match.Date) return false;
                     
-                    // Asumimos que match.Date está en formato AAAA-MM-DD para la comparación directa
                     const matchDate = new Date(match.Date);
-                    
-                    // Compara las fechas. getTime() compara milisegundos.
                     return matchDate.getTime() >= startDate.getTime(); 
                 });
                 
@@ -532,7 +550,7 @@
                 const row = tbody.insertRow();
                 const cell = row.insertCell();
                 cell.colSpan = 9;
-                cell.textContent = "No se encontraron partidos futuros con cuota válida y que cumplan con el filtro de fecha.";
+                cell.textContent = "No se encontraron partidos futuros que cumplan los criterios de filtro y cuota.";
                 cell.style.textAlign = 'center';
                 return;
             }
@@ -564,7 +582,6 @@
                 row.insertCell().textContent = index + 1; 
                 row.insertCell().textContent = `${match.Match || 'N/A'} (${match.League || 'N/A'})`;
                 row.insertCell().textContent = match.Odd;
-                // Muestra el valor fijo (GG)
                 row.insertCell().textContent = match.DesiredOutcome; 
                 
                 const roiCell = row.insertCell();
@@ -596,7 +613,8 @@
                         
                         let countHtml = `(${count} partidos)`;
                         
-                        if (count < 10) {
+                        // Advertencia si la muestra real es menor a 10
+                        if (count < MAX_SAMPLE_SIZE) {
                             countHtml += `<span class="warning-icon" title="Advertencia: Muestra histórica muy pequeña (sólo ${count} partidos). El ROI puede no ser estadísticamente fiable.">⚠️</span>`;
                         }
                         
@@ -622,21 +640,31 @@
         
         /**
          * Filtra los partidos del historial por equipo, posición Y DesiredOutcome.
+         * MODIFICACIÓN: Aquí también limitamos la muestra a los últimos 10 (MAX_SAMPLE_SIZE)
          */
         function getHistoricalMatchesForTeam(teamName, position, desiredOutcome) {
             
-            return historicalMatches.filter(match => {
+            // 1. Filtrar los partidos que cumplen con la condición
+            let filteredMatches = historicalMatches.filter(match => {
                 const { homeTeam, awayTeam } = parseTeams(match.Match);
                 
-                // 1. Coincidencia de posición
                 const positionMatch = (position === 'Local' && homeTeam === teamName) ||
                                       (position === 'Visitante' && awayTeam === teamName);
                 
-                // 2. Coincidencia de estrategia (DesiredOutcome)
                 const outcomeMatch = match.DesiredOutcome === desiredOutcome;
                 
                 return positionMatch && outcomeMatch;
             });
+            
+            // 2. Ordenar por Fecha (Descendente)
+            filteredMatches.sort((a, b) => {
+                const dateA = a.Date || '1900-01-01'; 
+                const dateB = b.Date || '1900-01-01';
+                return dateB.localeCompare(dateA); 
+            });
+            
+            // 3. Devolver solo los últimos 10 para la muestra en el modal
+            return filteredMatches.slice(0, MAX_SAMPLE_SIZE);
         }
 
         function showHistoricalSample(matchIndex) {
@@ -649,7 +677,7 @@
             modalTitle.textContent = `Muestra Histórica para: ${match.Match} (Estrategia: ${desiredOutcome})`;
 
             const homeMatches = getHistoricalMatchesForTeam(match.homeTeamStandardized, 'Local', desiredOutcome);
-            const homeRoiInfo = match.homeRoiData;
+            const homeRoiInfo = match.homeRoiData; // ROI calculado ya sobre los últimos 10
             
             htmlContent += buildTeamSection(
                 match.homeTeamStandardized, 
@@ -660,7 +688,7 @@
             );
 
             const awayMatches = getHistoricalMatchesForTeam(match.awayTeamStandardized, 'Visitante', desiredOutcome);
-            const awayRoiInfo = match.awayRoiData;
+            const awayRoiInfo = match.awayRoiData; // ROI calculado ya sobre los últimos 10
             
             htmlContent += buildTeamSection(
                 match.awayTeamStandardized, 
@@ -684,8 +712,7 @@
             }
 
             sectionHtml += `<p>
-                ROI Histórico Calculado: <span style="font-weight: bold; color: ${roiInfo.roi >= 0 ? 'green' : 'red'};">${roiInfo.roi.toFixed(2)}%</span>
-                (Muestra utilizada: ${roiInfo.count} partidos)
+                ROI Histórico Calculado (**Últimos ${roiInfo.count} partidos**): <span style="font-weight: bold; color: ${roiInfo.roi >= 0 ? 'green' : 'red'};">${roiInfo.roi.toFixed(2)}%</span>
             </p>`;
 
             if (matches.length > 0) {
@@ -701,6 +728,7 @@
                     </thead>
                     <tbody>`;
 
+                // Los partidos se muestran del más reciente al más antiguo
                 matches.forEach(m => {
                     const netProfit = calculateRealROI(m); 
                     const resultClass = m.Result === 'Winning' ? 'winning' : (m.Result === 'Losing' ? 'losing' : ''); 
