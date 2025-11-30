@@ -236,8 +236,8 @@
     <div class="container">
         <h1>🏆 Analizador Estratégico de Apuestas de Fútbol ⚽</h1>
         
-        <p>
-            **Nota:** El ROI histórico se calcula en base a la estrategia **GG (Gol-Gol)** en los últimos **10 partidos** de cada equipo.
+        <p id="strategyInfo">
+            **Nota:** El ROI histórico se calculará en base a la estrategia predominante (`DesiredOutcome`) que se encuentre en tu archivo de Historial, utilizando los últimos **10 partidos** de cada equipo.
         </p>
 
         <div class="file-input-group">
@@ -302,14 +302,14 @@
     </div>
 
     <script>
-        // --- CONSTANTES DE ESTRATEGIA ---
-        const FIXED_DESIRED_OUTCOME = "GG"; 
+        // --- CONSTANTES DE ESTRATEGIA Y MUESTRA ---
         const MAX_SAMPLE_SIZE = 10; 
 
         // Variables para almacenar los datos
         let historicalMatches = []; 
         let futureMatches = [];
         let allFutureMatches = []; 
+        let strategyToAnalyze = ''; // Estrategia determinada dinámicamente
         
         // --- Funciones de Carga ---
 
@@ -375,24 +375,43 @@
             return (odd - 1) * 100;
         }
 
-        // --- Funciones Auxiliares de Equipo (Corregida la estandarización) ---
+        // --- Funciones Auxiliares de Equipo y Estrategia ---
 
         const standardizeName = (name) => {
             if (typeof name !== 'string') return '';
             
-            // 1. Convertir a mayúsculas
             let standardized = name.toUpperCase().trim();
-            
-            // 2. Eliminar puntuación y caracteres especiales no alfanuméricos (manteniendo espacios)
             standardized = standardized.replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g,"");
-            
-            // 3. Reemplazar variaciones comunes
-            standardized = standardized.replace(/ F\.?C\.?(\s|$)/g, ' FC '); // FC, F.C., FC, etc.
-            standardized = standardized.replace(/ C\.?F\.?(\s|$)/g, ' CF '); // CF, C.F., etc.
-            standardized = standardized.replace(/\s+/g, ' ').trim(); // Normalizar espacios múltiples
+            standardized = standardized.replace(/ F\.?C\.?(\s|$)/g, ' FC '); 
+            standardized = standardized.replace(/ C\.?F\.?(\s|$)/g, ' CF '); 
+            standardized = standardized.replace(/\s+/g, ' ').trim(); 
 
             return standardized;
         };
+        
+        /**
+         * Determina la estrategia (DesiredOutcome) más frecuente en el historial.
+         */
+        function getMostFrequentStrategy(matches) {
+            const outcomeCounts = {};
+            matches.forEach(match => {
+                const outcome = standardizeName(match.DesiredOutcome) || 'N/A';
+                if (outcome !== 'N/A' && outcome) { // Asegurar que no sea cadena vacía después de estandarizar
+                    outcomeCounts[outcome] = (outcomeCounts[outcome] || 0) + 1;
+                }
+            });
+
+            let maxCount = 0;
+            let mostFrequent = '';
+            for (const outcome in outcomeCounts) {
+                if (outcomeCounts[outcome] > maxCount) {
+                    maxCount = outcomeCounts[outcome];
+                    mostFrequent = outcome;
+                }
+            }
+            return mostFrequent;
+        }
+
 
         function parseTeams(matchString) {
             if (!matchString) {
@@ -413,28 +432,28 @@
         }
 
         /**
-         * Crea el mapa de estadísticas de ROI.
-         * Cálculo sobre los ÚLTIMOS 10 partidos cronológicos disponibles.
+         * Crea el mapa de estadísticas de ROI solo para la estrategia determinada.
          */
-        function getTeamRoiMap(matches) {
+        function getTeamRoiMap(matches, strategy) {
+            if (!strategy) return {}; // Si no hay estrategia, no hay ROI histórico que calcular
+
             const groupedStats = {};
             
             matches.forEach(match => {
                 const { homeTeam, awayTeam } = parseTeams(match.Match);
-                // Usamos el DesiredOutcome del historial, estandarizado a GG
                 const desiredOutcome = standardizeName(match.DesiredOutcome) || 'N/A'; 
                 
-                // Solo procesamos si el historial tiene el outcome fijo que estamos analizando ('GG')
-                if (desiredOutcome === FIXED_DESIRED_OUTCOME) { 
+                // Solo procesamos si coincide con la estrategia determinada
+                if (desiredOutcome === strategy) { 
                     
                     if (homeTeam !== 'DESCONOCIDO') {
-                        const key = `${homeTeam} - Local - ${FIXED_DESIRED_OUTCOME}`;
+                        const key = `${homeTeam} - Local - ${strategy}`;
                         groupedStats[key] = groupedStats[key] || [];
                         groupedStats[key].push(match);
                     }
 
                     if (awayTeam !== 'DESCONOCIDO') {
-                        const key = `${awayTeam} - Visitante - ${FIXED_DESIRED_OUTCOME}`;
+                        const key = `${awayTeam} - Visitante - ${strategy}`;
                         groupedStats[key] = groupedStats[key] || [];
                         groupedStats[key].push(match);
                     }
@@ -446,16 +465,17 @@
             Object.keys(groupedStats).forEach(key => {
                 let teamMatches = groupedStats[key];
                 
-                // Ordenar por Fecha (Descendente: más reciente primero)
+                // 1. Ordenar por Fecha (Descendente: más reciente primero)
                 teamMatches.sort((a, b) => {
                     const dateA = a.Date || '1900-01-01'; 
                     const dateB = b.Date || '1900-01-01';
                     return dateB.localeCompare(dateA); 
                 });
                 
-                // Tomar solo los últimos 10 partidos (MAX_SAMPLE_SIZE)
+                // 2. Tomar solo los últimos 10 partidos (MAX_SAMPLE_SIZE)
                 const recentMatches = teamMatches.slice(0, MAX_SAMPLE_SIZE);
                 
+                // 3. Calcular el ROI
                 let totalProfit = 0;
                 recentMatches.forEach(match => {
                     totalProfit += calculateRealROI(match);
@@ -477,6 +497,7 @@
         
         function processFiles() {
             document.querySelector('#resultsTable tbody').innerHTML = '';
+            const strategyInfoElement = document.getElementById('strategyInfo');
 
             if (futureMatches.length === 0) {
                 alert("Por favor, carga el Archivo de Partidos Futuros.");
@@ -484,15 +505,25 @@
             }
 
             if (historicalMatches.length === 0) {
+                strategyToAnalyze = '';
                  alert("Advertencia: No se cargó el Historial. Las columnas de ROI Histórico se mostrarán como 'N/D'.");
+            } else {
+                // 1. Determinar la estrategia
+                strategyToAnalyze = getMostFrequentStrategy(historicalMatches);
+                if (!strategyToAnalyze) {
+                    alert("Advertencia: No se encontró un 'DesiredOutcome' válido en el Historial para determinar la estrategia. El ROI Histórico será N/D.");
+                } else {
+                    strategyInfoElement.innerHTML = `**Nota:** El ROI histórico se calcula en base a la estrategia predominante: **${strategyToAnalyze}** (utilizando los últimos **10 partidos** de cada equipo).`;
+                }
             }
 
-            const teamRoiMap = getTeamRoiMap(historicalMatches);
+
+            const teamRoiMap = getTeamRoiMap(historicalMatches, strategyToAnalyze);
             
             const startDateString = document.getElementById('startDateInput').value.trim();
             let filteredFutureMatches = futureMatches;
 
-            // 1. Filtrar por fecha de inicio
+            // 2. Filtrar por fecha de inicio
             if (startDateString) {
                 const startDate = new Date(startDateString);
                 
@@ -513,11 +544,12 @@
             }
 
 
-            // 2. Enriquecer y calcular ROI Teórico
+            // 3. Enriquecer y calcular ROI Teórico
             const matchesWithROI = filteredFutureMatches.map(match => {
                 if (match && typeof match === 'object') { 
                     
-                    match.DesiredOutcome = FIXED_DESIRED_OUTCOME; 
+                    // Asignar la estrategia determinada (para usar en el modal)
+                    match.DesiredOutcome = strategyToAnalyze; 
                     
                     match.Odd = match.Odd || '1.00'; 
                     match.Match = match.Match || 'N/A';
@@ -530,8 +562,8 @@
                     match.homeTeamStandardized = homeTeam; 
                     match.awayTeamStandardized = awayTeam; 
                     
-                    // Clave de búsqueda (siempre 'GG')
-                    const desiredOutcomeKey = FIXED_DESIRED_OUTCOME;
+                    // Clave de búsqueda
+                    const desiredOutcomeKey = strategyToAnalyze;
 
                     const homeKey = `${homeTeam} - Local - ${desiredOutcomeKey}`;
                     const awayKey = `${awayTeam} - Visitante - ${desiredOutcomeKey}`;
@@ -547,10 +579,10 @@
 
             allFutureMatches = matchesWithROI; 
 
-            // 3. Ordenar por ROI Teórico
+            // 4. Ordenar por ROI Teórico
             matchesWithROI.sort((a, b) => b.calculatedROI - a.calculatedROI);
 
-            // 4. Mostrar los resultados
+            // 5. Mostrar los resultados
             displayResults(matchesWithROI);
         }
 
@@ -678,7 +710,7 @@
             const modalTitle = document.getElementById('modalTitle');
             const modalBody = document.getElementById('modalBody');
             let htmlContent = '';
-            const desiredOutcome = match.DesiredOutcome; 
+            const desiredOutcome = strategyToAnalyze; // Usar la estrategia dinámica
 
             modalTitle.textContent = `Muestra Histórica para: ${match.Match} (Estrategia: ${desiredOutcome})`;
 
