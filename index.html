@@ -253,22 +253,26 @@
         // --- FUNCIONES CORE (ROI y Nombres) ---
 
         /**
-         * Calcula la ganancia/pérdida neta de una sola apuesta para la simulación.
+         * Calcula la ganancia/pérdida neta de una sola apuesta para la simulación ($1 Stake).
          */
         function calculateNetProfit(match) {
             const odd = parseFloat(match.Odd);
             const result = match.Result; 
             const stake = FIXED_STAKE;
 
-            if (isNaN(odd) || odd <= 1 || !result) {
+            // Validar que la cuota y el resultado sean válidos para la simulación
+            if (isNaN(odd) || odd <= 1 || typeof result !== 'string') {
                 return 0; 
             }
             
-            if (result === 'Winning') {
+            const normalizedResult = result.trim().toUpperCase();
+
+            if (normalizedResult === 'WINNING') {
                 return stake * (odd - 1); 
-            } else if (result === 'Losing') {
+            } else if (normalizedResult === 'LOSING') {
                 return -stake; 
             } else {
+                // Para 'Void', 'Pending' o cualquier otro valor, la ganancia es 0
                 return 0;
             }
         }
@@ -280,13 +284,15 @@
             const odd = parseFloat(match.Odd);
             const result = match.Result; 
 
-            if (isNaN(odd) || odd <= 1 || !result) {
+            if (isNaN(odd) || odd <= 1 || typeof result !== 'string') {
                 return 0; 
             }
             
-            if (result === 'Winning') {
+            const normalizedResult = result.trim().toUpperCase();
+
+            if (normalizedResult === 'WINNING') {
                 return odd - 1; 
-            } else if (result === 'Losing') {
+            } else if (normalizedResult === 'LOSING') {
                 return -1; 
             } else {
                 return 0;
@@ -317,6 +323,7 @@
             }
             
             let teams = [];
+            // Manejar varios separadores comunes (-, vs, —)
             const normalizedString = matchString.trim().replace(/\s+—\s+/g, ' - ').replace(/\s+vs\s+/g, ' - ');
 
             if (normalizedString.includes(' - ')) { 
@@ -389,10 +396,11 @@
                 let teamMatches = groupedStats[key];
                 
                 // 3. Ordenar por Fecha (Descendente: más reciente primero)
+                // Usamos una función de comparación robusta para las fechas de texto
                 teamMatches.sort((a, b) => {
-                    const dateA = a.Date || '1900-01-01'; 
-                    const dateB = b.Date || '1900-01-01';
-                    return dateB.localeCompare(dateA); 
+                    const dateA = a.Date ? new Date(a.Date) : new Date('1900-01-01');
+                    const dateB = b.Date ? new Date(b.Date) : new Date('1900-01-01');
+                    return dateB.getTime() - dateA.getTime(); 
                 });
                 
                 // 4. Tomar solo los últimos 10 partidos
@@ -439,8 +447,9 @@
             historicalMatches.forEach(match => {
                 const profit = calculateNetProfit(match);
                 
-                // Solo contamos la inversión si el partido tiene un resultado válido (Win/Loss)
-                if (match.Result === 'Winning' || match.Result === 'Losing') {
+                // Solo contamos la inversión si el partido tiene un resultado válido de apuesta (Winning/Losing)
+                const result = match.Result ? match.Result.trim().toUpperCase() : '';
+                if (result === 'WINNING' || result === 'LOSING') {
                     totalInvestment += FIXED_STAKE;
                 }
 
@@ -460,15 +469,16 @@
             // --- 2. ANÁLISIS HISTÓRICO POR EQUIPO ---
 
             if (analysisMatches.length === 0) {
-                alert("Advertencia: No se cargó el archivo de 'Equipos a Analizar'. No se puede realizar el análisis histórico por equipo.");
+                document.getElementById('analysisStrategyInfo').textContent = "No se cargó el archivo de 'Equipos a Analizar'. Análisis omitido.";
+                document.getElementById('analysisResults').style.display = 'block';
                 return;
             }
 
             const strategyToAnalyze = getMostFrequentStrategy(historicalMatches);
             
             if (!strategyToAnalyze) {
-                document.getElementById('analysisStrategyInfo').textContent = "No se pudo determinar una estrategia (DesiredOutcome) válida en el Historial.";
-                alert("Advertencia: No se encontró un 'DesiredOutcome' válido en el Historial. El análisis por equipo se omitirá.");
+                document.getElementById('analysisStrategyInfo').textContent = "No se pudo determinar una estrategia (DesiredOutcome) válida en el Historial. Análisis omitido.";
+                document.getElementById('analysisResults').style.display = 'block';
                 return;
             }
             
