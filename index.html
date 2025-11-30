@@ -326,7 +326,8 @@
             reader.onload = function(e) {
                 try {
                     const data = JSON.parse(e.target.result);
-                    const matches = Array.isArray(data) ? data : [data];
+                    // Aseguramos que data es un array
+                    const matches = Array.isArray(data) ? data : (data ? [data] : []);
                     
                     if (type === 'historical') {
                         historicalMatches = matches;
@@ -380,6 +381,8 @@
         // --- Funciones Auxiliares de Equipo ---
 
         const standardizeName = (name) => {
+            // Elimina caracteres especiales y convierte a mayúsculas
+            if (typeof name !== 'string') return '';
             return name.replace(/[^a-zA-Z0-9\s]/g, '').toUpperCase().trim();
         };
 
@@ -396,6 +399,7 @@
             }
             
             return {
+                // Estandarizamos los nombres inmediatamente al parsear
                 homeTeam: teams.length === 2 ? standardizeName(teams[0]) : 'DESCONOCIDO',
                 awayTeam: teams.length === 2 ? standardizeName(teams[1]) : 'DESCONOCIDO'
             };
@@ -403,7 +407,7 @@
 
         /**
          * Crea el mapa de estadísticas de ROI.
-         * MODIFICACIÓN CLAVE: El cálculo se basa SÓLO en los últimos 10 partidos cronológicos (MAX_SAMPLE_SIZE) 
+         * El cálculo se basa SÓLO en los últimos 10 partidos cronológicos (MAX_SAMPLE_SIZE) 
          * que cumplen con la Estrategia (DesiredOutcome)
          */
         function getTeamRoiMap(matches) {
@@ -412,7 +416,8 @@
             // 1. Agrupar todos los partidos por clave (Equipo - Posición - DesiredOutcome)
             matches.forEach(match => {
                 const { homeTeam, awayTeam } = parseTeams(match.Match);
-                const desiredOutcome = match.DesiredOutcome || 'N/A';
+                // Asignamos 'N/A' si la columna no existe en el historial
+                const desiredOutcome = standardizeName(match.DesiredOutcome) || 'N/A'; 
                 
                 if (homeTeam !== 'DESCONOCIDO') {
                     const key = `${homeTeam} - Local - ${desiredOutcome}`;
@@ -435,10 +440,8 @@
                 
                 // 3. Ordenar por Fecha (Descendente)
                 teamMatches.sort((a, b) => {
-                    // Usamos localeCompare para comparar strings AAAA-MM-DD
                     const dateA = a.Date || '1900-01-01'; 
                     const dateB = b.Date || '1900-01-01';
-                    // b.localeCompare(a) -> Orden descendente (más reciente primero)
                     return dateB.localeCompare(dateA); 
                 });
                 
@@ -455,7 +458,7 @@
                 if (count > 0) {
                     resultMap[key] = {
                         roi: (totalProfit / count) * 100,
-                        count: count // La muestra real (máximo 10)
+                        count: count 
                     };
                 }
             });
@@ -466,6 +469,9 @@
         // --- LÓGICA DE PROCESAMIENTO PRINCIPAL ---
         
         function processFiles() {
+            // Reiniciar la tabla de resultados
+            document.querySelector('#resultsTable tbody').innerHTML = '';
+
             if (futureMatches.length === 0) {
                 alert("Por favor, carga el Archivo de Partidos Futuros.");
                 return;
@@ -493,7 +499,8 @@
                     if (!match.Date) return false;
                     
                     const matchDate = new Date(match.Date);
-                    return matchDate.getTime() >= startDate.getTime(); 
+                    // Aseguramos que la comparación de fechas funcione correctamente
+                    return matchDate.setHours(0,0,0,0) >= startDate.setHours(0,0,0,0); 
                 });
                 
                 if (filteredFutureMatches.length === 0) {
@@ -506,7 +513,7 @@
             const matchesWithROI = filteredFutureMatches.map(match => {
                 if (match && typeof match === 'object') { 
                     
-                    match.DesiredOutcome = FIXED_DESIRED_OUTCOME; 
+                    match.DesiredOutcome = FIXED_DESIRED_OUTCOME; // Fijo a GG
                     
                     match.Odd = match.Odd || '1.00'; 
                     match.Match = match.Match || 'N/A';
@@ -519,11 +526,15 @@
                     match.homeTeamStandardized = homeTeam; 
                     match.awayTeamStandardized = awayTeam; 
                     
-                    const desiredOutcome = match.DesiredOutcome;
+                    // La clave de búsqueda DEBE coincidir exactamente con la clave de mapa
+                    const desiredOutcomeKey = standardizeName(match.DesiredOutcome);
 
-                    // La búsqueda usa la clave combinada (Equipo - Posición - DesiredOutcome)
-                    match.homeRoiData = teamRoiMap[`${homeTeam} - Local - ${desiredOutcome}`] || null;
-                    match.awayRoiData = teamRoiMap[`${awayTeam} - Visitante - ${desiredOutcome}`] || null;
+                    const homeKey = `${homeTeam} - Local - ${desiredOutcomeKey}`;
+                    const awayKey = `${awayTeam} - Visitante - ${desiredOutcomeKey}`;
+                    
+                    // Búsqueda en el mapa
+                    match.homeRoiData = teamRoiMap[homeKey] || null;
+                    match.awayRoiData = teamRoiMap[awayKey] || null;
 
                 } else {
                     match.calculatedROI = -99999;
@@ -544,8 +555,7 @@
 
         function displayResults(matches) {
             const tbody = document.querySelector('#resultsTable tbody');
-            tbody.innerHTML = '';
-
+            
             if (matches.length === 0) {
                 const row = tbody.insertRow();
                 const cell = row.insertCell();
@@ -640,10 +650,13 @@
         
         /**
          * Filtra los partidos del historial por equipo, posición Y DesiredOutcome.
-         * MODIFICACIÓN: Aquí también limitamos la muestra a los últimos 10 (MAX_SAMPLE_SIZE)
+         * La muestra se limita a los últimos 10 (MAX_SAMPLE_SIZE)
          */
         function getHistoricalMatchesForTeam(teamName, position, desiredOutcome) {
             
+            // Aseguramos que el outcome de búsqueda esté estandarizado
+            const desiredOutcomeKey = standardizeName(desiredOutcome);
+
             // 1. Filtrar los partidos que cumplen con la condición
             let filteredMatches = historicalMatches.filter(match => {
                 const { homeTeam, awayTeam } = parseTeams(match.Match);
@@ -651,7 +664,8 @@
                 const positionMatch = (position === 'Local' && homeTeam === teamName) ||
                                       (position === 'Visitante' && awayTeam === teamName);
                 
-                const outcomeMatch = match.DesiredOutcome === desiredOutcome;
+                // Comparamos el outcome del historial (estandarizado) con el outcome de búsqueda
+                const outcomeMatch = (standardizeName(match.DesiredOutcome) || 'N/A') === desiredOutcomeKey;
                 
                 return positionMatch && outcomeMatch;
             });
@@ -663,7 +677,7 @@
                 return dateB.localeCompare(dateA); 
             });
             
-            // 3. Devolver solo los últimos 10 para la muestra en el modal
+            // 3. Devolver solo los últimos N para la muestra en el modal
             return filteredMatches.slice(0, MAX_SAMPLE_SIZE);
         }
 
@@ -677,7 +691,7 @@
             modalTitle.textContent = `Muestra Histórica para: ${match.Match} (Estrategia: ${desiredOutcome})`;
 
             const homeMatches = getHistoricalMatchesForTeam(match.homeTeamStandardized, 'Local', desiredOutcome);
-            const homeRoiInfo = match.homeRoiData; // ROI calculado ya sobre los últimos 10
+            const homeRoiInfo = match.homeRoiData; 
             
             htmlContent += buildTeamSection(
                 match.homeTeamStandardized, 
@@ -688,7 +702,7 @@
             );
 
             const awayMatches = getHistoricalMatchesForTeam(match.awayTeamStandardized, 'Visitante', desiredOutcome);
-            const awayRoiInfo = match.awayRoiData; // ROI calculado ya sobre los últimos 10
+            const awayRoiInfo = match.awayRoiData; 
             
             htmlContent += buildTeamSection(
                 match.awayTeamStandardized, 
@@ -707,7 +721,7 @@
                 <h4>Detalle de **${teamName}** como **${position}** (Estrategia: ${desiredOutcome})</h4>`;
             
             if (!roiInfo) {
-                sectionHtml += `<p style="color: red; font-weight: bold;">No hay datos históricos disponibles para este equipo bajo la estrategia **${desiredOutcome}**.</p></div>`;
+                sectionHtml += `<p style="color: red; font-weight: bold;">No hay datos históricos disponibles (o la muestra es 0) para este equipo bajo la estrategia **${desiredOutcome}**.</p></div>`;
                 return sectionHtml;
             }
 
@@ -728,7 +742,6 @@
                     </thead>
                     <tbody>`;
 
-                // Los partidos se muestran del más reciente al más antiguo
                 matches.forEach(m => {
                     const netProfit = calculateRealROI(m); 
                     const resultClass = m.Result === 'Winning' ? 'winning' : (m.Result === 'Losing' ? 'losing' : ''); 
@@ -744,7 +757,7 @@
 
                 sectionHtml += `</tbody></table>`;
             } else {
-                sectionHtml += `<p style="color: red;">No se encontraron partidos en el historial que cumplieran las **tres condiciones**: Equipo (${teamName}), Posición (${position}) y Estrategia (${desiredOutcome}).</p>`;
+                sectionHtml += `<p style="color: red;">El ROI fue calculado con ${roiInfo.count} partidos. No se encontraron partidos adicionales en el historial que cumplieran las **tres condiciones**.</p>`;
             }
 
             sectionHtml += `</div>`;
