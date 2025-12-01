@@ -2,10 +2,10 @@
 <html lang="es">
 <head>
 <meta charset="UTF-8">
-<title>Calculadora ROI – Backtesting + Partidos Futuros</title>
+<title>Backtesting + Predicción con Partidos Futuros</title>
 
 <style>
-    body { font-family: Arial; background:#f4f4f4; padding:20px; }
+    body { font-family: Arial; background:#f1f1f1; padding:20px; }
     h2 { margin-top:25px; }
     .card {
         background:white; padding:20px; border-radius:10px;
@@ -14,24 +14,23 @@
     table { width:100%; border-collapse:collapse; margin-top:10px; }
     th, td { border:1px solid #ddd; padding:8px; text-align:center; }
     th { background:#333; color:white; }
-    tr:nth-child(even) { background:#eee; }
     input[type="file"] { margin-top:10px; }
-    .success { color:green; font-weight:bold; }
-    .fail { color:red; font-weight:bold; }
     button {
         background:#007bff; border:none; padding:12px 20px;
         color:white; border-radius:8px; cursor:pointer;
-        margin-top:10px; font-size:16px;
+        font-size:16px;
     }
     button:hover { background:#0056b3; }
+    .good { color:green; font-weight:bold; }
+    .bad { color:red; font-weight:bold; }
 </style>
 </head>
 
 <body>
 
-<h1>📊 Calculadora ROI – Historial + Partidos Futuros</h1>
+<h1>📊 Backtesting + Predicción para Partidos Futuros</h1>
 
-<!-- CARGA DE ARCHIVOS -->
+<!-- CARGAS DE ARCHIVO -->
 <div class="card">
     <h2>📁 Cargar Historial (Backtesting)</h2>
     <input type="file" id="historialInput" accept=".json">
@@ -43,30 +42,12 @@
 </div>
 
 <div class="card">
-    <button id="runBacktesting">🔍 Hacer Backtesting</button>
+    <button id="runBacktesting">🔍 Hacer Backtesting + Predicción</button>
 </div>
 
-<!-- RESULTADOS -->
+<!-- TABLAS -->
 <div class="card">
-    <h2>Resultados del Backtesting</h2>
-    <table id="matchTable">
-        <thead>
-            <tr>
-                <th>Fecha</th>
-                <th>Liga</th>
-                <th>Partido</th>
-                <th>Pick</th>
-                <th>Odd</th>
-                <th>Resultado</th>
-                <th>Ganancia</th>
-            </tr>
-        </thead>
-        <tbody></tbody>
-    </table>
-</div>
-
-<div class="card">
-    <h2>ROI por Equipo</h2>
+    <h2>ROI por Equipo (Historial)</h2>
     <table id="teamROI">
         <thead>
             <tr>
@@ -82,15 +63,14 @@
 </div>
 
 <div class="card">
-    <h2>Partidos Futuros Cargados</h2>
-    <table id="futureTable">
+    <h2>Predicción para Partidos Futuros (Según ROI Histórico)</h2>
+    <table id="predictTable">
         <thead>
             <tr>
-                <th>Fecha</th>
-                <th>Liga</th>
                 <th>Partido</th>
-                <th>Pick</th>
-                <th>Odd</th>
+                <th>Equipo Local ROI</th>
+                <th>Equipo Visitante ROI</th>
+                <th>Equipo Más Rentable</th>
             </tr>
         </thead>
         <tbody></tbody>
@@ -98,105 +78,67 @@
 </div>
 
 <script>
-// CONFIG
 const STAKE = 1;
 
-// VARIABLES
 let historialData = [];
 let futurosData = [];
 let teamStats = {};
 
-// LECTURA DE ARCHIVOS -------------------
-document.getElementById("historialInput").addEventListener("change", e => {
-    readJSON(e.target.files[0], data => historialData = data);
-});
-
-document.getElementById("futurosInput").addEventListener("change", e => {
-    readJSON(e.target.files[0], data => {
-        futurosData = data;
-        renderFuturos();
-    });
-});
-
+// Leer JSON --------------------
 function readJSON(file, callback) {
     const reader = new FileReader();
     reader.onload = e => {
         try {
             let content = e.target.result;
-            let parsed = JSON.parse("[" + content.replace(/,\s*$/, "") + "]");
-            callback(parsed);
+            let data = JSON.parse("[" + content.replace(/,\s*$/, "") + "]");
+            callback(data);
         } catch (err) {
-            alert("Error leyendo archivo JSON: " + err);
+            alert("Archivo JSON inválido");
         }
     };
     reader.readAsText(file);
 }
 
-// BOTÓN DE BACKTESTING -------------------
+document.getElementById("historialInput").addEventListener("change", e => {
+    readJSON(e.target.files[0], d => historialData = d);
+});
+
+document.getElementById("futurosInput").addEventListener("change", e => {
+    readJSON(e.target.files[0], d => futurosData = d);
+});
+
 document.getElementById("runBacktesting").addEventListener("click", () => {
-    if (historialData.length === 0) {
-        alert("Primero carga un archivo de historial.");
+    if (!historialData.length || !futurosData.length) {
+        alert("Debe subir ambos archivos.");
         return;
     }
     teamStats = {};
-    runBacktesting(historialData);
+    processHistorial();
+    renderTeamROI();
+    predictFuturos();
 });
 
-// BACKTESTING -----------------------------
-function runBacktesting(matches) {
-    const tableBody = document.querySelector("#matchTable tbody");
-    tableBody.innerHTML = "";
+// PROCESAR HISTORIAL (Backtesting)
+function processHistorial() {
+    historialData.forEach(m => {
+        if (!m.Result) return;
 
-    matches.forEach(m => {
-        const gain = calcGain(m);
-        renderMatchRow(m, gain);
-        updateTeamStats(m.Match, gain);
-    });
+        let gain = m.Result === "Winning" ? (m.Odd - 1) * STAKE : -STAKE;
 
-    renderTeamROI();
-}
+        const [home, away] = m.Match.split(" - ");
 
-function calcGain(m) {
-    if (m.Result === "Winning") return (m.Odd - 1) * STAKE;
-    if (m.Result === "Losing") return -STAKE;
-    return 0;
-}
+        [home, away].forEach(team => {
+            if (!teamStats[team])
+                teamStats[team] = { matches: 0, win: 0, profit: 0 };
 
-function renderMatchRow(m, gain) {
-    const row = document.createElement("tr");
-
-    const status =
-        gain > 0 ? "success" :
-        gain < 0 ? "fail" :
-        "";
-
-    row.innerHTML = `
-        <td>${m.Date}</td>
-        <td>${m.League}</td>
-        <td>${m.Match}</td>
-        <td>${m["Desired Outcome"]}</td>
-        <td>${m.Odd}</td>
-        <td class="${status}">
-            ${gain > 0 ? "Ganado" : gain < 0 ? "Perdido" : "-"}
-        </td>
-        <td>${gain.toFixed(2)}</td>
-    `;
-
-    document.querySelector("#matchTable tbody").appendChild(row);
-}
-
-function updateTeamStats(matchName, gain) {
-    const [home, away] = matchName.split(" - ");
-
-    [home, away].forEach(team => {
-        if (!teamStats[team]) teamStats[team] = { matches: 0, win: 0, profit: 0 };
-
-        teamStats[team].matches++;
-        if (gain > 0) teamStats[team].win++;
-        teamStats[team].profit += gain;
+            teamStats[team].matches++;
+            if (gain > 0) teamStats[team].win++;
+            teamStats[team].profit += gain;
+        });
     });
 }
 
+// TABLA ROI HISTÓRICO
 function renderTeamROI() {
     const tbody = document.querySelector("#teamROI tbody");
     tbody.innerHTML = "";
@@ -217,20 +159,34 @@ function renderTeamROI() {
     }
 }
 
-// FUTUROS --------------------------------
-function renderFuturos() {
-    const tbody = document.querySelector("#futureTable tbody");
+// PREDICCIÓN PARA FUTUROS ---------------------------
+function predictFuturos() {
+    const tbody = document.querySelector("#predictTable tbody");
     tbody.innerHTML = "";
 
     futurosData.forEach(m => {
+        const [home, away] = m.Match.split(" - ");
+
+        const roiHome = teamStats[home] ? (teamStats[home].profit / teamStats[home].matches * 100).toFixed(2) : "N/A";
+        const roiAway = teamStats[away] ? (teamStats[away].profit / teamStats[away].matches * 100).toFixed(2) : "N/A";
+
+        let best = "Sin datos";
+
+        if (!isNaN(parseFloat(roiHome)) && !isNaN(parseFloat(roiAway))) {
+            best = parseFloat(roiHome) > parseFloat(roiAway)
+                ? `${home} (Local)`
+                : `${away} (Visitante)`;
+        }
+
         const row = document.createElement("tr");
+
         row.innerHTML = `
-            <td>${m.Date}</td>
-            <td>${m.League}</td>
             <td>${m.Match}</td>
-            <td>${m["Desired Outcome"]}</td>
-            <td>${m.Odd}</td>
+            <td class="${roiHome > 0 ? 'good' : 'bad'}">${roiHome}</td>
+            <td class="${roiAway > 0 ? 'good' : 'bad'}">${roiAway}</td>
+            <td><b>${best}</b></td>
         `;
+
         tbody.appendChild(row);
     });
 }
