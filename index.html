@@ -2,34 +2,53 @@
 <html lang="es">
 <head>
 <meta charset="UTF-8">
-<title>Calculadora de ROI por Equipo (JSON)</title>
+<title>Calculadora ROI – Backtesting + Partidos Futuros</title>
+
 <style>
-    body { font-family: Arial, sans-serif; background:#f7f7f7; padding:20px; }
-    h2 { margin-top:30px; }
+    body { font-family: Arial; background:#f4f4f4; padding:20px; }
+    h2 { margin-top:25px; }
     .card {
         background:white; padding:20px; border-radius:10px;
-        box-shadow:0 2px 10px rgba(0,0,0,0.1); margin-bottom:25px;
+        box-shadow:0 2px 10px rgba(0,0,0,0.1); margin-bottom:30px;
     }
     table { width:100%; border-collapse:collapse; margin-top:10px; }
     th, td { border:1px solid #ddd; padding:8px; text-align:center; }
     th { background:#333; color:white; }
-    #teamROI tbody tr:nth-child(even) { background:#eee; }
+    tr:nth-child(even) { background:#eee; }
     input[type="file"] { margin-top:10px; }
     .success { color:green; font-weight:bold; }
     .fail { color:red; font-weight:bold; }
+    button {
+        background:#007bff; border:none; padding:12px 20px;
+        color:white; border-radius:8px; cursor:pointer;
+        margin-top:10px; font-size:16px;
+    }
+    button:hover { background:#0056b3; }
 </style>
 </head>
+
 <body>
 
-<h1>📊 Calculadora de ROI por Equipo (JSON)</h1>
+<h1>📊 Calculadora ROI – Historial + Partidos Futuros</h1>
 
+<!-- CARGA DE ARCHIVOS -->
 <div class="card">
-    <h3>Subir Archivo(s) JSON</h3>
-    <input type="file" id="fileInput" accept=".json" multiple>
+    <h2>📁 Cargar Historial (Backtesting)</h2>
+    <input type="file" id="historialInput" accept=".json">
 </div>
 
 <div class="card">
-    <h2>Resultados por Partido</h2>
+    <h2>📁 Cargar Partidos Futuros</h2>
+    <input type="file" id="futurosInput" accept=".json">
+</div>
+
+<div class="card">
+    <button id="runBacktesting">🔍 Hacer Backtesting</button>
+</div>
+
+<!-- RESULTADOS -->
+<div class="card">
+    <h2>Resultados del Backtesting</h2>
     <table id="matchTable">
         <thead>
             <tr>
@@ -62,81 +81,116 @@
     </table>
 </div>
 
+<div class="card">
+    <h2>Partidos Futuros Cargados</h2>
+    <table id="futureTable">
+        <thead>
+            <tr>
+                <th>Fecha</th>
+                <th>Liga</th>
+                <th>Partido</th>
+                <th>Pick</th>
+                <th>Odd</th>
+            </tr>
+        </thead>
+        <tbody></tbody>
+    </table>
+</div>
+
 <script>
-// --- CONFIG ---
-const STAKE = 1;      // 1 unidad por apuesta
-const INITIAL_BANK = 100;
+// CONFIG
+const STAKE = 1;
 
-document.getElementById("fileInput").addEventListener("change", handleFiles);
+// VARIABLES
+let historialData = [];
+let futurosData = [];
+let teamStats = {};
 
-function handleFiles(event) {
-    const files = event.target.files;
-    [...files].forEach(file => {
-        const reader = new FileReader();
-        reader.onload = e => {
-            try {
-                const jsonString = e.target.result;
+// LECTURA DE ARCHIVOS -------------------
+document.getElementById("historialInput").addEventListener("change", e => {
+    readJSON(e.target.files[0], data => historialData = data);
+});
 
-                // Puede venir como JSON individual o lista separada por comas
-                let data = JSON.parse("[" + jsonString.replace(/,\s*$/, "") + "]");
-
-                processMatches(data);
-            } catch(err) {
-                alert("Error leyendo el archivo JSON: " + err);
-            }
-        };
-        reader.readAsText(file);
+document.getElementById("futurosInput").addEventListener("change", e => {
+    readJSON(e.target.files[0], data => {
+        futurosData = data;
+        renderFuturos();
     });
+});
+
+function readJSON(file, callback) {
+    const reader = new FileReader();
+    reader.onload = e => {
+        try {
+            let content = e.target.result;
+            let parsed = JSON.parse("[" + content.replace(/,\s*$/, "") + "]");
+            callback(parsed);
+        } catch (err) {
+            alert("Error leyendo archivo JSON: " + err);
+        }
+    };
+    reader.readAsText(file);
 }
 
-let teamStats = {}; // ROI por equipo
+// BOTÓN DE BACKTESTING -------------------
+document.getElementById("runBacktesting").addEventListener("click", () => {
+    if (historialData.length === 0) {
+        alert("Primero carga un archivo de historial.");
+        return;
+    }
+    teamStats = {};
+    runBacktesting(historialData);
+});
 
-function processMatches(matches) {
+// BACKTESTING -----------------------------
+function runBacktesting(matches) {
     const tableBody = document.querySelector("#matchTable tbody");
+    tableBody.innerHTML = "";
 
     matches.forEach(m => {
-        const { Match, Desired Outcome, Odd, Result, League, Date } = m;
-
-        let gain = 0;
-        let statusText = "-";
-
-        if (Result === "Winning") {
-            gain = (Odd - 1) * STAKE;
-            statusText = "Ganado";
-        } else if (Result === "Losing") {
-            gain = -STAKE;
-            statusText = "Perdido";
-        }
-
-        // insert row into table
-        const row = document.createElement("tr");
-        row.innerHTML = `
-            <td>${Date}</td>
-            <td>${League}</td>
-            <td>${Match}</td>
-            <td>${Desired Outcome}</td>
-            <td>${Odd}</td>
-            <td class="${statusText === 'Ganado' ? 'success' : statusText === 'Perdido' ? 'fail' : ''}">${statusText}</td>
-            <td>${gain.toFixed(2)}</td>
-        `;
-        tableBody.appendChild(row);
-
-        // ROI por equipo (solo historial)
-        if (Result === "Winning" || Result === "Losing") {
-            updateTeamROI(Match, gain);
-        }
+        const gain = calcGain(m);
+        renderMatchRow(m, gain);
+        updateTeamStats(m.Match, gain);
     });
 
     renderTeamROI();
 }
 
-function updateTeamROI(matchName, gain) {
+function calcGain(m) {
+    if (m.Result === "Winning") return (m.Odd - 1) * STAKE;
+    if (m.Result === "Losing") return -STAKE;
+    return 0;
+}
+
+function renderMatchRow(m, gain) {
+    const row = document.createElement("tr");
+
+    const status =
+        gain > 0 ? "success" :
+        gain < 0 ? "fail" :
+        "";
+
+    row.innerHTML = `
+        <td>${m.Date}</td>
+        <td>${m.League}</td>
+        <td>${m.Match}</td>
+        <td>${m["Desired Outcome"]}</td>
+        <td>${m.Odd}</td>
+        <td class="${status}">
+            ${gain > 0 ? "Ganado" : gain < 0 ? "Perdido" : "-"}
+        </td>
+        <td>${gain.toFixed(2)}</td>
+    `;
+
+    document.querySelector("#matchTable tbody").appendChild(row);
+}
+
+function updateTeamStats(matchName, gain) {
     const [home, away] = matchName.split(" - ");
 
     [home, away].forEach(team => {
-        if (!teamStats[team]) {
-            teamStats[team] = { matches: 0, win: 0, profit: 0 };
-        }
+        if (!teamStats[team]) teamStats[team] = { matches: 0, win: 0, profit: 0 };
+
         teamStats[team].matches++;
         if (gain > 0) teamStats[team].win++;
         teamStats[team].profit += gain;
@@ -162,6 +216,25 @@ function renderTeamROI() {
         tbody.appendChild(row);
     }
 }
+
+// FUTUROS --------------------------------
+function renderFuturos() {
+    const tbody = document.querySelector("#futureTable tbody");
+    tbody.innerHTML = "";
+
+    futurosData.forEach(m => {
+        const row = document.createElement("tr");
+        row.innerHTML = `
+            <td>${m.Date}</td>
+            <td>${m.League}</td>
+            <td>${m.Match}</td>
+            <td>${m["Desired Outcome"]}</td>
+            <td>${m.Odd}</td>
+        `;
+        tbody.appendChild(row);
+    });
+}
+
 </script>
 
 </body>
