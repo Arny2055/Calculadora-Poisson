@@ -6,16 +6,16 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 
 <style>
-body { font-family: Arial; background:#f5f5f5; padding:20px; }
+body { font-family: Arial; background:#f2f2f2; padding:20px; }
 .card { background:white; padding:20px; border-radius:12px; 
-        box-shadow:0 2px 10px rgba(0,0,0,0.1); margin-bottom:25px; }
+        box-shadow:0 2px 12px rgba(0,0,0,0.15); margin-bottom:25px; }
 h2 { margin-bottom:15px; }
 table { width:100%; border-collapse:collapse; }
-th { background:#222; color:white; padding:8px; }
+th { background:#1f1f1f; color:white; padding:8px; }
 td { padding:6px; border:1px solid #ddd; text-align:center; }
 button {
     background:#007BFF; border:none; padding:12px 20px;
-    color:white; border-radius:10px; font-size:16px;
+    color:white; border-radius:10px; font-size:16px; cursor:pointer;
 }
 .good { color:green; font-weight:bold; }
 .bad { color:red; font-weight:bold; }
@@ -29,7 +29,7 @@ button {
 <div id="message" class="msg">Cargue los archivos para comenzar.</div>
 
 <div class="card">
-    <h2>📁 Cargar Historial</h2>
+    <h2>📁 Cargar Historial (backtesting)</h2>
     <input type="file" id="historialFile" accept=".json">
 </div>
 
@@ -50,7 +50,7 @@ button {
                 <th>Partido</th>
                 <th>ROI Local</th>
                 <th>ROI Visitante</th>
-                <th>Partidos Analizados</th>
+                <th># de Partidos Analizados</th>
                 <th>Equipo Más Rentable</th>
             </tr>
         </thead>
@@ -59,21 +59,23 @@ button {
 </div>
 
 <script>
-// Variables persistentes para Safari
 let historialData = [];
 let futurosData = [];
 
 const msg = m => document.getElementById("message").innerText = m;
 
-// Convierte JSON no estándar a array válido
+// --- JSON flexible ---
 function safeJSON(text) {
     try {
+        // JSON sin corchetes → lo convertimos a array
         if (!text.trim().startsWith("[")) {
-            text = "[" + text.replace(/,\s*$/, "") + "]";
+            let fixed = "[" + text.trim();
+            fixed = fixed.replace(/,\s*$/, "") + "]";
+            return JSON.parse(fixed);
         }
         return JSON.parse(text);
-    } catch (e) {
-        msg("❌ Error al leer JSON. Revise el formato.");
+    } catch {
+        msg("❌ Error al leer el archivo JSON. Revise el formato.");
         return null;
     }
 }
@@ -82,7 +84,8 @@ function safeJSON(text) {
 document.getElementById("historialFile").addEventListener("change", e => {
     let file = e.target.files[0];
     if (!file) return;
-    let reader = new FileReader();
+
+    const reader = new FileReader();
     reader.onload = ev => {
         let data = safeJSON(ev.target.result);
         if (data) {
@@ -96,7 +99,8 @@ document.getElementById("historialFile").addEventListener("change", e => {
 document.getElementById("futurosFile").addEventListener("change", e => {
     let file = e.target.files[0];
     if (!file) return;
-    let reader = new FileReader();
+
+    const reader = new FileReader();
     reader.onload = ev => {
         let data = safeJSON(ev.target.result);
         if (data) {
@@ -110,66 +114,68 @@ document.getElementById("futurosFile").addEventListener("change", e => {
 // --- BOTÓN ---
 document.getElementById("runBtn").addEventListener("click", () => {
     if (!historialData.length || !futurosData.length) {
-        msg("⚠ Debe cargar los dos archivos antes de continuar.");
+        msg("⚠ Debe cargar ambos archivos.");
         return;
     }
 
     msg("Procesando Backtesting...");
-
     runBacktesting();
-
     msg("✔ Backtesting completado.");
 });
 
-// --- FUNCIÓN PRINCIPAL ---
-function runBacktesting() {
-    const tbody = document.querySelector("#predictTable tbody");
-    tbody.innerHTML = "";
-
-    futurosData.forEach(futureMatch => {
-        const [home, away] = futureMatch.Match.split(" - ").map(t => t.trim());
-
-        const homeStats = computeTeamROI(home);
-        const awayStats = computeTeamROI(away);
-
-        const best = (homeStats.roi > awayStats.roi)
-            ? home
-            : (awayStats.roi > homeStats.roi ? away : "Iguales");
-
-        tbody.innerHTML += `
-            <tr>
-                <td>${futureMatch.Match}</td>
-                <td class="${homeStats.roi >= 0 ? 'good' : 'bad'}">${homeStats.roi.toFixed(2)}%</td>
-                <td class="${awayStats.roi >= 0 ? 'good' : 'bad'}">${awayStats.roi.toFixed(2)}%</td>
-                <td>${homeStats.matches + awayStats.matches}</td>
-                <td><b>${best}</b></td>
-            </tr>
-        `;
-    });
-}
-
-// --- CÁLCULO DE ROI POR EQUIPO ---
-function computeTeamROI(team) {
+// --- ROI Individual por equipo ---
+function computeROI(team) {
     let matches = 0;
     let profit = 0;
 
     historialData.forEach(m => {
         if (!m.Match || !m.Odd || !m.Result) return;
 
-        const [home, away] = m.Match.split(" - ").map(t => t.trim());
-        if (home !== team && away !== team) return;
+        const [home, away] = m.Match.split(" - ").map(x => x.trim());
+        if (team !== home && team !== away) return;
 
         matches++;
 
-        const gain = (m.Result === "Winning") ? (parseFloat(m.Odd) - 1) : -1;
+        let gain = (m.Result === "Winning")
+            ? (parseFloat(m.Odd) - 1)
+            : -1;
+
         profit += gain;
     });
 
     return {
         matches,
-        profit,
-        roi: matches > 0 ? (profit / matches * 100) : 0
+        roi: matches > 0 ? (profit / matches * 100) : 0,
+        profit
     };
+}
+
+// --- BACKTESTING ---
+function runBacktesting() {
+    const tbody = document.querySelector("#predictTable tbody");
+    tbody.innerHTML = "";
+
+    futurosData.forEach(m => {
+        const [home, away] = m.Match.split(" - ").map(x => x.trim());
+
+        const homeROI = computeROI(home);
+        const awayROI = computeROI(away);
+
+        const best = 
+            homeROI.roi > awayROI.roi ? home :
+            awayROI.roi > homeROI.roi ? away :
+            "Iguales";
+
+        tbody.innerHTML += `
+            <tr>
+                <td>${m.Match}</td>
+                <td class="${homeROI.roi >= 0 ? 'good' : 'bad'}">${homeROI.roi.toFixed(2)}%</td>
+                <td class="${awayROI.roi >= 0 ? 'good' : 'bad'}">${awayROI.roi.toFixed(2)}%</td>
+                <td>${homeROI.matches + awayROI.matches}</td>
+                <td><b>${best}</b></td>
+            </tr>
+        `;
+    });
 }
 </script>
 
