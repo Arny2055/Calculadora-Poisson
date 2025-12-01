@@ -58,7 +58,7 @@
             color: #E0E0E0;
             flex-shrink: 0;
         }
-        .match-row input[type="number"], .match-row select {
+        .match-row input[type="number"], .match-row select, .match-row input[type="text"] {
             padding: 5px;
             border: 1px solid #555555;
             border-radius: 4px;
@@ -66,7 +66,7 @@
             color: #E0E0E0; 
             transition: border-color 0.3s;
         }
-        .match-row select {
+        .match-row select, .match-row input[type="text"] {
             width: 100%;
         }
         .match-row input:focus, .match-row select:focus {
@@ -114,6 +114,29 @@
         }
         #save-match-btn:hover { background-color: #3700B3; }
 
+        .btn-delete {
+            padding: 5px 8px;
+            background-color: #CF6679; /* Rojo suave */
+            color: white;
+            font-size: 0.8em;
+            cursor: pointer;
+            border-radius: 4px;
+            width: auto;
+            margin: 0;
+        }
+        .btn-delete:hover {
+            background-color: #A3001C;
+        }
+        #delete-all-btn {
+            background-color: #CF6679;
+            color: #121212;
+            margin-top: 20px;
+        }
+        #delete-all-btn:hover {
+            background-color: #A3001C;
+            color: #FFFFFF;
+        }
+
         /* --- RESULTADOS Y TABLA --- */
         #results {
             padding: 15px;
@@ -137,6 +160,8 @@
             border: 1px solid #333333;
             background-color: #1E1E1E;
             color: #E0E0E0;
+            padding: 8px 4px; /* Ajuste de padding */
+            font-size: 0.85em;
         }
         #match-history-table th {
             background-color: #333333;
@@ -146,6 +171,9 @@
         .history-roi-summary {
             border-bottom: 1px solid #333333;
             color: #E0E0E0;
+        }
+        .history-roi-summary > div {
+             font-size: 0.9em !important; /* Ajuste para el resumen */
         }
     </style>
 </head>
@@ -183,6 +211,16 @@
             <div class="section-box">
                 <h3 style="color: #6200EE;">💾 Registrar Apuesta Real [O/U | BTTS]</h3>
                 <p>Usa esta sección para registrar tus operaciones con stake variable.</p>
+
+                <div class="match-row">
+                    <label for="reg-home">Local:</label>
+                    <input type="text" id="reg-home" placeholder="Nombre Local" required>
+                </div>
+                <div class="match-row">
+                    <label for="reg-away">Visitante:</label>
+                    <input type="text" id="reg-away" placeholder="Nombre Visitante" required>
+                </div>
+                
                 <div class="match-row">
                     <label for="reg-market">Mercado:</label>
                     <select id="reg-market">
@@ -219,18 +257,21 @@
             <table id="match-history-table">
                 <thead>
                     <tr>
-                        <th>#ID</th>
+                        <th>#</th>
+                        <th>Partido</th>
                         <th>Mercado</th>
                         <th>Stake</th>
                         <th>Cuota</th>
                         <th>Estado</th>
                         <th>Ganancia Neta</th>
                         <th>ROI (%)</th>
+                        <th>Acción</th>
                     </tr>
                 </thead>
                 <tbody id="match-history-body">
                     </tbody>
             </table>
+            <button id="delete-all-btn" onclick="confirmClearHistory()">🗑️ Borrar Todo el Historial</button>
         </section>
     </div>
 
@@ -240,7 +281,8 @@
         const TOTAL_INVESTMENT_HISTORIC = NUM_MATCHES * INVESTMENT_PER_MATCH;
         const MIN_ROI_THRESHOLD = 15; // Umbral de ROI del 15%
 
-        let matchHistory = []; 
+        // Usaremos localStorage para persistir los datos del historial
+        let matchHistory = JSON.parse(localStorage.getItem('bettingHistory')) || []; 
         let historicalRoiData = { roiLocal: 0, roiVisitor: 0 }; 
 
         // --- Funciones de Utilidad y Estilos ---
@@ -337,13 +379,15 @@
 
         /** Guarda una apuesta en el historial y actualiza la tabla. */
         function saveMatchToHistory() {
+            const home = document.getElementById('reg-home').value.trim();
+            const away = document.getElementById('reg-away').value.trim();
             const market = document.getElementById('reg-market').value;
             const stakeInput = document.getElementById('reg-stake').value;
             const quotaInput = document.getElementById('reg-quota').value;
             const resultSelect = document.getElementById('reg-result').value;
 
-            if (!stakeInput || !quotaInput || resultSelect === "") {
-                alert('🚨 ERROR: Completa Stake, Cuota y Resultado.');
+            if (!home || !away || !stakeInput || !quotaInput || resultSelect === "") {
+                alert('🚨 ERROR: Completa los nombres de equipos, Stake, Cuota y Resultado.');
                 return;
             }
 
@@ -361,7 +405,9 @@
             const roi = (netProfit / stake) * 100; 
 
             const match = {
-                id: matchHistory.length + 1,
+                id: Date.now(), // Usamos timestamp como ID único
+                home: home,
+                away: away,
                 market: market,
                 stake: stake,
                 quota: quota,
@@ -371,15 +417,52 @@
             };
 
             matchHistory.push(match);
+            saveHistoryToLocalStorage();
             updateHistoryTable();
 
+            // Limpiar campos y dar feedback
+            document.getElementById('reg-home').value = '';
+            document.getElementById('reg-away').value = '';
             document.getElementById('reg-stake').value = '';
             document.getElementById('reg-quota').value = '';
             document.getElementById('reg-result').value = ''; 
             document.getElementById('reg-result').classList.add('result-default');
             document.getElementById('reg-result').classList.remove('result-won', 'result-lost');
-            alert(`✅ Apuesta #${match.id} (${market}) guardada.`);
+            alert(`✅ Apuesta registrada: ${home} vs ${away} (${market}).`);
         }
+        
+        /** Guarda el historial en localStorage. */
+        function saveHistoryToLocalStorage() {
+            localStorage.setItem('bettingHistory', JSON.stringify(matchHistory));
+        }
+
+        // --- Funciones de Eliminación ---
+
+        /** Elimina una apuesta individual por ID. */
+        window.deleteMatch = function(id) {
+            if (confirm('¿Seguro que deseas borrar esta apuesta individual?')) {
+                // Filtramos el array, manteniendo solo los elementos cuyo ID no coincide
+                matchHistory = matchHistory.filter(match => match.id !== id);
+                saveHistoryToLocalStorage();
+                updateHistoryTable();
+                alert('Apuesta eliminada.');
+            }
+        }
+
+        /** Confirma y borra todo el historial. */
+        function confirmClearHistory() {
+            if (matchHistory.length === 0) {
+                 alert('El historial ya está vacío.');
+                 return;
+            }
+            if (confirm('🚨 ¡ADVERTENCIA! ¿Estás seguro de que quieres borrar TODO el historial de apuestas? Esta acción no se puede deshacer.')) {
+                matchHistory = [];
+                saveHistoryToLocalStorage();
+                updateHistoryTable();
+                alert('Historial completamente borrado.');
+            }
+        }
+
 
         /** Calcula el ROI Total de todas las apuestas en el historial (O/U & BTTS). */
         function calculateTotalROI() {
@@ -443,9 +526,12 @@
             const tableBody = document.getElementById('match-history-body');
             tableBody.innerHTML = ''; 
 
-            matchHistory.forEach(match => {
+            matchHistory.forEach((match, index) => {
                 const row = tableBody.insertRow();
-                row.insertCell().textContent = match.id;
+                // Mostramos el índice + 1 como número de fila visible
+                row.insertCell().textContent = index + 1; 
+                // Columna de Partido (Local vs Visitante)
+                row.insertCell().textContent = `${match.home} vs ${match.away}`;
                 row.insertCell().textContent = match.market;
                 row.insertCell().textContent = match.stake.toFixed(2);
                 row.insertCell().textContent = match.quota.toFixed(2);
@@ -461,6 +547,10 @@
                 const roiCell = row.insertCell();
                 roiCell.textContent = `${match.roi.toFixed(2)}%`;
                 roiCell.classList.add(match.roi >= 0 ? 'positive' : 'negative');
+
+                // Botón de eliminar
+                const actionCell = row.insertCell();
+                actionCell.innerHTML = `<button class="btn-delete" onclick="deleteMatch(${match.id})">Borrar</button>`;
             });
             
             updateHistoricalSummary(); 
@@ -483,11 +573,11 @@
             return `${label}: <span class="${className}">${sign}${roundedRoi}%</span>`;
         }
         
-        // Inicializar inputs al cargar la página
+        // Inicializar inputs y tabla al cargar la página
         window.onload = function() {
             generateInputs('local-matches', 'local');
             generateInputs('visitor-matches', 'visitor');
-            updateHistoricalSummary(); 
+            updateHistoryTable(); // Carga los datos del localStorage y actualiza la tabla
         };
     </script>
 
