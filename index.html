@@ -2,410 +2,439 @@
 <html lang="es">
 <head>
 <meta charset="utf-8" />
-<title>Backtesting Robusto (Corregido) - Historial + Futuros</title>
 <meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Backtesting ROI por Equipo — Robust</title>
 <style>
-:root{--card-bg:#fff;--page-bg:#f4f6f8;--accent:#0b67d0}
-body{font-family:Inter, system-ui, Arial, sans-serif;background:var(--page-bg);margin:0;padding:20px;color:#111}
-.container{max-width:1100px;margin:0 auto}
-h1{margin:0 0 12px}
-.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
-.card{background:var(--card-bg);padding:16px;border-radius:10px;box-shadow:0 6px 18px rgba(12,20,30,0.06)}
-label{display:block;margin-bottom:6px;font-weight:600}
-input[type=file]{display:block}
-button{background:var(--accent);color:#fff;border:none;padding:10px 14px;border-radius:8px;cursor:pointer;margin-top:8px}
-button[disabled]{opacity:.5;cursor:not-allowed}
-table{width:100%;border-collapse:collapse;margin-top:10px;font-size:13px}
-th,td{border:1px solid #e6e9ee;padding:8px;text-align:left}
-th{background:#0f1724;color:#fff}
-.small{font-size:13px;color:#666}
-.good{color:green;font-weight:700}
-.bad{color:red;font-weight:700}
-pre.log{background:#0b1220;color:#dbe9ff;padding:8px;border-radius:6px;height:120px;overflow:auto;font-size:13px}
-.full{grid-column:1/ -1}
-.csv-btn{background:#1f8a3d}
-.count{font-weight:700;margin-left:8px}
-@media(max-width:900px){.grid{grid-template-columns:1fr}}
+  :root{--bg:#f5f7fb;--card:#fff;--accent:#0b6ed0}
+  body{font-family:Inter, Arial, sans-serif;background:var(--bg);margin:0;padding:18px;color:#111}
+  .wrap{max-width:1100px;margin:0 auto}
+  h1{margin:0 0 10px;font-size:20px}
+  .row{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px}
+  .card{background:var(--card);padding:14px;border-radius:10px;box-shadow:0 6px 20px rgba(12,20,30,0.06);flex:1;min-width:260px}
+  label{font-weight:700;display:block;margin-bottom:6px}
+  input[type=file]{width:100%}
+  button{background:var(--accent);color:#fff;border:0;padding:10px 14px;border-radius:8px;cursor:pointer}
+  button.secondary{background:#16a34a;margin-left:8px}
+  .small{font-size:13px;color:#555;margin-top:6px}
+  table{width:100%;border-collapse:collapse;margin-top:10px;font-size:13px}
+  th,td{border:1px solid #e6e9ee;padding:8px;text-align:left}
+  th{background:#0f1724;color:#fff}
+  pre.log{background:#0b1220;color:#dbe9ff;padding:8px;border-radius:6px;height:120px;overflow:auto;font-size:13px}
+  .good{color:green;font-weight:700}
+  .bad{color:red;font-weight:700}
+  .badge{display:inline-block;background:#efefef;padding:4px 8px;border-radius:8px;margin-left:8px;font-weight:700}
+  @media(max-width:820px){.row{flex-direction:column}}
 </style>
 </head>
 <body>
-<div class="container">
-    <h1>Backtesting — Versión Corregida</h1>
-    <p class="small">Bank = <b>100</b> (referencia) • Stake fijo = <b>1</b> por apuesta.</p>
+<div class="wrap">
+  <h1>Backtesting ROI por Equipo — versión robusta</h1>
+  <div class="small">Bank referencia: <b>100</b> • Stake fijo: <b>1</b>. Carga los dos archivos (historial y futuros), luego presiona <b>Hacer Backtesting</b>.</div>
 
-    <div class="grid">
-        <div class="card">
-            <label>1) Archivo HISTORIAL (Backtesting)</label>
-            <input id="histInput" type="file" accept=".json" />
-            <div class="small">Registros detectados: <span id="histCount" class="count">0</span></div>
-            <div class="small" style="margin-top:8px">Campos esperados: <code>Match</code>, <code>Odd</code>, <code>Result</code> (Winning/Losing).</div>
-        </div>
-
-        <div class="card">
-            <label>2) Archivo PARTIDOS FUTUROS</label>
-            <input id="futInput" type="file" accept=".json" />
-            <div class="small">Registros detectados: <span id="futCount" class="count">0</span></div>
-            <div class="small" style="margin-top:8px">Campos útiles: <code>Match</code>, <code>Date</code>, <code>Odd</code> (opcional).</div>
-        </div>
-
-        <div class="card full">
-            <button id="runBtn">🔍 Hacer Backtesting y Aplicar a Futuros</button>
-            <button id="downloadCsv" class="csv-btn" style="margin-left:8px">⬇ Descargar CSV (Predicción)</button>
-            <button id="clearMemory" style="margin-left:8px;background:#d03b3b">🗑 Limpiar archivos cargados</button>
-            <div style="margin-top:8px" class="small">Logs / mensajes:</div>
-            <pre id="log" class="log"></pre>
-        </div>
-
-        <div class="card full">
-            <h3>Resumen global</h3>
-            <div id="summary" class="small">Aún no hay datos procesados.</div>
-        </div>
-
-        <div class="card">
-            <h3>Tabla: Partidos HISTORIAL procesados</h3>
-            <table id="histTable">
-                <thead><tr><th>Fecha</th><th>Liga</th><th>Match</th><th>Pick</th><th>Odd</th><th>Result</th><th>Ganancia</th></tr></thead>
-                <tbody></tbody>
-            </table>
-        </div>
-
-        <div class="card">
-            <h3>ROI por Equipo (histórico)</h3>
-            <table id="teamTable">
-                <thead><tr><th>Equipo</th><th>Partidos</th><th>Victorias</th><th>Profit</th><th>ROI %</th><th>Profit / part. (avg)</th></tr></thead>
-                <tbody></tbody>
-            </table>
-        </div>
-
-        <div class="card full">
-            <h3>Predicción aplicada a PARTIDOS FUTUROS</h3>
-            <table id="predTable">
-                <thead><tr><th>Fecha</th><th>Liga</th><th>Match</th><th>Local (ROI%)</th><th>Visitante (ROI%)</th><th>AvgProfit Local</th><th>AvgProfit Visit.</th><th>EV estimado</th><th>Recomendación</th></tr></thead>
-                <tbody></tbody>
-            </table>
-        </div>
+  <div class="row" style="margin-top:12px">
+    <div class="card">
+      <label>1) Archivo HISTORIAL (Backtesting)</label>
+      <input id="histInput" type="file" accept=".json">
+      <div class="small">Registros detectados: <span id="histCount" class="badge">0</span></div>
+      <div class="small">Campos útiles: <code>Match</code>, <code>Odd</code>, <code>Result</code> (Winning/Losing).</div>
     </div>
+
+    <div class="card">
+      <label>2) Archivo PARTIDOS FUTUROS</label>
+      <input id="futInput" type="file" accept=".json">
+      <div class="small">Registros detectados: <span id="futCount" class="badge">0</span></div>
+      <div class="small">Campos sugeridos: <code>Match</code>, <code>Date</code>, <code>Odd</code> (opcional).</div>
+    </div>
+  </div>
+
+  <div class="row" style="align-items:center">
+    <div class="card" style="flex-basis:100%">
+      <button id="runBtn">🔍 Hacer Backtesting y Aplicar a Futuros</button>
+      <button id="csvBtn" class="secondary">⬇ Descargar CSV Predicciones</button>
+      <button id="clearBtn" style="background:#d03b3b;margin-left:8px">🗑 Limpiar memoria</button>
+      <div class="small" style="margin-top:8px">Mensajes / logs:</div>
+      <pre id="log" class="log"></pre>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="card">
+      <h3 style="margin-top:0">Resumen</h3>
+      <div id="summary" class="small">Aún no se ha procesado nada.</div>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0">Controles</h3>
+      <div class="small">Stake: <b>1</b> • Bank ref: <b>100</b></div>
+      <div class="small" style="margin-top:8px">Normalización de nombres: activada (quita tildes/acentos y minusculiza).</div>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="card" style="flex-basis:60%">
+      <h3 style="margin-top:0">ROI por Equipo (Historial)</h3>
+      <table id="teamTable">
+        <thead><tr><th>Equipo</th><th>Partidos</th><th>Victorias</th><th>Profit</th><th>ROI %</th><th>Profit / part. (avg)</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <div class="card" style="flex-basis:40%">
+      <h3 style="margin-top:0">Partidos Historial (procesados)</h3>
+      <table id="histTable">
+        <thead><tr><th>Fecha</th><th>Match</th><th>Odd</th><th>Result</th><th>Ganancia</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:12px">
+    <h3 style="margin-top:0">Predicción aplicada a Partidos Futuros</h3>
+    <table id="predTable">
+      <thead><tr><th>Fecha</th><th>Liga</th><th>Match</th><th>ROI Local</th><th>ROI Visit.</th><th>AvgProfit Local</th><th>AvgProfit Visit.</th><th>EV estimado</th><th>Recomendación</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
 </div>
 
 <script>
-/* ---------- CONFIG ---------- */
+/* ------------------ CONFIG ------------------ */
 const STAKE = 1;
-const INITIAL_BANK = 100;
+const BANK_REF = 100;
 
-/* ---------- HELPERS ---------- */
-const $ = id => document.getElementById(id);
-const logEl = $('log');
-function log(msg){
-    const time = new Date().toLocaleTimeString();
-    logEl.textContent = `[${time}] ${msg}\n` + logEl.textContent;
-}
-function toNumber(v){
-    if(v === null || v === undefined || v === '') return NaN;
-    const s = String(v).replace(/\u00A0/g,'').trim();
-    const s2 = s.replace(/,(\d{1,})$/,'.$1');
-    const n = parseFloat(s2);
-    return isNaN(n) ? NaN : n;
-}
-function isWinning(result){
-    if(!result) return false;
-    const r = String(result).toLowerCase().trim();
-    return ['winning','won','win','w','ganado','g','victoria','victorias','victory'].includes(r);
-}
-
-/* Robust parse (same as versión anterior) */
-function parseJSONContent(content){
-    content = content.trim();
-    if(!content) throw new Error("Contenido vacío");
-    try {
-        const parsed = JSON.parse(content);
-        if(Array.isArray(parsed)) return parsed;
-        if(typeof parsed === 'object') return [parsed];
-    } catch(e){}
-    try {
-        const wrapped = '[' + content + ']';
-        const cleaned = wrapped.replace(/,\s*(\]|\})/g, '$1');
-        const parsed = JSON.parse(cleaned);
-        if(Array.isArray(parsed)) return parsed;
-    } catch(e){}
-    const lines = content.split(/\r?\n/).map(l=>l.trim()).filter(Boolean);
-    if(lines.length > 1){
-        const out=[];
-        for(const line of lines){
-            let ln=line;
-            if(ln.endsWith(',')) ln=ln.slice(0,-1);
-            try { out.push(JSON.parse(ln)); } catch(e){}
-        }
-        if(out.length) return out;
-    }
-    const objs=[];
-    const regex=/{[^}]*}/g;
-    let m;
-    while((m=regex.exec(content))!==null){
-        try { objs.push(JSON.parse(m[0])); } catch(e){}
-    }
-    if(objs.length) return objs;
-    throw new Error("No se pudo parsear el JSON. Ver formato.");
-}
-
-/* ---------- ESTADO EN MEMORIA ---------- */
-/* Ahora guardamos los datos parseados en memoria inmediatamente al subir los archivos. */
+/* ------------------ STATE (persistente en memoria) ------------------ */
 let historialUploaded = null;
 let futurosUploaded = null;
-let teamStats = {};
+let teamStats = {}; // key = normalized team name -> {displayName, matches, wins, profit}
 
-/* ---------- UI: Lectura inmediata al subir ---------- */
-$('histInput').addEventListener('change', async (ev) => {
-    const f = ev.target.files[0];
-    if(!f){ historialUploaded = null; $('histCount').textContent = 0; return; }
-    try {
-        const text = await f.text();
-        const arr = parseJSONContent(text);
-        historialUploaded = arr;
-        $('histCount').textContent = arr.length;
-        log(`Historial cargado en memoria (${f.name}): ${arr.length} registros.`);
-    } catch(err){
-        historialUploaded = null;
-        $('histCount').textContent = 0;
-        log('ERROR parseando historial: ' + err.message);
-        alert('Error parseando archivo historial: ' + err.message);
+/* ------------------ HELPERS ------------------ */
+
+const $ = id => document.getElementById(id);
+const logEl = $('log');
+
+function log(msg){
+  const now = new Date().toLocaleTimeString();
+  logEl.textContent = `[${now}] ${msg}\n` + logEl.textContent;
+}
+
+function safeParseJSON(content){
+  // robust parse: try many forms
+  if(!content || !content.trim()) throw new Error('Archivo vacío');
+  content = content.trim();
+
+  // 1) direct parse
+  try {
+    const parsed = JSON.parse(content);
+    if(Array.isArray(parsed)) return parsed;
+    if(typeof parsed === 'object') return [parsed];
+  } catch(e){}
+
+  // 2) if it's a list of objects separated by commas (common), try wrap
+  try {
+    const wrapped = '[' + content.replace(/,\s*$/,'') + ']';
+    const p = JSON.parse(wrapped);
+    if(Array.isArray(p)) return p;
+  } catch(e){}
+
+  // 3) line-delimited JSON objects
+  const lines = content.split(/\r?\n/).map(l=>l.trim()).filter(Boolean);
+  if(lines.length > 1){
+    const out = [];
+    for(const ln of lines){
+      let s = ln;
+      if(s.endsWith(',')) s = s.slice(0,-1);
+      try { out.push(JSON.parse(s)); } catch(e){}
     }
+    if(out.length) return out;
+  }
+
+  // 4) extract {...} blocks with regex
+  const objs = [];
+  const regex = /{[^}]*}/g;
+  let m;
+  while((m = regex.exec(content)) !== null){
+    try {
+      objs.push(JSON.parse(m[0]));
+    } catch(e){}
+  }
+  if(objs.length) return objs;
+
+  throw new Error('No se pudo parsear el JSON. Revisa el formato.');
+}
+
+function toNumber(v){
+  if(v === null || v === undefined || v === '') return NaN;
+  let s = String(v).replace(/\u00A0/g,'').trim();
+  // handle comma decimals
+  s = s.replace(/,(\d{1,})$/,'$1'.replace ? s : s); // fallback
+  // better: replace last comma with dot when comma used as decimal
+  if(/^\d+,\d+$/.test(s)) s = s.replace(',', '.');
+  const n = parseFloat(s);
+  return isNaN(n) ? NaN : n;
+}
+
+function normalizeName(name){
+  if(!name && name !== 0) return '';
+  // Remove special weird characters, convert to lower, remove diacritics and extra spaces
+  let s = String(name).trim().toLowerCase();
+  // normalize diacritics
+  s = s.normalize('NFD').replace(/\p{Diacritic}/gu, '');
+  // collapse multiple spaces and remove weird characters except alnum and -
+  s = s.replace(/[^a-z0-9\-\s]/g, ' ');
+  s = s.replace(/\s+/g, ' ').trim();
+  return s;
+}
+
+/* ------------------ UI: handle file inputs (read & store in memory) ------------------ */
+
+$('histInput').addEventListener('change', async (ev) => {
+  try {
+    const f = ev.target.files[0];
+    if(!f) { historialUploaded = null; $('histCount').textContent = '0'; return; }
+    const text = await f.text();
+    const arr = safeParseJSON(text);
+    historialUploaded = arr;
+    $('histCount').textContent = arr.length;
+    log(`Historial cargado: ${arr.length} registros (archivo: ${f.name}).`);
+  } catch(err){
+    historialUploaded = null;
+    $('histCount').textContent = '0';
+    log(`ERROR parseando historial: ${err.message}`);
+  }
 });
 
 $('futInput').addEventListener('change', async (ev) => {
+  try {
     const f = ev.target.files[0];
-    if(!f){ futurosUploaded = null; $('futCount').textContent = 0; return; }
-    try {
-        const text = await f.text();
-        const arr = parseJSONContent(text);
-        futurosUploaded = arr;
-        $('futCount').textContent = arr.length;
-        log(`Futuros cargados en memoria (${f.name}): ${arr.length} registros.`);
-    } catch(err){
-        futurosUploaded = null;
-        $('futCount').textContent = 0;
-        log('ERROR parseando futuros: ' + err.message);
-        alert('Error parseando archivo futuros: ' + err.message);
-    }
-});
-
-/* ---------- CLEAR MEMORY BUTTON ---------- */
-$('clearMemory').addEventListener('click', () => {
-    historialUploaded = null;
+    if(!f) { futurosUploaded = null; $('futCount').textContent = '0'; return; }
+    const text = await f.text();
+    const arr = safeParseJSON(text);
+    futurosUploaded = arr;
+    $('futCount').textContent = arr.length;
+    log(`Futuros cargados: ${arr.length} registros (archivo: ${f.name}).`);
+  } catch(err){
     futurosUploaded = null;
-    $('histCount').textContent = 0;
-    $('futCount').textContent = 0;
-    $('histInput').value = '';
-    $('futInput').value = '';
-    log('Archivos cargados en memoria eliminados por usuario.');
+    $('futCount').textContent = '0';
+    log(`ERROR parseando futuros: ${err.message}`);
+  }
 });
 
-/* ---------- PROCESSING (usar datos en memoria) ---------- */
-function resetUIOutputs(){
-    $('histTable').querySelector('tbody').innerHTML = '';
-    $('teamTable').querySelector('tbody').innerHTML = '';
-    $('predTable').querySelector('tbody').innerHTML = '';
-    $('summary').textContent = 'Aún no hay datos procesados.';
+/* ------------------ CLEAR MEMORY ------------------ */
+$('clearBtn').addEventListener('click', () => {
+  historialUploaded = null;
+  futurosUploaded = null;
+  teamStats = {};
+  $('histCount').textContent = '0';
+  $('futCount').textContent = '0';
+  $('teamTable').querySelector('tbody').innerHTML = '';
+  $('histTable').querySelector('tbody').innerHTML = '';
+  $('predTable').querySelector('tbody').innerHTML = '';
+  $('summary').textContent = 'Memoria limpiada.';
+  log('Memoria limpiada por el usuario.');
+});
+
+/* ------------------ PROCESSING: build teamStats from historial ------------------ */
+function processHistorial(){
+  teamStats = {}; // reset
+  const histBody = $('histTable').querySelector('tbody');
+  histBody.innerHTML = '';
+
+  let processedCount = 0;
+  let totalProfit = 0;
+
+  for(const item of (historialUploaded || [])){
+    // Expect fields: Match, Odd, Result (but tolerant)
+    const match = item.Match ?? item.Match ?? item['Match'] ?? '';
+    if(!match) {
+      log('Registro historial sin campo Match -> ignorado.');
+      continue;
+    }
+    const date = item.Date ?? item.date ?? '';
+    const oddRaw = item.Odd ?? item.odd ?? item['Odd 1 PreMatch'] ?? '';
+    const odd = toNumber(oddRaw);
+    const resultRaw = item.Result ?? item.result ?? '';
+    const won = (typeof resultRaw === 'string' && /win|won|winning|ganad/i.test(resultRaw)) || (String(resultRaw).toLowerCase() === 'winning');
+
+    // compute gain only if explicit result present (winning or losing)
+    let gain = 0;
+    if(resultRaw){
+      if(won && !isNaN(odd)) gain = (odd - 1) * STAKE;
+      else if(won && isNaN(odd)) gain = 0;
+      else if(!won) gain = -STAKE;
+      processedCount++;
+      totalProfit += gain;
+    } else {
+      // no result -> show as 0 in table but not count in stats
+      gain = 0;
+    }
+
+    // show in historial table
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${date}</td><td>${match}</td><td>${oddRaw ?? ''}</td><td>${resultRaw ?? ''}</td><td>${gain.toFixed(2)}</td>`;
+    histBody.appendChild(tr);
+
+    // update teamStats only when result present
+    if(resultRaw){
+      const parts = match.split(' - ');
+      let home = parts[0] ? parts[0].trim() : null;
+      let away = parts[1] ? parts[1].trim() : null;
+
+      // if split not valid, store whole string as single key
+      if(!home || !away){
+        const keyNorm = normalizeName(match);
+        if(!teamStats[keyNorm]) teamStats[keyNorm] = { display: match, matches:0, wins:0, profit:0 };
+        teamStats[keyNorm].matches++;
+        if(won) teamStats[keyNorm].wins++;
+        teamStats[keyNorm].profit += gain;
+      } else {
+        const hNorm = normalizeName(home);
+        const aNorm = normalizeName(away);
+
+        if(!teamStats[hNorm]) teamStats[hNorm] = { display: home, matches:0, wins:0, profit:0 };
+        if(!teamStats[aNorm]) teamStats[aNorm] = { display: away, matches:0, wins:0, profit:0 };
+
+        teamStats[hNorm].matches++;
+        teamStats[aNorm].matches++;
+        if(won){
+          teamStats[hNorm].wins++;
+          teamStats[aNorm].wins++;
+          // Note: we count a win toward BOTH teams — this matches earlier behavior requested by you.
+        }
+        teamStats[hNorm].profit += gain;
+        teamStats[aNorm].profit += gain;
+      }
+    }
+  }
+
+  // summary
+  const globalROI = processedCount > 0 ? (totalProfit / (processedCount * STAKE)) * 100 : 0;
+  $('summary').innerHTML = `<b>Historial:</b> ${processedCount} partidos con resultado • Profit total: ${totalProfit.toFixed(2)} • ROI global: ${globalROI.toFixed(2)}% (bank ref ${BANK_REF})`;
+
+  renderTeamTable();
 }
 
-function processHistorialArray(arr){
-    teamStats = {};
-    const histBody = $('histTable').querySelector('tbody');
-    histBody.innerHTML = '';
-
-    let totalProfit = 0;
-    let processed = 0;
-
-    arr.forEach((m, idx) => {
-        if(!m.Match){
-            log(`Hist registro ${idx+1}: falta 'Match' -> ignorado.`);
-            return;
-        }
-        const match = m.Match;
-        const oddRaw = m.Odd ?? m['Odd'] ?? m['odd'] ?? m['Odd 1 PreMatch'] ?? '';
-        const odd = toNumber(oddRaw);
-        const resultRaw = m.Result ?? m['Result'] ?? '';
-        const won = isWinning(resultRaw);
-
-        let gain = 0;
-        if(resultRaw){
-            if(won && !isNaN(odd)) gain = (odd - 1) * STAKE;
-            else if(won && isNaN(odd)) gain = 0;
-            else if(!won) gain = -STAKE;
-        } else {
-            gain = 0;
-        }
-
-        const tr = document.createElement('tr');
-        tr.innerHTML = `<td>${m.Date ?? ''}</td>
-                        <td>${m.League ?? ''}</td>
-                        <td>${match}</td>
-                        <td>${m['Desired Outcome'] ?? ''}</td>
-                        <td>${oddRaw ?? ''}</td>
-                        <td>${resultRaw ?? ''}</td>
-                        <td>${gain.toFixed(2)}</td>`;
-        histBody.appendChild(tr);
-
-        if(resultRaw){
-            totalProfit += gain;
-            processed++;
-
-            const parts = match.split(' - ');
-            let home = parts[0] ? parts[0].trim() : null;
-            let away = parts[1] ? parts[1].trim() : null;
-
-            if(!home || !away){
-                const key = match.trim();
-                if(!teamStats[key]) teamStats[key] = { matches:0, wins:0, profit:0 };
-                teamStats[key].matches++;
-                if(won) teamStats[key].wins++;
-                teamStats[key].profit += gain;
-            } else {
-                [home, away].forEach(team => {
-                    if(!teamStats[team]) teamStats[team] = { matches:0, wins:0, profit:0 };
-                    teamStats[team].matches++;
-                    if(won) teamStats[team].wins++;
-                    teamStats[team].profit += gain;
-                });
-            }
-        }
-    });
-
-    const globalROI = processed > 0 ? (totalProfit / (processed * STAKE)) * 100 : 0;
-    $('summary').innerHTML = `<b>Historial procesado:</b> ${processed} partidos con resultado • Profit total: ${totalProfit.toFixed(2)} • ROI global: ${globalROI.toFixed(2)}%`;
-
-    renderTeamTable();
-}
-
+/* ------------------ RENDER TEAM TABLE ------------------ */
 function renderTeamTable(){
-    const tbody = $('teamTable').querySelector('tbody');
-    tbody.innerHTML = '';
-    const keys = Object.keys(teamStats).sort((a,b) => (teamStats[b].profit - teamStats[a].profit));
-    keys.forEach(team => {
-        const t = teamStats[team];
-        const roiPct = t.matches > 0 ? (t.profit / (t.matches * STAKE)) * 100 : 0;
-        const avgProfit = t.matches > 0 ? (t.profit / t.matches) : 0;
-        const tr = document.createElement('tr');
-        tr.innerHTML = `<td>${team}</td>
-                        <td>${t.matches}</td>
-                        <td>${t.wins}</td>
-                        <td>${t.profit.toFixed(2)}</td>
-                        <td class="${roiPct>=0?'good':'bad'}">${roiPct.toFixed(2)} %</td>
-                        <td>${avgProfit.toFixed(3)}</td>`;
-        tbody.appendChild(tr);
-    });
+  const tbody = $('teamTable').querySelector('tbody');
+  tbody.innerHTML = '';
+
+  // sort by profit desc
+  const keys = Object.keys(teamStats).sort((a,b) => (teamStats[b].profit - teamStats[a].profit));
+  for(const k of keys){
+    const t = teamStats[k];
+    const roiPct = t.matches > 0 ? (t.profit / (t.matches * STAKE)) * 100 : 0;
+    const avgProfit = t.matches > 0 ? (t.profit / t.matches) : 0;
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${t.display}</td><td>${t.matches}</td><td>${t.wins ?? 0}</td><td>${t.profit.toFixed(2)}</td><td class="${roiPct>=0?'good':'bad'}">${roiPct.toFixed(2)} %</td><td>${avgProfit.toFixed(3)}</td>`;
+    tbody.appendChild(tr);
+  }
 }
 
-function applyToFuturos(arr){
-    const tbody = $('predTable').querySelector('tbody');
-    tbody.innerHTML = '';
+/* ------------------ APPLY TO FUTUROS & PREDICT ------------------ */
+function applyToFuturos(){
+  const tbody = $('predTable').querySelector('tbody');
+  tbody.innerHTML = '';
 
-    arr.forEach((m, idx) => {
-        if(!m.Match){ log(`Fut ${idx+1}: falta Match -> ignorado.`); return; }
-        const match = m.Match;
-        const parts = match.split(' - ');
-        const home = parts[0] ? parts[0].trim() : null;
-        const away = parts[1] ? parts[1].trim() : null;
+  for(const m of (futurosUploaded || [])){
+    const match = m.Match ?? m.match ?? '';
+    if(!match){
+      log('Futuro sin campo Match -> ignorado.');
+      continue;
+    }
+    const date = m.Date ?? m.date ?? '';
+    const liga = m.League ?? m.league ?? '';
 
-        const statsHome = home && teamStats[home] ? teamStats[home] : null;
-        const statsAway = away && teamStats[away] ? teamStats[away] : null;
+    const parts = match.split(' - ');
+    const home = parts[0] ? parts[0].trim() : null;
+    const away = parts[1] ? parts[1].trim() : null;
 
-        const roiHome = statsHome && statsHome.matches>0 ? (statsHome.profit / (statsHome.matches * STAKE)) * 100 : null;
-        const roiAway = statsAway && statsAway.matches>0 ? (statsAway.profit / (statsAway.matches * STAKE)) * 100 : null;
+    const homeNorm = home ? normalizeName(home) : null;
+    const awayNorm = away ? normalizeName(away) : null;
 
-        const avgHome = statsHome && statsHome.matches>0 ? (statsHome.profit / statsHome.matches) : null;
-        const avgAway = statsAway && statsAway.matches>0 ? (statsAway.profit / statsAway.matches) : null;
+    const homeStats = (homeNorm && teamStats[homeNorm]) ? teamStats[homeNorm] : null;
+    const awayStats = (awayNorm && teamStats[awayNorm]) ? teamStats[awayNorm] : null;
 
-        let recommendation = 'Sin datos';
-        let ev = null;
+    const roiHome = homeStats && homeStats.matches>0 ? (homeStats.profit / (homeStats.matches * STAKE)) * 100 : null;
+    const roiAway = awayStats && awayStats.matches>0 ? (awayStats.profit / (awayStats.matches * STAKE)) * 100 : null;
+    const avgHome = homeStats && homeStats.matches>0 ? (homeStats.profit / homeStats.matches) : null;
+    const avgAway = awayStats && awayStats.matches>0 ? (awayStats.profit / awayStats.matches) : null;
 
-        if(avgHome !== null && avgAway !== null){
-            ev = Math.max(avgHome, avgAway);
-            if(ev > 0) recommendation = avgHome > avgAway ? `${home} (Apostar)` : `${away} (Apostar)`;
-            else recommendation = 'No rentable (ev ≤ 0)';
-        } else if(avgHome !== null){
-            ev = avgHome;
-            recommendation = avgHome > 0 ? `${home} (Apostar)` : 'No rentable (ev ≤ 0)';
-        } else if(avgAway !== null){
-            ev = avgAway;
-            recommendation = avgAway > 0 ? `${away} (Apostar)` : 'No rentable (ev ≤ 0)';
-        }
+    // Recommendation logic
+    let recommendation = 'Sin datos';
+    let ev = null;
+    if(avgHome !== null && avgAway !== null){
+      ev = Math.max(avgHome, avgAway);
+      recommendation = ev > 0 ? (avgHome > avgAway ? `${home} (Apostar)` : `${away} (Apostar)`) : 'No rentable (ev ≤ 0)';
+    } else if(avgHome !== null){
+      ev = avgHome;
+      recommendation = avgHome > 0 ? `${home} (Apostar)` : 'No rentable (ev ≤ 0)';
+    } else if(avgAway !== null){
+      ev = avgAway;
+      recommendation = avgAway > 0 ? `${away} (Apostar)` : 'No rentable (ev ≤ 0)';
+    }
 
-        const displayRoiHome = roiHome === null ? 'N/A' : `${roiHome.toFixed(2)} %`;
-        const displayRoiAway = roiAway === null ? 'N/A' : `${roiAway.toFixed(2)} %`;
-        const displayAvgHome = avgHome === null ? 'N/A' : avgHome.toFixed(3);
-        const displayAvgAway = avgAway === null ? 'N/A' : avgAway.toFixed(3);
-        const displayEV = ev === null ? 'N/A' : ev.toFixed(3);
+    const displayRoiHome = roiHome === null ? 'N/A' : roiHome.toFixed(2) + ' %';
+    const displayRoiAway = roiAway === null ? 'N/A' : roiAway.toFixed(2) + ' %';
+    const displayAvgHome = avgHome === null ? 'N/A' : avgHome.toFixed(3);
+    const displayAvgAway = avgAway === null ? 'N/A' : avgAway.toFixed(3);
+    const displayEV = ev === null ? 'N/A' : ev.toFixed(3);
 
-        const tr = document.createElement('tr');
-        tr.innerHTML = `<td>${m.Date ?? ''}</td>
-                        <td>${m.League ?? ''}</td>
-                        <td>${match}</td>
-                        <td class="${(roiHome||0)>=0?'good':'bad'}">${displayRoiHome}</td>
-                        <td class="${(roiAway||0)>=0?'good':'bad'}">${displayRoiAway}</td>
-                        <td>${displayAvgHome}</td>
-                        <td>${displayAvgAway}</td>
-                        <td>${displayEV}</td>
-                        <td><b>${recommendation}</b></td>`;
-        tbody.appendChild(tr);
-    });
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${date}</td><td>${liga}</td><td>${match}</td>
+                    <td class="${(roiHome||0)>=0?'good':'bad'}">${displayRoiHome}</td>
+                    <td class="${(roiAway||0)>=0?'good':'bad'}">${displayRoiAway}</td>
+                    <td>${displayAvgHome}</td>
+                    <td>${displayAvgAway}</td>
+                    <td>${displayEV}</td>
+                    <td><b>${recommendation}</b></td>`;
+    tbody.appendChild(tr);
+  }
 }
 
-/* CSV export */
-function downloadPredictionCSV(){
-    const rows = [];
-    rows.push(['Fecha','Liga','Match','ROI Local (%)','ROI Visitante (%)','AvgProfit Local','AvgProfit Visitante','EV estimado','Recomendación']);
-    const tbody = $('predTable').querySelector('tbody');
-    for(const tr of tbody.querySelectorAll('tr')){
-        const cols = Array.from(tr.children).map(td => td.innerText.replace(/\n/g,' ').trim());
-        rows.push(cols);
-    }
-    if(rows.length <= 1){ alert('No hay predicciones para exportar.'); return; }
-    const csv = rows.map(r => r.map(cell => `"${String(cell).replace(/"/g,'""')}"`).join(',')).join('\r\n');
-    const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `predicciones_backtesting_${new Date().toISOString().slice(0,10)}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+/* ------------------ CSV EXPORT ------------------ */
+function exportPredictionsCSV(){
+  const rows = [];
+  rows.push(['Date','League','Match','ROI Local (%)','ROI Visitante (%)','AvgProfit Local','AvgProfit Visitante','EV','Recommendation']);
+  const tbody = $('predTable').querySelector('tbody');
+  for(const tr of tbody.querySelectorAll('tr')){
+    const cols = Array.from(tr.children).map(td => td.innerText.replace(/\n/g,' ').trim());
+    rows.push(cols);
+  }
+  if(rows.length <= 1){ log('No hay predicciones para exportar.'); return; }
+  const csv = rows.map(r => r.map(cell => `"${String(cell).replace(/"/g,'""')}"`).join(',')).join('\r\n');
+  const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `predicciones_backtesting_${new Date().toISOString().slice(0,10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+  log('CSV de predicciones generado.');
 }
 
-/* ---------- RUN BUTTON ---------- */
-$('runBtn').addEventListener('click', async () => {
-    // Validaciones: usar datos ya cargados en memoria
-    if(!historialUploaded){
-        alert('Primero carga el archivo de HISTORIAL (se parseará en memoria al subir).');
-        return;
-    }
-    if(!futurosUploaded){
-        alert('Primero carga el archivo de PARTIDOS FUTUROS (se parseará en memoria al subir).');
-        return;
-    }
+/* ------------------ RUN BUTTON ------------------ */
+$('runBtn').addEventListener('click', () => {
+  // validations
+  if(!historialUploaded){ log('ERROR: debe cargar archivo HISTORIAL antes.'); $('summary').textContent = 'Carga el historial.'; return; }
+  if(!futurosUploaded){ log('ERROR: debe cargar archivo FUTUROS antes.'); $('summary').textContent = 'Carga los partidos futuros.'; return; }
 
-    // Desactivar botón durante procesado
-    $('runBtn').disabled = true;
-    $('downloadCsv').disabled = true;
-    log('Iniciando backtesting con datos en memoria...');
-
-    try {
-        resetUIOutputs();
-        processHistorialArray(historialUploaded);
-        applyToFuturos(futurosUploaded);
-        log('Backtesting completado correctamente.');
-    } catch(err){
-        log('ERROR durante backtesting: ' + (err.message || err));
-        alert('Error durante backtesting: ' + (err.message || 'ver logs'));
-    } finally {
-        $('runBtn').disabled = false;
-        $('downloadCsv').disabled = false;
-    }
+  // process
+  log('Iniciando backtesting usando datos en memoria...');
+  try {
+    processHistorial();
+    applyToFuturos();
+    log('Backtesting finalizado correctamente.');
+  } catch(err){
+    log('ERROR durante backtesting: ' + (err && err.message ? err.message : err));
+  }
 });
 
-$('downloadCsv').addEventListener('click', downloadPredictionCSV);
+/* ------------------ CSV BUTTON ------------------ */
+$('csvBtn').addEventListener('click', exportPredictionsCSV);
 
-/* Inicial state */
-log('Interfaz lista. Sube archivos para empezar. (Se guardan en memoria al subir).');
-
+/* ------------------ initial message ------------------ */
+log('Interfaz lista. Sube los archivos y presiona "Hacer Backtesting".');
+$('summary').textContent = 'Interfaz lista. Sube HISTORIAL y FUTUROS.';
 </script>
 </body>
 </html>
