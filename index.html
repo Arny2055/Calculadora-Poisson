@@ -1,211 +1,553 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-<meta charset="UTF-8" />
-<title>Backtesting ROI por Partido</title>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Backtesting ROI — Completo (Partidos, Equipos, Ligas, Export)</title>
+
+<!-- Chart.js -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<!-- SheetJS (XLSX export) -->
+<script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
+
 <style>
-    body {
-        font-family: Arial;
-        margin: 20px;
-        background: #f1f1f1;
-    }
-    h2 { margin-top: 30px; }
-    .box {
-        background: white;
-        padding: 15px;
-        margin-bottom: 20px;
-        border-radius: 8px;
-        box-shadow: 0px 2px 4px rgba(0,0,0,0.15);
-    }
-    table {
-        width: 100%;
-        border-collapse: collapse;
-        margin-top: 10px;
-        background: white;
-    }
-    table th, table td {
-        border: 1px solid #ccc;
-        padding: 6px;
-        text-align: center;
-    }
-    table th {
-        background: #333;
-        color: white;
-    }
-    .btn {
-        background: #007bff;
-        color: white;
-        padding: 10px 16px;
-        border: none;
-        border-radius: 6px;
-        cursor: pointer;
-        margin-top: 10px;
-    }
-    .btn:hover {
-        background: #0056b3;
-    }
+:root{--bg:#f6f8fb;--card:#fff;--accent:#0b6ed0;--muted:#6b7280;--good:#16a34a;--bad:#dc2626}
+body{font-family:Inter,Arial,Helvetica,sans-serif;background:var(--bg);margin:0;padding:18px;color:#0f1724}
+.wrap{max-width:1200px;margin:0 auto}
+.header{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+h1{margin:0;font-size:20px}
+.card{background:var(--card);padding:12px;border-radius:10px;box-shadow:0 6px 18px rgba(12,20,30,0.06);margin-top:12px}
+.controls{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+@media(max-width:900px){.controls{grid-template-columns:repeat(1,1fr)}}
+label{font-weight:600;margin-bottom:6px;display:block}
+input[type=file], select, input[type=text], input[type=number]{width:100%;padding:8px;border:1px solid #e6e9ee;border-radius:8px}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:10px}
+button{background:var(--accent);color:white;border:none;padding:10px 12px;border-radius:8px;cursor:pointer}
+button.secondary{background:#334155}
+.small{font-size:13px;color:var(--muted)}
+table{width:100%;border-collapse:collapse;margin-top:10px;font-size:13px}
+th,td{padding:8px;border:1px solid #e6e9ee;text-align:left}
+th{background:#0f1724;color:white}
+tr:nth-child(even){background:#fbfdff}
+.good{color:var(--good);font-weight:700}
+.bad{color:var(--bad);font-weight:700}
+pre#log{background:#0b1220;color:#dbe9ff;padding:8px;border-radius:6px;height:120px;overflow:auto;font-size:12px}
+.canvas-wrap{height:300px;padding:6px}
+.actions{display:flex;gap:8px;flex-wrap:wrap}
+.badge{display:inline-block;background:#eef2ff;padding:4px 8px;border-radius:999px;font-weight:700;margin-left:6px}
 </style>
 </head>
-
 <body>
-<h1>Herramienta de Backtesting ROI (Local vs Visitante)</h1>
+<div class="wrap">
+  <div class="header">
+    <div>
+      <h1>Backtesting ROI — Partidos / Equipos / Ligas</h1>
+      <div class="small">Reglas: local→local, visitante→visitante, ROI usa la odd del historial. Stake = 1u por defecto (configurable).</div>
+    </div>
+    <div class="actions">
+      <button id="clearBtn" style="background:#ef4444">Limpiar</button>
+    </div>
+  </div>
 
-<div class="box">
-    <h2>Cargar archivos</h2>
+  <section class="card">
+    <div class="controls">
+      <div>
+        <label>1) Archivo HISTORIAL (JSON)</label>
+        <input id="histFile" type="file" accept=".json">
+      </div>
+      <div>
+        <label>2) Archivo PARTIDOS FUTUROS (JSON)</label>
+        <input id="futFile" type="file" accept=".json">
+      </div>
+      <div>
+        <label>Filtro: Liga</label>
+        <select id="leagueFilter"><option value="all">Todas</option></select>
+      </div>
+      <div>
+        <label>Filtro: Buscar equipo</label>
+        <input id="teamFilter" type="text" placeholder="texto para buscar equipos (opcional)">
+      </div>
+    </div>
 
-    <p><b>Archivo HISTORIAL (JSON):</b>
-    <input type="file" id="historialFile" accept=".json"></p>
+    <div class="row" style="margin-top:12px">
+      <div style="width:120px">
+        <label>Stake por apuesta</label>
+        <input id="stakeInput" type="number" min="0.01" step="0.01" value="1">
+      </div>
+      <div style="width:120px">
+        <label>Bank (referencia)</label>
+        <input id="bankInput" type="number" min="1" step="1" value="100">
+      </div>
+      <div style="flex:1">
+        <label>&nbsp;</label>
+        <div class="row">
+          <button id="runBtn">🔍 Hacer Backtesting</button>
+          <button id="exportAllCsv" class="secondary">⬇ CSV todo</button>
+          <button id="exportAllXlsx" class="secondary">⬇ XLSX todo</button>
+        </div>
+      </div>
+    </div>
 
-    <p><b>Archivo PARTIDOS FUTUROS (JSON):</b>
-    <input type="file" id="futurosFile" accept=".json"></p>
+    <div class="row" style="margin-top:12px">
+      <div style="flex:1">
+        <label>Logs</label>
+        <pre id="log"></pre>
+      </div>
+      <div style="width:320px">
+        <label>Resumen</label>
+        <div id="summary" class="small" style="background:#fff;padding:10px;border-radius:8px;height:120px;overflow:auto"></div>
+      </div>
+    </div>
+  </section>
 
-    <button class="btn" onclick="hacerBacktesting()">Hacer Backtesting</button>
+  <!-- Results: matches -->
+  <section class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <h3 style="margin:0">Resultados por PARTIDO (ordenado por ROI total)</h3>
+      <div class="actions">
+        <button id="exportMatchesCsv" class="secondary">Exportar Matches CSV</button>
+        <button id="exportMatchesXlsx" class="secondary">Exportar Matches XLSX</button>
+      </div>
+    </div>
+    <div class="small">ROI Local = suma (odd_hist −1) para partidos donde local histórico = local futuro; ROI Visitante igual para visitante histórico.</div>
+    <table id="matchesTable">
+      <thead><tr>
+        <th>#</th><th>Partido</th><th>Liga</th><th>ROI Local</th><th>ROI Visitante</th><th>ROI Total</th><th># Local</th><th># Visitante</th>
+      </tr></thead>
+      <tbody></tbody>
+    </table>
+  </section>
+
+  <!-- Results: teams -->
+  <section class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <h3 style="margin:0">Resumen por EQUIPO</h3>
+      <div class="actions">
+        <button id="exportTeamsCsv" class="secondary">Exportar Teams CSV</button>
+        <button id="exportTeamsXlsx" class="secondary">Exportar Teams XLSX</button>
+      </div>
+    </div>
+    <div class="small">Incluye ROI global y ROI separados (local/visitante). Kelly recomendado basado en winrate y odd medio (opcional).</div>
+    <table id="teamsTable">
+      <thead><tr>
+        <th>Equipo</th><th>Matches</th><th>Wins</th><th>Losses</th><th>Profit</th><th>AvgProfit</th><th>ROI %</th><th>ROI Local %</th><th>ROI Visit. %</th><th>Avg Odd</th><th>WinRate</th><th>Kelly %</th><th>Kelly stake (u)</th>
+      </tr></thead>
+      <tbody></tbody>
+    </table>
+  </section>
+
+  <!-- Results: leagues -->
+  <section class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <h3 style="margin:0">Resumen por LIGA</h3>
+      <div class="actions">
+        <button id="exportLeaguesCsv" class="secondary">Exportar Ligas CSV</button>
+        <button id="exportLeaguesXlsx" class="secondary">Exportar Ligas XLSX</button>
+      </div>
+    </div>
+    <div class="small">ROI Ponderado por liga = profit_total / (matches_total * stake) * 100</div>
+    <table id="leaguesTable">
+      <thead><tr><th>Liga</th><th>Matches</th><th>Profit</th><th>ROI % (ponderado)</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </section>
+
+  <!-- Charts -->
+  <section class="card">
+    <div style="display:flex;gap:12px;align-items:flex-start">
+      <div style="flex:1">
+        <h3 style="margin:0">Gráfica: ROI por Equipo (Top 30)</h3>
+        <div class="canvas-wrap"><canvas id="chartTeams"></canvas></div>
+      </div>
+      <div style="width:420px">
+        <h3 style="margin:0">Gráfica: ROI por Liga</h3>
+        <div class="canvas-wrap"><canvas id="chartLeagues"></canvas></div>
+      </div>
+    </div>
+  </section>
+
 </div>
 
-<div id="resultados" class="box"></div>
-
 <script>
-let historialData = [];
-let futurosData = [];
+/* ---------------- State in memory ---------------- */
+let historial = [];
+let futuros = [];
+let matchesResult = []; // per future match results
+let teamsResult = [];   // per team results
+let leaguesResult = []; // per league aggregation
+let chartTeams=null, chartLeagues=null;
 
-/* ---------------------------------------------------
-   LECTOR DE ARCHIVOS (NO BORRA NADA, NO RECARGA NADA)
-----------------------------------------------------*/
-document.getElementById("historialFile").addEventListener("change", function(e) {
-    cargarArchivoJSON(e.target.files[0], "historial");
+/* ---------------- Helpers ---------------- */
+const logEl = document.getElementById('log');
+function log(msg){ const t=new Date().toLocaleTimeString(); logEl.textContent = `[${t}] ${msg}\n` + logEl.textContent; }
+function safeParseJSON(text){
+  text = String(text||'').trim();
+  if(!text) throw new Error('archivo vacío');
+  try{ const p=JSON.parse(text); return Array.isArray(p)?p:[p]; }catch(e){}
+  try{ const p=JSON.parse('['+text.replace(/,\s*$/,'')+']'); return Array.isArray(p)?p:[p]; }catch(e){}
+  const lines = text.split(/\r?\n/).map(l=>l.trim()).filter(Boolean);
+  if(lines.length>1){
+    const out=[];
+    for(let ln of lines){ if(ln.endsWith(',')) ln=ln.slice(0,-1); try{ out.push(JSON.parse(ln)); }catch(e){} }
+    if(out.length) return out;
+  }
+  const objs=[]; const re=/{[^}]*}/g; let m;
+  while((m=re.exec(text))!==null){ try{ objs.push(JSON.parse(m[0])); }catch(e){} }
+  if(objs.length) return objs;
+  throw new Error('No se pudo parsear JSON.');
+}
+function normalize(s){ if(!s && s!==0) return ''; let x=String(s).trim().toLowerCase(); x=x.normalize('NFD').replace(/\p{Diacritic}/gu,''); x=x.replace(/[^a-z0-9\- ]/g,' '); x=x.replace(/\s+/g,' ').trim(); return x; }
+function mean(a){ return a && a.length ? a.reduce((s,v)=>s+v,0)/a.length : NaN; }
+function downloadBlob(blob, filename){ const url = URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download=filename; a.click(); URL.revokeObjectURL(url); }
+
+/* ---------------- File inputs ---------------- */
+document.getElementById('histFile').addEventListener('change', async e=>{
+  const f = e.target.files[0]; if(!f) return;
+  try{
+    const txt = await f.text();
+    historial = safeParseJSON(txt);
+    log(`Historial cargado: ${historial.length} registros (${f.name})`);
+    buildLeagueFilter();
+  }catch(err){ log('ERROR parse historial: '+err.message); alert('Error parse historial: '+err.message); }
 });
-document.getElementById("futurosFile").addEventListener("change", function(e) {
-    cargarArchivoJSON(e.target.files[0], "futuros");
+document.getElementById('futFile').addEventListener('change', async e=>{
+  const f = e.target.files[0]; if(!f) return;
+  try{
+    const txt = await f.text();
+    futuros = safeParseJSON(txt);
+    log(`Futuros cargados: ${futuros.length} registros (${f.name})`);
+    buildLeagueFilter();
+  }catch(err){ log('ERROR parse futuros: '+err.message); alert('Error parse futuros: '+err.message); }
 });
 
-function cargarArchivoJSON(file, tipo) {
-    const reader = new FileReader();
-    reader.onload = function(e) {
-        let txt = e.target.result.trim();
+/* ---------------- Build league select options ---------------- */
+function buildLeagueFilter(){
+  const s = new Set();
+  (historial||[]).forEach(x=>{ if(x.League) s.add(String(x.League)); });
+  (futuros||[]).forEach(x=>{ if(x.League) s.add(String(x.League)); });
+  const sel = document.getElementById('leagueFilter');
+  const prev = sel.value || 'all';
+  sel.innerHTML = '<option value="all">Todas</option>';
+  Array.from(s).sort().forEach(l => {
+    const opt = document.createElement('option'); opt.value = l; opt.textContent = l; sel.appendChild(opt);
+  });
+  sel.value = prev;
+}
 
-        // Si el JSON viene como objetos separados por comas, lo reparamos
-        if (!txt.startsWith("[")) {
-            txt = "[" + txt + "]";
+/* ---------------- Core processing ---------------- */
+document.getElementById('runBtn').addEventListener('click', ()=>{
+  try{
+    if(!historial.length || !futuros.length){ alert('Carga ambos archivos (historial y futuros).'); return; }
+    const stake = parseFloat(document.getElementById('stakeInput').value) || 1;
+    const bank = parseFloat(document.getElementById('bankInput').value) || 100;
+    const ligaFilter = document.getElementById('leagueFilter').value;
+    const teamQuery = (document.getElementById('teamFilter').value||'').trim().toLowerCase();
+
+    matchesResult = [];
+    const teamAcc = {}; // normalized -> aggregated stats
+    const leagueAcc = {}; // league -> {profit, matches}
+
+    // For each future match, compute ROI local and visitante
+    for(const fut of futuros){
+      if(!fut.Match) continue;
+      if(ligaFilter !== 'all' && fut.League !== ligaFilter) continue;
+
+      const [localFutRaw, visitaFutRaw] = String(fut.Match).split(' - ').map(s=> (s||'').trim());
+      const localFut = localFutRaw || '';
+      const visitaFut = visitaFutRaw || '';
+
+      if(teamQuery){
+        if(!localFut.toLowerCase().includes(teamQuery) && !visitaFut.toLowerCase().includes(teamQuery)) continue;
+      }
+
+      // find historial matches where home == localFut
+      const localHist = historial.filter(h=>{
+        if(!h.Match) return false;
+        const [hHome, hAway] = String(h.Match).split(' - ').map(s=> (s||'').trim());
+        return hHome === localFut;
+      });
+
+      // find historial matches where away == visitaFut
+      const visitaHist = historial.filter(h=>{
+        if(!h.Match) return false;
+        const [hHome, hAway] = String(h.Match).split(' - ').map(s=> (s||'').trim());
+        return hAway === visitaFut;
+      });
+
+      // compute roi sums using odd from historial
+      let roiLocal = 0;
+      let cntLocal = 0;
+      for(const h of localHist){
+        const odd = parseFloat(h.Odd);
+        const res = String(h.Result||'').toLowerCase();
+        const win = /win|won|winning|ganad|gano|victoria/.test(res);
+        if(win){
+          roiLocal += (isNaN(odd)?0:(odd - 1));
+        } else {
+          roiLocal -= 1;
         }
+        cntLocal++;
+        // accumulate per team stats
+        const norm = normalize(localFut);
+        teamAcc[norm] = teamAcc[norm] || {display:localFut,matches:0,wins:0,losses:0,profit:0,odds:[], matchesHome:0, winsHome:0, lossesHome:0, profitHome:0, oddsHome:[]};
+        teamAcc[norm].matches++;
+        teamAcc[norm].matchesHome++;
+        if(win){ teamAcc[norm].wins++; teamAcc[norm].winsHome++; } else { teamAcc[norm].losses++; teamAcc[norm].lossesHome++; }
+        const gain = win ? ((isNaN(odd)?0:(odd - 1))): -1;
+        teamAcc[norm].profit += gain;
+        if(!isNaN(odd)) { teamAcc[norm].odds.push(odd); teamAcc[norm].oddsHome.push(odd); }
+        // league accumulate
+        const lg = fut.League || 'Sin liga';
+        leagueAcc[lg] = leagueAcc[lg] || {profit:0,matches:0};
+        leagueAcc[lg].profit += gain;
+        leagueAcc[lg].matches++;
+      }
 
-        try {
-            const data = JSON.parse(txt);
-            if (tipo === "historial") historialData = data;
-            if (tipo === "futuros") futurosData = data;
-        } catch (err) {
-            alert("Error leyendo archivo JSON");
+      let roiVisita = 0;
+      let cntVisita = 0;
+      for(const h of visitaHist){
+        const odd = parseFloat(h.Odd);
+        const res = String(h.Result||'').toLowerCase();
+        const win = /win|won|winning|ganad|gano|victoria/.test(res);
+        if(win){
+          roiVisita += (isNaN(odd)?0:(odd - 1));
+        } else {
+          roiVisita -=1;
         }
-    };
-    reader.readAsText(file);
-}
+        cntVisita++;
+        // accumulate per team stats for away team
+        const norm = normalize(visitaFut);
+        teamAcc[norm] = teamAcc[norm] || {display:visitaFut,matches:0,wins:0,losses:0,profit:0,odds:[], matchesHome:0, winsHome:0, lossesHome:0, profitHome:0, oddsHome:[], matchesAway:0, winsAway:0, lossesAway:0, profitAway:0, oddsAway:[]};
+        teamAcc[norm].matches++;
+        teamAcc[norm].matchesAway = (teamAcc[norm].matchesAway||0)+1;
+        if(win){ teamAcc[norm].wins++; teamAcc[norm].winsAway = (teamAcc[norm].winsAway||0)+1; } else { teamAcc[norm].losses++; teamAcc[norm].lossesAway = (teamAcc[norm].lossesAway||0)+1; }
+        const gain = win ? ((isNaN(odd)?0:(odd - 1))): -1;
+        teamAcc[norm].profit += gain;
+        if(!isNaN(odd)) { teamAcc[norm].odds.push(odd); teamAcc[norm].oddsAway = (teamAcc[norm].oddsAway||[]).concat([odd]); }
+        // league accumulate
+        const lg = fut.League || 'Sin liga';
+        leagueAcc[lg] = leagueAcc[lg] || {profit:0,matches:0};
+        leagueAcc[lg].profit += gain;
+        leagueAcc[lg].matches++;
+      }
 
-/* ---------------------------------------------------
-   OBTENER ROI DE UN EQUIPO SEGÚN SU POSICIÓN (L o V)
-----------------------------------------------------*/
-function calcularROIEquipo(equipo, historial, modo) {
-    // modo = "local" → buscar solo partidos donde fue local
-    // modo = "visitante" → solo partidos donde fue visitante
+      const roiTotal = roiLocal + roiVisita;
+      matchesResult.push({
+        partido: fut.Match,
+        league: fut.League || '',
+        roiLocal: roiLocal,
+        roiVisitante: roiVisita,
+        roiTotal: roiTotal,
+        cntLocal: cntLocal,
+        cntVisitante: cntVisita
+      });
+    } // end futuros loop
 
-    let apuestas = historial.filter(p => {
-        if (!p.Match) return false;
-        const [loc, vis] = p.Match.split(" - ").map(s => s.trim());
-        return (modo === "local" && loc === equipo) ||
-               (modo === "visitante" && vis === equipo);
-    });
+    // sort matches by roiTotal desc
+    matchesResult.sort((a,b)=> b.roiTotal - a.roiTotal);
 
-    let total = 0;
-
-    for (let p of apuestas) {
-        const odd = parseFloat(p.Odd);
-        if (p.Result === "Winning") {
-            total += (odd - 1);
-        } else if (p.Result === "Losing") {
-            total -= 1;
-        }
+    // build teamsResult from teamAcc
+    teamsResult = [];
+    for(const k of Object.keys(teamAcc)){
+      const s = teamAcc[k];
+      const avgProfit = s.matches ? s.profit / s.matches : 0;
+      const roiPct = s.matches ? (s.profit / (s.matches * (parseFloat(document.getElementById('stakeInput').value) || 1))) * 100 : 0;
+      const roiLocal = (s.matchesHome ? (s.profitHome / (s.matchesHome * (parseFloat(document.getElementById('stakeInput').value)||1))) * 100 : NaN);
+      const roiAway = (s.matchesAway ? (s.profitAway / (s.matchesAway * (parseFloat(document.getElementById('stakeInput').value)||1))) * 100 : NaN);
+      const avgOdd = mean(s.odds.filter(Boolean));
+      const winRate = s.matches ? (s.wins / s.matches) : 0;
+      // Kelly
+      let kellyFrac=NaN, kellyStake=NaN;
+      if(!isNaN(avgOdd) && avgOdd>1){
+        const b = avgOdd - 1; const p = winRate; const q = 1 - p;
+        const frac = ((b * p) - q) / b; kellyFrac = Math.max(-1,Math.min(1,frac));
+        if(!isNaN(kellyFrac)) kellyStake = Math.max(0, kellyFrac * (parseFloat(document.getElementById('bankInput').value)||100));
+      }
+      teamsResult.push({
+        team: s.display,
+        matches: s.matches, wins: s.wins, losses: s.losses, profit: s.profit,
+        avgProfit: avgProfit, roiPct: roiPct, roiLocal: roiLocal, roiAway: roiAway, avgOdd: avgOdd,
+        winRate: winRate, kellyFrac: kellyFrac, kellyStake: kellyStake
+      });
     }
 
-    return {
-        partidos: apuestas.length,
-        roi: total,
-        detalle: apuestas
-    };
+    // sort teams by ROI desc
+    teamsResult.sort((a,b)=> b.roiPct - a.roiPct);
+
+    // build leaguesResult
+    leaguesResult = [];
+    for(const lg of Object.keys(leagueAcc)){
+      const m = leagueAcc[lg].matches || 0;
+      const p = leagueAcc[lg].profit || 0;
+      const roiPct = m ? (p / (m * (parseFloat(document.getElementById('stakeInput').value)||1))) * 100 : 0;
+      leaguesResult.push({league:lg, matches:m, profit:p, roiPct:roiPct});
+    }
+    leaguesResult.sort((a,b)=> b.roiPct - a.roiPct);
+
+    // Render everything
+    renderMatchesTable();
+    renderTeamsTable();
+    renderLeaguesTable();
+    renderCharts();
+
+    // Summary
+    document.getElementById('summary').innerHTML = `<div><b>Partidos futuros analizados:</b> ${matchesResult.length}</div>
+      <div><b>Equipos con historial analizado:</b> ${teamsResult.length}</div>
+      <div><b>Ligas detectadas:</b> ${leaguesResult.length}</div>`;
+
+    log('Backtesting completado: matches='+matchesResult.length+', teams='+teamsResult.length+', leagues='+leaguesResult.length);
+  }catch(err){
+    log('ERROR proceso: '+(err && err.message ? err.message : err));
+    alert('Error durante el procesamiento: ' + (err && err.message ? err.message : err));
+  }
+});
+
+/* ---------------- Render functions ---------------- */
+function renderMatchesTable(){
+  const tbody = document.querySelector('#matchesTable tbody'); tbody.innerHTML = '';
+  matchesResult.forEach((r,i)=>{
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${i+1}</td>
+      <td>${r.partido}</td>
+      <td>${r.league}</td>
+      <td class="${r.roiLocal>=0?'good':'bad'}">${r.roiLocal.toFixed(3)}</td>
+      <td class="${r.roiVisitante>=0?'good':'bad'}">${r.roiVisitante.toFixed(3)}</td>
+      <td><b>${r.roiTotal.toFixed(3)}</b></td>
+      <td>${r.cntLocal}</td>
+      <td>${r.cntVisitante}</td>`;
+    tbody.appendChild(tr);
+  });
+}
+function renderTeamsTable(){
+  const tbody = document.querySelector('#teamsTable tbody'); tbody.innerHTML = '';
+  teamsResult.forEach(r=>{
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${r.team}</td>
+      <td>${r.matches}</td>
+      <td>${r.wins}</td>
+      <td>${r.losses}</td>
+      <td>${r.profit.toFixed(3)}</td>
+      <td>${r.avgProfit.toFixed(3)}</td>
+      <td class="${r.roiPct>=0?'good':'bad'}">${r.roiPct.toFixed(2)}%</td>
+      <td>${isNaN(r.roiLocal)?'N/A':r.roiLocal.toFixed(2)+'%'}</td>
+      <td>${isNaN(r.roiAway)?'N/A':r.roiAway.toFixed(2)+'%'}</td>
+      <td>${r.avgOdd? r.avgOdd.toFixed(3) : 'N/A'}</td>
+      <td>${(r.winRate*100).toFixed(2)}%</td>
+      <td>${isNaN(r.kellyFrac)?'N/A':(r.kellyFrac*100).toFixed(2)+'%'}</td>
+      <td>${isNaN(r.kellyStake)?'N/A':r.kellyStake.toFixed(3)}</td>`;
+    tbody.appendChild(tr);
+  });
+}
+function renderLeaguesTable(){
+  const tbody = document.querySelector('#leaguesTable tbody'); tbody.innerHTML = '';
+  leaguesResult.forEach(r=>{
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${r.league}</td><td>${r.matches}</td><td>${r.profit.toFixed(3)}</td><td class="${r.roiPct>=0?'good':'bad'}">${r.roiPct.toFixed(2)}%</td>`;
+    tbody.appendChild(tr);
+  });
 }
 
-/* ---------------------------------------------------
-   BACKTESTING PRINCIPAL POR PARTIDO
-----------------------------------------------------*/
-function hacerBacktesting() {
+/* ---------------- Charts render ---------------- */
+function renderCharts(){
+  const topTeams = teamsResult.slice(0,30);
+  const ctxT = document.getElementById('chartTeams').getContext('2d');
+  if(chartTeams) chartTeams.destroy();
+  chartTeams = new Chart(ctxT, {
+    type:'bar',
+    data:{ labels: topTeams.map(t=>t.team), datasets:[{ label:'ROI %', data: topTeams.map(t=>t.roiPct), backgroundColor: topTeams.map(t=> t.roiPct>0 ? 'rgba(16,185,129,0.8)' : 'rgba(239,68,68,0.8)') }] },
+    options:{responsive:true, plugins:{legend:{display:false}}, scales:{y:{beginAtZero:true}}}
+  });
 
-    if (historialData.length === 0 || futurosData.length === 0) {
-        alert("Debes cargar ambos archivos.");
-        return;
-    }
-
-    let resultadosPartido = [];
-
-    for (let pf of futurosData) {
-
-        if (!pf.Match) continue;
-
-        const [localFut, visitaFut] = pf.Match.split(" - ").map(s => s.trim());
-
-        // ROI LOCAL FUTURO (solo historial como local)
-        const roiLocal = calcularROIEquipo(localFut, historialData, "local");
-
-        // ROI VISITANTE FUTURO (solo historial como visitante)
-        const roiVisitante = calcularROIEquipo(visitaFut, historialData, "visitante");
-
-        resultadosPartido.push({
-            partido: pf.Match,
-            local: localFut,
-            visitante: visitaFut,
-            roiLocal: roiLocal.roi,
-            roiVisitante: roiVisitante.roi,
-            partidosLocal: roiLocal.partidos,
-            partidosVisitante: roiVisitante.partidos,
-            roiTotal: roiLocal.roi + roiVisitante.roi
-        });
-    }
-
-    // ORDENAR
-    resultadosPartido.sort((a, b) => b.roiTotal - a.roiTotal);
-
-    mostrarResultados(resultadosPartido);
+  const ctxL = document.getElementById('chartLeagues').getContext('2d');
+  if(chartLeagues) chartLeagues.destroy();
+  chartLeagues = new Chart(ctxL, {
+    type:'bar',
+    data:{ labels: leaguesResult.map(l=>l.league), datasets:[{ label:'ROI %', data: leaguesResult.map(l=>l.roiPct) }] },
+    options:{responsive:true, plugins:{legend:{display:false}}, scales:{y:{beginAtZero:true}}}
+  });
 }
 
-/* ---------------------------------------------------
-   MOSTRAR TABLA DE RESULTADOS
-----------------------------------------------------*/
-function mostrarResultados(lista) {
-    let html = `
-        <h2>Resultados por Partido (Ordenado por ROI Total)</h2>
-        <table>
-            <tr>
-                <th>Partido</th>
-                <th>ROI Local</th>
-                <th>ROI Visitante</th>
-                <th>Total ROI</th>
-                <th>Partidos Local</th>
-                <th>Partidos Visitante</th>
-            </tr>
-    `;
-
-    for (let r of lista) {
-        html += `
-        <tr>
-            <td>${r.partido}</td>
-            <td>${r.roiLocal.toFixed(2)}</td>
-            <td>${r.roiVisitante.toFixed(2)}</td>
-            <td><b>${r.roiTotal.toFixed(2)}</b></td>
-            <td>${r.partidosLocal}</td>
-            <td>${r.partidosVisitante}</td>
-        </tr>
-        `;
-    }
-
-    html += "</table>";
-    document.getElementById("resultados").innerHTML = html;
+/* ---------------- Exports: CSV & XLSX ---------------- */
+function exportToCSV(dataArray, header, filename){
+  const rows = [header].concat(dataArray.map(obj => header.map(h => obj[h] !== undefined ? obj[h] : '')));
+  const csv = rows.map(r => r.map(cell => `"${String(cell).replace(/"/g,'""')}"`).join(',')).join('\r\n');
+  downloadBlob(new Blob([csv], {type:'text/csv;charset=utf-8;'}), filename);
+  log('CSV exportado: ' + filename);
 }
+function exportToXLSX(sheetName, dataArray, filename){
+  const ws = XLSX.utils.json_to_sheet(dataArray);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, sheetName);
+  const wbout = XLSX.write(wb, {bookType:'xlsx', type:'array'});
+  downloadBlob(new Blob([wbout],{type:'application/octet-stream'}), filename);
+  log('XLSX exportado: ' + filename);
+}
+
+/* Match exports */
+document.getElementById('exportMatchesCsv').addEventListener('click', ()=>{
+  if(!matchesResult.length){ alert('No hay matches para exportar'); return; }
+  const header = ['partido','league','roiLocal','roiVisitante','roiTotal','cntLocal','cntVisitante'];
+  const arr = matchesResult.map(r=>({partido:r.partido, league:r.league, roiLocal:r.roiLocal, roiVisitante:r.roiVisitante, roiTotal:r.roiTotal, cntLocal:r.cntLocal, cntVisitante:r.cntVisitante}));
+  exportToCSV(arr, header, 'matches_backtesting.csv');
+});
+document.getElementById('exportMatchesXlsx').addEventListener('click', ()=>{
+  if(!matchesResult.length){ alert('No hay matches para exportar'); return; }
+  exportToXLSX('matches', matchesResult, 'matches_backtesting.xlsx');
+});
+
+/* Teams exports */
+document.getElementById('exportTeamsCsv').addEventListener('click', ()=>{
+  if(!teamsResult.length){ alert('No hay teams para exportar'); return; }
+  const header = ['team','matches','wins','losses','profit','avgProfit','roiPct','roiLocal','roiAway','avgOdd','winRate','kellyFrac','kellyStake'];
+  const arr = teamsResult.map(r=>({
+    team:r.team,matches:r.matches,wins:r.wins,losses:r.losses,profit:r.profit,avgProfit:r.avgProfit,roiPct:r.roiPct,roiLocal:r.roiLocal,roiAway:r.roiAway,avgOdd:r.avgOdd,winRate:r.winRate,kellyFrac:r.kellyFrac,kellyStake:r.kellyStake
+  }));
+  exportToCSV(arr, header, 'teams_backtesting.csv');
+});
+document.getElementById('exportTeamsXlsx').addEventListener('click', ()=>{
+  if(!teamsResult.length){ alert('No hay teams para exportar'); return; }
+  exportToXLSX('teams', teamsResult, 'teams_backtesting.xlsx');
+});
+
+/* Leagues exports */
+document.getElementById('exportLeaguesCsv').addEventListener('click', ()=>{
+  if(!leaguesResult.length){ alert('No hay ligas para exportar'); return; }
+  const header = ['league','matches','profit','roiPct'];
+  exportToCSV(leaguesResult, header, 'leagues_backtesting.csv');
+});
+document.getElementById('exportLeaguesXlsx').addEventListener('click', ()=>{
+  if(!leaguesResult.length){ alert('No hay ligas para exportar'); return; }
+  exportToXLSX('leagues', leaguesResult, 'leagues_backtesting.xlsx');
+});
+
+/* Export all */
+document.getElementById('exportAllCsv').addEventListener('click', ()=>{
+  if(matchesResult.length) exportToCSV(matchesResult.map(m=>({partido:m.partido,league:m.league,roiLocal:m.roiLocal,roiVisitante:m.roiVisitante,roiTotal:m.roiTotal,cntLocal:m.cntLocal,cntVisitante:m.cntVisitante})), ['partido','league','roiLocal','roiVisitante','roiTotal','cntLocal','cntVisitante'],'all_matches.csv');
+  if(teamsResult.length) exportToCSV(teamsResult.map(t=>({team:t.team,matches:t.matches,wins:t.wins,losses:t.losses,profit:t.profit,avgProfit:t.avgProfit,roiPct:t.roiPct,avgOdd:t.avgOdd,winRate:t.winRate,kellyFrac:t.kellyFrac,kellyStake:t.kellyStake})), ['team','matches','wins','losses','profit','avgProfit','roiPct','avgOdd','winRate','kellyFrac','kellyStake'],'all_teams.csv');
+  if(leaguesResult.length) exportToCSV(leaguesResult, ['league','matches','profit','roiPct'],'all_leagues.csv');
+});
+document.getElementById('exportAllXlsx').addEventListener('click', ()=>{
+  if(!matchesResult.length && !teamsResult.length && !leaguesResult.length){ alert('No hay datos para exportar'); return; }
+  // create sheets
+  const wb = XLSX.utils.book_new();
+  if(matchesResult.length){ const ws = XLSX.utils.json_to_sheet(matchesResult); XLSX.utils.book_append_sheet(wb, ws, 'matches'); }
+  if(teamsResult.length){ const ws2 = XLSX.utils.json_to_sheet(teamsResult); XLSX.utils.book_append_sheet(wb, ws2, 'teams'); }
+  if(leaguesResult.length){ const ws3 = XLSX.utils.json_to_sheet(leaguesResult); XLSX.utils.book_append_sheet(wb, ws3, 'leagues'); }
+  const wbout = XLSX.write(wb, {bookType:'xlsx', type:'array'});
+  downloadBlob(new Blob([wbout],{type:'application/octet-stream'}), 'backtesting_all.xlsx');
+  log('XLSX todo exportado.');
+});
+
+/* Clear button */
+document.getElementById('clearBtn').addEventListener('click', ()=>{
+  historial=[]; futuros=[]; matchesResult=[]; teamsResult=[]; leaguesResult=[]; chartTeams && chartTeams.destroy(); chartLeagues && chartLeagues.destroy();
+  document.querySelectorAll('table tbody').forEach(tb=>tb.innerHTML=''); document.getElementById('summary').innerHTML=''; log('Memoria limpiada.');
+});
+
+/* Utility download wrapper used in XLSX export */
+function downloadBlob(blob, filename){ const url = URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download=filename; a.click(); URL.revokeObjectURL(url); }
+
+log('Interfaz lista — sube HISTORIAL y PARTIDOS FUTUROS para empezar.');
 </script>
 </body>
 </html>
