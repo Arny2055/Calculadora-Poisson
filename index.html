@@ -6,18 +6,19 @@
 <style>
     body { font-family: Arial; margin: 20px; background: #f5f5f5; }
     h2 { margin-top: 30px; }
-    input[type="file"] { padding: 10px; }
-    button { padding: 10px 20px; cursor: pointer; margin-top: 10px; }
+    button { padding: 10px 20px; cursor: pointer; margin: 10px 5px; }
     table { border-collapse: collapse; width: 100%; margin-top: 20px; }
     th, td { border: 1px solid #ccc; padding: 8px; text-align: left; }
     th { background: #333; color: white; }
     tr:nth-child(even) { background: #eee; }
+    .positivo { background: #caffc8 !important; }
     #status { background: #222; color: white; padding: 10px; margin-top: 20px; }
+    select { padding: 8px; }
 </style>
 </head>
 <body>
 
-<h1>Herramienta Backtesting ROI por Equipo</h1>
+<h1>Backtesting ROI por Equipo</h1>
 
 <h2>1. Cargar archivo HISTORIAL (JSON)</h2>
 <input type="file" id="historialFile" accept=".json">
@@ -25,8 +26,14 @@
 <h2>2. Cargar archivo PARTIDOS FUTUROS (JSON)</h2>
 <input type="file" id="futurosFile" accept=".json">
 
-<br><br>
+<h2>3. Filtro por liga</h2>
+<select id="ligaSelect">
+    <option value="all">Todas las ligas</option>
+</select>
+
+<br>
 <button onclick="runBacktesting()">HACER BACKTESTING</button>
+<button onclick="exportCSV()">DESCARGAR CSV</button>
 
 <div id="status">Esperando archivos…</div>
 
@@ -44,15 +51,22 @@
     <tbody></tbody>
 </table>
 
+<h2>Gráfica ROI por equipo</h2>
+<canvas id="roiChart" height="100"></canvas>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
 <script>
 let historial = [];
 let futuros = [];
+let resultadosTabla = [];
 
 /* ----------------------- LECTURA DE ARCHIVOS ----------------------- */
 
 document.getElementById("historialFile").addEventListener("change", function () {
     readJSONFile(this.files[0], data => {
         historial = Array.isArray(data) ? data : [data];
+        actualizarLigas();
         document.getElementById("status").innerText = "Historial cargado con " + historial.length + " registros.";
     });
 });
@@ -60,6 +74,7 @@ document.getElementById("historialFile").addEventListener("change", function () 
 document.getElementById("futurosFile").addEventListener("change", function () {
     readJSONFile(this.files[0], data => {
         futuros = Array.isArray(data) ? data : [data];
+        actualizarLigas();
         document.getElementById("status").innerText = "Partidos futuros cargados: " + futuros.length;
     });
 });
@@ -68,13 +83,31 @@ function readJSONFile(file, callback) {
     const reader = new FileReader();
     reader.onload = e => {
         try {
-            const json = JSON.parse("[" + e.target.result.replace(/}\s*,\s*{/g, "},{") + "]");
+            const text = "[" + e.target.result.replace(/}\s*,\s*{/g, "},{") + "]";
+            const json = JSON.parse(text);
             callback(json);
         } catch (err) {
             alert("Error leyendo el JSON: " + err);
         }
     };
     reader.readAsText(file);
+}
+
+/* ----------------------- FILTRO DE LIGAS ----------------------- */
+
+function actualizarLigas() {
+    const ligas = new Set();
+
+    [...historial, ...futuros].forEach(item => {
+        if (item.League) ligas.add(item.League);
+    });
+
+    const select = document.getElementById("ligaSelect");
+    select.innerHTML = `<option value="all">Todas las ligas</option>`;
+
+    ligas.forEach(liga => {
+        select.innerHTML += `<option value="${liga}">${liga}</option>`;
+    });
 }
 
 /* ----------------------- BACKTESTING ----------------------- */
@@ -87,10 +120,13 @@ function runBacktesting() {
 
     document.getElementById("status").innerText = "Procesando Backtesting…";
 
-    let resultados = {}; // estructura: equipo → {games, wins, losses}
+    let filtroLiga = document.getElementById("ligaSelect").value;
+
+    let resultados = {};
 
     futuros.forEach(match => {
         if (!match.Match) return;
+        if (filtroLiga !== "all" && match.League !== filtroLiga) return;
 
         let [home, away] = match.Match.split(" - ").map(x => x.trim());
 
@@ -98,7 +134,6 @@ function runBacktesting() {
         analizarEquipo(away, historial, resultados);
     });
 
-    // Convertir a tabla computando ROI
     let tabla = Object.entries(resultados).map(([equipo, data]) => {
         let roi = ((data.wins * 1) - (data.losses * 1)) / data.games * 100;
         return {
@@ -106,14 +141,15 @@ function runBacktesting() {
             games: data.games,
             wins: data.wins,
             losses: data.losses,
-            roi: roi.toFixed(2)
+            roi: roi
         };
     });
 
-    // Ordenar por mayor ROI
     tabla.sort((a, b) => b.roi - a.roi);
+    resultadosTabla = tabla;
 
     mostrarTabla(tabla);
+    graficar(tabla);
 
     document.getElementById("status").innerText = "Backtesting finalizado ✔️";
 }
@@ -146,14 +182,61 @@ function mostrarTabla(data) {
 
     data.forEach(row => {
         let tr = document.createElement("tr");
+
+        if (row.roi > 0) tr.classList.add("positivo");
+
         tr.innerHTML = `
             <td>${row.equipo}</td>
             <td>${row.games}</td>
             <td>${row.wins}</td>
             <td>${row.losses}</td>
-            <td><b>${row.roi}%</b></td>
+            <td><b>${row.roi.toFixed(2)}%</b></td>
         `;
         tbody.appendChild(tr);
+    });
+}
+
+/* ----------------------- CSV EXPORT ----------------------- */
+
+function exportCSV() {
+    let csv = "Equipo,Partidos,Ganados,Perdidos,ROI\n";
+    resultadosTabla.forEach(r => {
+        csv += `${r.equipo},${r.games},${r.wins},${r.losses},${r.roi.toFixed(2)}\n`;
+    });
+
+    const blob = new Blob([csv], {type: "text/csv"});
+    const url = URL.createObjectURL(blob);
+
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "backtesting_roi.csv";
+    a.click();
+}
+
+/* ----------------------- GRÁFICA ----------------------- */
+
+let chart;
+
+function graficar(data) {
+    const ctx = document.getElementById("roiChart");
+
+    if (chart) chart.destroy();
+
+    chart = new Chart(ctx, {
+        type: "bar",
+        data: {
+            labels: data.map(r => r.equipo),
+            datasets: [{
+                label: "ROI %",
+                data: data.map(r => r.roi)
+            }]
+        },
+        options: {
+            responsive: true,
+            scales: {
+                y: { beginAtZero: true }
+            }
+        }
     });
 }
 </script>
