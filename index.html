@@ -129,6 +129,13 @@
             padding-top: 10px;
             border-top: 1px solid #ccc;
         }
+        .history-roi-summary {
+            display: flex;
+            justify-content: space-around;
+            padding: 10px 0;
+            border-bottom: 1px solid #ccc;
+            margin-bottom: 15px;
+        }
     </style>
 </head>
 <body>
@@ -138,7 +145,7 @@
 
         <section>
             <h2>📝 Datos para Cálculo de ROI Histórico (Fijo: Stake 1)</h2>
-            <p>Usa esta sección solo para el análisis rápido de un historial fijo de **5 partidos por equipo** (Stake 1 unitario).</p>
+            <p>Usa esta sección para el análisis rápido de un historial fijo de **5 partidos por equipo** (Stake 1 unitario).</p>
             <div class="grid-layout">
                 <div class="section-box">
                     <h3 style="color: #d9534f;">🏠 Equipo Local</h3>
@@ -153,11 +160,9 @@
             <button id="calc-roi-btn" onclick="calculateROI()">Calcular ROI Histórico</button>
 
             <div id="results" style="display: none;">
-                <h3>✅ Resultados del ROI Histórico</h3>
-                <div class="result-item" id="roi-local"></div>
-                <div class="result-item" id="roi-visitor"></div>
-                <hr>
-                <div class="result-item" id="roi-combined"></div>
+                <div class="result-item" id="roi-local-output"></div>
+                <div class="result-item" id="roi-visitor-output"></div>
+                <div class="result-item" id="roi-combined-output"></div>
             </div>
         </section>
         
@@ -196,8 +201,10 @@
 
         <section class="history-section">
             <h2>📜 Historial de Apuestas (Stake Variable)</h2>
-            <div id="total-roi-results">
+            
+            <div class="history-roi-summary" id="historical-roi-summary">
                 </div>
+            
             <table id="match-history-table">
                 <thead>
                     <tr>
@@ -260,8 +267,8 @@
         }
 
         // --- Lógica de ROI Histórico (Stake 1) ---
-        // (Mantenido solo para la sección de análisis rápido por equipo)
 
+        /** Calcula la ganancia neta para un equipo en los 5 partidos históricos. */
         function calculateNetProfit(prefix) {
             let totalReturn = 0;
             for (let i = 1; i <= NUM_MATCHES; i++) {
@@ -282,13 +289,15 @@
             return totalReturn - TOTAL_INVESTMENT_HISTORIC; 
         }
 
+        /** Calcula y MUESTRA el ROI histórico en la sección de historial. */
         function calculateROI() {
             const netProfitLocal = calculateNetProfit('local');
             const netProfitVisitor = calculateNetProfit('visitor');
 
             if (netProfitLocal === null || netProfitVisitor === null) {
-                document.getElementById('results').style.display = 'none';
                 alert('🚨 Completa todos los 5 partidos (Cuota y Resultado) en ambas secciones para el cálculo histórico.');
+                // Limpiamos los resultados históricos en el historial si hay error
+                updateHistoricalSummary(0, 0, 0, 0); 
                 return;
             }
 
@@ -298,9 +307,13 @@
             const totalCombinedInvestment = TOTAL_INVESTMENT_HISTORIC * 2; 
             const roiCombined = (totalNetProfit / totalCombinedInvestment) * 100;
 
-            document.getElementById('roi-local').innerHTML = formatResult('🏠 ROI Local', roiLocal);
-            document.getElementById('roi-visitor').innerHTML = formatResult('✈️ ROI Visitante', roiVisitor);
-            document.getElementById('roi-combined').innerHTML = formatResult('✨ ROI Combinado', roiCombined);
+            // Mostrar el ROI Combinado en la sección de historial
+            updateHistoricalSummary(roiLocal, roiVisitor, totalCombinedInvestment, roiCombined);
+
+            // Opcional: mostrar los resultados en la sección de "Resultados ROI Histórico"
+            document.getElementById('roi-local-output').innerHTML = formatResult('🏠 ROI Local', roiLocal);
+            document.getElementById('roi-visitor-output').innerHTML = formatResult('✈️ ROI Visitante', roiVisitor);
+            document.getElementById('roi-combined-output').innerHTML = formatResult('✨ ROI Combinado', roiCombined);
             document.getElementById('results').style.display = 'block';
         }
 
@@ -355,12 +368,10 @@
             alert(`✅ Apuesta #${match.id} (${market}) guardada con éxito.`);
         }
 
-        /** Calcula el ROI Total de todas las apuestas en el historial. */
+        /** Calcula el ROI Total de todas las apuestas en el historial (O/U & BTTS). */
         function calculateTotalROI() {
-            const resultsDiv = document.getElementById('total-roi-results');
             if (matchHistory.length === 0) {
-                resultsDiv.innerHTML = 'Aún no hay apuestas registradas.';
-                return;
+                return { totalInvestment: 0, totalNetProfit: 0, totalROI: 0 };
             }
 
             let totalInvestment = 0;
@@ -372,21 +383,41 @@
             });
 
             const totalROI = (totalNetProfit / totalInvestment) * 100;
+            
+            return { totalInvestment, totalNetProfit, totalROI };
+        }
 
-            const totalNetProfitFormatted = totalNetProfit.toFixed(2);
-            const totalROIFormatted = totalROI.toFixed(2);
+        /** Actualiza el resumen de ROI en la parte superior del historial. */
+        function updateHistoricalSummary(roiLocal, roiVisitor, historicalInvestment, roiCombinedHistorical) {
+            const historySummary = document.getElementById('historical-roi-summary');
+            const totalROIData = calculateTotalROI(); // ROI de las apuestas reales
 
-            const className = totalROI > 0 ? 'positive' : (totalROI < 0 ? 'negative' : 'zero');
-            const sign = totalROI >= 0 ? '+' : '';
+            // Formato para ROI Histórico (Fijo, Stake 1)
+            const roiLocalFormatted = formatResult(`🏠 ROI Local (5P)`, roiLocal);
+            const roiVisitorFormatted = formatResult(`✈️ ROI Visitante (5P)`, roiVisitor);
 
-            resultsDiv.innerHTML = `
-                <p>Total de Apuestas: <strong>${matchHistory.length}</strong> | Inversión Total: <strong>${totalInvestment.toFixed(2)}</strong></p>
-                <p>Ganancia Neta Total: <span class="${className}">${sign}${totalNetProfitFormatted}</span> | ROI General: <span class="${className}">${sign}${totalROIFormatted}%</span></p>
+            // Formato para ROI de Apuestas Reales (Variable)
+            const roiGeneralFormatted = formatResult(`✨ ROI General (${matchHistory.length} Ap.)`, totalROIData.totalROI);
+            
+            const generalInfo = `
+                ROI Apuestas Reales: 
+                <span class="${totalROIData.totalROI >= 0 ? 'positive' : 'negative'}">
+                    ${totalROIData.totalROI >= 0 ? '+' : ''}${totalROIData.totalROI.toFixed(2)}%
+                </span> 
+                (Inv. Total: ${totalROIData.totalInvestment.toFixed(2)})
+            `;
+
+            historySummary.innerHTML = `
+                <div style="font-size:1.0em;">${roiLocalFormatted}</div>
+                <div style="font-size:1.0em;">${roiVisitorFormatted}</div>
+                <div style="font-size:1.0em; font-weight: bold; border-left: 1px solid #ccc; padding-left: 20px;">
+                    ${roiGeneralFormatted}
+                </div>
             `;
         }
 
 
-        /** Actualiza la tabla de historial con los datos del array y el ROI Total. */
+        /** Actualiza la tabla de historial con los datos del array. */
         function updateHistoryTable() {
             const tableBody = document.getElementById('match-history-body');
             tableBody.innerHTML = ''; 
@@ -410,11 +441,13 @@
                 roiCell.textContent = `${match.roi.toFixed(2)}%`;
                 roiCell.classList.add(match.roi >= 0 ? 'positive' : 'negative');
             });
-
-            calculateTotalROI(); // Recalcula y muestra el ROI general
+            
+            // Recalcula y actualiza el resumen (incluyendo el ROI General de las apuestas reales)
+            // Usamos 0, 0, 0, 0 como valores por defecto si no se ha calculado el ROI Histórico aún.
+            updateHistoricalSummary(0, 0, 0, 0); 
         }
 
-        /** Formatea el resultado de ROI con color según sea positivo, negativo o cero. */
+        /** Formatea el resultado de ROI con color. */
         function formatResult(label, roi) {
             const roundedRoi = roi.toFixed(2);
             let className;
@@ -435,7 +468,7 @@
         window.onload = function() {
             generateInputs('local-matches', 'local');
             generateInputs('visitor-matches', 'visitor');
-            calculateTotalROI(); // Inicializa el mensaje de ROI total
+            updateHistoricalSummary(0, 0, 0, 0); // Inicializa el resumen con 0s
         };
     </script>
 
