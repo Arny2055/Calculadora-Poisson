@@ -1,197 +1,431 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-<meta charset="UTF-8">
-<title>Backtesting + Predicción con Partidos Futuros</title>
-
+<meta charset="utf-8" />
+<title>Backtesting Robusto - Historial + Predicción Futuros</title>
+<meta name="viewport" content="width=device-width,initial-scale=1" />
 <style>
-    body { font-family: Arial; background:#f1f1f1; padding:20px; }
-    h2 { margin-top:25px; }
-    .card {
-        background:white; padding:20px; border-radius:10px;
-        box-shadow:0 2px 10px rgba(0,0,0,0.1); margin-bottom:30px;
-    }
-    table { width:100%; border-collapse:collapse; margin-top:10px; }
-    th, td { border:1px solid #ddd; padding:8px; text-align:center; }
-    th { background:#333; color:white; }
-    input[type="file"] { margin-top:10px; }
-    button {
-        background:#007bff; border:none; padding:12px 20px;
-        color:white; border-radius:8px; cursor:pointer;
-        font-size:16px;
-    }
-    button:hover { background:#0056b3; }
-    .good { color:green; font-weight:bold; }
-    .bad { color:red; font-weight:bold; }
+    :root{--card-bg:#fff;--page-bg:#f4f6f8;--accent:#0b67d0}
+    body{font-family:Inter, system-ui, Arial, sans-serif;background:var(--page-bg);margin:0;padding:20px;color:#111}
+    .container{max-width:1100px;margin:0 auto}
+    h1{margin:0 0 12px}
+    .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+    .card{background:var(--card-bg);padding:16px;border-radius:10px;box-shadow:0 6px 18px rgba(12,20,30,0.06)}
+    label{display:block;margin-bottom:6px;font-weight:600}
+    input[type=file]{display:block}
+    button{background:var(--accent);color:#fff;border:none;padding:10px 14px;border-radius:8px;cursor:pointer;margin-top:8px}
+    button[disabled]{opacity:.5;cursor:not-allowed}
+    table{width:100%;border-collapse:collapse;margin-top:10px;font-size:13px}
+    th,td{border:1px solid #e6e9ee;padding:8px;text-align:left}
+    th{background:#0f1724;color:#fff}
+    .small{font-size:13px;color:#666}
+    .good{color:green;font-weight:700}
+    .bad{color:red;font-weight:700}
+    pre.log{background:#0b1220;color:#dbe9ff;padding:8px;border-radius:6px;height:120px;overflow:auto;font-size:13px}
+    .full{grid-column:1/ -1}
+    .csv-btn{background:#1f8a3d}
+    @media(max-width:900px){.grid{grid-template-columns:1fr}}
 </style>
 </head>
-
 <body>
+<div class="container">
+    <h1>Backtesting Robusto — Historial + Aplicación a Partidos Futuros</h1>
+    <p class="small">Bank = <b>100</b> (referencia) • Stake fijo = <b>1</b> por apuesta. Sube un archivo para historial y otro para futuros. Luego presiona <b>Hacer Backtesting</b>.</p>
 
-<h1>📊 Backtesting + Predicción para Partidos Futuros</h1>
+    <div class="grid">
+        <div class="card">
+            <label>1) Archivo HISTORIAL (Backtesting)</label>
+            <input id="histInput" type="file" accept=".json" />
+            <div class="small" style="margin-top:8px">El historial debe contener registros con campos: <code>Match</code>, <code>Odd</code>, <code>Result</code> (Winning/Losing).</div>
+        </div>
 
-<!-- CARGAS DE ARCHIVO -->
-<div class="card">
-    <h2>📁 Cargar Historial (Backtesting)</h2>
-    <input type="file" id="historialInput" accept=".json">
-</div>
+        <div class="card">
+            <label>2) Archivo PARTIDOS FUTUROS</label>
+            <input id="futInput" type="file" accept=".json" />
+            <div class="small" style="margin-top:8px">Los partidos futuros pueden no tener <code>Result</code>. Deben incluir <code>Match</code> y <code>Odd</code> (opcional).</div>
+        </div>
 
-<div class="card">
-    <h2>📁 Cargar Partidos Futuros</h2>
-    <input type="file" id="futurosInput" accept=".json">
-</div>
+        <div class="card full">
+            <button id="runBtn">🔍 Hacer Backtesting y Aplicar a Futuros</button>
+            <button id="downloadCsv" class="csv-btn" style="margin-left:8px">⬇ Descargar CSV (Predicción)</button>
+            <div style="margin-top:8px" class="small">Logs / mensajes:</div>
+            <pre id="log" class="log"></pre>
+        </div>
 
-<div class="card">
-    <button id="runBacktesting">🔍 Hacer Backtesting + Predicción</button>
-</div>
+        <div class="card full">
+            <h3>Resumen global</h3>
+            <div id="summary" class="small">Aún no hay datos procesados.</div>
+        </div>
 
-<!-- TABLAS -->
-<div class="card">
-    <h2>ROI por Equipo (Historial)</h2>
-    <table id="teamROI">
-        <thead>
-            <tr>
-                <th>Equipo</th>
-                <th>Partidos</th>
-                <th>Ganadas</th>
-                <th>ROI %</th>
-                <th>Beneficio</th>
-            </tr>
-        </thead>
-        <tbody></tbody>
-    </table>
-</div>
+        <div class="card">
+            <h3>Tabla: Partidos HISTORIAL procesados</h3>
+            <table id="histTable">
+                <thead><tr><th>Fecha</th><th>Liga</th><th>Match</th><th>Pick</th><th>Odd</th><th>Result</th><th>Ganancia</th></tr></thead>
+                <tbody></tbody>
+            </table>
+        </div>
 
-<div class="card">
-    <h2>Predicción para Partidos Futuros (Según ROI Histórico)</h2>
-    <table id="predictTable">
-        <thead>
-            <tr>
-                <th>Partido</th>
-                <th>Equipo Local ROI</th>
-                <th>Equipo Visitante ROI</th>
-                <th>Equipo Más Rentable</th>
-            </tr>
-        </thead>
-        <tbody></tbody>
-    </table>
+        <div class="card">
+            <h3>ROI por Equipo (histórico)</h3>
+            <table id="teamTable">
+                <thead><tr><th>Equipo</th><th>Partidos</th><th>Victorias</th><th>Profit</th><th>ROI %</th><th>Profit / part. (avg)</th></tr></thead>
+                <tbody></tbody>
+            </table>
+        </div>
+
+        <div class="card full">
+            <h3>Predicción aplicada a PARTIDOS FUTUROS</h3>
+            <table id="predTable">
+                <thead><tr><th>Fecha</th><th>Liga</th><th>Match</th><th>Local (ROI%)</th><th>Visitante (ROI%)</th><th>AvgProfit Local</th><th>AvgProfit Visit.</th><th>EV estimado (pick mejor)</th><th>Recomendación</th></tr></thead>
+                <tbody></tbody>
+            </table>
+        </div>
+    </div>
 </div>
 
 <script>
+/* ---------------- CONFIG ---------------- */
 const STAKE = 1;
+const INITIAL_BANK = 100;
 
-let historialData = [];
-let futurosData = [];
-let teamStats = {};
+/* ---------------- HELPERS & UTIL ---------------- */
+const $ = id => document.getElementById(id);
+const logEl = $('log');
 
-// Leer JSON --------------------
-function readJSON(file, callback) {
-    const reader = new FileReader();
-    reader.onload = e => {
-        try {
-            let content = e.target.result;
-            let data = JSON.parse("[" + content.replace(/,\s*$/, "") + "]");
-            callback(data);
-        } catch (err) {
-            alert("Archivo JSON inválido");
-        }
-    };
-    reader.readAsText(file);
+function log(msg){
+    const time = new Date().toLocaleTimeString();
+    logEl.textContent = `[${time}] ${msg}\n` + logEl.textContent;
 }
 
-document.getElementById("historialInput").addEventListener("change", e => {
-    readJSON(e.target.files[0], d => historialData = d);
-});
+/* Robust JSON parsing:
+   tries multiple strategies to parse user-provided JSON content.
+   returns array of objects or throws. */
+function parseJSONContent(content){
+    content = content.trim();
+    if(!content) throw new Error("Contenido vacío");
 
-document.getElementById("futurosInput").addEventListener("change", e => {
-    readJSON(e.target.files[0], d => futurosData = d);
-});
+    // 1) Try direct parse (array or object)
+    try {
+        const parsed = JSON.parse(content);
+        if(Array.isArray(parsed)) return parsed;
+        if(typeof parsed === 'object') return [parsed];
+    } catch(e){ /* ignore */ }
 
-document.getElementById("runBacktesting").addEventListener("click", () => {
-    if (!historialData.length || !futurosData.length) {
-        alert("Debe subir ambos archivos.");
+    // 2) If looks like multiple objects separated by commas (common in your examples)
+    // Try wrapping in array safely.
+    try {
+        const wrapped = '[' + content + ']';
+        const cleaned = wrapped.replace(/,\s*(\]|\})/g, '$1'); // remove trailing commas before ] or }
+        const parsed = JSON.parse(cleaned);
+        if(Array.isArray(parsed)) return parsed;
+    } catch(e){ /* ignore */ }
+
+    // 3) Try line-by-line parsing (each line a JSON object)
+    const lines = content.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+    if(lines.length > 1){
+        const out = [];
+        for(const line of lines){
+            let ln = line;
+            // remove trailing commas
+            if(ln.endsWith(',')) ln = ln.slice(0,-1);
+            try {
+                const obj = JSON.parse(ln);
+                out.push(obj);
+            } catch(e){
+                // try parse segments separated by '}, {' style
+                // fallback: try to find individual {...} with regex
+            }
+        }
+        if(out.length) return out;
+    }
+
+    // 4) fallback: extract {...} objects by regex (greedy minimal)
+    const objs = [];
+    const regex = /{[^}]*}/g;
+    let m;
+    while((m = regex.exec(content)) !== null){
+        try{
+            const o = JSON.parse(m[0]);
+            objs.push(o);
+        }catch(err){}
+    }
+    if(objs.length) return objs;
+
+    // if all fails:
+    throw new Error("No se pudo parsear el JSON. Asegúrate que el archivo sea JSON válido o múltiples objetos JSON separados correctamente.");
+}
+
+/* Safe number parse */
+function toNumber(v){
+    if(v === null || v === undefined || v === '') return NaN;
+    // remove non-breaking spaces and trim
+    const s = String(v).replace(/\u00A0/g,'').trim();
+    // replace comma decimal like "1,83" -> "1.83" (if present)
+    const s2 = s.replace(/,(\d{1,2})$/,'.$1');
+    const n = parseFloat(s2);
+    return isNaN(n) ? NaN : n;
+}
+
+/* Normalizar result text */
+function isWinning(result){
+    if(!result) return false;
+    const r = String(result).toLowerCase().trim();
+    return r === 'winning' || r === 'won' || r === 'win' || r === 'w' || r === 'ganado' || r === 'g';
+}
+
+/* ---------------- MAIN LOGIC ---------------- */
+
+let historial = [], futuros = [], teamStats = {};
+
+function resetState(){
+    historial = []; futuros = []; teamStats = {};
+    $('histTable').querySelector('tbody').innerHTML = '';
+    $('teamTable').querySelector('tbody').innerHTML = '';
+    $('predTable').querySelector('tbody').innerHTML = '';
+    $('summary').textContent = 'Aún no hay datos procesados.';
+    logEl.textContent = '';
+}
+
+/* Read file input (single file) and parse */
+function handleFileInput(fileInput, targetArrayName){
+    return new Promise((resolve, reject) => {
+        const file = fileInput.files[0];
+        if(!file) return resolve([]);
+        const reader = new FileReader();
+        reader.onload = ev => {
+            try {
+                const arr = parseJSONContent(ev.target.result);
+                log(`Archivo '${file.name}' parseado: ${arr.length} registros.`);
+                resolve(arr);
+            } catch(err){
+                reject(new Error(`Error parseando '${file.name}': ${err.message}`));
+            }
+        };
+        reader.onerror = err => reject(err);
+        reader.readAsText(file);
+    });
+}
+
+/* Process historial -> populate teamStats and display */
+function processHistorialArray(arr){
+    teamStats = {};
+    const histBody = $('histTable').querySelector('tbody');
+    histBody.innerHTML = '';
+
+    let totalProfit = 0;
+    let totalStaked = 0;
+    let processed = 0;
+
+    arr.forEach((m, idx) => {
+        // Basic validation
+        if(!m.Match){
+            log(`Registro ${idx+1}: falta campo 'Match' - se ignora.`);
+            return;
+        }
+        const match = m.Match;
+        const oddRaw = m.Odd ?? m['Odd'] ?? m['odd'] ?? m['Odd 1 PreMatch'] ?? '';
+        const odd = toNumber(oddRaw);
+        const resultRaw = m.Result ?? m['Result'] ?? '';
+        const won = isWinning(resultRaw);
+
+        // Compute gain: win => (odd - 1) * stake  ; lose => -stake ; else 0
+        let gain = 0;
+        if(won && !isNaN(odd)) gain = (odd - 1) * STAKE;
+        else if(won && isNaN(odd)) gain = STAKE * 0; // odd missing but marked winning -> treat as 0 profit (log)
+        else if(!won && resultRaw) gain = -STAKE;
+        else gain = 0; // no result -> skip in stats and table? We'll still show with gain 0 but not count in team stats
+
+        // Display in historial table (even if no result)
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td>${m.Date ?? ''}</td>
+                        <td>${m.League ?? ''}</td>
+                        <td>${match}</td>
+                        <td>${m['Desired Outcome'] ?? m.DesiredOutcome ?? ''}</td>
+                        <td>${oddRaw ?? ''}</td>
+                        <td>${resultRaw ?? ''}</td>
+                        <td>${gain.toFixed(2)}</td>`;
+        histBody.appendChild(tr);
+
+        // Only include in historical stats if we have explicit result (win or loss)
+        if(resultRaw && (won || (!won && String(resultRaw).trim() !== ''))){
+            // Update totals
+            totalProfit += gain;
+            totalStaked += STAKE;
+            processed++;
+
+            // split teams (expect "Home - Away" format)
+            const parts = match.split(' - ');
+            let home = parts[0] ? parts[0].trim() : null;
+            let away = parts[1] ? parts[1].trim() : null;
+
+            // If match format unexpected, still record whole string as one team to avoid crash
+            if(!home || !away){
+                // store under single key
+                const key = match.trim();
+                if(!teamStats[key]) teamStats[key] = { matches:0, wins:0, profit:0 };
+                teamStats[key].matches++;
+                if(won) teamStats[key].wins++;
+                teamStats[key].profit += gain;
+            } else {
+                [home, away].forEach(team => {
+                    if(!teamStats[team]) teamStats[team] = { matches:0, wins:0, profit:0 };
+                    teamStats[team].matches++;
+                    if(won) teamStats[team].wins++;
+                    teamStats[team].profit += gain;
+                });
+            }
+        }
+    });
+
+    // Global summary
+    const globalROI = processed > 0 ? (totalProfit / (processed * STAKE)) * 100 : 0;
+    $('summary').innerHTML = `<b>Historial procesado:</b> ${processed} partidos con resultado • Profit total: ${totalProfit.toFixed(2)} • ROI global: ${globalROI.toFixed(2)}% (bank ref ${INITIAL_BANK})`;
+
+    // Render team table
+    renderTeamTable();
+}
+
+/* Render team stats table */
+function renderTeamTable(){
+    const tbody = $('teamTable').querySelector('tbody');
+    tbody.innerHTML = '';
+    const keys = Object.keys(teamStats).sort((a,b) => (teamStats[b].profit - teamStats[a].profit));
+    keys.forEach(team => {
+        const t = teamStats[team];
+        const roiPct = t.matches > 0 ? (t.profit / (t.matches * STAKE)) * 100 : 0;
+        const avgProfit = t.matches > 0 ? (t.profit / t.matches) : 0;
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td>${team}</td>
+                        <td>${t.matches}</td>
+                        <td>${t.wins}</td>
+                        <td>${t.profit.toFixed(2)}</td>
+                        <td class="${roiPct>=0?'good':'bad'}">${roiPct.toFixed(2)} %</td>
+                        <td>${avgProfit.toFixed(3)}</td>`;
+        tbody.appendChild(tr);
+    });
+}
+
+/* Apply historical stats to future matches and render predictions */
+function applyToFuturos(arr){
+    const tbody = $('predTable').querySelector('tbody');
+    tbody.innerHTML = '';
+
+    arr.forEach((m, idx) => {
+        if(!m.Match) {
+            log(`Futuro registro ${idx+1}: falta campo 'Match' → ignorado.`);
+            return;
+        }
+        const match = m.Match;
+        const parts = match.split(' - ');
+        const home = parts[0] ? parts[0].trim() : null;
+        const away = parts[1] ? parts[1].trim() : null;
+
+        const row = document.createElement('tr');
+
+        // fetch team stats
+        const statsHome = home && teamStats[home] ? teamStats[home] : null;
+        const statsAway = away && teamStats[away] ? teamStats[away] : null;
+
+        const roiHome = statsHome && statsHome.matches>0 ? (statsHome.profit / (statsHome.matches * STAKE)) * 100 : null;
+        const roiAway = statsAway && statsAway.matches>0 ? (statsAway.profit / (statsAway.matches * STAKE)) * 100 : null;
+
+        const avgHome = statsHome && statsHome.matches>0 ? (statsHome.profit / statsHome.matches) : null;
+        const avgAway = statsAway && statsAway.matches>0 ? (statsAway.profit / statsAway.matches) : null;
+
+        // Recommendation logic:
+        // - If both teams have data: choose team with higher avgProfit per match (avgHome vs avgAway)
+        // - If only one team has data and avgProfit > 0 => suggest that team
+        // - If none have data => "Sin datos"
+        // - EV estimado = max(avgHome, avgAway) (expected profit per stake 1)
+        let recommendation = 'Sin datos';
+        let ev = null;
+
+        if(avgHome !== null && avgAway !== null){
+            ev = Math.max(avgHome, avgAway);
+            if(ev > 0) recommendation = (avgHome > avgAway) ? `${home} (Apostar)` : `${away} (Apostar)`;
+            else recommendation = 'No rentable (ev ≤ 0)';
+        } else if(avgHome !== null){
+            ev = avgHome;
+            recommendation = (avgHome > 0) ? `${home} (Apostar)` : 'No rentable (ev ≤ 0)';
+        } else if(avgAway !== null){
+            ev = avgAway;
+            recommendation = (avgAway > 0) ? `${away} (Apostar)` : 'No rentable (ev ≤ 0)';
+        }
+
+        // Friendly display values
+        const displayRoiHome = roiHome === null ? 'N/A' : `${roiHome.toFixed(2)} %`;
+        const displayRoiAway = roiAway === null ? 'N/A' : `${roiAway.toFixed(2)} %`;
+        const displayAvgHome = avgHome === null ? 'N/A' : avgHome.toFixed(3);
+        const displayAvgAway = avgAway === null ? 'N/A' : avgAway.toFixed(3);
+        const displayEV = ev === null ? 'N/A' : ev.toFixed(3);
+
+        row.innerHTML = `<td>${m.Date ?? ''}</td>
+                         <td>${m.League ?? ''}</td>
+                         <td>${match}</td>
+                         <td class="${(roiHome||0)>=0?'good':'bad'}">${displayRoiHome}</td>
+                         <td class="${(roiAway||0)>=0?'good':'bad'}">${displayRoiAway}</td>
+                         <td>${displayAvgHome}</td>
+                         <td>${displayAvgAway}</td>
+                         <td>${displayEV}</td>
+                         <td><b>${recommendation}</b></td>`;
+        tbody.appendChild(row);
+    });
+}
+
+/* CSV export of predictions */
+function downloadPredictionCSV(){
+    const rows = [];
+    // headers
+    rows.push(['Fecha','Liga','Match','ROI Local (%)','ROI Visitante (%)','AvgProfit Local','AvgProfit Visitante','EV estimado','Recomendación']);
+    const tbody = $('predTable').querySelector('tbody');
+    for(const tr of tbody.querySelectorAll('tr')){
+        const cols = Array.from(tr.children).map(td => td.innerText.replace(/\n/g,' ').trim());
+        rows.push(cols);
+    }
+    if(rows.length <= 1){
+        alert('No hay predicciones para exportar.');
         return;
     }
-    teamStats = {};
-    processHistorial();
-    renderTeamROI();
-    predictFuturos();
+    const csv = rows.map(r => r.map(cell => `"${String(cell).replace(/"/g,'""')}"`).join(',')).join('\r\n');
+    const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `predicciones_backtesting_${new Date().toISOString().slice(0,10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+}
+
+/* ---------------- UI wiring ---------------- */
+resetState();
+
+$('runBtn').addEventListener('click', async () => {
+    resetState();
+    log('Inicio de backtesting...');
+    try {
+        const [histArr, futArr] = await Promise.all([
+            handleFileInput($('histInput')),
+            handleFileInput($('futInput'))
+        ]);
+
+        if(!histArr.length) { log('Advertencia: archivo historial vacío.'); }
+        if(!futArr.length) { log('Advertencia: archivo futuros vacío.'); }
+
+        historial = histArr;
+        futuros = futArr;
+
+        log(`Historial cargado: ${historial.length} registros. Futuros cargados: ${futuros.length} registros.`);
+        processHistorialArray(historial);
+        applyToFuturos(futuros);
+        log('Backtesting finalizado.');
+    } catch(err){
+        log('ERROR: ' + (err.message || err));
+        alert('Error: ' + (err.message || 'Ver logs.'));
+    }
 });
 
-// PROCESAR HISTORIAL (Backtesting)
-function processHistorial() {
-    historialData.forEach(m => {
-        if (!m.Result) return;
-
-        let gain = m.Result === "Winning" ? (m.Odd - 1) * STAKE : -STAKE;
-
-        const [home, away] = m.Match.split(" - ");
-
-        [home, away].forEach(team => {
-            if (!teamStats[team])
-                teamStats[team] = { matches: 0, win: 0, profit: 0 };
-
-            teamStats[team].matches++;
-            if (gain > 0) teamStats[team].win++;
-            teamStats[team].profit += gain;
-        });
-    });
-}
-
-// TABLA ROI HISTÓRICO
-function renderTeamROI() {
-    const tbody = document.querySelector("#teamROI tbody");
-    tbody.innerHTML = "";
-
-    for (const team in teamStats) {
-        const t = teamStats[team];
-        const roi = (t.profit / (t.matches * STAKE)) * 100;
-
-        const row = document.createElement("tr");
-        row.innerHTML = `
-            <td>${team}</td>
-            <td>${t.matches}</td>
-            <td>${t.win}</td>
-            <td>${roi.toFixed(2)} %</td>
-            <td>${t.profit.toFixed(2)}</td>
-        `;
-        tbody.appendChild(row);
-    }
-}
-
-// PREDICCIÓN PARA FUTUROS ---------------------------
-function predictFuturos() {
-    const tbody = document.querySelector("#predictTable tbody");
-    tbody.innerHTML = "";
-
-    futurosData.forEach(m => {
-        const [home, away] = m.Match.split(" - ");
-
-        const roiHome = teamStats[home] ? (teamStats[home].profit / teamStats[home].matches * 100).toFixed(2) : "N/A";
-        const roiAway = teamStats[away] ? (teamStats[away].profit / teamStats[away].matches * 100).toFixed(2) : "N/A";
-
-        let best = "Sin datos";
-
-        if (!isNaN(parseFloat(roiHome)) && !isNaN(parseFloat(roiAway))) {
-            best = parseFloat(roiHome) > parseFloat(roiAway)
-                ? `${home} (Local)`
-                : `${away} (Visitante)`;
-        }
-
-        const row = document.createElement("tr");
-
-        row.innerHTML = `
-            <td>${m.Match}</td>
-            <td class="${roiHome > 0 ? 'good' : 'bad'}">${roiHome}</td>
-            <td class="${roiAway > 0 ? 'good' : 'bad'}">${roiAway}</td>
-            <td><b>${best}</b></td>
-        `;
-
-        tbody.appendChild(row);
-    });
-}
+$('downloadCsv').addEventListener('click', downloadPredictionCSV);
 
 </script>
-
 </body>
 </html>
