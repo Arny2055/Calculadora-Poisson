@@ -99,6 +99,11 @@
             color: #FFFFFF !important; 
             border-color: #CC0000 !important;
         }
+        .result-pending {
+            background-color: #33334d !important; /* Azul/Gris oscuro para pendiente */
+            color: #BB86FC !important; 
+            border-color: #6200EE !important;
+        }
         .result-default { 
             background-color: #121212; 
             color: #E0E0E0; 
@@ -168,6 +173,7 @@
         .positive { color: #00A800; font-weight: bold; } /* Ganancia Verde suave */
         .negative { color: #CF6679; font-weight: bold; } /* Pérdida Rojo suave */
         .zero { color: #AAAAAA; font-weight: bold; } /* Cero Gris */
+        .pending-text { color: #BB86FC; font-weight: bold; } /* Pendiente Púrpura */
         
         .history-section {
             background-color: #2C2C2C;
@@ -328,7 +334,7 @@
                         <option value="" selected disabled>-- Selecciona --</option>
                         <option value="1">Ganado</option>
                         <option value="0">Perdido</option>
-                    </select>
+                        <option value="-1">Pendiente</option> </select>
                 </div>
                 <button id="save-match-btn" onclick="saveMatchToHistory()">Guardar Apuesta</button>
             </div>
@@ -411,7 +417,7 @@
                 <select id="edit-result" onchange="applyResultStyle(this)" class="result-default">
                     <option value="1">Ganado</option>
                     <option value="0">Perdido</option>
-                </select>
+                    <option value="-1">Pendiente</option> </select>
             </div>
             
             <button id="save-edit-btn" onclick="saveEdit()">Guardar Cambios</button>
@@ -432,12 +438,14 @@
         /** Aplica la clase CSS de color según el resultado seleccionado. */
         function applyResultStyle(selectElement) {
             const value = selectElement.value;
-            selectElement.classList.remove('result-won', 'result-lost', 'result-default');
+            selectElement.classList.remove('result-won', 'result-lost', 'result-pending', 'result-default');
             
             if (value === '1') {
                 selectElement.classList.add('result-won');
             } else if (value === '0') {
                 selectElement.classList.add('result-lost');
+            } else if (value === '-1') {
+                selectElement.classList.add('result-pending');
             } else {
                 selectElement.classList.add('result-default');
             }
@@ -500,7 +508,6 @@
             const roiLocal = (netProfitLocal / TOTAL_INVESTMENT_HISTORIC) * 100;
             const roiVisitor = (netProfitVisitor / TOTAL_INVESTMENT_HISTORIC) * 100;
             
-            // Mostrar resultados en el div de "results"
             const totalNetProfit = netProfitLocal + netProfitVisitor;
             const roiCombined = (totalNetProfit / (TOTAL_INVESTMENT_HISTORIC * 2)) * 100;
             
@@ -518,6 +525,25 @@
             localStorage.setItem('bettingHistory', JSON.stringify(matchHistory));
         }
         
+        /** Calcula la ganancia neta y el ROI para una apuesta dada. */
+        function calculateBetMetrics(stake, quota, isWon) {
+            let netProfit = 0;
+            let roi = 0;
+
+            if (isWon === 1) {
+                const grossReturn = quota * stake;
+                netProfit = grossReturn - stake;
+                roi = (netProfit / stake) * 100;
+            } else if (isWon === 0) {
+                netProfit = -stake;
+                roi = -100;
+            } else { // isWon === -1 (Pendiente)
+                netProfit = 0;
+                roi = 0;
+            }
+            return { netProfit, roi };
+        }
+
         /** Guarda una apuesta en el historial y actualiza la tabla. */
         function saveMatchToHistory() {
             const home = document.getElementById('reg-home').value.trim();
@@ -537,16 +563,14 @@
 
             const stake = parseFloat(stakeInput);
             const quota = parseFloat(quotaInput);
-            const isWon = parseInt(resultSelect);
+            const isWon = parseInt(resultSelect); // Puede ser 1, 0, o -1 (Pendiente)
             
             if (stake <= 0 || quota <= 1.0) {
                 alert('🚨 ERROR: El Stake debe ser > 0 y la Cuota > 1.0');
                 return;
             }
 
-            const grossReturn = isWon === 1 ? (quota * stake) : 0; 
-            const netProfit = grossReturn - stake; 
-            const roi = (netProfit / stake) * 100; 
+            const { netProfit, roi } = calculateBetMetrics(stake, quota, isWon);
 
             const roiLocal = roiLocalManual !== '' ? parseFloat(roiLocalManual) : null;
             const roiVisitor = roiVisitorManual !== '' ? parseFloat(roiVisitorManual) : null;
@@ -579,7 +603,7 @@
             document.getElementById('reg-roi-local').value = '';
             document.getElementById('reg-roi-visitor').value = '';
             document.getElementById('reg-result').classList.add('result-default');
-            document.getElementById('reg-result').classList.remove('result-won', 'result-lost');
+            document.getElementById('reg-result').classList.remove('result-won', 'result-lost', 'result-pending');
             alert(`✅ Apuesta registrada: ${home} vs ${away}.`);
         }
 
@@ -662,7 +686,7 @@
             
             const stake = parseFloat(stakeInput);
             const quota = parseFloat(quotaInput);
-            const isWon = parseInt(resultSelect);
+            const isWon = parseInt(resultSelect); // Puede ser 1, 0, o -1
 
             if (stake <= 0 || quota <= 1.0) {
                 alert('🚨 ERROR: El Stake debe ser > 0 y la Cuota > 1.0');
@@ -670,9 +694,7 @@
             }
             
             // Recalcular Ganancia Neta y ROI General
-            const grossReturn = isWon === 1 ? (quota * stake) : 0; 
-            const netProfit = grossReturn - stake; 
-            const roi = (netProfit / stake) * 100; 
+            const { netProfit, roi } = calculateBetMetrics(stake, quota, isWon);
 
             // Actualizar el objeto
             matchHistory[index] = {
@@ -697,16 +719,18 @@
 
         // --- Funciones de Reporte y Vista ---
 
-        /** Calcula el ROI Total de todas las apuestas en el historial. */
+        /** Calcula el ROI Total de todas las apuestas TERMINADAS en el historial. */
         function calculateTotalROI() {
-            if (matchHistory.length === 0) {
+            const terminatedMatches = matchHistory.filter(match => match.result !== -1);
+            
+            if (terminatedMatches.length === 0) {
                 return { totalInvestment: 0, totalNetProfit: 0, totalROI: 0 };
             }
 
             let totalInvestment = 0;
             let totalNetProfit = 0;
 
-            matchHistory.forEach(match => {
+            terminatedMatches.forEach(match => {
                 totalInvestment += match.stake;
                 totalNetProfit += match.netProfit;
             });
@@ -721,7 +745,9 @@
             const historySummary = document.getElementById('historical-roi-summary');
             const totalROIData = calculateTotalROI(); 
             
-            const roiGeneralFormatted = formatResult(`✨ ROI General (${matchHistory.length} Ap.)`, totalROIData.totalROI);
+            const terminatedCount = matchHistory.filter(match => match.result !== -1).length;
+
+            const roiGeneralFormatted = formatResult(`✨ ROI General (${terminatedCount} Ap. Terminadas)`, totalROIData.totalROI);
             
             historySummary.innerHTML = `
                 <div style="font-weight: bold;">
@@ -761,16 +787,40 @@
                 row.insertCell().textContent = match.stake.toFixed(2);
                 row.insertCell().textContent = match.quota.toFixed(2);
                 
+                // ESTADO
                 const resultCell = row.insertCell();
-                resultCell.textContent = match.result === 1 ? 'Ganado' : 'Perdido';
-                resultCell.classList.add(match.result === 1 ? 'positive' : 'negative');
+                let statusText;
+                if (match.result === 1) {
+                    statusText = 'Ganado';
+                    resultCell.classList.add('positive');
+                } else if (match.result === 0) {
+                    statusText = 'Perdido';
+                    resultCell.classList.add('negative');
+                } else {
+                    statusText = 'Pendiente';
+                    resultCell.classList.add('pending-text');
+                }
+                resultCell.textContent = statusText;
                 
+                // GANANCIA NETA
                 const profitCell = row.insertCell();
-                profitCell.textContent = match.netProfit.toFixed(2);
-                profitCell.classList.add(match.netProfit >= 0 ? 'positive' : 'negative');
+                if (match.result === -1) {
+                    profitCell.textContent = 'N/A';
+                    profitCell.classList.add('zero');
+                } else {
+                    profitCell.textContent = match.netProfit.toFixed(2);
+                    profitCell.classList.add(match.netProfit >= 0 ? 'positive' : 'negative');
+                }
 
+                // ROI GENERAL DE LA APUESTA
                 const roiCell = row.insertCell();
-                roiCell.innerHTML = formatResultSimple(match.roi);
+                if (match.result === -1) {
+                    roiCell.textContent = 'N/A';
+                    roiCell.classList.add('zero');
+                } else {
+                    roiCell.innerHTML = formatResultSimple(match.roi);
+                }
+
 
                 // Columna de Acción (Editar y Borrar)
                 const actionCell = row.insertCell();
