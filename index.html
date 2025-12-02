@@ -19,10 +19,10 @@
             overflow-x: hidden; 
         }
         .container {
-            max-width: 600px; /* Reducido para celular */
+            max-width: 600px; 
             margin: auto;
             background: #1E1E1E;
-            min-height: calc(100vh - 60px); /* Altura mínima para que no haya vacío */
+            min-height: calc(100vh - 60px); 
             padding: 10px;
         }
 
@@ -152,17 +152,17 @@
             background-color: #2C2C2C;
             border-radius: 4px;
             margin-bottom: 15px;
-            flex-wrap: wrap; /* Permite que se envuelva en móvil */
+            flex-wrap: wrap; 
         }
         #history-filters select {
-            width: 45%; /* Dos por fila en móvil */
+            width: 45%; 
             min-width: 120px;
             flex-grow: 1;
         }
         
         /* BOTONES */
         button {
-            padding: 12px; /* Botones grandes para touch */
+            padding: 12px; 
             border: none;
             border-radius: 4px;
             font-weight: bold;
@@ -182,7 +182,7 @@
         .btn-delete { background-color: #CF6679; }
         .btn-edit { background-color: #BB86FC; }
 
-        /* Ajustes para ROIs Manuales en Registro */
+        /* Ajustes para ROIs Manuales en Registro (Calculadora de ROI) */
         .roi-input-group {
             display: flex;
             gap: 10px;
@@ -191,13 +191,34 @@
         .roi-input-group > div {
             width: 50%;
         }
-        .roi-input-group label {
-            width: 30px; /* Etiqueta más pequeña para el ROI */
-        }
         .roi-input-row {
             display: flex;
             align-items: center;
             gap: 5px;
+        }
+        .roi-input-row label {
+            width: 50px; 
+        }
+        
+        /* Estilos de la Calculadora de ROI */
+        #roi-calculator {
+            background-color: #121212;
+            padding: 15px;
+            border-radius: 4px;
+            border: 1px solid #BB86FC;
+            margin-bottom: 15px;
+        }
+        #roi-calculator h3 {
+            color: #03DAC6;
+            margin-top: 0;
+        }
+        #roi-result-display {
+            text-align: center;
+            font-size: 1.5em;
+            margin-top: 10px;
+            padding: 10px;
+            border: 1px dashed #444;
+            border-radius: 4px;
         }
 
     </style>
@@ -208,7 +229,27 @@
         <div id="register-view" class="view active-view">
             <section class="section-box">
                 <h2 style="color: #6200EE;">💸 Registrar Apuesta</h2>
-
+                
+                <div id="roi-calculator">
+                    <h3>🔍 Calculadora de ROI (Value)</h3>
+                    
+                    <div class="roi-input-group">
+                        <div class="roi-input-row">
+                            <label for="calc-fair-odd">Cuota Justa:</label>
+                            <input type="number" id="calc-fair-odd" step="0.01" min="1.01" oninput="calculateROI()">
+                        </div>
+                        <div class="roi-input-row">
+                            <label for="calc-bookie-odd">Cuota Real:</label>
+                            <input type="number" id="calc-bookie-odd" step="0.01" min="1.01" oninput="calculateROI()">
+                        </div>
+                    </div>
+                    
+                    <div id="roi-result-display" class="zero">
+                        ROI / Value: <span>--</span>
+                    </div>
+                </div>
+                
+                <p style="margin: 15px 0 5px 0; font-size: 1em; font-weight: bold; color: #BB86FC;">Datos del Partido y Mercado:</p>
                 <div class="match-row">
                     <label for="reg-home">Local:</label>
                     <input type="text" id="reg-home" placeholder="Nombre Local" required>
@@ -225,19 +266,19 @@
                     </select>
                 </div>
 
-                <p style="margin: 10px 0 5px 0; font-size: 0.9em; font-weight: bold; color: #03DAC6;">ROIs Análisis (%):</p>
+                <p style="margin: 10px 0 5px 0; font-size: 0.9em; font-weight: bold; color: #03DAC6;">ROI/Análisis (Opcional):</p>
                 <div class="roi-input-group">
                     <div class="roi-input-row">
                         <label for="reg-roi-local">L.:</label>
-                        <input type="number" id="reg-roi-local" step="0.01" placeholder="Ej: 15.5">
+                        <input type="number" id="reg-roi-local" step="0.01" placeholder="ROI L.">
                     </div>
                     <div class="roi-input-row">
                         <label for="reg-roi-visitor">V.:</label>
-                        <input type="number" id="reg-roi-visitor" step="0.01" placeholder="Ej: -5.0">
+                        <input type="number" id="reg-roi-visitor" step="0.01" placeholder="ROI V.">
                     </div>
                 </div>
 
-                <p style="margin: 10px 0 5px 0; font-size: 0.9em; font-weight: bold; color: #E0E0E0;">Datos de Apuesta:</p>
+                <p style="margin: 10px 0 5px 0; font-size: 0.9em; font-weight: bold; color: #E0E0E0;">Datos de Apuesta Real:</p>
                 <div class="match-row">
                     <label for="reg-stake">Stake (U.):</label>
                     <input type="number" id="reg-stake" step="0.1" min="0.1" placeholder="Ej: 1.5 Unidades" required>
@@ -397,6 +438,42 @@
         let myProfitChart; 
         let currentFilter = { result: 'all', market: 'all' };
 
+        // --- FUNCIONES DE CÁLCULO DE ROI (NUEVAS) ---
+        
+        function calculateROI() {
+            const fairOddInput = document.getElementById('calc-fair-odd').value;
+            const bookieOddInput = document.getElementById('calc-bookie-odd').value;
+            const display = document.getElementById('roi-result-display');
+            
+            const fairOdd = parseFloat(fairOddInput);
+            const bookieOdd = parseFloat(bookieOddInput);
+            
+            display.classList.remove('positive', 'negative', 'zero');
+
+            if (isNaN(fairOdd) || isNaN(bookieOdd) || fairOdd < 1.01 || bookieOdd < 1.01) {
+                display.innerHTML = 'ROI / Value: <span>--</span>';
+                display.classList.add('zero');
+                return;
+            }
+            
+            // Fórmula: (Cuota Real / Cuota Justa) - 1
+            const valueFactor = (bookieOdd / fairOdd) - 1;
+            const roiPercent = valueFactor * 100;
+
+            const formattedROI = roiPercent.toFixed(2) + '%';
+            
+            if (roiPercent > 0) {
+                display.innerHTML = `ROI / Value: <span class="positive">+${formattedROI}</span>`;
+                display.classList.add('positive');
+            } else if (roiPercent < 0) {
+                display.innerHTML = `ROI / Value: <span class="negative">${formattedROI}</span>`;
+                display.classList.add('negative');
+            } else {
+                display.innerHTML = `ROI / Value: <span class="zero">${formattedROI}</span>`;
+                display.classList.add('zero');
+            }
+        }
+        
         // --- FUNCIONES DE VISTAS ---
 
         /** Muestra la vista seleccionada y actualiza la barra de navegación */
@@ -413,7 +490,6 @@
             if (element) {
                 element.classList.add('active');
             } else {
-                // Si no se pasó un elemento (ej. en la inicialización)
                 document.querySelector(`#navbar .nav-item[onclick*="${viewId}"]`).classList.add('active');
             }
             
@@ -425,7 +501,7 @@
                 renderProfitChart();
             } else if (viewId === 'summary-config-view') {
                 updateUnitDisplay();
-                updateSummaryConfigView(); // Nueva función para actualizar ambas métricas
+                updateSummaryConfigView(); 
             }
         }
         
@@ -525,7 +601,7 @@
 
             matchHistory.push(match);
             localStorage.setItem('bettingHistory', JSON.stringify(matchHistory));
-            updateHistoryTable(); // Actualiza historial en segundo plano
+            updateHistoryTable(); 
 
             // Limpiar campos de registro y enfocar a la siguiente acción
             document.getElementById('reg-home').value = '';
@@ -537,6 +613,12 @@
             const regResult = document.getElementById('reg-result');
             regResult.value = '';
             applyResultStyle(regResult);
+            
+            // Limpiar calculadora de ROI
+            document.getElementById('calc-fair-odd').value = '';
+            document.getElementById('calc-bookie-odd').value = '';
+            calculateROI(); // Resetear el display
+            
             alert(`✅ Apuesta registrada: ${home} vs ${away}.`);
         }
 
@@ -549,7 +631,7 @@
                 matchHistory = [];
                 localStorage.removeItem('bettingHistory');
                 updateHistoryTable();
-                updateSummaryConfigView(); // Refrescar la vista de resumen
+                updateSummaryConfigView();
                 alert('Historial completamente borrado.');
             }
         }
@@ -570,7 +652,7 @@
                 const resultMatch = currentFilter.result === 'all' || match.result.toString() === currentFilter.result;
                 const marketMatch = currentFilter.market === 'all' || match.market === currentFilter.market;
                 return resultMatch && marketMatch;
-            }).reverse(); // Mostrar lo más reciente primero
+            }).reverse();
 
             if (filteredHistory.length === 0) {
                  tableBody.innerHTML = '<tr><td colspan="11" style="text-align: center; color: #BB86FC;">No hay apuestas para los filtros seleccionados.</td></tr>';
@@ -641,8 +723,6 @@
                     <button class="btn-delete" onclick="deleteMatch(${match.id})">Del</button>
                 `;
             });
-            
-            // updateHistoricalSummary(); // Ya se llama al entrar a la vista de gráficos
         }
 
         function formatResult(label, roi) {
