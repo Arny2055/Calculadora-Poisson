@@ -112,6 +112,12 @@
         .zero { color: #AAAAAA; font-weight: bold; }
         .pending-text { color: #BB86FC; font-weight: bold; }
 
+        /* --- ESTILOS DINÁMICOS PARA SELECT DE RESULTADOS (INCLUYE HISTÓRICOS Y REGISTRO) --- */
+        .result-default { background-color: #121212; color: #E0E0E0; border-color: #555555; }
+        .result-won { background-color: #004d00 !important; color: #00A800 !important; border-color: #00A800 !important; font-weight: bold; }
+        .result-lost { background-color: #5d0000 !important; color: #CF6679 !important; border-color: #CF6679 !important; font-weight: bold; }
+        .result-pending { background-color: #3d007a !important; color: #BB86FC !important; border-color: #BB86FC !important; font-weight: bold; }
+
         /* --- CALCULADORA DE ROI HISTÓRICO (COMPLEJO) --- */
         #roi-calculator {
             background-color: #121212;
@@ -232,10 +238,11 @@
                             function generateHistoryRows(team) {
                                 let html = '';
                                 for(let i = 1; i <= 5; i++) {
+                                    // Clase inicial 'result-lost' ya que '0' (Perdido) es el valor seleccionado por defecto
                                     html += `
                                         <div class="history-match-row">
                                             <span>M${i}:</span>
-                                            <select class="calc-${team}-result" onchange="calculateHistoricalROI()">
+                                            <select class="calc-${team}-result result-lost" onchange="applyResultStyle(this); calculateHistoricalROI()">
                                                 <option value="1">Ganado (G)</option>
                                                 <option value="0" selected>Perdido (P)</option>
                                             </select>
@@ -461,7 +468,7 @@
         let myProfitChart; 
         let currentFilter = { result: 'all', market: 'all' };
 
-        // --- FUNCIONES DE CÁLCULO DE ROI HISTÓRICO (REVISADO) ---
+        // --- FUNCIONES DE CÁLCULO DE ROI HISTÓRICO ---
 
         /** * Calcula el Yield/ROI histórico para un equipo basado en 5 resultados (G/P) y sus respectivas cuotas.
          * Asume un Stake de 1.
@@ -473,18 +480,21 @@
             const resultSelects = document.querySelectorAll(`.calc-${team}-result`);
             const oddInputs = document.querySelectorAll(`.calc-${team}-odd`);
 
-            let totalInvestment = NUM_GAMES; // 5 partidos * Stake 1 = 5 U.
+            let totalInvestment = 0; 
             let netProfit = 0;
-            let missingData = false;
+            let validGames = 0; // Contar solo juegos con cuota válida
 
             for (let i = 0; i < NUM_GAMES; i++) {
                 const result = parseInt(resultSelects[i].value); // 1 = Ganado, 0 = Perdido
                 const odd = parseFloat(oddInputs[i].value);
 
                 if (isNaN(odd) || odd < 1.01) {
-                    missingData = true;
                     continue; // Saltar partidos sin cuota válida
                 }
+
+                // Asumimos un Stake de 1U por partido
+                totalInvestment += 1; 
+                validGames++;
 
                 if (result === 1) {
                     // Ganado: Profit = Cuota - Stake(1)
@@ -495,14 +505,7 @@
                 }
             }
 
-            // Si falta algún dato crucial (cuota), devolvemos 0 para evitar distorsiones
-            if (missingData) {
-                 // Si hay algún dato faltante, no calcular o calcular con los datos presentes
-                 // Para simplicidad, si hay datos faltantes, devolver 0.
-                 return 0;
-            }
-            
-            // Si la inversión es 0 (ej. todos los datos faltantes), el ROI es 0
+            // Si no hay juegos con cuota válida, el ROI es 0
             if (totalInvestment === 0) return 0;
 
             const roi = (netProfit / totalInvestment) * 100;
@@ -542,6 +545,17 @@
             generalROIDisplay.classList.add(roiGeneral >= 0.01 ? 'positive' : (roiGeneral <= -0.01 ? 'negative' : 'zero'));
         }
 
+        // --- FUNCIONES DE ESTILO DE RESULTADOS ---
+        
+        window.applyResultStyle = function(selectElement) {
+            const value = selectElement.value;
+            selectElement.classList.remove('result-won', 'result-lost', 'result-pending', 'result-default');
+            if (value === '1') { selectElement.classList.add('result-won'); } 
+            else if (value === '0') { selectElement.classList.add('result-lost'); } 
+            else if (value === '-1') { selectElement.classList.add('result-pending'); } 
+            else { selectElement.classList.add('result-default'); }
+        }
+
         // --- FUNCIONES DE VISTAS ---
 
         /** Muestra la vista seleccionada y actualiza la barra de navegación */
@@ -562,9 +576,7 @@
             }
             
             // Forzar actualización de datos al cambiar de vista
-            if (viewId === 'register-view') {
-                 // calculateHistoricalROI(); // Ya no es necesario que recalcule al cambiar de vista, solo con el input
-            } else if (viewId === 'history-view') {
+            if (viewId === 'history-view') {
                 updateHistoryTable();
             } else if (viewId === 'chart-view') {
                 updateHistoricalSummary();
@@ -675,8 +687,11 @@
             document.getElementById('reg-stake').value = '';
             document.getElementById('reg-quota').value = '';
             
-            // Resetear resultados históricos y cuotas
-            Array.from(document.querySelectorAll('.calc-local-result, .calc-visitor-result')).forEach(s => s.value = '0');
+            // Resetear resultados históricos y cuotas (manteniendo el estilo por defecto)
+            Array.from(document.querySelectorAll('.calc-local-result, .calc-visitor-result')).forEach(s => {
+                s.value = '0';
+                applyResultStyle(s); 
+            });
             Array.from(document.querySelectorAll('.calc-local-odd, .calc-visitor-odd')).forEach(input => input.value = '');
             calculateHistoricalROI(); // Resetear el display de la calculadora
             
@@ -1041,20 +1056,17 @@
             document.getElementById('editModal').style.display = 'none';
         }
 
-        window.applyResultStyle = function(selectElement) {
-            const value = selectElement.value;
-            selectElement.classList.remove('result-won', 'result-lost', 'result-pending', 'result-default');
-            if (value === '1') { selectElement.classList.add('result-won'); } 
-            else if (value === '0') { selectElement.classList.add('result-lost'); } 
-            else if (value === '-1') { selectElement.classList.add('result-pending'); } 
-            else { selectElement.classList.add('result-default'); }
-        }
-
         // --- INICIALIZACIÓN ---
         window.onload = function() {
             // Inicializa la vista por defecto (Registro)
             showView('register-view');
             calculateHistoricalROI(); // Inicializa el cálculo del ROI a 0.00%
+            
+            // Aplica el estilo inicial de Perdido (P) a todos los selectores históricos
+            Array.from(document.querySelectorAll('.calc-local-result, .calc-visitor-result')).forEach(s => {
+                // Ya se asigna la clase inicial en el HTML, pero lo aseguramos
+                s.classList.add('result-lost');
+            });
         };
     </script>
 
