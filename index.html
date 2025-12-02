@@ -294,6 +294,13 @@
     <div class="container">
         <h1>📊 Calculadora de ROI y Registro de Apuestas</h1>
 
+        <section style="margin-bottom: 30px;">
+            <h2>📈 Progreso de Beneficio Acumulado (P&L)</h2>
+            <div style="background: #1e1e1e; padding: 15px; border-radius: 8px; height: 350px;">
+                <canvas id="profitChart" width="800" height="400"></canvas>
+            </div>
+        </section>
+
         <section>
             <h2>📝 Análisis de ROI Histórico (Stake 1 Unit)</h2>
             <p>Datos de rendimiento base. **Esta sección es solo de análisis rápido**; el ROI L/V del historial se ingresa manualmente.</p>
@@ -478,6 +485,7 @@
         </div>
     </div>
 
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
     <script>
         const NUM_MATCHES = 5;
@@ -487,6 +495,7 @@
 
         let matchHistory = JSON.parse(localStorage.getItem('bettingHistory')) || []; 
         let historicalRoiData = { roiLocal: 0, roiVisitor: 0 }; 
+        let myProfitChart; // Variable global para la instancia del gráfico
 
         // --- Funciones de Utilidad y Estilos ---
 
@@ -773,10 +782,7 @@
 
         // --- Funciones de Reporte y Vista ---
 
-        /** * Calcula el ROI Total, Ganancia Neta y Yield de todas las apuestas TERMINADAS.
-         * El ROI (Return on Investment) se calcula sobre el Stake unitario (stake * 100).
-         * El Yield (Rendimiento) se calcula sobre el Stake Total apostado.
-         */
+        /** * Calcula el ROI Total, Ganancia Neta y Yield de todas las apuestas TERMINADAS. */
         function calculateSummaryMetrics() {
             const terminatedMatches = matchHistory.filter(match => match.result !== -1);
             
@@ -791,13 +797,10 @@
             let totalROI = 0;
             let totalYield = 0;
 
-            if (terminatedMatches.length > 0) {
-                // Cálculo del ROI: (Ganancia Neta / Total Apostado) * 100
+            if (totalInvestment > 0) {
+                // Cálculo del ROI/Yield: (Ganancia Neta / Stake Total) * 100
                 totalROI = (totalNetProfit / totalInvestment) * 100;
-                
-                // Cálculo del Yield (asumiendo que es equivalente al ROI en este contexto financiero)
-                // Si quisieras un Yield diferente (Ej. Ganancia Neta / Stake inicial * 100), se ajustaría aquí.
-                totalYield = totalROI; 
+                totalYield = totalROI; // En el contexto de apuestas, a menudo son el mismo cálculo.
             }
             
             return { totalInvestment, totalNetProfit, totalROI, totalYield, terminatedCount: terminatedMatches.length };
@@ -897,6 +900,7 @@
             });
             
             updateHistoricalSummary(); 
+            renderProfitChart(); // <-- LLAMADA AL GRAFICO
         }
 
         /** Formatea el resultado de ROI con color, incluyendo el signo y el símbolo %. */
@@ -932,6 +936,85 @@
             }
             return `<span class="${className}">${sign}${roundedRoi}%</span>`;
         }
+
+        // --- FUNCIONES DEL GRÁFICO ---
+
+        /** Dibuja la gráfica de Progreso de Beneficio (P&L) Acumulado. */
+        function renderProfitChart() {
+            const ctx = document.getElementById('profitChart');
+            if (!ctx) return;
+
+            // 1. Calcular datos acumulados
+            let accumulatedProfit = 0;
+            const labels = ['Inicio'];
+            const dataPoints = [0];
+
+            matchHistory.forEach((match, index) => {
+                // Solo incluimos apuestas terminadas, de lo contrario la línea sería engañosa
+                if (match.result !== -1) {
+                    accumulatedProfit += match.netProfit;
+                }
+                labels.push(`Apuesta ${index + 1}`);
+                dataPoints.push(parseFloat(accumulatedProfit.toFixed(2))); // Acumulado
+            });
+            
+            // Si ya existe un gráfico, destrúyelo antes de crear uno nuevo
+            if (window.myProfitChart) {
+                window.myProfitChart.destroy();
+            }
+
+            // 2. Dibujar el gráfico usando Chart.js
+            window.myProfitChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Beneficio Acumulado (U)',
+                        data: dataPoints,
+                        borderColor: '#03DAC6', // Cian para la línea
+                        backgroundColor: 'rgba(3, 218, 198, 0.1)', // Fondo sutil
+                        tension: 0.4, // Curvatura de la línea
+                        pointRadius: 3,
+                        pointBackgroundColor: '#BB86FC'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: 'Unidades (U)',
+                                color: '#E0E0E0'
+                            },
+                            grid: {
+                                color: '#333333' 
+                            },
+                            ticks: {
+                                color: '#E0E0E0'
+                            }
+                        },
+                        x: {
+                            grid: {
+                                color: '#333333'
+                            },
+                            ticks: {
+                                color: '#E0E0E0'
+                            }
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            display: false
+                        }
+                    }
+                }
+            });
+        }
+
+        // --- FUNCIONES DEL MODAL DE RESUMEN ---
 
         /** Cierra el modal de resumen. */
         window.closeSummaryModal = function() {
