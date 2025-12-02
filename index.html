@@ -168,6 +168,17 @@
             background-color: #A3001C;
             color: #FFFFFF;
         }
+        /* Nuevo botón para resumen de rendimiento */
+        #show-summary-btn {
+            background-color: #BB86FC;
+            color: #121212;
+            margin-top: 20px;
+        }
+        #show-summary-btn:hover {
+            background-color: #8C52FF;
+            color: #FFFFFF;
+        }
+
 
         /* --- RESULTADOS Y TABLA --- */
         .positive { color: #00A800; font-weight: bold; } /* Ganancia Verde suave */
@@ -201,15 +212,15 @@
             border-bottom: 1px solid #333333;
             color: #E0E0E0;
             padding: 10px;
-            display: flex; /* Flexbox para centrar y alinear */
-            justify-content: center; /* Centrar el contenido */
-            gap: 20px; /* Espacio entre los dos divs */
+            display: flex;
+            justify-content: center;
+            gap: 20px; 
         }
         .history-roi-summary > div {
              font-size: 0.9em !important; 
         }
 
-        /* --- MODAL DE EDICIÓN --- */
+        /* --- MODAL DE EDICIÓN Y RESUMEN --- */
         .modal {
             display: none; 
             position: fixed; 
@@ -226,8 +237,8 @@
             margin: 10% auto; 
             padding: 20px;
             border: 1px solid #BB86FC;
-            width: 80%;
-            max-width: 400px;
+            width: 90%;
+            max-width: 600px;
             border-radius: 8px;
             position: relative;
         }
@@ -253,6 +264,28 @@
         }
         #save-edit-btn:hover {
             background-color: #00C4B4;
+        }
+
+        /* Estilo de la tabla de resumen dentro del modal */
+        #summary-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 15px;
+        }
+        #summary-table th, #summary-table td {
+            border: 1px solid #555;
+            padding: 10px;
+            text-align: center;
+            background-color: #1E1E1E;
+        }
+        #summary-table th {
+            background-color: #333;
+            color: #03DAC6;
+            font-size: 1em;
+        }
+        #summary-table td {
+            font-weight: bold;
+            font-size: 1.1em;
         }
     </style>
 </head>
@@ -366,6 +399,8 @@
                 <tbody id="match-history-body">
                     </tbody>
             </table>
+            
+            <button id="show-summary-btn" onclick="showPerformanceSummary()">📈 Ver Resumen de Rendimiento (ROI & Yield)</button>
             <button id="delete-all-btn" onclick="confirmClearHistory()">🗑️ Borrar Todo el Historial</button>
         </section>
     </div>
@@ -424,6 +459,25 @@
             <button id="save-edit-btn" onclick="saveEdit()">Guardar Cambios</button>
         </div>
     </div>
+
+    <div id="summaryModal" class="modal">
+        <div class="modal-content">
+            <span class="close-btn" onclick="closeSummaryModal()">&times;</span>
+            <h3>📈 Resumen de Rendimiento (Apuestas Terminadas)</h3>
+            
+            <table id="summary-table">
+                <thead>
+                    <tr>
+                        <th>Métrica</th>
+                        <th>Valor</th>
+                    </tr>
+                </thead>
+                <tbody id="summary-table-body">
+                    </tbody>
+            </table>
+        </div>
+    </div>
+
 
     <script>
         const NUM_MATCHES = 5;
@@ -719,39 +773,45 @@
 
         // --- Funciones de Reporte y Vista ---
 
-        /** Calcula el ROI Total de todas las apuestas TERMINADAS en el historial. */
-        function calculateTotalROI() {
+        /** * Calcula el ROI Total, Ganancia Neta y Yield de todas las apuestas TERMINADAS.
+         * El ROI (Return on Investment) se calcula sobre el Stake unitario (stake * 100).
+         * El Yield (Rendimiento) se calcula sobre el Stake Total apostado.
+         */
+        function calculateSummaryMetrics() {
             const terminatedMatches = matchHistory.filter(match => match.result !== -1);
             
-            if (terminatedMatches.length === 0) {
-                return { totalInvestment: 0, totalNetProfit: 0, totalROI: 0 };
-            }
-
-            let totalInvestment = 0; // <--- Suma de Stakes (Unidades)
-            let totalNetProfit = 0;
+            let totalInvestment = 0; // Suma de Stakes (Unidades)
+            let totalNetProfit = 0; // Suma de Ganancia Neta
 
             terminatedMatches.forEach(match => {
-                totalInvestment += match.stake; // Suma de Stakes
+                totalInvestment += match.stake; 
                 totalNetProfit += match.netProfit;
             });
 
-            const totalROI = (totalNetProfit / totalInvestment) * 100;
+            let totalROI = 0;
+            let totalYield = 0;
+
+            if (terminatedMatches.length > 0) {
+                // Cálculo del ROI: (Ganancia Neta / Total Apostado) * 100
+                totalROI = (totalNetProfit / totalInvestment) * 100;
+                
+                // Cálculo del Yield (asumiendo que es equivalente al ROI en este contexto financiero)
+                // Si quisieras un Yield diferente (Ej. Ganancia Neta / Stake inicial * 100), se ajustaría aquí.
+                totalYield = totalROI; 
+            }
             
-            return { totalInvestment, totalNetProfit, totalROI };
+            return { totalInvestment, totalNetProfit, totalROI, totalYield, terminatedCount: terminatedMatches.length };
         }
 
         /** Actualiza el resumen de ROI en la parte superior del historial (Incluye Unidades). */
         function updateHistoricalSummary() {
             const historySummary = document.getElementById('historical-roi-summary');
-            const totalROIData = calculateTotalROI(); 
+            const summaryData = calculateSummaryMetrics(); 
             
-            const terminatedCount = matchHistory.filter(match => match.result !== -1).length;
-
-            const totalStakes = totalROIData.totalInvestment.toFixed(2); // Unidades
+            const totalStakes = summaryData.totalInvestment.toFixed(2); 
             
-            const roiGeneralFormatted = formatResult(`✨ ROI General (${terminatedCount} Ap. Terminadas)`, totalROIData.totalROI);
+            const roiGeneralFormatted = formatResult(`✨ ROI General (${summaryData.terminatedCount} Ap. Terminadas)`, summaryData.totalROI);
             
-            // Se añade el nuevo elemento de Unidades Apostadas
             historySummary.innerHTML = `
                 <div style="font-weight: bold; margin-right: 20px;">
                     ${roiGeneralFormatted}
@@ -871,6 +931,68 @@
                 className = 'zero';
             }
             return `<span class="${className}">${sign}${roundedRoi}%</span>`;
+        }
+
+        /** Cierra el modal de resumen. */
+        window.closeSummaryModal = function() {
+            document.getElementById('summaryModal').style.display = 'none';
+        }
+
+        /** Abre el modal y muestra la tabla de rendimiento. */
+        window.showPerformanceSummary = function() {
+            const summaryData = calculateSummaryMetrics();
+            const tableBody = document.getElementById('summary-table-body');
+            tableBody.innerHTML = ''; // Limpiar la tabla
+
+            if (summaryData.terminatedCount === 0) {
+                tableBody.innerHTML = '<tr><td colspan="2" class="pending-text">Aún no hay apuestas terminadas para el resumen.</td></tr>';
+            } else {
+                // Fila de ROI
+                let roiCell = formatResultSimple(summaryData.totalROI);
+                tableBody.innerHTML += `
+                    <tr>
+                        <td>ROI (Retorno de Inversión)</td>
+                        <td>${roiCell}</td>
+                    </tr>
+                `;
+
+                // Fila de Yield (Asumiendo que es igual al ROI en este contexto)
+                let yieldCell = formatResultSimple(summaryData.totalYield);
+                tableBody.innerHTML += `
+                    <tr>
+                        <td>Yield (Rendimiento)</td>
+                        <td>${yieldCell}</td>
+                    </tr>
+                `;
+
+                // Fila de Ganancia Neta Total
+                let netProfitCell = summaryData.totalNetProfit.toFixed(2);
+                let profitClass = summaryData.totalNetProfit >= 0 ? 'positive' : 'negative';
+                tableBody.innerHTML += `
+                    <tr>
+                        <td>Ganancia Neta Total</td>
+                        <td class="${profitClass}">${netProfitCell} U.</td>
+                    </tr>
+                `;
+
+                // Fila de Unidades Apostadas
+                tableBody.innerHTML += `
+                    <tr>
+                        <td>Unidades Apostadas (Stake Total)</td>
+                        <td class="zero">${summaryData.totalInvestment.toFixed(2)} U.</td>
+                    </tr>
+                `;
+
+                // Fila de Total de Apuestas
+                tableBody.innerHTML += `
+                    <tr>
+                        <td>Total de Apuestas Terminadas</td>
+                        <td class="zero">${summaryData.terminatedCount}</td>
+                    </tr>
+                `;
+            }
+
+            document.getElementById('summaryModal').style.display = 'block';
         }
         
         // Inicializar inputs y tabla al cargar la página
