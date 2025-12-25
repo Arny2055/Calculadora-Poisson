@@ -3,29 +3,38 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Poisson Auto-Scraper Fix</title>
+    <title>Poisson Scanner - Deep Extraction</title>
     <style>
         :root { --primary: #00ff85; --secondary: #3d195a; --bg: #f2f2f7; --accent: #007aff; }
         body { font-family: -apple-system, system-ui, sans-serif; background: var(--bg); margin: 0; padding: 12px; }
         .container { max-width: 500px; margin: auto; background: white; padding: 20px; border-radius: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.1); }
-        h1 { text-align: center; color: var(--secondary); font-size: 1.3rem; border-bottom: 3px solid var(--primary); padding-bottom: 8px; }
-        .scraper-panel { background: #eef2ff; padding: 15px; border-radius: 15px; border: 1px solid #c7d2fe; margin-bottom: 20px; }
+        h1 { text-align: center; color: var(--secondary); font-size: 1.3rem; border-bottom: 3px solid var(--primary); padding-bottom: 8px; margin-top: 0; }
+        
+        .scraper-panel { background: #fff; border: 2px solid #e2e8f0; padding: 15px; border-radius: 15px; margin-bottom: 20px; }
         select { width: 100%; padding: 12px; border-radius: 10px; border: 1px solid #ccc; font-size: 16px; margin-bottom: 10px; }
         .fetch-btn { width: 100%; padding: 15px; background: var(--accent); color: white; border: none; border-radius: 12px; font-weight: 800; cursor: pointer; }
-        #status { font-size: 12px; text-align: center; margin-top: 10px; font-weight: bold; color: #4b5563; }
-        textarea { width: 100%; height: 80px; border: 1px solid #d1d1d6; border-radius: 12px; padding: 10px; font-size: 11px; box-sizing: border-box; background: #fbfbfb; margin-top: 10px; }
+        
+        #status { font-size: 12px; text-align: center; margin-top: 10px; font-weight: bold; padding: 8px; border-radius: 8px; background: #f8fafc; }
+        
+        label { font-size: 11px; font-weight: bold; color: #666; display: block; margin-top: 15px; text-transform: uppercase; }
+        textarea { width: 100%; height: 80px; border: 1px solid #d1d1d6; border-radius: 12px; padding: 10px; font-size: 12px; box-sizing: border-box; background: #fbfbfb; margin-top: 5px; }
+        
         .avg-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 15px 0; }
         input { width: 100%; padding: 12px; border: 1px solid #d1d1d6; border-radius: 10px; text-align: center; font-weight: bold; }
+        
         .calc-btn { width: 100%; padding: 18px; background: var(--secondary); color: white; border: none; border-radius: 16px; font-size: 1rem; font-weight: 900; cursor: pointer; }
-        .match-card { margin-top: 15px; border-radius: 12px; background: white; border: 1px solid #e5e5ea; overflow: hidden; }
-        .match-header { background: var(--secondary); color: white; padding: 10px; font-size: 14px; }
-        .res-row { display: flex; justify-content: space-between; padding: 12px; border-bottom: 1px solid #f2f2f7; font-size: 14px; }
+        
+        .match-card { margin-top: 15px; border-radius: 12px; background: white; border: 1px solid #e5e5ea; overflow: hidden; animation: slideUp 0.3s ease; }
+        @keyframes slideUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        .match-header { background: var(--secondary); color: white; padding: 10px; font-size: 14px; font-weight: bold; }
+        .res-row { display: flex; justify-content: space-between; padding: 12px; border-bottom: 1px solid #f2f2f7; font-size: 15px; align-items: center; }
+        .prob-val { font-size: 20px; font-weight: 900; color: var(--accent); }
     </style>
 </head>
 <body>
 
 <div class="container">
-    <h1>Poisson Scanner</h1>
+    <h1>Poisson Scanner Pro</h1>
 
     <div class="scraper-panel">
         <select id="leagueSelect">
@@ -36,79 +45,81 @@
             <option value="france">Ligue 1</option>
             <option value="netherlands">Eredivisie</option>
         </select>
-        <button class="fetch-btn" onclick="runDeepScraper()">⚡ IMPORTAR ESTADÍSTICAS</button>
+        <button class="fetch-btn" onclick="fetchAndParse()">⚡ IMPORTAR DATOS</button>
         <div id="status">Esperando comando...</div>
     </div>
 
-    <label style="font-size: 11px; font-weight: bold; color: #666;">PARTIDOS (Copia de Flashscore):</label>
-    <textarea id="matchesInput" placeholder="Ej: 21:00 Real Madrid - Barcelona"></textarea>
+    <label>Partidos (Ej: Arsenal - Chelsea)</label>
+    <textarea id="matchesInput" placeholder="Pega aquí los partidos..."></textarea>
     
     <div class="avg-grid">
-        <div><label style="font-size: 10px;">AVG L</label><input type="number" id="avgH" step="0.01" value="1.54"></div>
-        <div><label style="font-size: 10px;">AVG V</label><input type="number" id="avgA" step="0.01" value="1.18"></div>
+        <div><label>Avg Goles Local</label><input type="number" id="avgH" step="0.01" value="1.54"></div>
+        <div><label>Avg Goles Visita</label><input type="number" id="avgA" step="0.01" value="1.18"></div>
     </div>
     
-    <button class="calc-btn" onclick="calculate()">ESCUDRIÑAR</button>
+    <button class="calc-btn" onclick="calculate()">ESCUDRIÑAR PARTIDOS</button>
     <div id="results"></div>
 </div>
 
 <script>
-    let homeDB = {}, awayDB = {};
+    let dbHome = {}, dbAway = {};
 
-    async function runDeepScraper() {
+    async function fetchAndParse() {
         const league = document.getElementById('leagueSelect').value;
         const status = document.getElementById('status');
-        status.innerText = "⏳ Extrayendo datos de Soccerstats...";
+        status.innerText = "⏳ Extrayendo datos...";
+        status.style.color = "#4b5563";
 
-        const targetUrl = `https://www.soccerstats.com/homeaway.asp?league=${league}`;
-        const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(targetUrl)}`;
+        const url = `https://www.soccerstats.com/homeaway.asp?league=${league}`;
+        const proxy = `https://api.allorigins.win/get?url=${encodeURIComponent(url)}&cache=${new Date().getTime()}`;
 
         try {
-            const response = await fetch(proxyUrl);
-            const json = await response.json();
-            const parser = new DOMParser();
-            const doc = parser.parseFromString(json.contents, 'text/html');
-            const tables = doc.querySelectorAll('table.btable');
+            const resp = await fetch(proxy);
+            const data = await resp.json();
+            const doc = new DOMParser().parseFromString(data.contents, 'text/html');
+            const tables = doc.querySelectorAll('table');
+            
+            dbHome = {}; dbAway = {};
+            let tablesFound = 0;
 
-            homeDB = {}; awayDB = {}; // Reset
+            tables.forEach(table => {
+                const rows = Array.from(table.querySelectorAll('tr'));
+                // Buscamos tablas que tengan al menos 8 columnas (formato estándar de stats)
+                const validRows = rows.filter(r => r.querySelectorAll('td').length >= 8);
+                
+                if (validRows.length > 5) {
+                    const isHome = table.innerText.toLowerCase().includes('home performance');
+                    const isAway = table.innerText.toLowerCase().includes('away performance');
 
-            // Soccerstats suele tener las tablas de local y visitante consecutivas
-            // Buscaremos específicamente por el contenido de las celdas
-            tables.forEach((table) => {
-                const headerText = table.innerText.toLowerCase();
-                const rows = table.querySelectorAll('tr');
+                    if (isHome || isAway) {
+                        validRows.forEach(row => {
+                            const td = row.querySelectorAll('td');
+                            const name = td[1].innerText.trim();
+                            const stats = {
+                                pj: parseFloat(td[2].innerText),
+                                gf: parseFloat(td[6].innerText),
+                                gc: parseFloat(td[7].innerText)
+                            };
 
-                if (headerText.includes('home performance') || headerText.includes('away performance')) {
-                    const isHome = headerText.includes('home performance');
-                    
-                    rows.forEach(row => {
-                        const cols = row.querySelectorAll('td');
-                        if (cols.length >= 8) {
-                            const teamName = cols[1].innerText.trim();
-                            const pj = parseFloat(cols[2].innerText);
-                            const gf = parseFloat(cols[6].innerText);
-                            const gc = parseFloat(cols[7].innerText);
-
-                            if (!isNaN(pj) && teamName !== "" && teamName.length > 2) {
-                                if (isHome) homeDB[teamName] = { pj, gf, gc };
-                                else awayDB[teamName] = { pj, gf, gc };
+                            if (!isNaN(stats.pj) && stats.pj > 0 && name.length > 2) {
+                                if (isHome) dbHome[name] = stats;
+                                else dbAway[name] = stats;
                             }
-                        }
-                    });
+                        });
+                        tablesFound++;
+                    }
                 }
             });
 
-            const count = Object.keys(homeDB).length;
-            if (count > 0) {
-                status.innerText = `✅ DATOS SINCRONIZADOS (${count} EQ)`;
+            if (Object.keys(dbHome).length > 0) {
+                status.innerText = `✅ DATOS CARGADOS: ${Object.keys(dbHome).length} EQUIPOS`;
                 status.style.color = "#059669";
             } else {
-                status.innerText = "❌ No se encontraron equipos. Revisa la liga.";
+                status.innerText = "❌ No se detectaron tablas. Prueba otra liga.";
                 status.style.color = "#dc2626";
             }
-        } catch (error) {
-            status.innerText = "❌ Error de conexión con el servidor.";
-            status.style.color = "#dc2626";
+        } catch (e) {
+            status.innerText = "❌ Error de conexión.";
         }
     }
 
@@ -124,20 +135,18 @@
         const lines = document.getElementById('matchesInput').value.trim().split('\n');
         
         lines.forEach(line => {
-            // Buscamos nombres de equipos en la línea (separados por guion o espacios largos)
-            const p = line.split(/\s+-\s+|\t|\s{2,}/);
-            if (p.length < 2) return;
-            
-            // Intentamos limpiar nombres (ej: quitar la hora si viene pegada)
-            const hName = p[0].replace(/\d{2}:\d{2}/, '').trim();
-            const aName = p[1].trim();
+            const teams = line.split(/\s*-\s*|\s{2,}|\t/);
+            if (teams.length < 2) return;
 
-            // Buscamos coincidencias (Soccerstats a veces tiene nombres largos, usamos include)
-            const hKey = Object.keys(homeDB).find(k => hName.includes(k) || k.includes(hName));
-            const aKey = Object.keys(awayDB).find(k => aName.includes(k) || k.includes(aName));
+            const hSearch = teams[0].trim().toLowerCase();
+            const aSearch = teams[1].trim().toLowerCase();
+
+            // Buscador inteligente por coincidencias parciales
+            const hKey = Object.keys(dbHome).find(k => k.toLowerCase().includes(hSearch) || hSearch.includes(k.toLowerCase()));
+            const aKey = Object.keys(dbAway).find(k => k.toLowerCase().includes(aSearch) || aSearch.includes(k.toLowerCase()));
 
             if (hKey && aKey) {
-                const h = homeDB[hKey], a = awayDB[aKey];
+                const h = dbHome[hKey], a = dbAway[aKey];
                 const lamH = (h.gf/h.pj/avH) * (a.gc/a.pj/avH) * avH;
                 const lamA = (a.gf/a.pj/avA) * (h.gc/h.pj/avA) * avA;
 
@@ -148,7 +157,7 @@
                         <div class="match-header">${hKey} vs ${aKey}</div>
                         <div class="res-row">
                             <span>Ambos Anotan</span>
-                            <b style="color:var(--accent)">${btts}%</b>
+                            <span class="prob-val">${btts}%</span>
                         </div>
                     </div>`;
             }
