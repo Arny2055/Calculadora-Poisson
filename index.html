@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Run-in Analysis Tool | SoccerSTATS Predictor</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         :root {
             --primary: #2563eb;
@@ -40,7 +41,7 @@
         h1 { font-weight: 700; color: var(--primary-dark); margin-bottom: 10px; }
         p.subtitle { color: var(--text-muted); font-size: 0.95rem; }
 
-        /* Input Area */
+        /* Card styles */
         .card {
             background: var(--card-bg);
             border-radius: 16px;
@@ -48,6 +49,15 @@
             box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
             margin-bottom: 24px;
             border: 1px solid #e2e8f0;
+        }
+        .card-header {
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: var(--text-main);
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
         }
 
         textarea { 
@@ -81,32 +91,35 @@
         .btn:hover { background: var(--primary-dark); transform: translateY(-1px); }
 
         /* Match Setup */
-        .match-setup {
+        .match-setup, .market-inputs {
             display: grid;
             grid-template-columns: 1fr 1fr;
             gap: 20px;
             margin-top: 20px;
         }
 
-        .team-select-box {
+        .team-select-box, .market-input-group {
             display: flex;
             flex-direction: column;
         }
 
         label { font-weight: 600; margin-bottom: 8px; color: var(--text-muted); font-size: 0.85rem; text-transform: uppercase; }
 
-        select { 
+        select, input[type="number"] { 
             padding: 12px; 
             border-radius: 8px; 
             border: 1px solid #cbd5e1; 
             background: white;
             font-size: 1rem;
+            transition: border-color 0.2s;
         }
+        input[type="number"]:focus { border-color: var(--primary); outline: none; }
+
 
         /* Results Display */
         .prediction-grid {
             display: grid;
-            grid-template-columns: 1fr 120px 1fr;
+            grid-template-columns: 1fr 100px 1fr; /* Adjusted for better spacing */
             align-items: center;
             gap: 20px;
             margin-top: 30px;
@@ -117,6 +130,10 @@
             border-radius: 12px;
             background: #f1f5f9;
             text-align: center;
+            min-height: 150px; /* Ensure cards have similar height */
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
         }
 
         .vs-circle {
@@ -130,9 +147,10 @@
             justify-content: center;
             font-weight: 800;
             margin: 0 auto;
+            font-size: 1.2rem;
         }
 
-        .stat-val { font-size: 1.5rem; font-weight: 700; color: var(--primary); }
+        .stat-val { font-size: 1.5rem; font-weight: 700; color: var(--primary); margin-bottom: 5px; }
         .stat-label { font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; }
 
         .badge {
@@ -140,6 +158,8 @@
             border-radius: 20px;
             font-size: 0.8rem;
             font-weight: 700;
+            margin-top: 8px;
+            display: inline-block;
         }
         .pos { background: #dcfce7; color: #166534; }
         .neg { background: #fee2e2; color: #991b1b; }
@@ -152,11 +172,44 @@
             font-size: 1.2rem;
             font-weight: 600;
             border: 2px dashed #cbd5e1;
+            background-color: #ffffff; /* Default background */
+        }
+        .verdict-box strong { color: var(--primary-dark); }
+
+        .chart-container {
+            margin-top: 30px;
+            padding: 20px;
+            background: var(--card-bg);
+            border-radius: 12px;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+            border: 1px solid #e2e8f0;
         }
 
-        @media (max-width: 600px) {
-            .match-setup, .prediction-grid { grid-template-columns: 1fr; }
+        .market-prediction-card {
+            margin-top: 20px;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+        .market-item {
+            background: #e0f2f7;
+            padding: 15px;
+            border-radius: 10px;
+            text-align: center;
+            font-weight: 600;
+            color: #0c4a6e;
+            border: 1px solid #bae6fd;
+        }
+        .market-item.over { background-color: #dcfce7; color: #166534; border-color: #86efac; }
+        .market-item.under { background-color: #fee2e2; color: #991b1b; border-color: #fca5a5; }
+        .market-item.btts-yes { background-color: #fffbeb; color: #92400e; border-color: #fcd34d; }
+        .market-item.btts-no { background-color: #e0e7ff; color: #3730a3; border-color: #a5b4fc; }
+
+
+        @media (max-width: 768px) {
+            .match-setup, .market-inputs, .prediction-grid { grid-template-columns: 1fr; }
             .vs-circle { margin: 10px auto; }
+            .market-prediction-card { grid-template-columns: 1fr; }
         }
     </style>
 </head>
@@ -165,46 +218,84 @@
 <div class="container">
     <header>
         <h1>⚽ Run-in Predictor Pro</h1>
-        <p class="subtitle">Analiza la dificultad del calendario y proyecta resultados basados en SoccerSTATS.</p>
+        <p class="subtitle">Analiza la dificultad del calendario y proyecta resultados de partidos con datos de SoccerSTATS.</p>
     </header>
 
     <div class="card">
-        <label>Carga de Datos (Pegar tabla de SoccerSTATS)</label>
-        <textarea id="dataInput" placeholder="Copia y pega las columnas: Rank, Equipo, GP, Pts, PPG, PLD, REM, DIF..."></textarea>
+        <div class="card-header">
+            <span style="font-size: 1.3em;">📄</span> Cargar Datos de SoccerSTATS
+        </div>
+        <textarea id="dataInput" placeholder="Copia y pega aquí las columnas de la tabla 'Run-in Analysis' (Ej: Rank, Equipo, GP, Pts, PPG, PLD, REM, DIF...). Asegúrate de incluir todos los equipos."></textarea>
         <button class="btn" onclick="processData()">Importar Equipos</button>
     </div>
 
     <div id="mainTool" style="display:none;" class="card">
+        <div class="card-header">
+            <span style="font-size: 1.3em;">🆚</span> Configuración del Partido
+        </div>
         <div class="match-setup">
             <div class="team-select-box">
-                <label>Equipo Local</label>
+                <label for="homeTeam">Equipo Local</label>
                 <select id="homeTeam"></select>
             </div>
             <div class="team-select-box">
-                <label>Equipo Visitante</label>
+                <label for="awayTeam">Equipo Visitante</label>
                 <select id="awayTeam"></select>
+            </div>
+        </div>
+        
+        <div class="market-inputs">
+            <div class="market-input-group">
+                <label for="homeAvgGoals">Goles Promedio Local (Ej: 1.8)</label>
+                <input type="number" id="homeAvgGoals" step="0.1" value="1.5">
+            </div>
+            <div class="market-input-group">
+                <label for="awayAvgGoals">Goles Promedio Visitante (Ej: 1.2)</label>
+                <input type="number" id="awayAvgGoals" step="0.1" value="1.0">
+            </div>
+            <div class="market-input-group">
+                <label for="overUnderLine">Línea Over/Under (Ej: 2.5)</label>
+                <input type="number" id="overUnderLine" step="0.5" value="2.5">
+            </div>
+            <div class="market-input-group">
+                <label for="bttsYesProb">Prob. BTTS SÍ (%) (Ej: 60)</label>
+                <input type="number" id="bttsYesProb" step="1" value="50" min="0" max="100">
             </div>
         </div>
 
         <div style="text-align:center; margin-top: 30px;">
-            <button class="btn" style="background: var(--success);" onclick="generatePrediction()">Calcular Probabilidades</button>
+            <button class="btn" style="background: var(--success);" onclick="generatePrediction()">Calcular Pronóstico Completo</button>
         </div>
 
         <div id="resultArea" style="display:none;">
+            <div class="card-header" style="margin-top: 30px;">
+                <span style="font-size: 1.3em;">📊</span> Análisis de Duelo
+            </div>
             <div class="prediction-grid">
-                <div class="team-card" id="homeDisplay">
-                    </div>
+                <div class="team-card" id="homeDisplay"></div>
                 <div class="vs-circle">VS</div>
-                <div class="team-card" id="awayDisplay">
-                    </div>
+                <div class="team-card" id="awayDisplay"></div>
             </div>
             <div id="verdict" class="verdict-box"></div>
+            
+            <div class="chart-container">
+                <canvas id="ppgChart"></canvas>
+            </div>
+
+            <div class="card-header" style="margin-top: 30px;">
+                <span style="font-size: 1.3em;">💰</span> Pronóstico de Mercados
+            </div>
+            <div class="market-prediction-card">
+                <div id="overUnderPrediction" class="market-item"></div>
+                <div id="bttsPrediction" class="market-item"></div>
+            </div>
         </div>
     </div>
 </div>
 
 <script>
     let teamData = {};
+    let ppgChartInstance = null; // Para almacenar la instancia del gráfico
 
     function processData() {
         const text = document.getElementById('dataInput').value;
@@ -223,7 +314,7 @@
                 teamData[name] = {
                     ppg: parseFloat(parts[4]),
                     pld_opp: parseFloat(parts[5]),
-                    rem_opp: parseFloat(parts[6] || parts[5]),
+                    rem_opp: parseFloat(parts[6] || parts[5]), // Fallback if REM is missing
                     diff: parts[7] || "0%"
                 };
                 let opt = document.createElement('option');
@@ -237,7 +328,7 @@
             document.getElementById('mainTool').style.display = 'block';
             document.getElementById('dataInput').style.borderColor = 'var(--success)';
         } else {
-            alert('Error: No se detectaron datos. Asegúrate de copiar las filas de la tabla de Run-in Analysis.');
+            alert('Error: No se detectaron datos válidos. Asegúrate de copiar las filas de la tabla de Run-in Analysis de SoccerSTATS.');
         }
     }
 
@@ -246,6 +337,13 @@
         const away = document.getElementById('awayTeam').value;
         const h = teamData[home];
         const a = teamData[away];
+
+        // Goles promedio y línea O/U
+        const homeAvgGoals = parseFloat(document.getElementById('homeAvgGoals').value);
+        const awayAvgGoals = parseFloat(document.getElementById('awayAvgGoals').value);
+        const overUnderLine = parseFloat(document.getElementById('overUnderLine').value);
+        const bttsYesProb = parseFloat(document.getElementById('bttsYesProb').value);
+
 
         // Mostrar detalles Local
         document.getElementById('homeDisplay').innerHTML = `
@@ -267,29 +365,122 @@
             </div>
         `;
 
-        // Lógica de Veredicto
+        // Lógica de Veredicto (Resultado del partido)
         const diffPPG = h.ppg - a.ppg;
-        const diffDificultad = a.rem_opp - h.rem_opp; // Si el visitante tiene REM alto, viene de calendario fácil
+        // Dificultad: un REM alto para el visitante significa que viene de partidos fáciles, lo cual es desventaja en este partido
+        // un REM bajo para el local significa que viene de partidos fáciles, lo cual es ventaja para el local
+        const diffDificultad = (a.rem_opp - h.rem_opp); 
         
-        let score = diffPPG + (diffDificultad * 0.5);
+        let score = diffPPG + (diffDificultad * 0.3); // Ajustamos el peso de la dificultad
+
         let verdictText = "";
-        let color = "";
+        let verdictBgColor = "";
+        let verdictTextColor = "";
 
         if (score > 0.4) {
-            verdictText = `Predicción: Ventaja sólida para **${home}**`;
-            color = "#dcfce7";
+            verdictText = `El **${home}** es el favorito principal. Su solidez de PPG y la comparativa de dificultad de calendario sugieren una ventaja clara.`;
+            verdictBgColor = "#dcfce7"; // light green
         } else if (score < -0.4) {
-            verdictText = `Predicción: Riesgo de victoria de **${away}**`;
-            color = "#fee2e2";
+            verdictText = `El **${away}** se perfila con una buena oportunidad. Sus métricas de PPG y la relativa dificultad de su calendario le dan una ventaja.`;
+            verdictBgColor = "#fee2e2"; // light red
         } else {
-            verdictText = "Predicción: Empate o partido de resultado incierto";
-            color = "#fef9c3";
+            verdictText = "Partido muy parejo. Las métricas de Run-in sugieren un **Empate** o un resultado abierto.";
+            verdictBgColor = "#fef9c3"; // light yellow
         }
 
         const vBox = document.getElementById('verdict');
         vBox.innerHTML = verdictText;
-        vBox.style.backgroundColor = color;
+        vBox.style.backgroundColor = verdictBgColor;
         document.getElementById('resultArea').style.display = 'block';
+
+        // --- Predicción de Goles (Over/Under) ---
+        const totalExpectedGoals = homeAvgGoals + awayAvgGoals;
+        let overUnderPrediction = "";
+        let overUnderClass = "";
+
+        if (totalExpectedGoals > overUnderLine + 0.3) { // Más de 0.3 de margen para el Over
+            overUnderPrediction = `Apuesta: **OVER ${overUnderLine}** goles. Se esperan ${totalExpectedGoals.toFixed(2)} goles.`;
+            overUnderClass = "over";
+        } else if (totalExpectedGoals < overUnderLine - 0.3) { // Menos de 0.3 de margen para el Under
+            overUnderPrediction = `Apuesta: **UNDER ${overUnderLine}** goles. Se esperan ${totalExpectedGoals.toFixed(2)} goles.`;
+            overUnderClass = "under";
+        } else {
+            overUnderPrediction = `Mercado O/U ${overUnderLine} es complicado. Se esperan ${totalExpectedGoals.toFixed(2)} goles.`;
+            overUnderClass = "";
+        }
+        document.getElementById('overUnderPrediction').innerHTML = overUnderPrediction;
+        document.getElementById('overUnderPrediction').className = `market-item ${overUnderClass}`;
+
+
+        // --- Predicción de BTTS (Ambos Equipos Anotan) ---
+        let bttsPrediction = "";
+        let bttsClass = "";
+
+        // Un cálculo muy simplificado, se podría refinar con Poisson, etc.
+        const probHomeScores = (homeAvgGoals / totalExpectedGoals) * 100;
+        const probAwayScores = (awayAvgGoals / totalExpectedGoals) * 100;
+
+        if (bttsYesProb > 65 || (probHomeScores > 50 && probAwayScores > 40 && bttsYesProb > 55)) {
+            bttsPrediction = `Apuesta: **BTTS SÍ**. Alta probabilidad de que ambos equipos anoten (${bttsYesProb}% estimado).`;
+            bttsClass = "btts-yes";
+        } else if (bttsYesProb < 40) {
+            bttsPrediction = `Apuesta: **BTTS NO**. Baja probabilidad de que ambos equipos anoten (${bttsYesProb}% estimado).`;
+            bttsClass = "btts-no";
+        } else {
+            bttsPrediction = `Mercado BTTS: Incertidumbre (${bttsYesProb}% estimado).`;
+            bttsClass = "";
+        }
+        document.getElementById('bttsPrediction').innerHTML = bttsPrediction;
+        document.getElementById('bttsPrediction').className = `market-item ${bttsClass}`;
+
+
+        // --- Gráfico de PPG ---
+        if (ppgChartInstance) {
+            ppgChartInstance.destroy(); // Destruir la instancia anterior si existe
+        }
+        const ctx = document.getElementById('ppgChart').getContext('2d');
+        ppgChartInstance = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: ['PPG Actual', 'Dificultad (REM)'],
+                datasets: [
+                    {
+                        label: home,
+                        data: [h.ppg, h.rem_opp],
+                        backgroundColor: 'rgba(59, 130, 246, 0.7)', // Primary blue
+                        borderColor: 'rgba(59, 130, 246, 1)',
+                        borderWidth: 1
+                    },
+                    {
+                        label: away,
+                        data: [a.ppg, a.rem_opp],
+                        backgroundColor: 'rgba(16, 185, 129, 0.7)', // Success green
+                        borderColor: 'rgba(16, 185, 129, 1)',
+                        borderWidth: 1
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        title: {
+                            display: true,
+                            text: 'Valor (PPG / Dificultad REM)'
+                        }
+                    }
+                },
+                plugins: {
+                    title: {
+                        display: true,
+                        text: 'Comparativa de Equipos (PPG vs Dificultad REM)',
+                        font: { size: 16, weight: 'bold' }
+                    }
+                }
+            }
+        });
     }
 </script>
 
