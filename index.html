@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <title>Poisson Pro V9 - Rachas & Cuotas</title>
+    <title>Poisson Pro V10 - Expert Analysis</title>
     <style>
         :root { --primary: #001e54; --accent: #2563eb; --whatsapp: #25d366; --telegram: #0088cc; --bg: #f1f5f9; }
         body { font-family: 'Segoe UI', sans-serif; background: var(--bg); padding: 20px; color: #1e293b; }
@@ -13,22 +13,27 @@
         .main-btn { width: 100%; padding: 18px; background: var(--primary); color: white; border: none; border-radius: 10px; font-size: 18px; font-weight: bold; cursor: pointer; margin: 20px 0; }
         
         .share-container { display: flex; gap: 10px; justify-content: center; margin-bottom: 25px; display: none; }
-        .share-btn { padding: 12px 20px; border: none; border-radius: 8px; color: white; font-weight: bold; cursor: pointer; display: flex; align-items: center; gap: 8px; text-decoration: none; font-size: 14px; }
-        .btn-ws { background: var(--whatsapp); }
-        .btn-tg { background: var(--telegram); }
+        .share-btn { padding: 12px 20px; border: none; border-radius: 8px; color: white; font-weight: bold; cursor: pointer; display: flex; align-items: center; gap: 8px; text-decoration: none; font-size: 13px; }
+        .btn-ws { background: var(--whatsapp); } .btn-tg { background: var(--telegram); }
 
         #resultsUI { display: none; }
         .match-header { text-align: center; margin-bottom: 25px; padding: 20px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; }
-        .racha-badge { font-size: 12px; padding: 3px 8px; border-radius: 4px; margin: 0 5px; color: white; font-weight: bold; }
+        .racha-badge { font-size: 11px; padding: 2px 6px; border-radius: 3px; margin: 0 2px; color: white; font-weight: bold; }
         .racha-W { background: #10b981; } .racha-D { background: #f59e0b; } .racha-L { background: #ef4444; }
+
+        /* Gráfico de Barras Simple */
+        .chart-container { margin: 20px 0; padding: 15px; background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; }
+        .bar-row { display: flex; align-items: center; margin-bottom: 8px; font-size: 11px; }
+        .bar-label { width: 60px; font-weight: bold; }
+        .bar-bg { flex-grow: 1; background: #e2e8f0; height: 12px; border-radius: 6px; overflow: hidden; position: relative; }
+        .bar-fill { height: 100%; background: var(--accent); transition: width 1s; }
 
         .special-market { background: #eff6ff; border: 2px solid #bfdbfe; padding: 20px; border-radius: 12px; text-align: center; margin-bottom: 25px; }
         .prob-large { font-size: 38px; font-weight: 900; color: var(--accent); }
         
-        .tables-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 15px; }
+        .tables-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 15px; }
         .card { background: white; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden; }
         .card-header { background: var(--primary); color: white; padding: 10px; text-align: center; font-weight: bold; font-size: 13px; }
-        
         table { width: 100%; border-collapse: collapse; font-size: 12px; }
         th, td { padding: 8px; text-align: center; border-bottom: 1px solid #f1f5f9; }
         .val-win { color: #059669; font-weight: bold; }
@@ -38,11 +43,11 @@
 
 <div class="container">
     <div class="grid-inputs">
-        <textarea id="hInput" placeholder="Pega datos Local (con 'Flag' y Rachas)..."></textarea>
-        <textarea id="aInput" placeholder="Pega datos Visitante (con 'Flag' y Rachas)..."></textarea>
+        <textarea id="hInput" placeholder="Pega datos Local..."></textarea>
+        <textarea id="aInput" placeholder="Pega datos Visitante..."></textarea>
     </div>
 
-    <button class="main-btn" onclick="executeAnalysis()">CALCULAR CON RACHAS Y GENERAR REPORTE</button>
+    <button class="main-btn" onclick="executeAnalysis()">ANALIZAR PARTIDO CON RACHAS</button>
 
     <div id="resultsUI">
         <div class="share-container" id="shareBtns">
@@ -56,14 +61,19 @@
         </div>
 
         <div class="special-market">
-            <h3 style="margin:0;">🎯 GOL ANTES DEL MINUTO 30</h3>
+            <h3 style="margin:0; font-size: 14px;">🎯 GOL ANTES DEL MINUTO 30</h3>
             <div id="p30" class="prob-large">0%</div>
             <div id="c30" style="font-weight: bold;">Cuota Justa: 0.00</div>
         </div>
 
+        <div class="chart-container">
+            <h4 style="margin:0 0 15px 0; font-size: 13px; text-align:center;">INTENSIDAD DE GOL POR TRAMOS</h4>
+            <div id="barCharts"></div>
+        </div>
+
         <div class="tables-grid">
-            <div class="card"><div class="card-header">MERCADOS PRINCIPALES</div><table id="mainTab"></table></div>
-            <div class="card"><div class="card-header">TRAMOS ESPECÍFICOS</div><table id="rngTab"></table></div>
+            <div class="card"><div class="card-header">MERCADOS CLAVE</div><table id="mainTab"></table></div>
+            <div class="card"><div class="card-header">TRAMOS 15'</div><table id="rngTab"></table></div>
         </div>
     </div>
 </div>
@@ -82,34 +92,36 @@ function getDixonColesAdj(x, y, lX, lY) {
     return 1;
 }
 
-function extractName(text, fallback) {
+function extractName(text) {
     const match = text.match(/Flag\s+([^\n\r]+)/i);
-    return match ? match[1].split('-')[0].split('Stats')[0].trim() : fallback;
+    return match ? match[1].split('-')[0].split('Stats')[0].trim() : "Equipo";
 }
 
-function extractRacha(text) {
-    // Busca secuencias de W, D, L
-    const rachaMatch = text.match(/[WDL]{3,10}/g);
+function extractRachaAfterText(text) {
+    const keyword = "This season in the league";
+    const index = text.indexOf(keyword);
+    if (index === -1) return [];
+    
+    const relevantPart = text.substring(index + keyword.length);
+    const rachaMatch = relevantPart.match(/[WDL]{3,10}/g);
     return rachaMatch ? rachaMatch[0].split('') : [];
 }
 
-function parseInput(text, fallback) {
-    const name = extractName(text, fallback);
-    const racha = extractRacha(text);
+function parseInput(text, side) {
+    const name = extractName(text);
+    const racha = extractRachaAfterText(text);
     const gp = parseInt(text.match(/GP\s+(\d+)/)?.[1] || 10);
     
-    // Factor de forma: Victoria +5%, Derrota -5%
     let formFactor = 1.0;
-    racha.forEach(res => {
-        if(res === 'W') formFactor += 0.03;
-        if(res === 'L') formFactor -= 0.03;
+    racha.slice(-5).forEach(res => { // Solo tomamos los últimos 5 para la forma actual
+        if(res === 'W') formFactor += 0.04;
+        if(res === 'L') formFactor -= 0.04;
     });
 
     const intervals = ["0-15", "16-30", "31-45", "46-60", "61-75", "76-90"];
     let tramos = [];
     intervals.forEach(r => {
         const m = text.match(new RegExp(r + "\\s+GF\\s+(\\d+)\\s+GA\\s+(\\d+)"));
-        // Aplicamos el factor de racha a los goles esperados
         tramos.push({ 
             gf: m ? ((parseInt(m[1])/gp) * formFactor) : 0.05, 
             ga: m ? (parseInt(m[2])/gp) : 0.05 
@@ -119,22 +131,23 @@ function parseInput(text, fallback) {
 }
 
 function executeAnalysis() {
-    const h = parseInput(document.getElementById('hInput').value, "Local");
-    const a = parseInput(document.getElementById('aInput').value, "Visitante");
+    const h = parseInput(document.getElementById('hInput').value, "H");
+    const a = parseInput(document.getElementById('aInput').value, "A");
     
     document.getElementById('matchTitle').innerText = `${h.name} vs ${a.name}`;
     
-    // Mostrar Rachas visualmente
     let rhtml = `<b>${h.name}:</b> `;
     h.racha.forEach(r => rhtml += `<span class="racha-badge racha-${r}">${r}</span>`);
     rhtml += `<br><b>${a.name}:</b> `;
     a.racha.forEach(r => rhtml += `<span class="racha-badge racha-${r}">${r}</span>`);
     document.getElementById('rachasDisplay').innerHTML = rhtml;
 
-    let lH = [], lA = [];
+    let lH = [], lA = [], combinedL = [];
     for(let i=0; i<6; i++) {
-        lH.push((h.tramos[i].gf + a.tramos[i].ga) / 2);
-        lA.push((a.tramos[i].gf + h.tramos[i].ga) / 2);
+        let lh = (h.tramos[i].gf + a.tramos[i].ga) / 2;
+        let la = (a.tramos[i].gf + h.tramos[i].ga) / 2;
+        lH.push(lh); lA.push(la);
+        combinedL.push(lh + la);
     }
 
     const calcProb = (lhArr, laArr, line) => {
@@ -149,32 +162,33 @@ function executeAnalysis() {
     const pHT05 = calcProb(lH.slice(0,3), lA.slice(0,3), 0.5);
     const pSH05 = calcProb(lH.slice(3,6), lA.slice(3,6), 0.5);
     const p30 = calcProb(lH.slice(0,2), lA.slice(0,2), 0.5);
-    const p015 = calcProb([lH[0]], [lA[0]], 0.5);
-    const p1630 = calcProb([lH[1]], [lA[1]], 0.5);
-
+    
     reportData = { 
         title: `${h.name} vs ${a.name}`, 
-        pFT25, cFT25: 100/pFT25,
-        pHT05, cHT05: 100/pHT05,
-        pSH05, cSH05: 100/pSH05,
-        p30, c30: 100/p30,
-        p015, c015: 100/p015,
-        p1630, c1630: 100/p1630
+        pFT25, cFT25: 100/pFT25, pHT05, cHT05: 100/pHT05,
+        pSH05, cSH05: 100/pSH05, p30, c30: 100/p30
     };
 
-    document.getElementById('p30').innerText = p30.toFixed(2) + "%";
+    document.getElementById('p30').innerText = p30.toFixed(1) + "%";
     document.getElementById('c30').innerHTML = `Cuota Justa: <b>${reportData.c30.toFixed(2)}</b>`;
-    
+
+    // Gráfico de Barras
+    const labels = ["0-15'", "16-30'", "31-45'", "46-60'", "61-75'", "76-90'"];
+    let chartHtml = "";
+    combinedL.forEach((l, i) => {
+        let p = (1 - Math.exp(-l)) * 100;
+        chartHtml += `<div class="bar-row">
+            <div class="bar-label">${labels[i]}</div>
+            <div class="bar-bg"><div class="bar-fill" style="width: ${p*2}%"></div></div>
+            <div style="width: 40px; text-align:right; font-weight:bold;">${p.toFixed(0)}%</div>
+        </div>`;
+    });
+    document.getElementById('barCharts').innerHTML = chartHtml;
+
     document.getElementById('mainTab').innerHTML = `
-        <tr><th>Mercado</th><th>Prob.</th><th>Cuota</th></tr>
         <tr><td>Over 2.5 FT</td><td class="val-win">${pFT25.toFixed(1)}%</td><td>${reportData.cFT25.toFixed(2)}</td></tr>
         <tr><td>Over 0.5 HT</td><td class="val-win">${pHT05.toFixed(1)}%</td><td>${reportData.cHT05.toFixed(2)}</td></tr>
         <tr><td>Over 0.5 2ndH</td><td class="val-win">${pSH05.toFixed(1)}%</td><td>${reportData.cSH05.toFixed(2)}</td></tr>
-    `;
-    document.getElementById('rngTab').innerHTML = `
-        <tr><th>Tramo</th><th>Prob.</th><th>Cuota</th></tr>
-        <tr><td>Tramo 0-15'</td><td class="val-win">${p015.toFixed(1)}%</td><td>${reportData.c015.toFixed(2)}</td></tr>
-        <tr><td>Tramo 16-30'</td><td class="val-win">${p1630.toFixed(1)}%</td><td>${reportData.c1630.toFixed(2)}</td></tr>
     `;
 
     document.getElementById('resultsUI').style.display = 'block';
@@ -182,19 +196,15 @@ function executeAnalysis() {
 }
 
 function share(platform) {
-    const msg = `📊 *ANÁLISIS POISSON PRO (Rachas incl.)*\n📍 *${reportData.title}*\n\n` +
-                `⚽ *Over 2.5 FT:* ${reportData.pFT25.toFixed(1)}% (Cuota: ${reportData.cFT25.toFixed(2)})\n` +
-                `⏱ *Over 0.5 HT:* ${reportData.pHT05.toFixed(1)}% (Cuota: ${reportData.cHT05.toFixed(2)})\n` +
-                `🔄 *Over 0.5 2ndH:* ${reportData.pSH05.toFixed(1)}% (Cuota: ${reportData.cSH05.toFixed(2)})\n\n` +
-                `🎯 *GOL ANTES MIN 30:* ${reportData.p30.toFixed(1)}% (Cuota: ${reportData.c30.toFixed(2)})\n\n` +
-                `🕒 *Tramos:* \n` +
-                `- 0-15': ${reportData.p015.toFixed(1)}% (C: ${reportData.c015.toFixed(2)})\n` +
-                `- 16-30': ${reportData.p1630.toFixed(1)}% (C: ${reportData.c1630.toFixed(2)})`;
-
+    const msg = `📊 *POISSON PRO REPORT*\n📍 *${reportData.title}*\n\n` +
+                `⚽ Over 2.5 FT: ${reportData.pFT25.toFixed(1)}% (C: ${reportData.cFT25.toFixed(2)})\n` +
+                `⏱ Over 0.5 HT: ${reportData.pHT05.toFixed(1)}% (C: ${reportData.cHT05.toFixed(2)})\n` +
+                `🔄 Over 0.5 2ndH: ${reportData.pSH05.toFixed(1)}% (C: ${reportData.cSH05.toFixed(2)})\n\n` +
+                `🎯 *GOL ANTES MIN 30:* ${reportData.p30.toFixed(1)}% (C: ${reportData.c30.toFixed(2)})`;
+    
     const url = platform === 'whatsapp' 
         ? `https://api.whatsapp.com/send?text=${encodeURIComponent(msg)}`
         : `https://t.me/share/url?url=${encodeURIComponent(window.location.href)}&text=${encodeURIComponent(msg)}`;
-    
     window.open(url, '_blank');
 }
 </script>
