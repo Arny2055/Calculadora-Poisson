@@ -2,103 +2,82 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <title>Analizador de Patrones - Full Stats</title>
+    <title>Analizador de Patrones HT/FT - v4.0</title>
     <style>
-        :root { --bg: #0f172a; --card: #1e293b; --text: #f8fafc; --accent: #3b82f6; --success: #10b981; --danger: #ef4444; --warning: #f59e0b; }
-        body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); padding: 20px; line-height: 1.6; }
-        .container { max-width: 1200px; margin: auto; }
-        textarea { width: 100%; height: 140px; background: #1e293b; color: #fff; border: 2px solid #334155; border-radius: 8px; padding: 12px; margin-bottom: 15px; font-family: monospace; font-size: 11px; }
-        .btn { background: var(--accent); color: white; border: none; padding: 16px; cursor: pointer; border-radius: 8px; font-weight: bold; width: 100%; font-size: 16px; transition: 0.2s; }
-        .btn:hover { background: #2563eb; transform: translateY(-1px); }
-        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; margin-top: 20px; }
-        .card { background: var(--card); padding: 20px; border-radius: 12px; border-top: 4px solid var(--accent); }
-        .card h3 { margin: 0 0 15px 0; font-size: 14px; color: #94a3b8; text-transform: uppercase; }
+        :root { --bg: #0f172a; --card: #1e293b; --text: #f8fafc; --accent: #3b82f6; --success: #10b981; --danger: #ef4444; }
+        body { font-family: sans-serif; background: var(--bg); color: var(--text); padding: 20px; }
+        .container { max-width: 1000px; margin: auto; }
+        textarea { width: 100%; height: 150px; background: #334155; color: white; border: 1px solid #475569; border-radius: 8px; padding: 12px; font-family: monospace; }
+        .btn { background: var(--accent); color: white; border: none; padding: 15px; cursor: pointer; border-radius: 6px; font-weight: bold; width: 100%; margin: 15px 0; font-size: 16px; }
+        .card { background: var(--card); padding: 20px; border-radius: 12px; margin-bottom: 20px; }
         .row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #334155; }
         .win { color: var(--success); font-weight: bold; }
         .loss { color: var(--danger); font-weight: bold; }
-        .alert-box { background: #450a0a; border-left: 6px solid var(--danger); padding: 15px; margin: 20px 0; border-radius: 8px; }
-        .success-box { background: #064e3b; border-left: 6px solid var(--success); padding: 15px; margin: 20px 0; border-radius: 8px; }
+        .summary-box { padding: 15px; border-radius: 8px; margin-bottom: 20px; font-size: 18px; text-align: center; }
     </style>
 </head>
 <body>
 
 <div class="container">
-    <h1>📊 Herramienta de Minería de Datos Betting</h1>
-    <p style="color: #94a3b8;">Pega tus datos (incluyendo la fila de nombres de columna) abajo:</p>
-    
-    <textarea id="dataInput" placeholder="Name | Desired Outcome | Odd | League..."></textarea>
-    <button class="btn" onclick="runAnalysis()">ANALIZAR PATRONES GANADORES</button>
+    <h1>🔬 Analizador de Datos Betting (Corregido)</h1>
+    <textarea id="dataInput" placeholder="Pega aquí tus filas de Excel..."></textarea>
+    <button class="btn" onclick="process()">ANALIZAR AHORA</button>
 
     <div id="results" style="display:none;">
-        <div id="goldPattern" class="success-box"></div>
-        <div id="redFlags" class="alert-box"></div>
+        <div id="generalStats" class="summary-box" style="background: #1e293b; border: 1px solid #3b82f6;"></div>
+        
+        <div class="card">
+            <h3>📊 Porcentajes por Liga</h3>
+            <div id="leagueTable"></div>
+        </div>
 
-        <div class="grid">
-            <div class="card">
-                <h3>🏆 Rendimiento por Liga</h3>
-                <div id="leagueData"></div>
-            </div>
-            <div class="card">
-                <h3>💰 Análisis de Cuotas</h3>
-                <div id="oddData"></div>
-            </div>
-            <div class="card">
-                <h3>🔥 Ataques y Presión (FT)</h3>
-                <div id="attackData"></div>
-            </div>
+        <div class="card">
+            <h3>💰 Efectividad por Cuota</h3>
+            <div id="oddTable"></div>
         </div>
     </div>
 </div>
 
 <script>
-function runAnalysis() {
+function process() {
     const input = document.getElementById('dataInput').value.trim();
     if (!input) return;
 
     const lines = input.split('\n');
-    const headerLine = lines[0].toLowerCase();
-    const sep = headerLine.includes('\t') ? '\t' : ',';
-    const headers = headerLine.split(sep).map(h => h.trim());
-
-    // Buscador de columnas mejorado para tus nuevos datos
-    const find = (keys) => headers.findIndex(h => keys.some(k => h === k || h.includes(k)));
-
-    const idx = {
-        league: find(['league', 'liga']),
-        match: find(['match', 'partido']),
-        result: headers.lastIndexOf('result'), // El último "Result" suele ser el final
-        odd: find(['odd']),
-        daH: find(['home dangerous attacks at ft']),
-        daA: find(['away dangerous attacks at ft']),
-        posH: find(['home position']),
-        posA: find(['away position'])
-    };
-
-    let stats = { ligas: {}, odds: {}, attacks: {fuerte:{w:0,t:0}, debil:{w:0,t:0}}, total: {w:0, t:0} };
+    const header = lines[0].split('\t');
+    
+    // Buscar índices de forma flexible
+    const findIdx = (names) => header.findIndex(h => names.some(n => h.toLowerCase().includes(n.toLowerCase())));
+    
+    const idxLeague = findIdx(['league', 'liga']);
+    const idxOdd = findIdx(['odd']);
+    
+    let stats = { total: 0, wins: 0, leagues: {}, odds: {} };
 
     lines.slice(1).forEach(line => {
-        const col = line.split(sep);
-        if (col.length < headers.length) return;
+        const cols = line.split('\t').map(c => c.trim());
+        if (cols.length < 3) return;
 
-        const isWin = col[idx.result] && col[idx.result].toLowerCase().includes('winning');
-        const liga = col[idx.league] || 'Desconocida';
-        const cuota = parseFloat(col[idx.odd]?.replace(',', '.')) || 0;
-        const totalDA = (parseInt(col[idx.daH]) || 0) + (parseInt(col[idx.daA]) || 0);
+        // BÚSQUEDA DE RESULTADO: Buscamos "Winning" en cualquier columna de la fila
+        // Esto evita errores si la columna Result se mueve
+        const isWin = cols.some(cell => cell.toLowerCase() === 'winning');
+        
+        const league = cols[idxLeague] || "Desconocida";
+        const oddVal = parseFloat(cols[idxOdd]?.replace(',', '.')) || 0;
+        const oddRange = oddVal ? (Math.floor(oddVal * 1.5) / 1.5).toFixed(2) : "N/A";
 
-        stats.total.t++; if(isWin) stats.total.w++;
+        stats.total++;
+        if (isWin) stats.wins++;
 
-        // Agrupar Ligas
-        if (!stats.ligas[liga]) stats.ligas[liga] = {w:0, t:0};
-        stats.ligas[liga].t++; if(isWin) stats.ligas[liga].w++;
+        // Ligas
+        if (!stats.leagues[league]) stats.leagues[league] = { w: 0, t: 0 };
+        stats.leagues[league].t++;
+        if (isWin) stats.leagues[league].w++;
 
-        // Agrupar Cuotas (Rango 0.5)
-        const range = cuota ? (Math.floor(cuota * 2) / 2).toFixed(2) : "0.00";
-        if (!stats.odds[range]) stats.odds[range] = {w:0, t:0};
-        stats.odds[range].t++; if(isWin) stats.odds[range].w++;
-
-        // Agrupar Ataques (Umbral 100 ataques peligrosos totales en FT)
-        const catAtk = totalDA >= 90 ? 'fuerte' : 'debil';
-        stats.attacks[catAtk].t++; if(isWin) stats.attacks[catAtk].w++;
+        // Cuotas
+        if (!stats.odds[oddRange]) stats.odds[oddRange] = { w: 0, t: 0 };
+        stats.odds[oddRange].t++;
+        if (isWin) stats.odds[oddRange].w++;
     });
 
     display(stats);
@@ -106,39 +85,27 @@ function runAnalysis() {
 
 function display(s) {
     document.getElementById('results').style.display = 'block';
+    const wrGeneral = (s.wins / s.total * 100).toFixed(1);
     
-    // 1. Ligas
-    const ligasSorted = Object.entries(s.ligas).sort((a,b) => (b[1].w/b[1].t) - (a[1].w/a[1].t));
-    document.getElementById('leagueData').innerHTML = ligasSorted.map(([n, v]) => {
-        const wr = (v.w/v.t*100).toFixed(0);
-        return `<div class="row"><span>${n}</span><span class="${wr > 50 ? 'win' : 'loss'}">${wr}%</span></div>`;
-    }).join('');
-
-    // 2. Cuotas
-    const oddsSorted = Object.entries(s.odds).sort((a,b) => a[0] - b[0]);
-    document.getElementById('oddData').innerHTML = oddsSorted.map(([n, v]) => 
-        `<div class="row"><span>Cuota ~${n}</span><span class="win">${(v.w/v.t*100).toFixed(0)}%</span></div>`
-    ).join('');
-
-    // 3. Ataques
-    document.getElementById('attackData').innerHTML = `
-        <div class="row"><span>Partidos con +90 DA Totales</span><span class="win">${(s.attacks.fuerte.w/s.attacks.fuerte.t*100 || 0).toFixed(0)}%</span></div>
-        <div class="row"><span>Partidos con -90 DA Totales</span><span class="loss">${(s.attacks.debil.w/s.attacks.debil.t*100 || 0).toFixed(0)}%</span></div>
+    document.getElementById('generalStats').innerHTML = `
+        Acierto Total: <span class="win">${wrGeneral}%</span> (${s.wins}/${s.total} partidos)
     `;
 
-    // 4. Mensajes de Patrones
-    const mejorLiga = ligasSorted[0];
-    const peorLiga = ligasSorted[ligasSorted.length - 1];
+    // Tabla Ligas
+    let ligaHtml = "";
+    Object.entries(s.leagues).sort((a,b) => b[1].w - a[1].w).forEach(([name, data]) => {
+        const p = (data.w / data.t * 100).toFixed(0);
+        ligaHtml += `<div class="row"><span>${name}</span><span class="${p > 50 ? 'win' : 'loss'}">${p}% (${data.w}/${data.t})</span></div>`;
+    });
+    document.getElementById('leagueTable').innerHTML = ligaHtml;
 
-    document.getElementById('goldPattern').innerHTML = `
-        <strong>✅ ESTRATEGIA RECOMENDADA:</strong> Tu mayor tasa de éxito está en <b>${mejorLiga[0]}</b> (${(mejorLiga[1].w/mejorLiga[1].t*100).toFixed(0)}%). 
-        El total de acierto general es del <b>${(s.total.w/s.total.t*100).toFixed(1)}%</b>.
-    `;
-
-    document.getElementById('redFlags').innerHTML = `
-        <strong>⚠️ ALERTA DE PÉRDIDAS:</strong> Evita apostar en <b>${peorLiga[0]}</b>. 
-        Los partidos con poca actividad ofensiva (-90 Dangerous Attacks) tienen un acierto de solo el <b>${(s.attacks.debil.w/s.attacks.debil.t*100 || 0).toFixed(0)}%</b>.
-    `;
+    // Tabla Cuotas
+    let oddHtml = "";
+    Object.entries(s.odds).sort((a,b) => a[0] - b[0]).forEach(([range, data]) => {
+        const p = (data.w / data.t * 100).toFixed(0);
+        oddHtml += `<div class="row"><span>Rango Cuota ${range}</span><span class="win">${p}%</span></div>`;
+    });
+    document.getElementById('oddTable').innerHTML = oddHtml;
 }
 </script>
 </body>
