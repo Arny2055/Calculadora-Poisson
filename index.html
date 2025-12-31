@@ -2,137 +2,112 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <title>Analizador de Micro-Patrones por Liga</title>
+    <title>Analizador de Rangos de Cuotas - Betting Lab</title>
     <style>
         :root { --bg: #0f172a; --card: #1e293b; --text: #f8fafc; --accent: #3b82f6; --success: #10b981; --danger: #ef4444; --gold: #fbbf24; }
-        body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); padding: 20px; font-size: 14px; }
-        .container { max-width: 1300px; margin: auto; }
+        body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); padding: 20px; }
+        .container { max-width: 1000px; margin: auto; }
         textarea { width: 100%; height: 100px; background: #334155; color: white; border: 1px solid #475569; border-radius: 8px; padding: 10px; margin-bottom: 10px; }
         .btn { background: var(--accent); color: white; border: none; padding: 15px; cursor: pointer; border-radius: 6px; font-weight: bold; width: 100%; font-size: 16px; margin-bottom: 20px; }
         
-        .league-section { background: var(--card); border-radius: 12px; padding: 20px; margin-bottom: 30px; border-left: 5px solid var(--accent); }
-        .league-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #334155; padding-bottom: 10px; margin-bottom: 15px; }
-        .league-title { font-size: 1.5rem; font-weight: bold; color: var(--gold); }
+        .card { background: var(--card); border-radius: 12px; padding: 20px; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1); }
+        .table-header { display: grid; grid-template-columns: 2fr 1fr 1fr 1.5fr; padding: 10px; background: rgba(255,255,255,0.05); font-weight: bold; color: #94a3b8; font-size: 12px; text-transform: uppercase; }
+        .table-row { display: grid; grid-template-columns: 2fr 1fr 1fr 1.5fr; padding: 12px 10px; border-bottom: 1px solid #334155; align-items: center; transition: 0.2s; }
+        .table-row:hover { background: rgba(255,255,255,0.02); }
         
-        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 15px; }
-        .sub-card { background: rgba(255,255,255,0.03); padding: 15px; border-radius: 8px; border: 1px solid #334155; }
-        .sub-card h4 { margin: 0 0 10px 0; font-size: 12px; color: #94a3b8; text-transform: uppercase; }
+        .roi-badge { padding: 4px 8px; border-radius: 4px; font-weight: bold; text-align: center; }
+        .pos { background: rgba(16, 185, 129, 0.2); color: var(--success); }
+        .neg { background: rgba(239, 68, 68, 0.2); color: var(--danger); }
+        .neutral { background: #334155; color: #94a3b8; }
         
-        .item { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid #2d3748; }
-        .roi-pos { color: var(--success); font-weight: bold; }
-        .roi-neg { color: var(--danger); font-weight: bold; }
-        .badge { background: #334155; padding: 2px 8px; border-radius: 4px; font-size: 11px; }
+        .highlight { border-left: 4px solid var(--gold); background: rgba(251, 191, 36, 0.05) !important; }
     </style>
 </head>
 <body>
 
 <div class="container">
-    <h1>🔬 Analizador de Micro-Patrones (Liga > Día > Hora)</h1>
-    <textarea id="dataInput" placeholder="Pega tus datos con encabezados aquí..."></textarea>
-    <button class="btn" onclick="processMicroPatterns()">GENERAR ANALISIS POR LIGA INDEPENDIENTE</button>
+    <h1>🎯 Patrones por Micro-Rangos de Cuotas</h1>
+    <p style="color: #94a3b8; font-size: 14px;">Identifica el "Sweet Spot" (punto dulce) de tus cuotas para maximizar el ROI.</p>
+    
+    <textarea id="dataInput" placeholder="Pega tus datos aquí (Name, Desired Outcome, Odd, Result, etc.)..."></textarea>
+    <button class="btn" onclick="analyzeOdds()">ANALIZAR RENTABILIDAD POR CUOTA</button>
 
-    <div id="resultsContent"></div>
+    <div id="resultsCard" class="card" style="display:none;">
+        <div class="table-header">
+            <span>Rango de Cuota</span>
+            <span>Partidos</span>
+            <span>Acierto</span>
+            <span>Rentabilidad (ROI)</span>
+        </div>
+        <div id="oddsTableBody"></div>
+    </div>
 </div>
 
 <script>
-function processMicroPatterns() {
+function analyzeOdds() {
     const input = document.getElementById('dataInput').value.trim();
     if (!input) return;
 
     const lines = input.split('\n');
     const headers = lines[0].split('\t').map(h => h.trim().toLowerCase());
-    const find = (keys) => headers.findIndex(h => keys.some(k => h.includes(k)));
+    
+    const idxOdd = headers.findIndex(h => h === 'odd' || h.includes('live odd') || h === 'desired outcome odd');
+    const idxResult = headers.lastIndexOf('result');
 
-    const idx = {
-        league: find(['league', 'liga']),
-        date: find(['date', 'fecha']),
-        result: headers.lastIndexOf('result'),
-        odd: find(['odd'])
-    };
+    if (idxOdd === -1) {
+        alert("No se encontró la columna de Cuota (Odd).");
+        return;
+    }
 
-    let dataMap = {}; // Estructura: Liga -> { stats }
+    let ranges = {};
 
     lines.slice(1).forEach(line => {
         const col = line.split('\t').map(c => c.trim());
         if (col.length < 5) return;
 
-        const league = col[idx.league] || "Otras Ligas";
-        const isWin = col.some((c, i) => i >= idx.result && c.toLowerCase() === 'winning');
-        const odd = parseFloat(col[idx.odd]?.replace(',','.')) || 1.0;
-        const dateStr = col[idx.date] || "";
+        const odd = parseFloat(col[idxOdd]?.replace(',', '.')) || 0;
+        const isWin = col.some((c, i) => i >= idxResult && c.toLowerCase() === 'winning');
 
-        // Identificar Día
-        let day = "Otro";
-        const d = dateStr.toLowerCase();
-        if(d.includes('lun')) day="Lunes"; else if(d.includes('mar')) day="Martes"; 
-        else if(d.includes('mié')) day="Miércoles"; else if(d.includes('jue')) day="Jueves";
-        else if(d.includes('vie')) day="Viernes"; else if(d.includes('sáb')) day="Sábado";
-        else if(d.includes('dom')) day="Domingo";
+        if (odd > 0) {
+            // Creamos rangos de 0.10 (Ej: 1.10 - 1.20)
+            const floor = (Math.floor(odd * 10) / 10).toFixed(2);
+            const ceil = (parseFloat(floor) + 0.10).toFixed(2);
+            const rangeKey = `${floor} - ${ceil}`;
 
-        // Identificar Franja Horaria
-        const timeMatch = dateStr.match(/(\d{2}):(\d{2})/);
-        const hour = timeMatch ? parseInt(timeMatch[1]) : -1;
-        let slot = "Sin Hora";
-        if(hour >= 5 && hour < 13) slot = "Mañana";
-        else if(hour >= 13 && hour < 18) slot = "Tarde";
-        else if(hour >= 18 && hour < 22) slot = "Noche";
-        else if(hour >= 22 || (hour >= 0 && hour < 5)) slot = "Madrugada";
+            if (!ranges[rangeKey]) {
+                ranges[rangeKey] = { s: 0, r: 0, w: 0, min: parseFloat(floor) };
+            }
 
-        // Inicializar Liga
-        if(!dataMap[league]) {
-            dataMap[league] = { s:0, r:0, days: {}, hours: {} };
+            ranges[rangeKey].s += 1; // Stake 1
+            ranges[rangeKey].r += isWin ? odd : 0; // Retorno
+            if (isWin) ranges[rangeKey].w++;
         }
-
-        const lObj = dataMap[league];
-        const ret = isWin ? odd : 0;
-        lObj.s++; lObj.r += ret;
-
-        if(!lObj.days[day]) lObj.days[day] = {s:0, r:0};
-        lObj.days[day].s++; lObj.days[day].r += ret;
-
-        if(!lObj.hours[slot]) lObj.hours[slot] = {s:0, r:0};
-        lObj.hours[slot].s++; lObj.hours[slot].r += ret;
     });
 
-    renderLeagues(dataMap);
+    render(ranges);
 }
 
-function renderLeagues(map) {
-    const container = document.getElementById('resultsContent');
-    container.innerHTML = "";
+function render(ranges) {
+    document.getElementById('resultsCard').style.display = 'block';
+    const body = document.getElementById('oddsTableBody');
+    body.innerHTML = "";
 
-    Object.entries(map).sort((a,b) => b[1].s - a[1].s).forEach(([name, data]) => {
-        const totalRoi = ((data.r/data.s-1)*100).toFixed(1);
-        
-        const section = document.createElement('div');
-        section.className = "league-section";
-        section.innerHTML = `
-            <div class="league-header">
-                <span class="league-title">${name}</span>
-                <span class="badge" style="color:${totalRoi>=0?'#10b981':'#ef4444'}">ROI LIGA: ${totalRoi}%</span>
-            </div>
-            <div class="grid">
-                <div class="sub-card">
-                    <h4>📅 Mejores Días en esta Liga</h4>
-                    ${Object.entries(data.days).sort((a,b)=>(b[1].r/b[1].s)-(a[1].r/a[1].s)).map(([d, s]) => {
-                        const roi = ((s.r/s.s-1)*100).toFixed(0);
-                        return `<div class="item"><span>${d}</span><span class="${roi>=0?'roi-pos':'roi-neg'}">${roi}%</span></div>`;
-                    }).join('')}
-                </div>
-                <div class="sub-card">
-                    <h4>⏰ Mejores Horarios en esta Liga</h4>
-                    ${Object.entries(data.hours).sort((a,b)=>(b[1].r/b[1].s)-(a[1].r/a[1].s)).map(([h, s]) => {
-                        const roi = ((s.r/s.s-1)*100).toFixed(0);
-                        return `<div class="item"><span>${h}</span><span class="${roi>=0?'roi-pos':'roi-neg'}">${roi}%</span></div>`;
-                    }).join('')}
-                </div>
-                <div class="sub-card" style="display:flex; flex-direction:column; justify-content:center; text-align:center;">
-                    <div style="font-size:12px; color:#94a3b8;">MUESTRA</div>
-                    <div style="font-size:24px; font-weight:bold;">${data.s} Partidos</div>
-                </div>
-            </div>
+    const sortedRanges = Object.entries(ranges).sort((a, b) => a[1].min - b[1].min);
+
+    sortedRanges.forEach(([range, data]) => {
+        const roi = ((data.r / data.s - 1) * 100).toFixed(1);
+        const wr = (data.w / data.s * 100).toFixed(1);
+        const isHighValue = parseFloat(roi) > 10;
+
+        const row = document.createElement('div');
+        row.className = `table-row ${isHighValue ? 'highlight' : ''}`;
+        row.innerHTML = `
+            <span style="font-weight:bold;">${range}</span>
+            <span>${data.s} ud.</span>
+            <span>${wr}%</span>
+            <span class="roi-badge ${roi >= 0 ? 'pos' : 'neg'}">${roi}% ROI</span>
         `;
-        container.appendChild(section);
+        body.appendChild(row);
     });
 }
 </script>
