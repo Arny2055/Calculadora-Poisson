@@ -2,55 +2,54 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <title>Calculador de ROI y Rentabilidad Pro</title>
+    <title>Analizador de Valor: Días y Equipos</title>
     <style>
-        :root { --bg: #0f172a; --card: #1e293b; --text: #f8fafc; --accent: #3b82f6; --success: #10b981; --danger: #ef4444; --gold: #fbbf24; }
-        body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); padding: 20px; }
+        :root { --bg: #0f172a; --card: #1e293b; --text: #f8fafc; --accent: #3b82f6; --success: #10b981; --danger: #ef4444; }
+        body { font-family: 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); padding: 20px; }
         .container { max-width: 1200px; margin: auto; }
         textarea { width: 100%; height: 100px; background: #334155; color: white; border: 1px solid #475569; border-radius: 8px; padding: 10px; font-size: 11px; }
-        .btn { background: var(--accent); color: white; border: none; padding: 15px; cursor: pointer; border-radius: 6px; font-weight: bold; width: 100%; margin: 15px 0; }
-        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(350px, 1fr)); gap: 15px; }
-        .card { background: var(--card); padding: 15px; border-radius: 12px; }
-        .item { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #2d3748; align-items: center; }
-        .roi-pos { color: var(--success); font-weight: bold; background: rgba(16, 185, 129, 0.1); padding: 2px 6px; border-radius: 4px; }
-        .roi-neg { color: var(--danger); font-weight: bold; background: rgba(239, 68, 68, 0.1); padding: 2px 6px; border-radius: 4px; }
-        .label { font-size: 13px; color: #94a3b8; }
-        .val-main { font-weight: 600; }
-        .summary { background: #1e3a8a; padding: 20px; border-radius: 12px; margin-bottom: 20px; border-left: 6px solid var(--accent); }
+        .btn { background: var(--accent); color: white; border: none; padding: 15px; cursor: pointer; border-radius: 6px; font-weight: bold; width: 100%; margin: 15px 0; font-size: 16px; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 15px; }
+        .card { background: var(--card); padding: 20px; border-radius: 12px; border-bottom: 4px solid #334155; }
+        .day-row { display: flex; justify-content: space-between; padding: 10px; margin: 5px 0; border-radius: 6px; background: rgba(255,255,255,0.03); }
+        .roi-pos { color: var(--success); font-weight: bold; }
+        .roi-neg { color: var(--danger); font-weight: bold; }
+        .highlight-box { background: #1e3a8a; padding: 20px; border-radius: 12px; margin-bottom: 20px; border-left: 6px solid var(--accent); }
+        h3 { margin-top: 0; font-size: 14px; color: #94a3b8; text-transform: uppercase; }
     </style>
 </head>
 <body>
 
 <div class="container">
-    <h1>💰 Buscador de Rentabilidad (ROI)</h1>
+    <h1>📈 Analizador de Rentabilidad Temporal y Estratégica</h1>
     <textarea id="dataInput" placeholder="Pega tus datos aquí..."></textarea>
-    <button class="btn" onclick="calculateProfitability()">CALCULAR EQUIPOS MÁS RENTABLES</button>
+    <button class="btn" onclick="analyzeProfit()">CALCULAR PATRONES DE RENTABILIDAD</button>
 
     <div id="results" style="display:none;">
-        <div class="summary">
-            <h2 id="overallRoi" style="margin:0;">ROI Total: 0%</h2>
-            <p id="topInsight" style="margin:10px 0 0 0; color: #bfdbfe;"></p>
+        <div class="highlight-box">
+            <h2 id="bestDayMsg" style="margin:0;"></h2>
+            <p id="totalProfitMsg" style="margin:10px 0 0 0;"></p>
         </div>
 
         <div class="grid">
             <div class="card">
-                <h3>🔝 Top 10 Equipos por ROI (Rentabilidad)</h3>
-                <div id="resProfitTeams"></div>
+                <h3>📅 Rentabilidad por Día</h3>
+                <div id="daysList"></div>
             </div>
             <div class="card">
-                <h3>📉 Equipos con Mayor Pérdida</h3>
-                <div id="resLossTeams"></div>
+                <h3>💎 Equipos con Mayor Valor (ROI)</h3>
+                <div id="teamsList"></div>
             </div>
             <div class="card">
-                <h3>📊 Filtros PreMatch Ganadores</h3>
-                <div id="resFilters"></div>
+                <h3>📊 Filtro PreMatch (ROI)</h3>
+                <div id="filterList"></div>
             </div>
         </div>
     </div>
 </div>
 
 <script>
-function calculateProfitability() {
+function analyzeProfit() {
     const input = document.getElementById('dataInput').value.trim();
     const lines = input.split('\n');
     const headers = lines[0].split('\t').map(h => h.trim().toLowerCase());
@@ -58,86 +57,96 @@ function calculateProfitability() {
     const find = (keys) => headers.findIndex(h => keys.some(k => h.includes(k)));
 
     const idx = {
+        date: find(['date', 'fecha']),
         match: find(['match']),
         result: headers.lastIndexOf('result'),
-        odd: find(['odd']), // La cuota live o la que se usó para la apuesta
-        odd1: find(['odd 1 prematch']),
-        odd2: find(['odd 2 prematch'])
+        odd: find(['odd']),
+        o1: find(['odd 1 prematch']),
+        o2: find(['odd 2 prematch'])
     };
 
-    let stats = { teams: {}, totalStake: 0, totalReturn: 0, filters: {fav: {s:0, r:0}, underdog: {s:0, r:0}} };
+    const dayNames = ["Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
+    let stats = { 
+        days: {}, 
+        teams: {}, 
+        filters: { fav: {s:0, r:0}, under: {s:0, r:0} },
+        globalS: 0, globalR: 0
+    };
 
     lines.slice(1).forEach(line => {
-        const cols = line.split('\t').map(c => c.trim());
-        if (cols.length < 5) return;
+        const col = line.split('\t').map(c => c.trim());
+        if (col.length < 5) return;
 
-        const isWin = cols.some((c, i) => i >= idx.result && c.toLowerCase() === 'winning');
-        const odd = parseFloat(cols[idx.odd]?.replace(',','.')) || 1.0;
-        const [hTeam, aTeam] = cols[idx.match] ? cols[idx.match].split(' - ') : ['?', '?'];
-        const o1 = parseFloat(cols[idx.odd1]?.replace(',','.')) || 0;
-        const o2 = parseFloat(cols[idx.odd2]?.replace(',','.')) || 0;
+        const isWin = col.some((c, i) => i >= idx.result && c.toLowerCase() === 'winning');
+        const odd = parseFloat(col[idx.odd]?.replace(',','.')) || 1.0;
+        const [hT, aT] = col[idx.match] ? col[idx.match].split(' - ') : ['?', '?'];
+        const o1 = parseFloat(col[idx.o1]?.replace(',','.')) || 0;
+        const o2 = parseFloat(col[idx.o2]?.replace(',','.')) || 0;
 
-        const stake = 1; 
-        const profit = isWin ? (odd - 1) : -1;
+        // Procesar Fecha para obtener Día
+        let dayName = "Desconocido";
+        if(col[idx.date]) {
+            const rawDate = col[idx.date].toLowerCase();
+            if(rawDate.includes('lun')) dayName = "Lunes";
+            else if(rawDate.includes('mar')) dayName = "Martes";
+            else if(rawDate.includes('mié')) dayName = "Miércoles";
+            else if(rawDate.includes('jue')) dayName = "Jueves";
+            else if(rawDate.includes('vie')) dayName = "Viernes";
+            else if(rawDate.includes('sáb')) dayName = "Sábado";
+            else if(rawDate.includes('dom')) dayName = "Domingo";
+        }
+
+        const stake = 1;
         const ret = isWin ? odd : 0;
 
-        stats.totalStake += stake;
-        stats.totalReturn += ret;
+        stats.globalS += stake;
+        stats.globalR += ret;
 
-        // Stats por Equipo
-        [hTeam, aTeam].forEach(t => {
+        // Stats Días
+        if(!stats.days[dayName]) stats.days[dayName] = {s:0, r:0};
+        stats.days[dayName].s += stake; stats.days[dayName].r += ret;
+
+        // Stats Equipos
+        [hT, aT].forEach(t => {
             if(!t) return;
-            if(!stats.teams[t]) stats.teams[t] = {s:0, r:0, w:0, t:0};
-            stats.teams[t].s += stake;
-            stats.teams[t].r += ret;
-            stats.teams[t].t++;
-            if(isWin) stats.teams[t].w++;
+            if(!stats.teams[t]) stats.teams[t] = {s:0, r:0, t:0, w:0};
+            stats.teams[t].s += stake; stats.teams[t].r += ret;
+            stats.teams[t].t++; if(isWin) stats.teams[t].w++;
         });
 
-        // Filtro PreMatch: ¿Es rentable ir con el favorito?
+        // Stats Filtros
         if(o1 > 0 && o2 > 0) {
-            const isFav = (o1 < 2.0); // Ejemplo: Local muy favorito
-            const key = isFav ? 'fav' : 'underdog';
-            stats.filters[key].s += stake;
-            stats.filters[key].r += ret;
+            const f = (o1 < o2) ? 'fav' : 'under';
+            stats.filters[f].s += stake; stats.filters[f].r += ret;
         }
     });
 
-    renderROI(stats);
+    render(stats);
 }
 
-function renderROI(s) {
+function render(s) {
     document.getElementById('results').style.display = 'block';
-    const totalROI = ((s.totalReturn / s.totalStake - 1) * 100).toFixed(2);
-    document.getElementById('overallRoi').innerText = `ROI Total del Sistema: ${totalROI}%`;
+    
+    // Render Días
+    const daysHtml = Object.entries(s.days).map(([name, data]) => {
+        const roi = ((data.r / data.s - 1) * 100).toFixed(1);
+        return `<div class="day-row"><span>${name}</span><span class="${roi >= 0 ? 'roi-pos' : 'roi-neg'}">${roi}% ROI</span></div>`;
+    }).join('');
+    document.getElementById('daysList').innerHTML = daysHtml;
 
-    const teamArray = Object.entries(s.teams).map(([name, data]) => ({
-        name,
-        roi: ((data.r / data.s - 1) * 100).toFixed(1),
-        winrate: (data.w / data.t * 100).toFixed(0),
-        rawRoi: (data.r / data.s - 1)
-    }));
+    // Render Equipos (Top 8 ROI)
+    const topTeams = Object.entries(s.teams)
+        .map(([n, d]) => ({n, roi: ((d.r/d.s-1)*100)}))
+        .sort((a,b) => b.roi - a.roi)
+        .slice(0, 8)
+        .map(t => `<div class="day-row"><span>${t.n}</span><span class="roi-pos">${t.roi.toFixed(1)}%</span></div>`)
+        .join('');
+    document.getElementById('teamsList').innerHTML = topTeams;
 
-    const topProfit = [...teamArray].sort((a,b) => b.rawRoi - a.rawRoi).slice(0, 10);
-    const topLoss = [...teamArray].sort((a,b) => a.rawRoi - b.rawRoi).slice(0, 10);
-
-    const formatList = (arr) => arr.map(t => `
-        <div class="item">
-            <div>
-                <div class="val-main">${t.name}</div>
-                <div class="label">${t.winrate}% Acierto</div>
-            </div>
-            <div class="${t.rawRoi >= 0 ? 'roi-pos' : 'roi-neg'}">${t.roi}% ROI</div>
-        </div>
-    `).join('');
-
-    document.getElementById('resProfitTeams').innerHTML = formatList(topProfit);
-    document.getElementById('resLossTeams').innerHTML = formatList(topLoss);
-
-    const favRoi = ((s.filters.fav.r / s.filters.fav.s - 1) * 100 || 0).toFixed(1);
-    document.getElementById('resFilters').innerHTML = `
-        <div class="item"><span>Local muy favorito (Odd1 < 2.0)</span><span class="${favRoi >= 0 ? 'roi-pos' : 'roi-neg'}">${favRoi}% ROI</span></div>
-    `;
+    // Resumen Superior
+    const bestDay = Object.entries(s.days).sort((a,b) => (b[1].r/b[1].s) - (a[1].r/a[1].s))[0];
+    document.getElementById('bestDayMsg').innerText = `Día más rentable: ${bestDay[0]}`;
+    document.getElementById('totalProfitMsg').innerText = `Tu ROI global es de ${((s.globalR/s.globalS - 1)*100).toFixed(2)}% tras ${s.globalS} apuestas analizadas.`;
 }
 </script>
 </body>
