@@ -2,55 +2,55 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <title>Analizador de Patrones Avanzado - Betting Engine</title>
+    <title>Calculador de ROI y Rentabilidad Pro</title>
     <style>
         :root { --bg: #0f172a; --card: #1e293b; --text: #f8fafc; --accent: #3b82f6; --success: #10b981; --danger: #ef4444; --gold: #fbbf24; }
-        body { font-family: 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); padding: 20px; }
+        body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); padding: 20px; }
         .container { max-width: 1200px; margin: auto; }
-        textarea { width: 100%; height: 120px; background: #334155; color: white; border: 1px solid #475569; border-radius: 8px; padding: 12px; font-size: 11px; }
+        textarea { width: 100%; height: 100px; background: #334155; color: white; border: 1px solid #475569; border-radius: 8px; padding: 10px; font-size: 11px; }
         .btn { background: var(--accent); color: white; border: none; padding: 15px; cursor: pointer; border-radius: 6px; font-weight: bold; width: 100%; margin: 15px 0; }
-        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 15px; }
-        .card { background: var(--card); padding: 15px; border-radius: 12px; border-bottom: 4px solid #334155; }
-        .card h3 { margin-top: 0; font-size: 13px; color: #94a3b8; text-transform: uppercase; }
-        .item { display: flex; justify-content: space-between; padding: 5px 0; border-bottom: 1px solid #2d3748; font-size: 13px; }
-        .win { color: var(--success); font-weight: bold; }
-        .loss { color: var(--danger); font-weight: bold; }
-        .insight { background: #1e3a8a; padding: 15px; border-radius: 8px; margin-bottom: 20px; border-left: 5px solid var(--gold); }
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(350px, 1fr)); gap: 15px; }
+        .card { background: var(--card); padding: 15px; border-radius: 12px; }
+        .item { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #2d3748; align-items: center; }
+        .roi-pos { color: var(--success); font-weight: bold; background: rgba(16, 185, 129, 0.1); padding: 2px 6px; border-radius: 4px; }
+        .roi-neg { color: var(--danger); font-weight: bold; background: rgba(239, 68, 68, 0.1); padding: 2px 6px; border-radius: 4px; }
+        .label { font-size: 13px; color: #94a3b8; }
+        .val-main { font-weight: 600; }
+        .summary { background: #1e3a8a; padding: 20px; border-radius: 12px; margin-bottom: 20px; border-left: 6px solid var(--accent); }
     </style>
 </head>
 <body>
 
 <div class="container">
-    <h1>🎯 Buscador de Patrones Inteligente</h1>
-    <textarea id="dataInput" placeholder="Pega aquí tus datos con encabezados..."></textarea>
-    <button class="btn" onclick="analyzeData()">BUSCAR PATRONES GANADORES</button>
+    <h1>💰 Buscador de Rentabilidad (ROI)</h1>
+    <textarea id="dataInput" placeholder="Pega tus datos aquí..."></textarea>
+    <button class="btn" onclick="calculateProfitability()">CALCULAR EQUIPOS MÁS RENTABLES</button>
 
     <div id="results" style="display:none;">
-        <div id="topInsight" class="insight"></div>
+        <div class="summary">
+            <h2 id="overallRoi" style="margin:0;">ROI Total: 0%</h2>
+            <p id="topInsight" style="margin:10px 0 0 0; color: #bfdbfe;"></p>
+        </div>
 
         <div class="grid">
             <div class="card">
-                <h3>🏠 Equipos (Local) - Mejor Acierto</h3>
-                <div id="resHomeTeams"></div>
+                <h3>🔝 Top 10 Equipos por ROI (Rentabilidad)</h3>
+                <div id="resProfitTeams"></div>
             </div>
             <div class="card">
-                <h3>🚀 Equipos (Visitante) - Mejor Acierto</h3>
-                <div id="resAwayTeams"></div>
+                <h3>📉 Equipos con Mayor Pérdida</h3>
+                <div id="resLossTeams"></div>
             </div>
             <div class="card">
-                <h3>📊 Cuotas PreMatch (Favoritos)</h3>
-                <div id="resPreMatch"></div>
-            </div>
-            <div class="card">
-                <h3>📍 Posición en Tabla</h3>
-                <div id="resPos"></div>
+                <h3>📊 Filtros PreMatch Ganadores</h3>
+                <div id="resFilters"></div>
             </div>
         </div>
     </div>
 </div>
 
 <script>
-function analyzeData() {
+function calculateProfitability() {
     const input = document.getElementById('dataInput').value.trim();
     const lines = input.split('\n');
     const headers = lines[0].split('\t').map(h => h.trim().toLowerCase());
@@ -60,83 +60,83 @@ function analyzeData() {
     const idx = {
         match: find(['match']),
         result: headers.lastIndexOf('result'),
+        odd: find(['odd']), // La cuota live o la que se usó para la apuesta
         odd1: find(['odd 1 prematch']),
-        odd2: find(['odd 2 prematch']),
-        posH: find(['home position']),
-        posA: find(['away position'])
+        odd2: find(['odd 2 prematch'])
     };
 
-    let db = { hTeams: {}, aTeams: {}, pre: {favLocal: {w:0,t:0}, favAway: {w:0,t:0}}, pos: {cercanos:{w:0,t:0}, lejanos:{w:0,t:0}} };
+    let stats = { teams: {}, totalStake: 0, totalReturn: 0, filters: {fav: {s:0, r:0}, underdog: {s:0, r:0}} };
 
     lines.slice(1).forEach(line => {
         const cols = line.split('\t').map(c => c.trim());
         if (cols.length < 5) return;
 
         const isWin = cols.some((c, i) => i >= idx.result && c.toLowerCase() === 'winning');
+        const odd = parseFloat(cols[idx.odd]?.replace(',','.')) || 1.0;
         const [hTeam, aTeam] = cols[idx.match] ? cols[idx.match].split(' - ') : ['?', '?'];
         const o1 = parseFloat(cols[idx.odd1]?.replace(',','.')) || 0;
         const o2 = parseFloat(cols[idx.odd2]?.replace(',','.')) || 0;
-        const pH = parseInt(cols[idx.posH]) || 0;
-        const pA = parseInt(cols[idx.posA]) || 0;
 
-        // Equipos
-        if(hTeam) {
-            if(!db.hTeams[hTeam]) db.hTeams[hTeam] = {w:0, t:0};
-            db.hTeams[hTeam].t++; if(isWin) db.hTeams[hTeam].w++;
-        }
-        if(aTeam) {
-            if(!db.aTeams[aTeam]) db.aTeams[aTeam] = {w:0, t:0};
-            db.aTeams[aTeam].t++; if(isWin) db.aTeams[aTeam].w++;
-        }
+        const stake = 1; 
+        const profit = isWin ? (odd - 1) : -1;
+        const ret = isWin ? odd : 0;
 
-        // Cuotas PreMatch
+        stats.totalStake += stake;
+        stats.totalReturn += ret;
+
+        // Stats por Equipo
+        [hTeam, aTeam].forEach(t => {
+            if(!t) return;
+            if(!stats.teams[t]) stats.teams[t] = {s:0, r:0, w:0, t:0};
+            stats.teams[t].s += stake;
+            stats.teams[t].r += ret;
+            stats.teams[t].t++;
+            if(isWin) stats.teams[t].w++;
+        });
+
+        // Filtro PreMatch: ¿Es rentable ir con el favorito?
         if(o1 > 0 && o2 > 0) {
-            if(o1 < o2) { db.pre.favLocal.t++; if(isWin) db.pre.favLocal.w++; }
-            else { db.pre.favAway.t++; if(isWin) db.pre.favAway.w++; }
-        }
-
-        // Posiciones
-        if(pH > 0 && pA > 0) {
-            const diff = Math.abs(pH - pA);
-            if(diff <= 5) { db.pos.cercanos.t++; if(isWin) db.pos.cercanos.w++; }
-            else { db.pos.lejanos.t++; if(isWin) db.pos.lejanos.w++; }
+            const isFav = (o1 < 2.0); // Ejemplo: Local muy favorito
+            const key = isFav ? 'fav' : 'underdog';
+            stats.filters[key].s += stake;
+            stats.filters[key].r += ret;
         }
     });
 
-    render(db);
+    renderROI(stats);
 }
 
-function render(db) {
+function renderROI(s) {
     document.getElementById('results').style.display = 'block';
+    const totalROI = ((s.totalReturn / s.totalStake - 1) * 100).toFixed(2);
+    document.getElementById('overallRoi').innerText = `ROI Total del Sistema: ${totalROI}%`;
 
-    const getList = (obj) => Object.entries(obj)
-        .filter(e => e[1].t > 0)
-        .sort((a,b) => (b[1].w/b[1].t) - (a[1].w/a[1].t))
-        .slice(0, 8)
-        .map(([n, v]) => `<div class="item"><span>${n}</span><span class="win">${(v.w/v.t*100).toFixed(0)}% (${v.w}/${v.t})</span></div>`)
-        .join('');
+    const teamArray = Object.entries(s.teams).map(([name, data]) => ({
+        name,
+        roi: ((data.r / data.s - 1) * 100).toFixed(1),
+        winrate: (data.w / data.t * 100).toFixed(0),
+        rawRoi: (data.r / data.s - 1)
+    }));
 
-    document.getElementById('resHomeTeams').innerHTML = getList(db.hTeams);
-    document.getElementById('resAwayTeams').innerHTML = getList(db.aTeams);
+    const topProfit = [...teamArray].sort((a,b) => b.rawRoi - a.rawRoi).slice(0, 10);
+    const topLoss = [...teamArray].sort((a,b) => a.rawRoi - b.rawRoi).slice(0, 10);
 
-    document.getElementById('resPreMatch').innerHTML = `
-        <div class="item"><span>Favorito Local (Odd 1 < Odd 2)</span><span class="win">${(db.pre.favLocal.w/db.pre.favLocal.t*100 || 0).toFixed(1)}%</span></div>
-        <div class="item"><span>Favorito Visitante (Odd 2 < Odd 1)</span><span class="win">${(db.pre.favAway.w/db.pre.favAway.t*100 || 0).toFixed(1)}%</span></div>
-    `;
+    const formatList = (arr) => arr.map(t => `
+        <div class="item">
+            <div>
+                <div class="val-main">${t.name}</div>
+                <div class="label">${t.winrate}% Acierto</div>
+            </div>
+            <div class="${t.rawRoi >= 0 ? 'roi-pos' : 'roi-neg'}">${t.roi}% ROI</div>
+        </div>
+    `).join('');
 
-    document.getElementById('resPos').innerHTML = `
-        <div class="item"><span>Equipos nivelados (Dif pos ≤ 5)</span><span class="win">${(db.pos.cercanos.w/db.pos.cercanos.t*100 || 0).toFixed(1)}%</span></div>
-        <div class="item"><span>Equipos desiguales (Dif pos > 5)</span><span class="win">${(db.pos.lejanos.w/db.pos.lejanos.t*100 || 0).toFixed(1)}%</span></div>
-    `;
+    document.getElementById('resProfitTeams').innerHTML = formatList(topProfit);
+    document.getElementById('resLossTeams').innerHTML = formatList(topLoss);
 
-    // Insight Inteligente
-    const winCercanos = db.pos.cercanos.w / db.pos.cercanos.t;
-    const winLejanos = db.pos.lejanos.w / db.pos.lejanos.t;
-    
-    document.getElementById('topInsight').innerHTML = `
-        <strong>💡 PATRÓN DETECTADO:</strong> Los partidos entre equipos <b>${winCercanos > winLejanos ? 'nivelados' : 'con mucha diferencia de tabla'}</b> 
-        tienen un mejor comportamiento para tu estrategia. 
-        ${db.pre.favLocal.w/db.pre.favLocal.t > 0.6 ? "<br>✅ Hay una tendencia fuerte de acierto cuando el local es favorito en PreMatch." : ""}
+    const favRoi = ((s.filters.fav.r / s.filters.fav.s - 1) * 100 || 0).toFixed(1);
+    document.getElementById('resFilters').innerHTML = `
+        <div class="item"><span>Local muy favorito (Odd1 < 2.0)</span><span class="${favRoi >= 0 ? 'roi-pos' : 'roi-neg'}">${favRoi}% ROI</span></div>
     `;
 }
 </script>
