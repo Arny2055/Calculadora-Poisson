@@ -2,140 +2,138 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <title>Estratega Maestro - ROI por Horarios</title>
+    <title>Analizador de Micro-Patrones por Liga</title>
     <style>
         :root { --bg: #0f172a; --card: #1e293b; --text: #f8fafc; --accent: #3b82f6; --success: #10b981; --danger: #ef4444; --gold: #fbbf24; }
-        body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); padding: 20px; }
-        .container { max-width: 1200px; margin: auto; }
-        textarea { width: 100%; height: 100px; background: #334155; color: white; border: 1px solid #475569; border-radius: 8px; padding: 10px; font-size: 11px; margin-bottom: 10px; }
-        .btn { background: var(--accent); color: white; border: none; padding: 15px; cursor: pointer; border-radius: 6px; font-weight: bold; width: 100%; font-size: 16px; }
-        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; margin-top: 20px; }
-        .card { background: var(--card); padding: 20px; border-radius: 12px; border-top: 4px solid var(--accent); }
-        .time-slot { display: flex; justify-content: space-between; padding: 10px; margin: 5px 0; border-radius: 8px; background: rgba(255,255,255,0.05); border-left: 4px solid #475569; }
+        body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); padding: 20px; font-size: 14px; }
+        .container { max-width: 1300px; margin: auto; }
+        textarea { width: 100%; height: 100px; background: #334155; color: white; border: 1px solid #475569; border-radius: 8px; padding: 10px; margin-bottom: 10px; }
+        .btn { background: var(--accent); color: white; border: none; padding: 15px; cursor: pointer; border-radius: 6px; font-weight: bold; width: 100%; font-size: 16px; margin-bottom: 20px; }
+        
+        .league-section { background: var(--card); border-radius: 12px; padding: 20px; margin-bottom: 30px; border-left: 5px solid var(--accent); }
+        .league-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #334155; padding-bottom: 10px; margin-bottom: 15px; }
+        .league-title { font-size: 1.5rem; font-weight: bold; color: var(--gold); }
+        
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 15px; }
+        .sub-card { background: rgba(255,255,255,0.03); padding: 15px; border-radius: 8px; border: 1px solid #334155; }
+        .sub-card h4 { margin: 0 0 10px 0; font-size: 12px; color: #94a3b8; text-transform: uppercase; }
+        
+        .item { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid #2d3748; }
         .roi-pos { color: var(--success); font-weight: bold; }
         .roi-neg { color: var(--danger); font-weight: bold; }
-        .hour-label { font-size: 12px; color: #94a3b8; }
-        .export-btn { background: #10b981; margin-top: 10px; }
+        .badge { background: #334155; padding: 2px 8px; border-radius: 4px; font-size: 11px; }
     </style>
 </head>
 <body>
 
 <div class="container">
-    <div class="card" style="margin-bottom:20px; border-top: 4px solid var(--gold);">
-        <h2>🕒 Analizador de Franjas Horarias y Plan Semanal</h2>
-        <p>Identifica a qué hora del día tus predicciones son más precisas.</p>
-    </div>
+    <h1>🔬 Analizador de Micro-Patrones (Liga > Día > Hora)</h1>
+    <textarea id="dataInput" placeholder="Pega tus datos con encabezados aquí..."></textarea>
+    <button class="btn" onclick="processMicroPatterns()">GENERAR ANALISIS POR LIGA INDEPENDIENTE</button>
 
-    <textarea id="dataInput" placeholder="Pega tus datos aquí..."></textarea>
-    <button class="btn" onclick="processAll()">GENERAR ESTRATEGIA HORARIA Y SEMANAL</button>
-
-    <div id="results" style="display:none;">
-        <div class="grid">
-            <div class="card">
-                <h3>⏰ Rentabilidad por Horario</h3>
-                <div id="hourStats"></div>
-            </div>
-            <div class="card">
-                <h3>📅 Rentabilidad por Día</h3>
-                <div id="dayStats"></div>
-            </div>
-            <div class="card">
-                <h3>⭐ Equipos Top ROI</h3>
-                <div id="teamStats"></div>
-            </div>
-        </div>
-        
-        <button class="btn export-btn" onclick="exportStrategy()">DESCARGAR PLAN ESTRATÉGICO (.txt)</button>
-    </div>
+    <div id="resultsContent"></div>
 </div>
 
 <script>
-function processAll() {
+function processMicroPatterns() {
     const input = document.getElementById('dataInput').value.trim();
+    if (!input) return;
+
     const lines = input.split('\n');
     const headers = lines[0].split('\t').map(h => h.trim().toLowerCase());
-
     const find = (keys) => headers.findIndex(h => keys.some(k => h.includes(k)));
-    const idx = { date: find(['date', 'fecha']), match: find(['match']), result: headers.lastIndexOf('result'), odd: find(['odd']) };
 
-    let stats = { hours: {}, days: {}, teams: {} };
+    const idx = {
+        league: find(['league', 'liga']),
+        date: find(['date', 'fecha']),
+        result: headers.lastIndexOf('result'),
+        odd: find(['odd'])
+    };
+
+    let dataMap = {}; // Estructura: Liga -> { stats }
 
     lines.slice(1).forEach(line => {
         const col = line.split('\t').map(c => c.trim());
         if (col.length < 5) return;
 
+        const league = col[idx.league] || "Otras Ligas";
         const isWin = col.some((c, i) => i >= idx.result && c.toLowerCase() === 'winning');
         const odd = parseFloat(col[idx.odd]?.replace(',','.')) || 1.0;
-        const [hT, aT] = col[idx.match] ? col[idx.match].split(' - ') : ['?', '?'];
         const dateStr = col[idx.date] || "";
 
-        // Extraer Hora (Formato esperado: HH:mm)
+        // Identificar Día
+        let day = "Otro";
+        const d = dateStr.toLowerCase();
+        if(d.includes('lun')) day="Lunes"; else if(d.includes('mar')) day="Martes"; 
+        else if(d.includes('mié')) day="Miércoles"; else if(d.includes('jue')) day="Jueves";
+        else if(d.includes('vie')) day="Viernes"; else if(d.includes('sáb')) day="Sábado";
+        else if(d.includes('dom')) day="Domingo";
+
+        // Identificar Franja Horaria
         const timeMatch = dateStr.match(/(\d{2}):(\d{2})/);
         const hour = timeMatch ? parseInt(timeMatch[1]) : -1;
-        
         let slot = "Sin Hora";
-        if(hour >= 5 && hour < 12) slot = "Mañana (05-12h)";
-        else if(hour >= 12 && hour < 17) slot = "Mediodía (12-17h)";
-        else if(hour >= 17 && hour < 21) slot = "Tarde (17-21h)";
-        else if(hour >= 21 || (hour >= 0 && hour < 5)) slot = "Noche (21-05h)";
+        if(hour >= 5 && hour < 13) slot = "Mañana";
+        else if(hour >= 13 && hour < 18) slot = "Tarde";
+        else if(hour >= 18 && hour < 22) slot = "Noche";
+        else if(hour >= 22 || (hour >= 0 && hour < 5)) slot = "Madrugada";
 
-        // Extraer Día
-        let dName = "Otro";
-        if(dateStr.toLowerCase().includes('lun')) dName = "Lunes";
-        else if(dateStr.toLowerCase().includes('mar')) dName = "Martes";
-        else if(dateStr.toLowerCase().includes('mié')) dName = "Miércoles";
-        else if(dateStr.toLowerCase().includes('jue')) dName = "Jueves";
-        else if(dateStr.toLowerCase().includes('vie')) dName = "Viernes";
-        else if(dateStr.toLowerCase().includes('sáb')) dName = "Sábado";
-        else if(dateStr.toLowerCase().includes('dom')) dName = "Domingo";
+        // Inicializar Liga
+        if(!dataMap[league]) {
+            dataMap[league] = { s:0, r:0, days: {}, hours: {} };
+        }
 
+        const lObj = dataMap[league];
         const ret = isWin ? odd : 0;
+        lObj.s++; lObj.r += ret;
 
-        // Guardar Stats
-        [stats.hours, stats.days].forEach((obj, i) => {
-            const key = i === 0 ? slot : dName;
-            if(!obj[key]) obj[key] = {s:0, r:0};
-            obj[key].s++; obj[key].r += ret;
-        });
+        if(!lObj.days[day]) lObj.days[day] = {s:0, r:0};
+        lObj.days[day].s++; lObj.days[day].r += ret;
 
-        [hT, aT].forEach(t => {
-            if(!t) return;
-            if(!stats.teams[t]) stats.teams[t] = {s:0, r:0};
-            stats.teams[t].s++; stats.teams[t].r += ret;
-        });
+        if(!lObj.hours[slot]) lObj.hours[slot] = {s:0, r:0};
+        lObj.hours[slot].s++; lObj.hours[slot].r += ret;
     });
 
-    render(stats);
+    renderLeagues(dataMap);
 }
 
-function render(s) {
-    document.getElementById('results').style.display = 'block';
+function renderLeagues(map) {
+    const container = document.getElementById('resultsContent');
+    container.innerHTML = "";
 
-    const createList = (obj) => Object.entries(obj)
-        .sort((a,b) => (b[1].r/b[1].s) - (a[1].r/a[1].s))
-        .map(([name, d]) => {
-            const roi = ((d.r/d.s-1)*100).toFixed(1);
-            return `<div class="time-slot"><span>${name}</span><span class="${roi>=0?'roi-pos':'roi-neg'}">${roi}% ROI</span></div>`;
-        }).join('');
-
-    document.getElementById('hourStats').innerHTML = createList(s.hours);
-    document.getElementById('dayStats').innerHTML = createList(s.days);
-    
-    document.getElementById('teamStats').innerHTML = Object.entries(s.teams)
-        .filter(e => e[1].s > 1)
-        .sort((a,b) => (b[1].r/b[1].s) - (a[1].r/a[1].s))
-        .slice(0, 8)
-        .map(([n, d]) => `<div class="time-slot"><span>${n}</span><span class="roi-pos">${((d.r/d.s-1)*100).toFixed(0)}%</span></div>`)
-        .join('');
-}
-
-function exportStrategy() {
-    const content = document.getElementById('results').innerText;
-    const blob = new Blob([content], {type: "text/plain"});
-    const link = document.createElement("a");
-    link.href = URL.createObjectURL(blob);
-    link.download = "mi_estrategia_betting.txt";
-    link.click();
+    Object.entries(map).sort((a,b) => b[1].s - a[1].s).forEach(([name, data]) => {
+        const totalRoi = ((data.r/data.s-1)*100).toFixed(1);
+        
+        const section = document.createElement('div');
+        section.className = "league-section";
+        section.innerHTML = `
+            <div class="league-header">
+                <span class="league-title">${name}</span>
+                <span class="badge" style="color:${totalRoi>=0?'#10b981':'#ef4444'}">ROI LIGA: ${totalRoi}%</span>
+            </div>
+            <div class="grid">
+                <div class="sub-card">
+                    <h4>📅 Mejores Días en esta Liga</h4>
+                    ${Object.entries(data.days).sort((a,b)=>(b[1].r/b[1].s)-(a[1].r/a[1].s)).map(([d, s]) => {
+                        const roi = ((s.r/s.s-1)*100).toFixed(0);
+                        return `<div class="item"><span>${d}</span><span class="${roi>=0?'roi-pos':'roi-neg'}">${roi}%</span></div>`;
+                    }).join('')}
+                </div>
+                <div class="sub-card">
+                    <h4>⏰ Mejores Horarios en esta Liga</h4>
+                    ${Object.entries(data.hours).sort((a,b)=>(b[1].r/b[1].s)-(a[1].r/a[1].s)).map(([h, s]) => {
+                        const roi = ((s.r/s.s-1)*100).toFixed(0);
+                        return `<div class="item"><span>${h}</span><span class="${roi>=0?'roi-pos':'roi-neg'}">${roi}%</span></div>`;
+                    }).join('')}
+                </div>
+                <div class="sub-card" style="display:flex; flex-direction:column; justify-content:center; text-align:center;">
+                    <div style="font-size:12px; color:#94a3b8;">MUESTRA</div>
+                    <div style="font-size:24px; font-weight:bold;">${data.s} Partidos</div>
+                </div>
+            </div>
+        `;
+        container.appendChild(section);
+    });
 }
 </script>
 </body>
