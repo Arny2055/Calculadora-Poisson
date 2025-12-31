@@ -2,113 +2,110 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <title>Analizador de Rangos de Cuotas - Betting Lab</title>
+    <title>Gestión de Riesgo y Simulador de Rachas</title>
     <style>
         :root { --bg: #0f172a; --card: #1e293b; --text: #f8fafc; --accent: #3b82f6; --success: #10b981; --danger: #ef4444; --gold: #fbbf24; }
         body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); padding: 20px; }
-        .container { max-width: 1000px; margin: auto; }
-        textarea { width: 100%; height: 100px; background: #334155; color: white; border: 1px solid #475569; border-radius: 8px; padding: 10px; margin-bottom: 10px; }
+        .container { max-width: 1100px; margin: auto; }
+        textarea { width: 100%; height: 80px; background: #334155; color: white; border: 1px solid #475569; border-radius: 8px; padding: 10px; margin-bottom: 10px; }
         .btn { background: var(--accent); color: white; border: none; padding: 15px; cursor: pointer; border-radius: 6px; font-weight: bold; width: 100%; font-size: 16px; margin-bottom: 20px; }
-        
-        .card { background: var(--card); border-radius: 12px; padding: 20px; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1); }
-        .table-header { display: grid; grid-template-columns: 2fr 1fr 1fr 1.5fr; padding: 10px; background: rgba(255,255,255,0.05); font-weight: bold; color: #94a3b8; font-size: 12px; text-transform: uppercase; }
-        .table-row { display: grid; grid-template-columns: 2fr 1fr 1fr 1.5fr; padding: 12px 10px; border-bottom: 1px solid #334155; align-items: center; transition: 0.2s; }
-        .table-row:hover { background: rgba(255,255,255,0.02); }
-        
-        .roi-badge { padding: 4px 8px; border-radius: 4px; font-weight: bold; text-align: center; }
-        .pos { background: rgba(16, 185, 129, 0.2); color: var(--success); }
-        .neg { background: rgba(239, 68, 68, 0.2); color: var(--danger); }
-        .neutral { background: #334155; color: #94a3b8; }
-        
-        .highlight { border-left: 4px solid var(--gold); background: rgba(251, 191, 36, 0.05) !important; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }
+        .card { background: var(--card); padding: 20px; border-radius: 12px; border-bottom: 4px solid #334155; }
+        .stat-val { font-size: 24px; font-weight: bold; display: block; margin-top: 5px; }
+        .danger-val { color: var(--danger); }
+        .success-val { color: var(--success); }
+        .advice-box { background: rgba(59, 130, 246, 0.1); border: 1px dashed var(--accent); padding: 15px; border-radius: 8px; margin-top: 20px; font-size: 14px; }
     </style>
 </head>
 <body>
 
 <div class="container">
-    <h1>🎯 Patrones por Micro-Rangos de Cuotas</h1>
-    <p style="color: #94a3b8; font-size: 14px;">Identifica el "Sweet Spot" (punto dulce) de tus cuotas para maximizar el ROI.</p>
-    
-    <textarea id="dataInput" placeholder="Pega tus datos aquí (Name, Desired Outcome, Odd, Result, etc.)..."></textarea>
-    <button class="btn" onclick="analyzeOdds()">ANALIZAR RENTABILIDAD POR CUOTA</button>
+    <h1>🛡️ Simulador de Rachas y Gestión de Riesgo</h1>
+    <textarea id="dataInput" placeholder="Pega tus datos aquí..."></textarea>
+    <button class="btn" onclick="runRiskAnalysis()">ANALIZAR MI RESISTENCIA AL RIESGO</button>
 
-    <div id="resultsCard" class="card" style="display:none;">
-        <div class="table-header">
-            <span>Rango de Cuota</span>
-            <span>Partidos</span>
-            <span>Acierto</span>
-            <span>Rentabilidad (ROI)</span>
+    <div id="results" style="display:none;">
+        <div class="grid">
+            <div class="card">
+                <h3>📉 Peor Racha (Consecutiva)</h3>
+                <span id="maxLossStreak" class="stat-val danger-val">0</span>
+                <p style="font-size:12px; color:#94a3b8;">Partidos seguidos perdiendo.</p>
+            </div>
+            <div class="card">
+                <h3>📈 Mejor Racha (Consecutiva)</h3>
+                <span id="maxWinStreak" class="stat-val success-val">0</span>
+                <p style="font-size:12px; color:#94a3b8;">Partidos seguidos ganando.</p>
+            </div>
+            <div class="card" style="border-bottom-color: var(--gold);">
+                <h3>💰 Bankroll Recomendado</h3>
+                <span id="bankReq" class="stat-val" style="color: var(--gold);">0 uds.</span>
+                <p style="font-size:12px; color:#94a3b8;">Caja mínima para no quebrar.</p>
+            </div>
         </div>
-        <div id="oddsTableBody"></div>
+
+        <div class="advice-box" id="riskAdvice"></div>
     </div>
 </div>
 
 <script>
-function analyzeOdds() {
+function runRiskAnalysis() {
     const input = document.getElementById('dataInput').value.trim();
     if (!input) return;
 
     const lines = input.split('\n');
     const headers = lines[0].split('\t').map(h => h.trim().toLowerCase());
-    
-    const idxOdd = headers.findIndex(h => h === 'odd' || h.includes('live odd') || h === 'desired outcome odd');
     const idxResult = headers.lastIndexOf('result');
 
-    if (idxOdd === -1) {
-        alert("No se encontró la columna de Cuota (Odd).");
-        return;
-    }
-
-    let ranges = {};
+    let currentWinStreak = 0;
+    let currentLossStreak = 0;
+    let maxWin = 0;
+    let maxLoss = 0;
+    let wins = 0;
+    let total = 0;
 
     lines.slice(1).forEach(line => {
         const col = line.split('\t').map(c => c.trim());
         if (col.length < 5) return;
 
-        const odd = parseFloat(col[idxOdd]?.replace(',', '.')) || 0;
         const isWin = col.some((c, i) => i >= idxResult && c.toLowerCase() === 'winning');
+        total++;
 
-        if (odd > 0) {
-            // Creamos rangos de 0.10 (Ej: 1.10 - 1.20)
-            const floor = (Math.floor(odd * 10) / 10).toFixed(2);
-            const ceil = (parseFloat(floor) + 0.10).toFixed(2);
-            const rangeKey = `${floor} - ${ceil}`;
-
-            if (!ranges[rangeKey]) {
-                ranges[rangeKey] = { s: 0, r: 0, w: 0, min: parseFloat(floor) };
-            }
-
-            ranges[rangeKey].s += 1; // Stake 1
-            ranges[rangeKey].r += isWin ? odd : 0; // Retorno
-            if (isWin) ranges[rangeKey].w++;
+        if (isWin) {
+            wins++;
+            currentWinStreak++;
+            maxLoss = Math.max(maxLoss, currentLossStreak);
+            currentLossStreak = 0;
+        } else {
+            currentLossStreak++;
+            maxWin = Math.max(maxWin, currentWinStreak);
+            currentWinStreak = 0;
         }
     });
+    // Final check for last rows
+    maxWin = Math.max(maxWin, currentWinStreak);
+    maxLoss = Math.max(maxLoss, currentLossStreak);
 
-    render(ranges);
+    displayRisk(maxWin, maxLoss, wins, total);
 }
 
-function render(ranges) {
-    document.getElementById('resultsCard').style.display = 'block';
-    const body = document.getElementById('oddsTableBody');
-    body.innerHTML = "";
+function displayRisk(mw, ml, w, t) {
+    document.getElementById('results').style.display = 'block';
+    document.getElementById('maxWinStreak').innerText = mw + " Partidos";
+    document.getElementById('maxLossStreak').innerText = ml + " Partidos";
+    
+    // Cálculo de Bankroll: 
+    // Usamos una fórmula de seguridad: (Peor racha x 3) + margen de varianza
+    // Esto asegura que incluso repitiendo tu peor racha 2 veces seguidas, sigas vivo.
+    const suggestedBank = (ml * 3) + 5;
+    document.getElementById('bankReq').innerText = suggestedBank + " Unidades";
 
-    const sortedRanges = Object.entries(ranges).sort((a, b) => a[1].min - b[1].min);
-
-    sortedRanges.forEach(([range, data]) => {
-        const roi = ((data.r / data.s - 1) * 100).toFixed(1);
-        const wr = (data.w / data.s * 100).toFixed(1);
-        const isHighValue = parseFloat(roi) > 10;
-
-        const row = document.createElement('div');
-        row.className = `table-row ${isHighValue ? 'highlight' : ''}`;
-        row.innerHTML = `
-            <span style="font-weight:bold;">${range}</span>
-            <span>${data.s} ud.</span>
-            <span>${wr}%</span>
-            <span class="roi-badge ${roi >= 0 ? 'pos' : 'neg'}">${roi}% ROI</span>
-        `;
-        body.appendChild(row);
-    });
+    const winRate = (w/t*100).toFixed(1);
+    document.getElementById('riskAdvice').innerHTML = `
+        <strong>💡 CONSEJO DE GESTIÓN:</strong><br>
+        Tu tasa de acierto es del <b>${winRate}%</b>. Estadísticamente, con una peor racha de <b>${ml}</b> fallos, 
+        cada apuesta no debería superar el <b>${(100/suggestedBank).toFixed(1)}%</b> de tu capital total. 
+        Si tu capital son 1000€, tu apuesta máxima (Stake 1) debería ser de <b>${(1000/suggestedBank).toFixed(0)}€</b>.
+    `;
 }
 </script>
 </body>
