@@ -2,160 +2,140 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <title>Analizador de Patrones HT - Versión Robusta</title>
-    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <title>Analizador de Goles HT - Selector Automático</title>
     <style>
         :root { --bg: #0f172a; --card: #1e293b; --text: #f8fafc; --accent: #3b82f6; --success: #10b981; --danger: #ef4444; }
-        body { font-family: sans-serif; background: var(--bg); color: var(--text); padding: 20px; }
-        .container { max-width: 1200px; margin: auto; }
-        textarea { width: 100%; height: 150px; background: #334155; color: white; border: 1px solid #475569; border-radius: 8px; padding: 12px; font-family: monospace; }
-        .controls { margin: 20px 0; display: flex; gap: 10px; }
-        button { flex: 1; background: var(--accent); color: white; border: none; padding: 15px; cursor: pointer; border-radius: 6px; font-weight: bold; font-size: 16px; }
-        button:hover { background: #2563eb; }
-        #debugLog { background: #450a0a; color: #fecaca; padding: 10px; border-radius: 5px; margin-bottom: 20px; display: none; font-size: 12px; }
-        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }
-        .card { background: var(--card); padding: 20px; border-radius: 12px; }
-        .pattern-box { background: #064e3b; border-left: 6px solid var(--success); padding: 20px; margin-bottom: 20px; border-radius: 8px; }
-        .win { color: var(--success); font-weight: bold; }
+        body { font-family: 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); padding: 20px; }
+        .container { max-width: 1100px; margin: auto; }
+        textarea { width: 100%; height: 120px; background: #334155; color: white; border: 1px solid #475569; border-radius: 8px; padding: 12px; margin-bottom: 10px; font-size: 12px; }
+        .btn { background: var(--accent); color: white; border: none; padding: 14px; cursor: pointer; border-radius: 6px; font-weight: bold; width: 100%; font-size: 16px; margin-bottom: 20px; }
+        .btn:hover { background: #2563eb; }
+        .error { background: #450a0a; color: #fecaca; padding: 15px; border-radius: 8px; margin-bottom: 20px; border: 1px solid #991b1b; display: none; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 15px; }
+        .card { background: var(--card); padding: 20px; border-radius: 12px; border-bottom: 4px solid var(--accent); }
+        .card h3 { margin-top: 0; font-size: 14px; color: #94a3b8; text-transform: uppercase; }
+        .item { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid #334155; font-size: 14px; }
+        .val { font-weight: bold; color: var(--success); }
+        .summary { background: #064e3b; padding: 20px; border-radius: 10px; margin-bottom: 20px; border-left: 6px solid var(--success); }
     </style>
 </head>
 <body>
 
 <div class="container">
-    <h1>🔬 Analizador de Patrones Pro</h1>
-    <div id="debugLog"></div>
+    <h1>🚀 Analizador Automático de Patrones</h1>
+    <div id="errorBox" class="error"></div>
     
-    <textarea id="dataInput" placeholder="Pega aquí los datos desde la fila de encabezados..."></textarea>
-    
-    <div class="controls">
-        <button onclick="processData()">EJECUTAR ANÁLISIS</button>
-    </div>
+    <textarea id="dataInput" placeholder="Pega aquí toda la información, incluyendo los encabezados..."></textarea>
+    <button class="btn" onclick="analyze()">ANALIZAR DATOS</button>
 
-    <div id="output" style="display:none;">
-        <div id="goldInsights" class="pattern-box"></div>
+    <div id="results" style="display:none;">
+        <div id="bestInsight" class="summary"></div>
+        
         <div class="grid">
-            <div class="card"><h3>🏆 Ligas Top</h3><div id="leagueResults"></div></div>
-            <div class="card"><h3>📊 Por Cuota</h3><div id="oddResults"></div></div>
-            <div class="card"><h3>⚽ Equipos Clave</h3><div id="teamResults"></div></div>
+            <div class="card">
+                <h3>🌍 Mejores Ligas</h3>
+                <div id="resLigas"></div>
+            </div>
+            <div class="card">
+                <h3>📈 Rentabilidad por Cuota</h3>
+                <div id="resCuotas"></div>
+            </div>
+            <div class="card">
+                <h3>⚡ Ataques Peligrosos</h3>
+                <div id="resAtaques"></div>
+            </div>
         </div>
-        <div id="mainChart" style="margin-top:20px;"></div>
     </div>
 </div>
 
 <script>
-function logError(msg) {
-    const log = document.getElementById('debugLog');
-    log.style.display = 'block';
-    log.innerHTML += `<div>⚠️ ${msg}</div>`;
-}
+function analyze() {
+    const errorBox = document.getElementById('errorBox');
+    errorBox.style.display = 'none';
+    errorBox.innerHTML = '';
 
-function processData() {
-    // Limpiar errores previos
-    document.getElementById('debugLog').innerHTML = '';
-    document.getElementById('debugLog').style.display = 'none';
-    
     const input = document.getElementById('dataInput').value.trim();
-    if (!input) {
-        logError("El área de texto está vacía.");
-        return;
-    }
+    if (!input) return;
 
     const lines = input.split('\n');
-    if (lines.length < 2) {
-        logError("No hay suficientes datos. Asegúrate de incluir la fila de encabezados.");
+    const headerLine = lines[0].toLowerCase();
+    
+    // Detector de separador (Tabulador o Coma)
+    const sep = headerLine.includes('\t') ? '\t' : (headerLine.includes(';') ? ';' : ',');
+    const headers = headerLine.split(sep).map(h => h.trim());
+
+    // BUSCADOR FLEXIBLE DE COLUMNAS (Clave para que no falle)
+    const findCol = (keywords) => headers.findIndex(h => keywords.some(k => h.includes(k)));
+
+    const idx = {
+        league: findCol(['league', 'liga']),
+        match: findCol(['match', 'partido']),
+        result: headers.findIndex(h => h === 'result' || (h.includes('result') && !h.includes('notification') && !h.includes('ht'))),
+        odd: findCol(['live odd', 'odd live', 'outcome live']),
+        daHome: findCol(['home dangerous attacks at notification']),
+        daAway: findCol(['away dangerous attacks at notification'])
+    };
+
+    // Validar columnas esenciales
+    if (idx.league === -1 || idx.result === -1) {
+        errorBox.style.display = 'block';
+        errorBox.innerHTML = `⚠️ No detectamos las columnas. Asegúrate de copiar los encabezados. <br> Buscando: "League", "Result". Detectado: ${headers.slice(0,3).join(', ')}...`;
         return;
     }
 
-    // Detectar si el separador es TAB (Excel) o Coma
-    const headerLine = lines[0];
-    const separator = headerLine.includes('\t') ? '\t' : (headerLine.includes(';') ? ';' : ',');
-    const headers = headerLine.split(separator).map(h => h.trim().toLowerCase());
+    let stats = { ligas: {}, cuotas: {baja:{w:0,t:0}, alta:{w:0,t:0}}, ataques: {fuerte:{w:0,t:0}, debil:{w:0,t:0}} };
 
-    // Buscar índices críticos
-    const idx = {
-        league: headers.findIndex(h => h.includes('league')),
-        match: headers.findIndex(h => h.includes('match')),
-        result: headers.findIndex(h => h.includes('result') && !h.includes('notification')),
-        odd: headers.findIndex(h => h.includes('live odd'))
-    };
+    lines.slice(1).forEach(line => {
+        const col = line.split(sep);
+        if (col.length < headers.length) return;
 
-    // Validar si encontramos las columnas
-    for (let key in idx) {
-        if (idx[key] === -1) {
-            logError(`No se encontró la columna para: ${key}. Revisa los encabezados.`);
-            return;
-        }
-    }
-
-    let stats = { leagues: {}, teams: {}, odds: { baja: {w:0, t:0}, media: {w:0, t:0}, alta: {w:0, t:0} } };
-
-    lines.slice(1).forEach((line, i) => {
-        const columns = line.split(separator);
-        if (columns.length < headers.length) return;
-
-        const isWin = columns[idx.result].toLowerCase().includes('winning');
-        const league = columns[idx.league] || 'Desconocida';
-        const match = columns[idx.match] || '';
-        const odd = parseFloat(columns[idx.odd].replace(',', '.')) || 0;
+        const isWin = col[idx.result] && col[idx.result].toLowerCase().includes('winning');
+        const liga = col[idx.league] || 'Otros';
+        const cuota = parseFloat(col[idx.odd] ? col[idx.odd].replace(',', '.') : 0);
+        const daTotales = (parseInt(col[idx.daHome]) || 0) + (parseInt(col[idx.daAway]) || 0);
 
         // Ligas
-        if (!stats.leagues[league]) stats.leagues[league] = {w: 0, t: 0};
-        stats.leagues[league].t++;
-        if (isWin) stats.leagues[league].w++;
-
-        // Equipos
-        const teams = match.split(' - ');
-        teams.forEach(t => {
-            const team = t.trim();
-            if (!stats.teams[team]) stats.teams[team] = {w: 0, t: 0};
-            stats.teams[team].t++;
-            if (isWin) stats.teams[team].w++;
-        });
+        if (!stats.ligas[liga]) stats.ligas[liga] = {w:0, t:0};
+        stats.ligas[liga].t++; if(isWin) stats.ligas[liga].w++;
 
         // Cuotas
-        if (odd > 0) {
-            const range = odd < 1.30 ? 'baja' : (odd < 1.50 ? 'media' : 'alta');
-            stats.odds[range].t++;
-            if (isWin) stats.odds[range].w++;
+        if (cuota > 0) {
+            const cat = cuota >= 1.30 ? 'alta' : 'baja';
+            stats.cuotas[cat].t++; if(isWin) stats.cuotas[cat].w++;
         }
+
+        // Ataques
+        const catAtq = daTotales >= 3 ? 'fuerte' : 'debil';
+        stats.ataques[catAtq].t++; if(isWin) stats.ataques[catAtq].w++;
     });
 
-    displayResults(stats);
+    render(stats);
 }
 
-function displayResults(stats) {
-    document.getElementById('output').style.display = 'block';
-
-    // Mejores Ligas
-    const bestLeagues = Object.entries(stats.leagues)
-        .sort((a,b) => (b[1].w/b[1].t) - (a[1].w/a[1].t))
-        .slice(0, 5)
-        .map(([name, s]) => `<div>${name}: <span class="win">${(s.w/s.t*100).toFixed(1)}%</span></div>`)
-        .join('');
-    document.getElementById('leagueResults').innerHTML = bestLeagues;
-
-    // Mejores Equipos (Mínimo 2 partidos)
-    const bestTeams = Object.entries(stats.teams)
-        .filter(t => t[1].t > 1)
-        .sort((a,b) => b[1].w - a[1].w)
-        .slice(0, 5)
-        .map(([name, s]) => `<div>${name}: <span class="win">${s.w} Wins</span></div>`)
-        .join('');
-    document.getElementById('teamResults').innerHTML = bestTeams || "No hay equipos repetidos aún";
+function render(s) {
+    document.getElementById('results').style.display = 'block';
+    
+    // Ligas
+    const sortedLigas = Object.entries(s.ligas).sort((a,b) => (b[1].w/b[1].t) - (a[1].w/a[1].t)).slice(0,5);
+    document.getElementById('resLigas').innerHTML = sortedLigas.map(([n, v]) => 
+        `<div class="item"><span>${n}</span><span class="val">${(v.w/v.t*100).toFixed(0)}%</span></div>`).join('');
 
     // Cuotas
-    const oddHtml = `
-        <div>1.10 - 1.29: <span class="win">${(stats.odds.baja.w/stats.odds.baja.t*100 || 0).toFixed(1)}%</span></div>
-        <div>1.30 - 1.49: <span class="win">${(stats.odds.media.w/stats.odds.media.t*100 || 0).toFixed(1)}%</span></div>
-        <div>1.50+: <span class="win">${(stats.odds.alta.w/stats.odds.alta.t*100 || 0).toFixed(1)}%</span></div>
+    document.getElementById('resCuotas').innerHTML = `
+        <div class="item"><span>1.10 - 1.29</span><span class="val">${(s.cuotas.baja.w/s.cuotas.baja.t*100 || 0).toFixed(1)}%</span></div>
+        <div class="item"><span>1.30 o más</span><span class="val">${(s.cuotas.alta.w/s.cuotas.alta.t*100 || 0).toFixed(1)}%</span></div>
     `;
-    document.getElementById('oddResults').innerHTML = oddHtml;
 
-    // Recomendación dinámica
-    const topL = Object.entries(stats.leagues).sort((a,b) => (b[1].w/b[1].t) - (a[1].w/a[1].t))[0];
-    document.getElementById('goldInsights').innerHTML = `
-        <strong>Patrón Detectado:</strong> La liga <b>${topL[0]}</b> tiene el mejor rendimiento. 
-        Prioriza apuestas en el rango de cuota con mayor porcentaje de acierto.
+    // Ataques
+    document.getElementById('resAtaques').innerHTML = `
+        <div class="item"><span>≥ 3 Atq. Peligrosos</span><span class="val">${(s.ataques.fuerte.w/s.ataques.fuerte.t*100 || 0).toFixed(1)}%</span></div>
+        <div class="item"><span>< 3 Atq. Peligrosos</span><span class="val">${(s.ataques.debil.w/s.ataques.debil.t*100 || 0).toFixed(1)}%</span></div>
+    `;
+
+    const mejorLiga = sortedLigas[0];
+    document.getElementById('bestInsight').innerHTML = `
+        <strong>🎯 PATRÓN DE ORO:</strong> En la liga <b>${mejorLiga[0]}</b> tienes un <b>${(mejorLiga[1].w/mejorLiga[1].t*100).toFixed(0)}%</b> de acierto. 
+        ${s.ataques.fuerte.w/s.ataques.fuerte.t > 0.8 ? "<br>🔥 <b>Dato Clave:</b> Cuando hay presión (+3 ataques), el acierto es masivo." : ""}
     `;
 }
 </script>
