@@ -2,110 +2,142 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <title>Analizador de Patrones HT/FT - v4.0</title>
+    <title>Analizador de Patrones Avanzado - Betting Engine</title>
     <style>
-        :root { --bg: #0f172a; --card: #1e293b; --text: #f8fafc; --accent: #3b82f6; --success: #10b981; --danger: #ef4444; }
-        body { font-family: sans-serif; background: var(--bg); color: var(--text); padding: 20px; }
-        .container { max-width: 1000px; margin: auto; }
-        textarea { width: 100%; height: 150px; background: #334155; color: white; border: 1px solid #475569; border-radius: 8px; padding: 12px; font-family: monospace; }
-        .btn { background: var(--accent); color: white; border: none; padding: 15px; cursor: pointer; border-radius: 6px; font-weight: bold; width: 100%; margin: 15px 0; font-size: 16px; }
-        .card { background: var(--card); padding: 20px; border-radius: 12px; margin-bottom: 20px; }
-        .row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #334155; }
+        :root { --bg: #0f172a; --card: #1e293b; --text: #f8fafc; --accent: #3b82f6; --success: #10b981; --danger: #ef4444; --gold: #fbbf24; }
+        body { font-family: 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); padding: 20px; }
+        .container { max-width: 1200px; margin: auto; }
+        textarea { width: 100%; height: 120px; background: #334155; color: white; border: 1px solid #475569; border-radius: 8px; padding: 12px; font-size: 11px; }
+        .btn { background: var(--accent); color: white; border: none; padding: 15px; cursor: pointer; border-radius: 6px; font-weight: bold; width: 100%; margin: 15px 0; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 15px; }
+        .card { background: var(--card); padding: 15px; border-radius: 12px; border-bottom: 4px solid #334155; }
+        .card h3 { margin-top: 0; font-size: 13px; color: #94a3b8; text-transform: uppercase; }
+        .item { display: flex; justify-content: space-between; padding: 5px 0; border-bottom: 1px solid #2d3748; font-size: 13px; }
         .win { color: var(--success); font-weight: bold; }
         .loss { color: var(--danger); font-weight: bold; }
-        .summary-box { padding: 15px; border-radius: 8px; margin-bottom: 20px; font-size: 18px; text-align: center; }
+        .insight { background: #1e3a8a; padding: 15px; border-radius: 8px; margin-bottom: 20px; border-left: 5px solid var(--gold); }
     </style>
 </head>
 <body>
 
 <div class="container">
-    <h1>🔬 Analizador de Datos Betting (Corregido)</h1>
-    <textarea id="dataInput" placeholder="Pega aquí tus filas de Excel..."></textarea>
-    <button class="btn" onclick="process()">ANALIZAR AHORA</button>
+    <h1>🎯 Buscador de Patrones Inteligente</h1>
+    <textarea id="dataInput" placeholder="Pega aquí tus datos con encabezados..."></textarea>
+    <button class="btn" onclick="analyzeData()">BUSCAR PATRONES GANADORES</button>
 
     <div id="results" style="display:none;">
-        <div id="generalStats" class="summary-box" style="background: #1e293b; border: 1px solid #3b82f6;"></div>
-        
-        <div class="card">
-            <h3>📊 Porcentajes por Liga</h3>
-            <div id="leagueTable"></div>
-        </div>
+        <div id="topInsight" class="insight"></div>
 
-        <div class="card">
-            <h3>💰 Efectividad por Cuota</h3>
-            <div id="oddTable"></div>
+        <div class="grid">
+            <div class="card">
+                <h3>🏠 Equipos (Local) - Mejor Acierto</h3>
+                <div id="resHomeTeams"></div>
+            </div>
+            <div class="card">
+                <h3>🚀 Equipos (Visitante) - Mejor Acierto</h3>
+                <div id="resAwayTeams"></div>
+            </div>
+            <div class="card">
+                <h3>📊 Cuotas PreMatch (Favoritos)</h3>
+                <div id="resPreMatch"></div>
+            </div>
+            <div class="card">
+                <h3>📍 Posición en Tabla</h3>
+                <div id="resPos"></div>
+            </div>
         </div>
     </div>
 </div>
 
 <script>
-function process() {
+function analyzeData() {
     const input = document.getElementById('dataInput').value.trim();
-    if (!input) return;
-
     const lines = input.split('\n');
-    const header = lines[0].split('\t');
-    
-    // Buscar índices de forma flexible
-    const findIdx = (names) => header.findIndex(h => names.some(n => h.toLowerCase().includes(n.toLowerCase())));
-    
-    const idxLeague = findIdx(['league', 'liga']);
-    const idxOdd = findIdx(['odd']);
-    
-    let stats = { total: 0, wins: 0, leagues: {}, odds: {} };
+    const headers = lines[0].split('\t').map(h => h.trim().toLowerCase());
+
+    const find = (keys) => headers.findIndex(h => keys.some(k => h.includes(k)));
+
+    const idx = {
+        match: find(['match']),
+        result: headers.lastIndexOf('result'),
+        odd1: find(['odd 1 prematch']),
+        odd2: find(['odd 2 prematch']),
+        posH: find(['home position']),
+        posA: find(['away position'])
+    };
+
+    let db = { hTeams: {}, aTeams: {}, pre: {favLocal: {w:0,t:0}, favAway: {w:0,t:0}}, pos: {cercanos:{w:0,t:0}, lejanos:{w:0,t:0}} };
 
     lines.slice(1).forEach(line => {
         const cols = line.split('\t').map(c => c.trim());
-        if (cols.length < 3) return;
+        if (cols.length < 5) return;
 
-        // BÚSQUEDA DE RESULTADO: Buscamos "Winning" en cualquier columna de la fila
-        // Esto evita errores si la columna Result se mueve
-        const isWin = cols.some(cell => cell.toLowerCase() === 'winning');
-        
-        const league = cols[idxLeague] || "Desconocida";
-        const oddVal = parseFloat(cols[idxOdd]?.replace(',', '.')) || 0;
-        const oddRange = oddVal ? (Math.floor(oddVal * 1.5) / 1.5).toFixed(2) : "N/A";
+        const isWin = cols.some((c, i) => i >= idx.result && c.toLowerCase() === 'winning');
+        const [hTeam, aTeam] = cols[idx.match] ? cols[idx.match].split(' - ') : ['?', '?'];
+        const o1 = parseFloat(cols[idx.odd1]?.replace(',','.')) || 0;
+        const o2 = parseFloat(cols[idx.odd2]?.replace(',','.')) || 0;
+        const pH = parseInt(cols[idx.posH]) || 0;
+        const pA = parseInt(cols[idx.posA]) || 0;
 
-        stats.total++;
-        if (isWin) stats.wins++;
+        // Equipos
+        if(hTeam) {
+            if(!db.hTeams[hTeam]) db.hTeams[hTeam] = {w:0, t:0};
+            db.hTeams[hTeam].t++; if(isWin) db.hTeams[hTeam].w++;
+        }
+        if(aTeam) {
+            if(!db.aTeams[aTeam]) db.aTeams[aTeam] = {w:0, t:0};
+            db.aTeams[aTeam].t++; if(isWin) db.aTeams[aTeam].w++;
+        }
 
-        // Ligas
-        if (!stats.leagues[league]) stats.leagues[league] = { w: 0, t: 0 };
-        stats.leagues[league].t++;
-        if (isWin) stats.leagues[league].w++;
+        // Cuotas PreMatch
+        if(o1 > 0 && o2 > 0) {
+            if(o1 < o2) { db.pre.favLocal.t++; if(isWin) db.pre.favLocal.w++; }
+            else { db.pre.favAway.t++; if(isWin) db.pre.favAway.w++; }
+        }
 
-        // Cuotas
-        if (!stats.odds[oddRange]) stats.odds[oddRange] = { w: 0, t: 0 };
-        stats.odds[oddRange].t++;
-        if (isWin) stats.odds[oddRange].w++;
+        // Posiciones
+        if(pH > 0 && pA > 0) {
+            const diff = Math.abs(pH - pA);
+            if(diff <= 5) { db.pos.cercanos.t++; if(isWin) db.pos.cercanos.w++; }
+            else { db.pos.lejanos.t++; if(isWin) db.pos.lejanos.w++; }
+        }
     });
 
-    display(stats);
+    render(db);
 }
 
-function display(s) {
+function render(db) {
     document.getElementById('results').style.display = 'block';
-    const wrGeneral = (s.wins / s.total * 100).toFixed(1);
-    
-    document.getElementById('generalStats').innerHTML = `
-        Acierto Total: <span class="win">${wrGeneral}%</span> (${s.wins}/${s.total} partidos)
+
+    const getList = (obj) => Object.entries(obj)
+        .filter(e => e[1].t > 0)
+        .sort((a,b) => (b[1].w/b[1].t) - (a[1].w/a[1].t))
+        .slice(0, 8)
+        .map(([n, v]) => `<div class="item"><span>${n}</span><span class="win">${(v.w/v.t*100).toFixed(0)}% (${v.w}/${v.t})</span></div>`)
+        .join('');
+
+    document.getElementById('resHomeTeams').innerHTML = getList(db.hTeams);
+    document.getElementById('resAwayTeams').innerHTML = getList(db.aTeams);
+
+    document.getElementById('resPreMatch').innerHTML = `
+        <div class="item"><span>Favorito Local (Odd 1 < Odd 2)</span><span class="win">${(db.pre.favLocal.w/db.pre.favLocal.t*100 || 0).toFixed(1)}%</span></div>
+        <div class="item"><span>Favorito Visitante (Odd 2 < Odd 1)</span><span class="win">${(db.pre.favAway.w/db.pre.favAway.t*100 || 0).toFixed(1)}%</span></div>
     `;
 
-    // Tabla Ligas
-    let ligaHtml = "";
-    Object.entries(s.leagues).sort((a,b) => b[1].w - a[1].w).forEach(([name, data]) => {
-        const p = (data.w / data.t * 100).toFixed(0);
-        ligaHtml += `<div class="row"><span>${name}</span><span class="${p > 50 ? 'win' : 'loss'}">${p}% (${data.w}/${data.t})</span></div>`;
-    });
-    document.getElementById('leagueTable').innerHTML = ligaHtml;
+    document.getElementById('resPos').innerHTML = `
+        <div class="item"><span>Equipos nivelados (Dif pos ≤ 5)</span><span class="win">${(db.pos.cercanos.w/db.pos.cercanos.t*100 || 0).toFixed(1)}%</span></div>
+        <div class="item"><span>Equipos desiguales (Dif pos > 5)</span><span class="win">${(db.pos.lejanos.w/db.pos.lejanos.t*100 || 0).toFixed(1)}%</span></div>
+    `;
 
-    // Tabla Cuotas
-    let oddHtml = "";
-    Object.entries(s.odds).sort((a,b) => a[0] - b[0]).forEach(([range, data]) => {
-        const p = (data.w / data.t * 100).toFixed(0);
-        oddHtml += `<div class="row"><span>Rango Cuota ${range}</span><span class="win">${p}%</span></div>`;
-    });
-    document.getElementById('oddTable').innerHTML = oddHtml;
+    // Insight Inteligente
+    const winCercanos = db.pos.cercanos.w / db.pos.cercanos.t;
+    const winLejanos = db.pos.lejanos.w / db.pos.lejanos.t;
+    
+    document.getElementById('topInsight').innerHTML = `
+        <strong>💡 PATRÓN DETECTADO:</strong> Los partidos entre equipos <b>${winCercanos > winLejanos ? 'nivelados' : 'con mucha diferencia de tabla'}</b> 
+        tienen un mejor comportamiento para tu estrategia. 
+        ${db.pre.favLocal.w/db.pre.favLocal.t > 0.6 ? "<br>✅ Hay una tendencia fuerte de acierto cuando el local es favorito en PreMatch." : ""}
+    `;
 }
 </script>
 </body>
