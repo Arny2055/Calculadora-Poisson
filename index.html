@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <title>Betting Intelligence Pro - Master Suite Final</title>
+    <title>Betting Intelligence Pro - Full Memory Edition</title>
     <style>
         :root { --bg: #0f172a; --card: #1e293b; --text: #f8fafc; --accent: #3b82f6; --success: #10b981; --danger: #ef4444; --gold: #fbbf24; }
         body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); padding: 20px; font-size: 14px; line-height: 1.4; }
@@ -34,7 +34,7 @@
 
 <div class="container">
     <div class="card" style="margin-bottom: 20px;">
-        <h2>🚀 Betting Master Hub - Control Total con Rangos Min/Max</h2>
+        <h2>🚀 Betting Master Hub - Pro Persistent Ranges</h2>
         <textarea id="dataInput" placeholder="Pega aquí tus datos históricos..."></textarea>
         <button class="btn" onclick="initialProcess()">1. PROCESAR DATOS HISTÓRICOS</button>
     </div>
@@ -46,7 +46,7 @@
             <h1 id="simRoiTotal" style="margin:0;">ROI: 0%</h1>
             <h2 id="simUnitsTotal" style="margin:5px 0 0 0; color: var(--success);">+0.00 UDS</h2>
             <p id="simStatsTotal" style="margin:5px 0 0 0; opacity: 0.8; font-size: 12px;"></p>
-            <button class="btn btn-save" onclick="saveTopStrategy()">💾 GUARDAR ESTRATEGIA (ROI > 20%)</button>
+            <button class="btn btn-save" onclick="saveTopStrategy()">💾 GUARDAR ESTRATEGIA COMPLETA (ROI > 20%)</button>
         </div>
 
         <div class="grid">
@@ -80,7 +80,7 @@
         <div id="leagueBreakdown"></div>
 
         <div class="card" style="margin-top:30px; border: 1px solid var(--success);">
-            <h3>📂 Estrategia en Memoria (Snapshot)</h3>
+            <h3>📂 Estrategia en Memoria (Snapshot con Rangos)</h3>
             <button class="btn-mini" style="background:var(--danger);" onclick="clearSaved()">Limpiar Memoria</button>
             <div id="savedContainer"></div>
         </div>
@@ -94,19 +94,10 @@ let currentLeaguesData = {};
 function initialProcess() {
     const input = document.getElementById('dataInput').value.trim();
     if (!input) return;
-
     const lines = input.split('\n');
     const headers = lines[0].split('\t').map(h => h.trim().toLowerCase());
     const find = (keys) => headers.findIndex(h => keys.some(k => h.includes(k)));
-
-    const idx = {
-        league: find(['league', 'liga']),
-        date: find(['date', 'fecha']),
-        match: find(['match']),
-        result: headers.lastIndexOf('result'),
-        odd: find(['odd'])
-    };
-
+    const idx = { league: find(['league', 'liga']), date: find(['date', 'fecha']), match: find(['match']), result: headers.lastIndexOf('result'), odd: find(['odd']) };
     allMatches = [];
     let initialOdds = {};
     let initialTeams = {};
@@ -114,21 +105,17 @@ function initialProcess() {
     lines.slice(1).forEach(line => {
         const col = line.split('\t').map(c => c.trim());
         if (col.length < 5) return;
-
         const isWin = col.some((c, i) => i >= idx.result && c.toLowerCase() === 'winning');
         const odd = parseFloat(col[idx.odd]?.replace(',','.')) || 0;
         const league = col[idx.league] || "Otras";
         const dateStr = col[idx.date] || "";
         const [hT, aT] = col[idx.match] ? col[idx.match].split(' - ') : ['?', '?'];
-
         if(odd > 0) {
             const floor = (Math.floor(odd * 10) / 10).toFixed(2);
             const range = `${floor} - ${(parseFloat(floor)+0.10).toFixed(2)}`;
             allMatches.push({ odd, isWin, league, range, dateStr, teams: [hT, aT] });
-
             if(!initialOdds[range]) initialOdds[range] = {s:0, r:0};
             initialOdds[range].s++; initialOdds[range].r += (isWin?odd:0);
-
             [hT, aT].forEach(t => {
                 if(!t || t==='?') return;
                 if(!initialTeams[t]) initialTeams[t] = {s:0, r:0, w:0};
@@ -137,7 +124,6 @@ function initialProcess() {
             });
         }
     });
-
     renderOddsFilters(initialOdds);
     renderTeamsFilters(initialTeams);
     updateAllDashboard();
@@ -161,30 +147,18 @@ function renderTeamsFilters(teams) {
     }).join('');
 }
 
-function toggleChecks(selector, val) {
-    document.querySelectorAll(selector).forEach(c => c.checked = val);
-}
+function toggleChecks(selector, val) { document.querySelectorAll(selector).forEach(c => c.checked = val); }
 
 function updateAllDashboard() {
     const activeRanges = Array.from(document.querySelectorAll('.rng-chk:checked')).map(c => c.value);
     const activeTeams = Array.from(document.querySelectorAll('.team-chk:checked')).map(c => c.value);
-    
     const filtered = allMatches.filter(m => activeRanges.includes(m.range) && m.teams.some(t => activeTeams.includes(t)));
-
     let stats = { s:0, r:0, w:0, maxLoss:0, currLoss:0, leagues:{} };
-
     filtered.forEach(m => {
         stats.s++;
-        if(m.isWin) {
-            stats.r += m.odd; stats.w++;
-            stats.maxLoss = Math.max(stats.maxLoss, stats.currLoss);
-            stats.currLoss = 0;
-        } else { stats.currLoss++; }
-
+        if(m.isWin) { stats.r += m.odd; stats.w++; stats.maxLoss = Math.max(stats.maxLoss, stats.currLoss); stats.currLoss = 0; } else { stats.currLoss++; }
         if(!stats.leagues[m.league]) stats.leagues[m.league] = { s:0, r:0, teams:{} };
-        let L = stats.leagues[m.league];
-        L.s++; L.r += (m.isWin ? m.odd : 0);
-
+        let L = stats.leagues[m.league]; L.s++; L.r += (m.isWin ? m.odd : 0);
         m.teams.forEach(t => {
             if(!activeTeams.includes(t)) return;
             if(!L.teams[t]) L.teams[t] = {s:0, r:0, w:0, maxO:0}; 
@@ -204,15 +178,12 @@ function renderUI(s) {
     document.getElementById('simRoiTotal').innerText = `ROI: ${totalRoi}%`;
     document.getElementById('simUnitsTotal').innerText = `${totalProfit >= 0 ? '+' : ''}${totalProfit} UNIDADES`;
     document.getElementById('simStatsTotal').innerText = `${s.s} Partidos analizados`;
-
     document.getElementById('maxLoss').innerText = s.maxLoss;
     const br = (s.maxLoss * 3) + 5;
     document.getElementById('bankReq').innerText = br + " u.";
     document.getElementById('stakeSugg').innerText = s.s > 0 ? (100/br).toFixed(1) + "%" : "0%";
-
     const lDiv = document.getElementById('leagueBreakdown');
     lDiv.innerHTML = "";
-    
     Object.entries(s.leagues).sort((a,b) => b[1].s - a[1].s).forEach(([name, data]) => {
         const lProfit = (data.r - data.s).toFixed(2);
         const section = document.createElement('div');
@@ -224,10 +195,7 @@ function renderUI(s) {
             const minO = hitRate > 0 ? (1 / hitRate).toFixed(2) : "N/A";
             const maxO = st.maxO > 0 ? st.maxO.toFixed(2) : "N/A";
             return `<div class="card ${roi>=20?'premium-team':''}" style="background:rgba(0,0,0,0.1)">
-                <div style="display:flex; justify-content:space-between;">
-                    <b>${t}</b> <span class="roi-tag ${roi>=0?'pos':'neg'}">${roi}%</span>
-                </div>
-                <div style="font-size:11px; margin:5px 0;">Profit: ${(st.r-st.s).toFixed(2)}u. | Muestra: ${st.s}p</div>
+                <div style="display:flex; justify-content:space-between;"><b>${t}</b> <span class="roi-tag ${roi>=0?'pos':'neg'}">${roi}%</span></div>
                 <div class="range-badge">Min: @${minO} - Max: @${maxO}</div>
             </div>`
         }).join('')}</div>`;
@@ -246,11 +214,11 @@ function checkAlerts() {
             if(lData.teams[savedItem.equipo]) {
                 const newRoi = ((lData.teams[savedItem.equipo].r/lData.teams[savedItem.equipo].s - 1)*100);
                 const oldRoi = parseFloat(savedItem.roi);
-                if(newRoi < oldRoi - 5) alerts.push(`<div class="alert-box" style="border-left-color:var(--danger)"><span style="color:var(--danger)">⚠️ ALERTA:</span> <b>${savedItem.equipo}</b> bajó de ${oldRoi}% a ${newRoi.toFixed(1)}% ROI.</div>`);
+                if(newRoi < oldRoi - 5) alerts.push(`<div class="alert-box" style="border-left-color:var(--danger)"><span style="color:var(--danger)">⚠️ BAJADA:</span> <b>${savedItem.equipo}</b> bajó a ${newRoi.toFixed(1)}% ROI.</div>`);
             }
         });
     });
-    container.innerHTML = alerts.length > 0 ? `<h3>🔔 Alertas de Estrategia</h3>` + alerts.join('') : "";
+    container.innerHTML = alerts.length > 0 ? `<h3>🔔 Alertas</h3>` + alerts.join('') : "";
 }
 
 function saveTopStrategy() {
@@ -258,11 +226,15 @@ function saveTopStrategy() {
     Object.entries(currentLeaguesData).forEach(([leagueName, data]) => {
         Object.entries(data.teams).forEach(([teamName, st]) => {
             const roi = ((st.r/st.s - 1)*100);
-            if(roi >= 20) toSave.push({ liga: leagueName, equipo: teamName, roi: roi.toFixed(1) + "%", unidades: (st.r - st.s).toFixed(2) });
+            const hitRate = st.w / st.s;
+            const minO = hitRate > 0 ? (1 / hitRate).toFixed(2) : "N/A";
+            const maxO = st.maxO > 0 ? st.maxO.toFixed(2) : "N/A";
+            if(roi >= 20) toSave.push({ liga: leagueName, equipo: teamName, roi: roi.toFixed(1) + "%", unidades: (st.r - st.s).toFixed(2), minOdd: minO, maxOdd: maxO });
         });
     });
     localStorage.setItem('bettingStrategy', JSON.stringify(toSave));
     loadSavedData();
+    alert("Guardado con éxito incluyendo rangos Min/Max.");
 }
 
 function loadSavedData() {
@@ -270,14 +242,12 @@ function loadSavedData() {
     const container = document.getElementById('savedContainer');
     if(!saved) { container.innerHTML = "<p>No hay equipos guardados.</p>"; return; }
     const data = JSON.parse(saved);
-    let html = `<table><thead><tr><th>Liga</th><th>Equipo</th><th>ROI</th><th>Units</th></tr></thead><tbody>`;
-    data.forEach(item => { html += `<tr><td>${item.liga}</td><td><b>${item.equipo}</b></td><td>${item.roi}</td><td>+${item.unidades}</td></tr>`; });
+    let html = `<table><thead><tr><th>Liga</th><th>Equipo</th><th>ROI</th><th>Units</th><th>Rango de Valor</th></tr></thead><tbody>`;
+    data.forEach(item => { html += `<tr><td>${item.liga}</td><td><b>${item.equipo}</b></td><td>${item.roi}</td><td style="color:var(--success);">+${item.unidades}</td><td><span class="range-badge">@${item.minOdd} - @${item.maxOdd}</span></td></tr>`; });
     container.innerHTML = html + `</tbody></table>`;
 }
 
-function clearSaved() {
-    if(confirm("¿Borrar memoria?")) { localStorage.removeItem('bettingStrategy'); loadSavedData(); document.getElementById('alertContainer').innerHTML = ""; }
-}
+function clearSaved() { if(confirm("¿Borrar memoria?")) { localStorage.removeItem('bettingStrategy'); loadSavedData(); document.getElementById('alertContainer').innerHTML = ""; } }
 </script>
 </body>
 </html>
