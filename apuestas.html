@@ -12,15 +12,27 @@
         
         .btn-nav { display: block; text-align: center; padding: 12px; color: var(--text); text-decoration: none; margin-bottom: 20px; border: 1px solid #334155; border-radius: 12px; font-size: 13px; font-weight: bold; background: var(--card); }
 
-        /* DASHBOARD DE RENDIMIENTO REAL */
-        .performance-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 25px; }
+        /* FILTRO POR ESTRATEGIA */
+        .filter-area { margin-bottom: 20px; }
+        select { width: 100%; background: var(--card); color: white; border: 1px solid var(--gold); padding: 12px; border-radius: 12px; font-size: 14px; outline: none; font-weight: bold; }
+
+        /* DASHBOARD */
+        .performance-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 15px; }
         .perf-card { background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); padding: 15px; border-radius: 16px; border: 1px solid #334155; text-align: center; box-shadow: 0 4px 15px rgba(0,0,0,0.2); }
         .perf-label { font-size: 10px; text-transform: uppercase; color: #94a3b8; letter-spacing: 1px; margin-bottom: 5px; display: block; }
         .perf-val { font-size: 22px; font-weight: 800; }
         .val-pos { color: var(--success); }
         .val-neg { color: var(--danger); }
 
-        h3 { font-size: 16px; color: var(--gold); border-left: 3px solid var(--gold); padding-left: 10px; margin: 25px 0 15px 0; }
+        /* HIT RATE VISUAL */
+        .stats-bar-container { background: var(--card); border-radius: 16px; padding: 15px; border: 1px solid #334155; margin-bottom: 25px; }
+        .stats-header { display: flex; justify-content: space-between; font-size: 11px; margin-bottom: 8px; font-weight: bold; }
+        .hit-rate-bg { width: 100%; height: 12px; background: var(--danger); border-radius: 6px; overflow: hidden; display: flex; }
+        .hit-rate-fill { height: 100%; background: var(--success); transition: width 0.5s ease; }
+        .stats-summary { display: flex; justify-content: space-around; margin-top: 10px; font-size: 11px; }
+        .stat-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; }
+
+        h3 { font-size: 15px; color: var(--gold); border-left: 3px solid var(--gold); padding-left: 10px; margin: 25px 0 15px 0; text-transform: uppercase; }
 
         /* TARJETAS DE APUESTA */
         .bet-card { background: var(--card); border-radius: 14px; padding: 15px; margin-bottom: 12px; border: 1px solid #334155; border-left: 4px solid var(--gold); }
@@ -40,12 +52,18 @@
         .tag-win { background: rgba(16, 185, 129, 0.15); color: var(--success); }
         .tag-loss { background: rgba(239, 68, 68, 0.15); color: var(--danger); }
 
-        .btn-clear { width: 100%; margin-top: 20px; background: transparent; color: #475569; border: none; font-size: 11px; cursor: pointer; text-decoration: underline; }
+        .btn-clear { width: 100%; margin-top: 20px; background: transparent; color: #475569; border: none; font-size: 11px; cursor: pointer; text-decoration: underline; margin-bottom: 30px; }
     </style>
 </head>
 <body>
 <div class="container">
     <a href="estrategia.html" class="btn-nav">← VOLVER AL PORTAFOLIO</a>
+
+    <div class="filter-area">
+        <select id="strategyFilter" onchange="loadBets()">
+            <option value="all">Todas las Estrategias</option>
+        </select>
+    </div>
 
     <div class="performance-grid">
         <div class="perf-card">
@@ -58,67 +76,109 @@
         </div>
     </div>
 
+    <div class="stats-bar-container">
+        <div class="stats-header">
+            <span>HIT RATE (PRECISIÓN)</span>
+            <span id="hitPercent" style="color:var(--success)">0%</span>
+        </div>
+        <div class="hit-rate-bg">
+            <div id="hitBar" class="hit-rate-fill" style="width: 0%"></div>
+        </div>
+        <div class="stats-summary">
+            <span><span class="stat-dot" style="background:var(--success)"></span>Wins: <b id="winCount">0</b></span>
+            <span><span class="stat-dot" style="background:var(--danger)"></span>Losses: <b id="lossCount">0</b></span>
+        </div>
+    </div>
+
     <h3>🎯 Apuestas Pendientes</h3>
     <div id="pendingBets"></div>
 
-    <h3>📜 Historial (Últimas 15)</h3>
+    <h3>📜 Historial Reciente</h3>
     <div id="historyBets" class="history-list"></div>
 
     <button class="btn-clear" onclick="clearHistory()">Borrar Historial de Resultados</button>
 </div>
 
 <script>
+function updateStrategyFilter(bets) {
+    const select = document.getElementById('strategyFilter');
+    const currentVal = select.value;
+    const strategies = [...new Set(bets.map(b => b.estrategia))].sort();
+    
+    let options = '<option value="all">Todas las Estrategias</option>';
+    strategies.forEach(s => {
+        options += `<option value="${s}" ${currentVal === s ? 'selected' : ''}>${s}</option>`;
+    });
+    select.innerHTML = options;
+}
+
 function loadBets() {
-    const bets = JSON.parse(localStorage.getItem('activeBets') || "[]");
+    const allBets = JSON.parse(localStorage.getItem('activeBets') || "[]");
+    const filterVal = document.getElementById('strategyFilter').value;
+    
+    updateStrategyFilter(allBets);
+
+    // Filtrar datos según selección
+    const bets = filterVal === 'all' ? allBets : allBets.filter(b => b.estrategia === filterVal);
+    
     const pendingDiv = document.getElementById('pendingBets');
     const historyDiv = document.getElementById('historyBets');
     
-    // Cálculos de Dashboard
     let totalInvertido = 0;
     let balanceNeto = 0;
+    let wins = 0;
+    let losses = 0;
     
-    bets.forEach(b => {
-        if(b.estado !== 'PENDIENTE') {
+    allBets.forEach(b => {
+        // El Dashboard y Hit Rate ahora pueden ser globales o filtrados. 
+        // Para máxima utilidad, haremos que el Dashboard responda al FILTRO:
+        if ((filterVal === 'all' || b.estrategia === filterVal) && b.estado !== 'PENDIENTE') {
             const stake = parseFloat(b.stake) || 0;
             const cuota = parseFloat(b.cuotaFinal) || 0;
             totalInvertido += stake;
             if(b.estado === 'WIN') {
                 balanceNeto += (stake * cuota) - stake;
+                wins++;
             } else {
                 balanceNeto -= stake;
+                losses++;
             }
         }
     });
 
     // Actualizar UI Dashboard
     const realRoi = totalInvertido > 0 ? ((balanceNeto / totalInvertido) * 100).toFixed(1) : "0.0";
-    const unitsEl = document.getElementById('realUnits');
-    const roiEl = document.getElementById('realRoi');
+    const uEl = document.getElementById('realUnits');
+    const rEl = document.getElementById('realRoi');
     
-    unitsEl.innerText = `${balanceNeto >= 0 ? '+' : ''}${balanceNeto.toFixed(2)} u.`;
-    unitsEl.className = `perf-val ${balanceNeto >= 0 ? 'val-pos' : 'val-neg'}`;
-    
-    roiEl.innerText = `${realRoi}%`;
-    roiEl.className = `perf-val ${parseFloat(realRoi) >= 0 ? 'val-pos' : 'val-neg'}`;
+    uEl.innerText = `${balanceNeto >= 0 ? '+' : ''}${balanceNeto.toFixed(2)} u.`;
+    uEl.className = `perf-val ${balanceNeto >= 0 ? 'val-pos' : 'val-neg'}`;
+    rEl.innerText = `${realRoi}%`;
+    rEl.className = `perf-val ${parseFloat(realRoi) >= 0 ? 'val-pos' : 'val-neg'}`;
 
-    // Renderizar Pendientes
+    // Actualizar Hit Rate
+    const totalTerminadas = wins + losses;
+    const hitRate = totalTerminadas > 0 ? Math.round((wins / totalTerminadas) * 100) : 0;
+    document.getElementById('hitPercent').innerText = hitRate + "%";
+    document.getElementById('hitBar').style.width = hitRate + "%";
+    document.getElementById('winCount').innerText = wins;
+    document.getElementById('lossCount').innerText = losses;
+
+    // Renderizar Pendientes (Filtradas)
     const pending = bets.filter(b => b.estado === 'PENDIENTE');
-    pendingDiv.innerHTML = pending.map((b, i) => `
+    pendingDiv.innerHTML = pending.map((b) => `
         <div class="bet-card">
-            <div class="bet-header">
-                <span>${b.estrategia.toUpperCase()}</span> 
-                <span>${b.fechaColocada}</span>
-            </div>
+            <div class="bet-header"><span>${b.estrategia.toUpperCase()}</span> <span>${b.fechaColocada}</span></div>
             <div class="bet-main">${b.equipo} @${b.cuotaFinal}</div>
-            <div style="font-size:11px; margin-bottom:12px; opacity:0.8;">Inversión: <b>${b.stake} unidades</b></div>
+            <div style="font-size:11px; margin-bottom:12px; opacity:0.8;">Stake: <b>${b.stake}</b></div>
             <div class="bet-footer">
                 <button class="btn-action btn-win" onclick="resolveBet('${b.fechaColocada}', 'WIN')">Ganada</button>
                 <button class="btn-action btn-loss" onclick="resolveBet('${b.fechaColocada}', 'LOSS')">Perdida</button>
             </div>
         </div>
-    `).join('') || "<p style='opacity:0.4; text-align:center; font-size:13px;'>No hay apuestas esperando resultado.</p>";
+    `).join('') || "<p style='opacity:0.4; text-align:center; font-size:13px; padding:10px;'>Sin pendientes en este filtro.</p>";
 
-    // Renderizar Historial
+    // Renderizar Historial (Filtrado)
     const history = bets.filter(b => b.estado !== 'PENDIENTE').reverse();
     historyDiv.innerHTML = history.slice(0, 15).map(b => {
         const profit = b.estado === 'WIN' ? (b.stake * b.cuotaFinal - b.stake) : -b.stake;
@@ -126,7 +186,7 @@ function loadBets() {
         <div class="history-item">
             <div>
                 <div style="font-weight:bold;">${b.equipo}</div>
-                <div style="font-size:10px; opacity:0.6;">@${b.cuotaFinal} • Stake ${b.stake}</div>
+                <div style="font-size:10px; opacity:0.6;">@${b.cuotaFinal} • Estrategia: ${b.estrategia}</div>
             </div>
             <div style="text-align:right;">
                 <span class="res-tag ${b.estado==='WIN'?'tag-win':'tag-loss'}">${b.estado}</span>
@@ -149,9 +209,14 @@ function resolveBet(id, result) {
 }
 
 function clearHistory() { 
-    if(confirm('¿Deseas borrar el historial de apuestas resueltas? (Las pendientes se mantendrán)')) { 
+    if(confirm('¿Borrar historial de este filtro?')) { 
         let bets = JSON.parse(localStorage.getItem('activeBets') || "[]");
-        bets = bets.filter(b => b.estado === 'PENDIENTE');
+        const filterVal = document.getElementById('strategyFilter').value;
+        if(filterVal === 'all') {
+            bets = bets.filter(b => b.estado === 'PENDIENTE');
+        } else {
+            bets = bets.filter(b => b.estrategia !== filterVal || b.estado === 'PENDIENTE');
+        }
         localStorage.setItem('activeBets', JSON.stringify(bets));
         loadBets();
     }
