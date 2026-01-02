@@ -19,12 +19,9 @@
         .highlight-box { background: linear-gradient(135deg, #1e3a8a 0%, #1e40af 100%); padding: 20px; border-radius: 16px; text-align: center; margin-bottom: 20px; border: 1px solid var(--gold); }
         .roi-val { font-size: 32px; font-weight: 800; display: block; }
         .unit-val { font-size: 20px; color: var(--success); font-weight: 600; }
-        
-        /* Estilos para el guardado por estrategia */
         .save-area { background: rgba(0,0,0,0.2); padding: 15px; border-radius: 12px; margin-top: 15px; border: 1px dashed var(--gold); }
         .strategy-input { width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #475569; background: #0f172a; color: white; margin-bottom: 10px; font-size: 14px; }
         .btn-save { background: var(--success); color: white; }
-
         .filters-container { display: grid; grid-template-columns: 1fr; gap: 15px; }
         .filter-card { background: var(--card); padding: 15px; border-radius: 12px; border: 1px solid #334155; }
         .scroll-list { max-height: 200px; overflow-y: auto; }
@@ -40,37 +37,32 @@
     </style>
 </head>
 <body>
-
 <div class="container">
     <div class="nav-header">
         <h2>🚀 Pro Hub (Eficiencia)</h2>
-        <a href="estrategia.html" class="btn-nav">MI PORTAFOLIO</a>
+        <a href="estrategia.html" class="btn-nav">PORTAFOLIO</a>
     </div>
-
     <div class="card">
-        <textarea id="dataInput" placeholder="Pega tus datos aquí..."></textarea>
+        <textarea id="dataInput" placeholder="Pega tus datos (historial 6 meses)..."></textarea>
         <button class="btn btn-primary" onclick="initialProcess()">ANALIZAR PATRONES ACTUALES</button>
     </div>
-
     <div id="resultsMain" style="display:none;">
         <div class="highlight-box">
             <span id="simRoiTotal" class="roi-val">ROI: 0%</span>
             <span id="simUnitsTotal" class="unit-val">+0.00 UDS</span>
-            
             <div class="save-area">
-                <input type="text" id="strategyName" class="strategy-input" placeholder="Nombre: Ej. Ganador 1HT, Over 2.5...">
-                <button class="btn btn-save" onclick="saveTopStrategy()">💾 GUARDAR EN ESTA ESTRATEGIA</button>
+                <input type="text" id="strategyName" class="strategy-input" placeholder="Nombre: Ej. Over 2.5, Ambos Anotan...">
+                <button class="btn btn-save" onclick="saveTopStrategy()">💾 GUARDAR ESTRATEGIA Y FECHA</button>
             </div>
         </div>
-
         <div class="filters-container">
             <div class="filter-card"><h3>⚖️ Cuotas</h3><div id="oddsFilterList" class="scroll-list"></div></div>
             <div class="filter-card"><h3>⚽ Equipos</h3><div id="teamsFilterList" class="scroll-list"></div></div>
             <div class="filter-card">
-                <h3>🛡️ Gestión</h3>
+                <h3>🛡️ Gestión de Riesgo</h3>
                 <div class="risk-grid">
-                    <div class="risk-item"><span class="risk-label">Racha</span><span id="maxLoss" class="risk-val">0</span></div>
-                    <div class="risk-item"><span class="risk-label">Bank</span><span id="bankReq" class="risk-val">0 u.</span></div>
+                    <div class="risk-item"><span class="risk-label">Racha Derrotas</span><span id="maxLoss" class="risk-val">0</span></div>
+                    <div class="risk-item"><span class="risk-label">Bank Mínimo</span><span id="bankReq" class="risk-val">0 u.</span></div>
                 </div>
                 <button class="btn btn-primary" style="margin-top:15px; background: var(--gold); color: #000;" onclick="updateAllDashboard()">RE-CALCULAR</button>
             </div>
@@ -78,7 +70,6 @@
         <div id="leagueBreakdown"></div>
     </div>
 </div>
-
 <script>
 let allMatches = []; 
 let currentLeaguesData = {};
@@ -89,51 +80,38 @@ function initialProcess() {
     const lines = input.split('\n');
     const headers = lines[0].split('\t').map(h => h.trim().toLowerCase());
     const find = (keys) => headers.findIndex(h => keys.some(k => h.includes(k)));
-    const idx = { league: find(['league', 'liga']), date: find(['date', 'fecha']), match: find(['match']), result: headers.lastIndexOf('result'), odd: find(['odd']) };
+    const idx = { league: find(['league', 'liga']), match: find(['match']), result: headers.lastIndexOf('result'), odd: find(['odd']) };
     allMatches = [];
-    let initialOdds = {};
-    let initialTeams = {};
-
+    let initialOdds = {}, initialTeams = {};
     lines.slice(1).forEach(line => {
         const col = line.split('\t').map(c => c.trim());
         if (col.length < 5) return;
         const isWin = col.some((c, i) => i >= idx.result && c.toLowerCase() === 'winning');
         const odd = parseFloat(col[idx.odd]?.replace(',','.')) || 0;
-        const league = col[idx.league] || "Otras";
         const [hT, aT] = col[idx.match] ? col[idx.match].split(' - ') : ['?', '?'];
         if(odd > 0) {
-            const floor = (Math.floor(odd * 10) / 10).toFixed(2);
-            const range = `${floor} - ${(parseFloat(floor)+0.10).toFixed(2)}`;
-            allMatches.push({ odd, isWin, league, range, teams: [hT, aT] });
+            const range = (Math.floor(odd * 10) / 10).toFixed(2);
+            allMatches.push({ odd, isWin, league: col[idx.league]||"Otras", range, teams: [hT, aT] });
             if(!initialOdds[range]) initialOdds[range] = {s:0, r:0};
             initialOdds[range].s++; initialOdds[range].r += (isWin?odd:0);
-            [hT, aT].forEach(t => {
-                if(!t || t==='?') return;
-                if(!initialTeams[t]) initialTeams[t] = {s:0, r:0, w:0};
-                initialTeams[t].s++; initialTeams[t].r += (isWin?odd:0);
-                if(isWin) initialTeams[t].w++;
-            });
+            [hT, aT].forEach(t => { if(t && t!=='?'){ if(!initialTeams[t]) initialTeams[t]={s:0, r:0, w:0}; initialTeams[t].s++; initialTeams[t].r+=(isWin?odd:0); if(isWin) initialTeams[t].w++; }});
         }
     });
-    renderOddsFilters(initialOdds);
-    renderTeamsFilters(initialTeams);
-    updateAllDashboard();
+    renderOddsFilters(initialOdds); renderTeamsFilters(initialTeams); updateAllDashboard();
     document.getElementById('resultsMain').style.display = 'block';
 }
 
 function renderOddsFilters(odds) {
-    const container = document.getElementById('oddsFilterList');
-    container.innerHTML = Object.entries(odds).sort((a,b) => parseFloat(a[0]) - parseFloat(b[0])).map(([range, d]) => {
-        const roi = ((d.r/d.s - 1)*100).toFixed(1);
-        return `<div class="row"><label><input type="checkbox" checked class="rng-chk" value="${range}"> @${range}</label><span class="roi-tag ${roi>=0?'pos':'neg'}">${roi}%</span></div>`;
+    document.getElementById('oddsFilterList').innerHTML = Object.entries(odds).sort((a,b)=>a[0]-b[0]).map(([r, d]) => {
+        const roi = ((d.r/d.s-1)*100).toFixed(1);
+        return `<div class="row"><label><input type="checkbox" checked class="rng-chk" value="${r}"> @${r}</label><span class="roi-tag ${roi>=0?'pos':'neg'}">${roi}%</span></div>`;
     }).join('');
 }
 
 function renderTeamsFilters(teams) {
-    const container = document.getElementById('teamsFilterList');
-    container.innerHTML = Object.entries(teams).sort((a,b) => b[1].s - a[1].s).map(([name, d]) => {
-        const roi = ((d.r/d.s - 1)*100).toFixed(0);
-        return `<div class="row"><label><input type="checkbox" checked class="team-chk" value="${name}"> ${name}</label><span class="roi-tag ${roi>=0?'pos':'neg'}">${roi}%</span></div>`;
+    document.getElementById('teamsFilterList').innerHTML = Object.entries(teams).sort((a,b)=>b[1].s-a[1].s).map(([n, d]) => {
+        const roi = ((d.r/d.s-1)*100).toFixed(0);
+        return `<div class="row"><label><input type="checkbox" checked class="team-chk" value="${n}"> ${n}</label><span class="roi-tag ${roi>=0?'pos':'neg'}">${roi}%</span></div>`;
     }).join('');
 }
 
@@ -147,34 +125,23 @@ function updateAllDashboard() {
         if(m.isWin) { stats.r += m.odd; stats.w++; stats.maxLoss = Math.max(stats.maxLoss, stats.currLoss); stats.currLoss = 0; } else { stats.currLoss++; }
         if(!stats.leagues[m.league]) stats.leagues[m.league] = { s:0, r:0, teams:{} };
         let L = stats.leagues[m.league]; L.s++; L.r += (m.isWin ? m.odd : 0);
-        m.teams.forEach(t => {
-            if(!activeTeams.includes(t)) return;
-            if(!L.teams[t]) L.teams[t] = {s:0, r:0, w:0}; 
-            L.teams[t].s++; 
-            L.teams[t].r += (m.isWin ? m.odd : 0);
-            if(m.isWin) L.teams[t].w++;
-        });
+        m.teams.forEach(t => { if(activeTeams.includes(t)){ if(!L.teams[t]) L.teams[t] = {s:0, r:0, w:0}; L.teams[t].s++; L.teams[t].r += (m.isWin?m.odd:0); if(m.isWin) L.teams[t].w++; }});
     });
-    stats.maxLoss = Math.max(stats.maxLoss, stats.currLoss);
-    currentLeaguesData = stats.leagues;
-    renderUI(stats);
+    stats.maxLoss = Math.max(stats.maxLoss, stats.currLoss); currentLeaguesData = stats.leagues; renderUI(stats);
 }
 
 function renderUI(s) {
-    const totalProfit = (s.r - s.s).toFixed(2);
-    document.getElementById('simRoiTotal').innerText = `ROI: ${s.s > 0 ? ((s.r/s.s - 1)*100).toFixed(1) : 0}%`;
-    document.getElementById('simUnitsTotal').innerText = `${totalProfit >= 0 ? '+' : ''}${totalProfit} UNIDADES`;
+    const profit = (s.r - s.s).toFixed(2);
+    document.getElementById('simRoiTotal').innerText = `ROI: ${s.s > 0 ? ((s.r/s.s-1)*100).toFixed(1) : 0}%`;
+    document.getElementById('simUnitsTotal').innerText = `${profit>=0?'+':''}${profit} UNIDADES`;
     document.getElementById('maxLoss').innerText = s.maxLoss;
-    document.getElementById('bankReq').innerText = (s.maxLoss * 3 + 5) + " u.";
-    const lDiv = document.getElementById('leagueBreakdown');
-    lDiv.innerHTML = "";
+    document.getElementById('bankReq').innerText = (s.maxLoss * 4 + 10) + " u.";
+    const lDiv = document.getElementById('leagueBreakdown'); lDiv.innerHTML = "";
     Object.entries(s.leagues).forEach(([name, data]) => {
-        const lProfit = (data.r - data.s).toFixed(2);
-        const section = document.createElement('div');
-        section.className = "league-section";
-        section.innerHTML = `<h4 style="margin:0 0 10px 0; font-size:14px;">${name} (${lProfit}u)</h4><div style="display:flex; flex-wrap:wrap; gap:8px;">${Object.entries(data.teams).slice(0,4).map(([t,st])=>{
-            const roi = ((st.r/st.s-1)*100).toFixed(0);
-            return `<div style="background:rgba(0,0,0,0.2); padding:6px 10px; border-radius:8px; font-size:11px;">${t}: <b>${roi}%</b> (${st.s}p)</div>`
+        const lP = (data.r - data.s).toFixed(2);
+        const section = document.createElement('div'); section.className = "league-section";
+        section.innerHTML = `<h4 style="margin:0 0 10px 0; font-size:14px;">${name} (${lP}u)</h4><div style="display:flex; flex-wrap:wrap; gap:8px;">${Object.entries(data.teams).slice(0,4).map(([t,st])=>{
+            return `<div style="background:rgba(0,0,0,0.2); padding:6px 10px; border-radius:8px; font-size:11px;">${t}: <b>${((st.r/st.s-1)*100).toFixed(0)}%</b></div>`
         }).join('')}</div>`;
         lDiv.appendChild(section);
     });
@@ -182,42 +149,32 @@ function renderUI(s) {
 
 function saveTopStrategy() {
     const strategyName = document.getElementById('strategyName').value.trim();
-    if(!strategyName) { alert("Escribe un nombre para la estrategia (ej: Over 2.5)"); return; }
+    if(!strategyName) return alert("Escribe el nombre de la estrategia");
+    let existing = JSON.parse(localStorage.getItem('bettingStrategy') || "[]");
+    const fechaHoy = new Date().toLocaleDateString();
 
-    let existingStrategy = JSON.parse(localStorage.getItem('bettingStrategy') || "[]");
-    let currentFound = [];
-
-    Object.entries(currentLeaguesData).forEach(([leagueName, data]) => {
-        Object.entries(data.teams).forEach(([teamName, st]) => {
-            const hitRate = st.s > 0 ? (st.w / st.s) : 0;
-            const roiValue = st.s > 0 ? ((st.r/st.s - 1)*100) : 0;
-            
-            if(roiValue >= 20 && hitRate > 0) {
-                const minEffOdd = (1 / hitRate).toFixed(2);
-                const targetOdd = (parseFloat(minEffOdd) * 1.10).toFixed(2);
-
-                currentFound.push({ 
-                    liga: leagueName, 
-                    equipo: teamName, 
-                    roi: roiValue.toFixed(1) + "%", 
-                    unidades: (st.r - st.s).toFixed(2), 
-                    minOdd: minEffOdd, 
-                    targetOdd: targetOdd,
-                    partidos: st.s,
-                    estrategia: strategyName // Guardamos la estrategia
-                });
+    Object.entries(currentLeaguesData).forEach(([league, data]) => {
+        Object.entries(data.teams).forEach(([team, st]) => {
+            const hitRate = st.w / st.s;
+            const roi = ((st.r/st.s - 1)*100);
+            if(roi >= 20 && st.s > 0) {
+                const minOdd = (1 / hitRate);
+                const targetOdd = minOdd * 1.1;
+                const edge = (hitRate * targetOdd - 1);
+                const stake = Math.max(1, Math.min(5, (edge / (targetOdd - 1) * 100) / 4)).toFixed(1);
+                
+                const newItem = { 
+                    liga: league, equipo: team, roi: roi.toFixed(1) + "%", unidades: (st.r-st.s).toFixed(2), 
+                    minOdd: minOdd.toFixed(2), targetOdd: targetOdd.toFixed(2), partidos: st.s, 
+                    estrategia: strategyName, stake: stake, fecha: fechaHoy
+                };
+                const idx = existing.findIndex(i => i.equipo === team && i.estrategia === strategyName);
+                if(idx !== -1) existing[idx] = newItem; else existing.push(newItem);
             }
         });
     });
-
-    // Filtramos para no duplicar equipo+estrategia
-    currentFound.forEach(newItem => {
-        const idx = existingStrategy.findIndex(item => item.equipo === newItem.equipo && item.estrategia === newItem.estrategia);
-        if (idx !== -1) existingStrategy[idx] = newItem; else existingStrategy.push(newItem);
-    });
-
-    localStorage.setItem('bettingStrategy', JSON.stringify(existingStrategy));
-    alert(`Guardado en la estrategia: ${strategyName}`);
+    localStorage.setItem('bettingStrategy', JSON.stringify(existing));
+    alert("Portafolio Actualizado.");
 }
 </script>
 </body>
