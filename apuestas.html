@@ -36,10 +36,10 @@
         .hit-rate-fill { height: 100%; background: var(--success); transition: width 0.5s ease; }
         .bcl-tag { font-size: 10px; color: var(--purple); margin-top: 10px; display: block; text-align: center; font-weight: bold; }
 
-        /* TARJETAS CON CALCULADORA DE DINERO */
+        /* TARJETAS */
         .bet-card { background: var(--card); border-radius: 14px; padding: 15px; margin-bottom: 12px; border: 1px solid #334155; border-left: 4px solid var(--gold); position: relative; }
         .bet-main { font-size: 16px; font-weight: 700; color: var(--accent); margin-bottom: 5px; }
-        .bet-money-info { font-size: 11px; color: var(--gold); margin-bottom: 12px; font-weight: bold; background: rgba(251, 191, 36, 0.1); padding: 5px; border-radius: 5px; display: inline-block; }
+        .bet-money-info { font-size: 11px; color: var(--gold); margin-bottom: 12px; font-weight: bold; background: rgba(251, 191, 36, 0.1); padding: 6px; border-radius: 6px; display: inline-block; border: 1px solid rgba(251, 191, 36, 0.2); }
         
         .closing-input-area { background: rgba(0,0,0,0.2); padding: 10px; border-radius: 10px; margin-bottom: 10px; }
         .closing-input-area input { width: 100%; background: #1e293b; border: 1px solid #334155; color: white; padding: 8px; border-radius: 6px; font-size: 12px; text-align: center; }
@@ -66,7 +66,7 @@
                 <input type="number" id="bankTotal" value="1000" oninput="saveRiskSettings()">
             </div>
             <div class="risk-input-group">
-                <label>⚖️ Riesgo por Stake (%)</label>
+                <label>⚖️ Riesgo Base (%)</label>
                 <input type="number" id="riskPercent" value="1" step="0.5" oninput="saveRiskSettings()">
             </div>
         </div>
@@ -79,14 +79,8 @@
     </div>
 
     <div class="performance-grid">
-        <div class="perf-card">
-            <span class="perf-label">Balance Neto</span>
-            <span id="realUnits" class="perf-val">0.00 u.</span>
-        </div>
-        <div class="perf-card">
-            <span class="perf-label">Crecimiento</span>
-            <span id="bankGrowth" class="perf-val">0.0%</span>
-        </div>
+        <div class="perf-card"><span class="perf-label">Balance Neto</span><span id="realUnits" class="perf-val">0.00 u.</span></div>
+        <div class="perf-card"><span class="perf-label">Crecimiento %</span><span id="bankGrowth" class="perf-val">0.0%</span></div>
     </div>
 
     <div class="stats-bar-container">
@@ -95,13 +89,13 @@
         <div style="display:flex; justify-content: space-around; font-size:11px; margin-top:10px;">
             <span>G: <b id="winCount">0</b></span> <span>P: <b id="lossCount">0</b></span>
         </div>
-        <span id="bclMetric" class="bcl-tag">BCL: 0%</span>
+        <span id="bclMetric" class="bcl-tag">Venciendo al cierre (BCL): 0%</span>
     </div>
 
     <h3>🎯 Apuestas Pendientes</h3>
     <div id="pendingBets"></div>
 
-    <h3>📜 Historial Reciente</h3>
+    <h3>📜 Historial</h3>
     <div id="historyBets" class="history-list"></div>
 
     <button onclick="clearHistory()" style="width:100%; background:none; border:none; color:#475569; text-decoration:underline; padding:20px; cursor:pointer; font-size:11px;">Borrar Historial Resuelto</button>
@@ -138,7 +132,7 @@ function loadBets() {
     const resolved = allBets.filter(b => b.estado !== 'PENDIENTE');
 
     resolved.forEach(b => {
-        const stakeUnits = parseFloat(b.stake) || 0;
+        const stakeUnits = parseFloat(b.stake) || 1;
         const cuota = parseFloat(b.cuotaFinal) || 0;
         const closing = parseFloat(b.closingOdd) || 0;
         totalInvertido += stakeUnits;
@@ -151,9 +145,10 @@ function loadBets() {
     document.getElementById('realUnits').innerText = `${balanceNeto >= 0 ? '+' : ''}${balanceNeto.toFixed(2)} u.`;
     document.getElementById('realUnits').className = `perf-val ${balanceNeto >= 0 ? 'val-pos' : 'val-neg'}`;
     
-    const growth = (balanceNeto / (bank/100)) ; // Basado en unidades vs capital
-    document.getElementById('bankGrowth').innerText = `${balanceNeto >= 0 ? '+' : ''}${(balanceNeto * risk).toFixed(1)}%`;
-    document.getElementById('bankGrowth').className = `perf-val ${balanceNeto >= 0 ? 'val-pos' : 'val-neg'}`;
+    // Crecimiento porcentual real basado en el riesgo configurado
+    const totalGrowth = balanceNeto * risk;
+    document.getElementById('bankGrowth').innerText = `${totalGrowth >= 0 ? '+' : ''}${totalGrowth.toFixed(1)}%`;
+    document.getElementById('bankGrowth').className = `perf-val ${totalGrowth >= 0 ? 'val-pos' : 'val-neg'}`;
 
     const hitRate = resolved.length > 0 ? Math.round((wins / resolved.length) * 100) : 0;
     document.getElementById('hitPercent').innerText = hitRate + "%";
@@ -176,16 +171,19 @@ function loadBets() {
 
 function renderLists(allBets, bank, risk) {
     const pending = allBets.filter(b => b.estado === 'PENDIENTE');
-    // LA MAGIA: Calcular cuánto dinero apostar
-    const valorUnidad = (bank * (risk/100));
+    const valorUnidadDinero = (bank * (risk / 100));
 
     document.getElementById('pendingBets').innerHTML = pending.map((b) => {
-        const dineroApostar = (valorUnidad * parseFloat(b.stake || 1)).toFixed(2);
+        // CORRECCIÓN: Multiplicar el valor de la unidad por el stake guardado
+        const stakeGuardado = parseFloat(b.stake) || 1;
+        const montoFinal = (valorUnidadDinero * stakeGuardado).toFixed(2);
+        
         return `
         <div class="bet-card">
             <button class="btn-del-single" onclick="deleteSingle('${b.fechaColocada}')">✕</button>
+            <div class="bet-header"><span style="color:var(--gold); font-weight:bold;">${b.estrategia}</span></div>
             <div class="bet-main">${b.equipo} @${b.cuotaFinal}</div>
-            <div class="bet-money-info">💰 APOSTAR: $${dineroApostar} (Stake ${b.stake})</div>
+            <div class="bet-money-info">💰 APOSTAR: $${montoFinal} (Stake ${stakeGuardado})</div>
             <div class="closing-input-area">
                 <input type="number" step="0.01" id="close-${b.fechaColocada.replace(/\D/g,'')}" placeholder="Cuota Cierre (Opcional)">
             </div>
