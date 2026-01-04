@@ -54,7 +54,7 @@
 
     <div id="setup-screen">
         <div class="scroll-content">
-            <div class="header-box"><h2>EL GURÚ DE LAS APUESTAS</h2><small>v32.0 - Swipe Navigation</small></div>
+            <div class="header-box"><h2>EL GURÚ DE LAS APUESTAS</h2><small>v33.0 - HT Markets Added</small></div>
             <textarea id="hIn" placeholder="Home Table Data..." oninput="uH()"></textarea>
             <textarea id="vIn" placeholder="Away Table Data..." oninput="uV()"></textarea>
             <textarea id="sIn" placeholder="League Averages..." oninput="uS()"></textarea>
@@ -88,7 +88,13 @@
         </div>
 
         <div id="p-goals" class="page">
-            <div class="section-title">Goles Over / Under</div>
+            <div class="section-title">Goles Primera Mitad (HT)</div>
+            <div class="card">
+                <div class="row" id="row-ov05ht"><span>+ 0.5 Goles HT</span><b class="pct" id="ov05ht">--</b></div>
+                <div class="row" id="row-ov15ht"><span>+ 1.5 Goles HT</span><b class="pct" id="ov15ht">--</b></div>
+                <div class="row" id="row-bttsht"><span>Ambos Marcan HT</span><b class="pct" id="bttsht">--</b></div>
+            </div>
+            <div class="section-title">Goles Tiempo Completo (FT)</div>
             <div class="card">
                 <div class="row" id="row-ov05"><span>+ 0.5 Goles</span><b class="pct" id="ov05">--</b></div>
                 <div class="row" id="row-ov15"><span>+ 1.5 Goles</span><b class="pct" id="ov15">--</b></div>
@@ -101,8 +107,8 @@
             </div>
             <div class="section-title">Ambos Marcan (BTTS)</div>
             <div class="card">
-                <div class="row" id="row-btts"><span>SÍ</span><b class="pct" id="btts">--</b></div>
-                <div class="row" id="row-nbtts"><span>NO</span><b class="pct" id="nbtts">--</b></div>
+                <div class="row" id="row-btts"><span>BTTS SÍ</span><b class="pct" id="btts">--</b></div>
+                <div class="row" id="row-nbtts"><span>BTTS NO</span><b class="pct" id="nbtts">--</b></div>
             </div>
         </div>
 
@@ -128,7 +134,7 @@
         </div>
 
         <div id="p-scores" class="page">
-            <div class="section-title">Marcadores Probables</div>
+            <div class="section-title">Marcadores Probables (FT)</div>
             <div id="score-list"></div>
         </div>
 
@@ -143,39 +149,22 @@
 <script>
     let dH={}, dV={}, aH=1.58, aV=1.22;
 
-    // --- LÓGICA DE SWIPE DOWN PARA VOLVER ---
-    let touchStartY = 0;
-    let touchEndY = 0;
-
-    document.addEventListener('touchstart', e => {
-        touchStartY = e.changedTouches[0].screenY;
-    }, false);
-
-    document.addEventListener('touchend', e => {
-        touchEndY = e.changedTouches[0].screenY;
-        handleGesture();
-    }, false);
-
-    function handleGesture() {
-        // Si el deslizamiento hacia abajo es mayor a 150px
-        if (touchEndY - touchStartY > 150) {
-            resetAnalysis();
-        }
-    }
+    // --- SWIPE DOWN NAVIGATION ---
+    let touchStartY = 0; let touchEndY = 0;
+    document.addEventListener('touchstart', e => { touchStartY = e.changedTouches[0].screenY; }, false);
+    document.addEventListener('touchend', e => { touchEndY = e.changedTouches[0].screenY; if (touchEndY - touchStartY > 150) resetAnalysis(); }, false);
 
     function resetAnalysis(){ 
         const setup = document.getElementById('setup-screen');
         const dash = document.getElementById('dashboard-screen');
         if (dash.style.display === 'flex') {
-            dash.style.display='none'; 
-            setup.style.display='flex';
+            dash.style.display='none'; setup.style.display='flex';
             const toast = document.getElementById('reset-toast');
-            toast.style.display = 'block';
-            setTimeout(() => toast.style.display = 'none', 1500);
+            toast.style.display = 'block'; setTimeout(() => toast.style.display = 'none', 1500);
         }
     }
 
-    // --- PROCESAMIENTO DE DATOS (INTACTO) ---
+    // --- DATA PROCESSING ---
     window.onload = function() {
         const p = new URLSearchParams(window.location.search);
         if (p.has('hData')) {
@@ -236,12 +225,22 @@
     function calculate(){
         const tH=document.getElementById('sH').value, tV=document.getElementById('sV').value;
         if(!dH[tH] || !dV[tV]) return;
+        
+        // Expectativas FT (Full Time)
         const xH = (dH[tH].f/aH)*(dV[tV].a/aH)*aH;
         const xV = (dV[tV].f/aV)*(dH[tH].a/aV)*aV;
+        
+        // Expectativas HT (Half Time - 45 min)
+        const xH_ht = xH * 0.5;
+        const xV_ht = xV * 0.5;
+
         let pH=0, pD=0, pV=0, ov05=0, ov15=0, ov25=0, ov35=0, ov45=0;
+        let ov05ht=0, ov15ht=0;
         let haM25=0, haM15=0, haP05=0, haP15=0, vaM25=0, vaM15=0, vaP05=0, vaP15=0, sc=[];
+
         for(let i=0; i<=14; i++){
             for(let j=0; j<=14; j++){
+                // Probabilidades FT
                 let p = poi(i,xH)*poi(j,xV);
                 if(i>j) pH+=p; else if(i===j) pD+=p; else pV+=p;
                 let tot = i+j;
@@ -249,35 +248,43 @@
                 if(i-j > 2.5) haM25+=p; if(i-j > 1.5) haM15+=p; if(i-j > -0.5) haP05+=p; if(i-j > -1.5) haP15+=p;
                 if(j-i > 2.5) vaM25+=p; if(j-i > 1.5) vaM15+=p; if(j-i > -0.5) vaP05+=p; if(j-i > -1.5) vaP15+=p;
                 if(i<=5 && j<=5) sc.push({s:`${i} - ${j}`, p:p});
+
+                // Probabilidades HT (solo para los mercados HT)
+                let p_ht = poi(i, xH_ht)*poi(j, xV_ht);
+                if((i+j)>0.5) ov05ht += p_ht;
+                if((i+j)>1.5) ov15ht += p_ht;
             }
         }
+
         document.getElementById('setup-screen').style.display='none';
         document.getElementById('dashboard-screen').style.display='flex';
+        
+        // Resultados 1X2 / DNB
         document.getElementById('resH').innerText=(pH*100).toFixed(1)+'%';
         document.getElementById('resD').innerText=(pD*100).toFixed(1)+'%';
         document.getElementById('resV').innerText=(pV*100).toFixed(1)+'%';
-        let tNoD = pH + pV;
-        let dnbH_val = (pH/tNoD*100);
+        let tNoD = pH + pV; let dnbH_val = (pH/tNoD*100);
         document.getElementById('dnbH').innerText=dnbH_val.toFixed(1)+'%';
         document.getElementById('dnbV').innerText=(pV/tNoD*100).toFixed(1)+'%';
         document.getElementById('res1X').innerText=((pH+pD)*100).toFixed(1)+'%';
         document.getElementById('resX2').innerText=((pV+pD)*100).toFixed(1)+'%';
         document.getElementById('res12').innerText=((pH+pV)*100).toFixed(1)+'%';
+
+        // Mercados HT
+        checkRange(ov05ht*100, 'ov05ht');
+        checkRange(ov15ht*100, 'ov15ht');
+        const btts_ht = (1 - poi(0, xH_ht)) * (1 - poi(0, xV_ht)) * 100;
+        checkRange(btts_ht, 'bttsht');
+
+        // Mercados FT Goles
         checkRange(ov05*100, 'ov05'); checkRange(ov15*100, 'ov15'); checkRange(ov25*100, 'ov25'); checkRange(ov35*100, 'ov35'); checkRange(ov45*100, 'ov45'); checkRange((1-ov15)*100, 'un15'); checkRange((1-ov25)*100, 'un25'); checkRange((1-ov35)*100, 'un35');
         const btts_si = (1 - poi(0, xH)) * (1 - poi(0, xV)) * 100;
         checkRange(btts_si, 'btts'); checkRange(100-btts_si, 'nbtts');
-        document.getElementById('haM25').innerText=(haM25*100).toFixed(1)+'%';
-        document.getElementById('haM15').innerText=(haM15*100).toFixed(1)+'%';
-        document.getElementById('haM05').innerText=(pH*100).toFixed(1)+'%';
-        document.getElementById('ha00').innerText=dnbH_val.toFixed(1)+'%';
-        document.getElementById('haP05').innerText=(haP05*100).toFixed(1)+'%';
-        document.getElementById('haP15').innerText=(haP15*100).toFixed(1)+'%';
-        document.getElementById('vaM25').innerText=(vaM25*100).toFixed(1)+'%';
-        document.getElementById('vaM15').innerText=(vaM15*100).toFixed(1)+'%';
-        document.getElementById('vaM05').innerText=(pV*100).toFixed(1)+'%';
-        document.getElementById('va00').innerText=(100-dnbH_val).toFixed(1)+'%';
-        document.getElementById('vaP05').innerText=(vaP05*100).toFixed(1)+'%';
-        document.getElementById('vaP15').innerText=(vaP15*100).toFixed(1)+'%';
+
+        // Hcap (Intacto)
+        document.getElementById('haM25').innerText=(haM25*100).toFixed(1)+'%'; document.getElementById('haM15').innerText=(haM15*100).toFixed(1)+'%'; document.getElementById('haM05').innerText=(pH*100).toFixed(1)+'%'; document.getElementById('ha00').innerText=dnbH_val.toFixed(1)+'%'; document.getElementById('haP05').innerText=(haP05*100).toFixed(1)+'%'; document.getElementById('haP15').innerText=(haP15*100).toFixed(1)+'%';
+        document.getElementById('vaM25').innerText=(vaM25*100).toFixed(1)+'%'; document.getElementById('vaM15').innerText=(vaM15*100).toFixed(1)+'%'; document.getElementById('vaM05').innerText=(pV*100).toFixed(1)+'%'; document.getElementById('va00').innerText=(100-dnbH_val).toFixed(1)+'%'; document.getElementById('vaP05').innerText=(vaP05*100).toFixed(1)+'%'; document.getElementById('vaP15').innerText=(vaP15*100).toFixed(1)+'%';
+
         sc.sort((a,b)=>b.p-a.p);
         let h=""; sc.slice(0,15).forEach(m=>{ h+=`<div class="row"><span>${m.s}</span><b class="pct">${(m.p*100).toFixed(1)}%</b></div>`; });
         document.getElementById('score-list').innerHTML=`<div class="card">${h}</div>`;
