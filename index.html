@@ -74,17 +74,17 @@
         .trend-badge { background: var(--accent-gold); color: #000; padding: 2px 5px; border-radius: 4px; font-weight: 800; font-size: 0.65rem; }
         .min-odds-tag { color: var(--fair-odds); font-family: monospace; font-weight: bold; }
         
-        /* Estilo para el indicador de fiabilidad */
         .reliability-score {
-            margin-top: 8px;
+            margin-top: 10px;
             padding-top: 8px;
             border-top: 1px solid rgba(255, 215, 0, 0.2);
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
+            display: none;
+            flex-direction: column;
+            gap: 5px;
         }
-        .score-bar { height: 4px; background: #333; flex: 1; margin: 0 10px; border-radius: 2px; overflow: hidden; }
-        .score-fill { height: 100%; background: var(--accent-green); transition: width 0.5s; }
+        .score-row { display: flex; justify-content: space-between; align-items: center; }
+        .score-bar { height: 6px; background: #333; width: 100%; border-radius: 3px; overflow: hidden; margin: 4px 0; }
+        .score-fill { height: 100%; background: var(--accent-green); transition: width 0.8s ease-in-out; width: 0%; }
 
         .page { display: none; }
         .page.active { display: block; }
@@ -222,13 +222,17 @@
 
             <div id="league-trend-box">
                 <div style="color:var(--accent-gold); font-weight:800; margin-bottom:8px; display:flex; align-items:center; gap:5px;">
-                    <i class="fa-solid fa-chart-line"></i> TENDENCIA DE LIGA & CUOTA MÍNIMA
+                    <i class="fa-solid fa-microchip"></i> ESCÁNER DE LIGA POISSON
                 </div>
                 <div id="trend-content"></div>
+                
                 <div class="reliability-score" id="reliability-container">
-                    <span style="font-size: 0.6rem;">FIABILIDAD POISSON:</span>
-                    <div class="score-bar"><div id="reliability-bar" class="score-fill" style="width: 0%;"></div></div>
-                    <b id="reliability-pct" style="font-size: 0.65rem; color: var(--accent-green);">0%</b>
+                    <div class="score-row">
+                        <span style="font-size: 0.65rem; font-weight: bold; color: var(--text-dim);">FIABILIDAD DE MATRIZ:</span>
+                        <b id="reliability-pct" style="font-size: 0.75rem;">0%</b>
+                    </div>
+                    <div class="score-bar"><div id="reliability-bar" class="score-fill"></div></div>
+                    <p id="reliability-msg" style="font-size: 0.6rem; color: var(--text-dim); margin: 2px 0 0 0; font-style: italic;"></p>
                 </div>
             </div>
         </div>
@@ -362,25 +366,15 @@
             const probCasa = (1 / bookieOdds);
             const probContrariaQuantum = (1 - (selectedMarket.pct / 100));
             let estimatedOverround = ((probCasa + probContrariaQuantum) - 1) * 100;
-            
             message += `💰 *CUOTA (${bookieName}):* ${bookieOdds.toFixed(2)}\n`;
-            
-            if(estimatedOverround < 0) {
-                message += `📈 Margen de Valor: +${Math.abs(estimatedOverround).toFixed(2)}%\n`;
-            } else {
-                message += `📉 Overround Casa: ${estimatedOverround.toFixed(2)}%\n`;
-            }
-
+            if(estimatedOverround < 0) message += `📈 Margen de Valor: +${Math.abs(estimatedOverround).toFixed(2)}%\n`;
+            else message += `📉 Overround Casa: ${estimatedOverround.toFixed(2)}%\n`;
             if(val > 0) message += `🔥 Valor Detectado: +${val.toFixed(1)}%\n`;
         }
         
         message += `\n`;
-
         const encoded = encodeURIComponent(message);
-        const url = platform === 'wa' 
-            ? `https://api.whatsapp.com/send?text=${encoded}`
-            : `https://t.me/share/url?url=${encoded}`;
-        
+        const url = platform === 'wa' ? `https://api.whatsapp.com/send?text=${encoded}` : `https://t.me/share/url?url=${encoded}`;
         window.open(url, '_blank');
         closeModal();
     }
@@ -414,8 +408,6 @@
         const t=document.getElementById('sIn').value;
         const hm=t.match(/Home goals per match:\s*([\d.]+)/);
         const am=t.match(/Away goals per match:\s*([\d.]+)/);
-        
-        // Capturar porcentajes reales de la liga para comparar
         const realH = t.match(/Home win percentage:\s*([\d.]+)/);
         const realD = t.match(/Draw percentage:\s*([\d.]+)/);
         const realV = t.match(/Away win percentage:\s*([\d.]+)/);
@@ -423,16 +415,8 @@
         if(hm && am) {
             aH = parseFloat(hm[1]); 
             aV = parseFloat(am[1]);
-            
-            let dataReal = null;
-            if(realH && realD && realV) {
-                dataReal = {
-                    h: parseFloat(realH[1]) / 100,
-                    d: parseFloat(realD[1]) / 100,
-                    v: parseFloat(realV[1]) / 100
-                };
-            }
-            analyzeLeagueTrend(aH, aV, dataReal);
+            let dr = (realH && realD && realV) ? {h:parseFloat(realH[1])/100, d:parseFloat(realD[1])/100, v:parseFloat(realV[1])/100} : null;
+            analyzeLeagueTrend(aH, aV, dr);
         }
     }
 
@@ -447,10 +431,8 @@
             }
         }
         
-        const trendBox = document.getElementById('league-trend-box');
+        document.getElementById('league-trend-box').style.display = 'block';
         const trendContent = document.getElementById('trend-content');
-        trendBox.style.display = 'block';
-
         const cMin = (p) => p > 0 ? (1 / p).toFixed(2) : "0.00";
 
         let apto = [];
@@ -458,31 +440,37 @@
         if(ov25 > 0.50) apto.push(`<span class="trend-badge">OVER 2.5</span> C. Mínima: <span class="min-odds-tag">${cMin(ov25)}</span>`);
         if(btts > 0.52) apto.push(`<span class="trend-badge">BTTS</span> C. Mínima: <span class="min-odds-tag">${cMin(btts)}</span>`);
         if(pD > 0.28) apto.push(`<span class="trend-badge">EMPATE</span> C. Mínima: <span class="min-odds-tag">${cMin(pD)}</span>`);
-        
-        if(apto.length === 0) apto.push("Liga equilibrada: Seguir cuota mínima de 1.90.");
+        if(apto.length === 0) apto.push("Liga equilibrada/neutral.");
         trendContent.innerHTML = apto.join('<br><div style="margin-top:6px;"></div>');
 
-        // LÓGICA DE FIABILIDAD (Comparación Poisson vs Realidad)
+        const relCont = document.getElementById('reliability-container');
         if(real) {
-            // Calcular diferencia absoluta entre Poisson y Realidad
+            relCont.style.display = 'flex';
             const diff = Math.abs(pH - real.h) + Math.abs(pD - real.d) + Math.abs(pV - real.v);
-            // Invertir diferencia para obtener puntaje (0.0 diff = 100% fiabilidad)
-            // Un diff de 0.20 es ya bastante alto, normalizamos sobre eso.
-            let reliability = Math.max(0, 100 - (diff * 200)); 
+            let reliability = Math.max(0, 100 - (diff * 250)); // Sensibilidad ajustada
             
-            document.getElementById('reliability-container').style.display = 'flex';
-            document.getElementById('reliability-bar').style.width = reliability + '%';
-            document.getElementById('reliability-pct').innerText = reliability.toFixed(0) + '%';
+            const rBar = document.getElementById('reliability-bar');
+            const rPct = document.getElementById('reliability-pct');
+            const rMsg = document.getElementById('reliability-msg');
+            
+            rBar.style.width = reliability + '%';
+            rPct.innerText = reliability.toFixed(1) + '%';
             
             if(reliability > 85) {
-                document.getElementById('reliability-pct').style.color = 'var(--value-color)';
-            } else if(reliability < 60) {
-                document.getElementById('reliability-pct').style.color = 'var(--delete)';
+                rPct.style.color = 'var(--value-color)';
+                rBar.style.background = 'var(--value-color)';
+                rMsg.innerText = "Esta liga respeta fielmente el modelo.";
+            } else if(reliability < 65) {
+                rPct.style.color = 'var(--delete)';
+                rBar.style.background = 'var(--delete)';
+                rMsg.innerText = "Liga volátil. Cuidado con el azar.";
             } else {
-                document.getElementById('reliability-pct').style.color = 'var(--accent-gold)';
+                rPct.style.color = 'var(--accent-gold)';
+                rBar.style.background = 'var(--accent-gold)';
+                rMsg.innerText = "Fiabilidad moderada.";
             }
         } else {
-            document.getElementById('reliability-container').style.display = 'none';
+            relCont.style.display = 'none';
         }
     }
 
@@ -529,40 +517,34 @@
         const xH_ht = xH * 0.5; const xV_ht = xV * 0.5;
         
         let pH=0, pD=0, pV=0, ov15=0, ov25=0, ov35=0, ov05ht=0, ov15ht=0, haM25=0, haM15=0, haP05=0, haP15=0, vaM25=0, vaM15=0, vaP05=0, vaP15=0, sc=[];
-        
         let pE = Array(13).fill(0); 
-
         for(let i=0; i<=12; i++){
             for(let j=0; j<=12; j++){
                 let p = poi(i,xH)*poi(j,xV);
                 if(i>j) pH+=p; else if(i===j) pD+=p; else pV+=p;
-                let tot = i+j;
-                if(tot < 13) pE[tot] += p;
-
+                let tot = i+j; if(tot < 13) pE[tot] += p;
                 if(tot>1.5) ov15+=p; if(tot>2.5) ov25+=p; if(tot>3.5) ov35+=p;
                 if(i-j > 2.5) haM25+=p; if(i-j > 1.5) haM15+=p; if(i-j > -0.5) haP05+=p; if(i-j > -1.5) haP15+=p;
                 if(j-i > 2.5) vaM25+=p; if(j-i > 1.5) vaM15+=p; if(j-i > -0.5) vaP05+=p; if(j-i > -1.5) vaP15+=p;
                 if(i<=5 && j<=5) sc.push({s:`${i} - ${j}`, p:p});
-                
                 let p_ht = poi(i, xH_ht)*poi(j, xV_ht);
                 if((i+j)>0.5) ov05ht += p_ht; if((i+j)>1.5) ov15ht += p_ht;
             }
         }
-
         function getAO(line) { 
             if(line % 1 === 0) { 
-                let win=0; for(let k=line+1; k<13; k++) win+=pE[k];
-                let loss=0; for(let k=0; k<line; k++) loss+=pE[k];
+                let win=0, loss=0;
+                for(let k=line+1; k<13; k++) win+=pE[k];
+                for(let k=0; k<line; k++) loss+=pE[k];
                 return win / (win + loss);
             } else if(line % 1 === 0.25) { 
-                let winFull=0; for(let k=Math.floor(line)+1; k<13; k++) winFull+=pE[k];
-                return winFull + (pE[Math.floor(line)] * 0.5);
+                let wf=0; for(let k=Math.floor(line)+1; k<13; k++) wf+=pE[k];
+                return wf + (pE[Math.floor(line)] * 0.5);
             } else { 
-                let winFull=0; for(let k=Math.ceil(line); k<13; k++) winFull+=pE[k];
-                return winFull + (pE[Math.floor(line)] * 0.5);
+                let wf=0; for(let k=Math.ceil(line); k<13; k++) wf+=pE[k];
+                return wf + (pE[Math.floor(line)] * 0.5);
             }
         }
-
         document.getElementById('setup-screen').style.display='none';
         document.getElementById('dashboard-screen').style.display='flex';
         document.getElementById('card-1x2').innerHTML = getRow('Local (1)', pH) + getRow('Empate (X)', pD) + getRow('Visita (2)', pV);
@@ -572,19 +554,7 @@
         const btts_ht = (1 - poi(0, xH_ht)) * (1 - poi(0, xV_ht));
         document.getElementById('card-ght').innerHTML = getRow('+ 0.5 Goles HT', ov05ht) + getRow('+ 1.5 Goles HT', ov15ht) + getRow('Ambos Marcan HT', btts_ht);
         const btts_si = (1 - poi(0, xH)) * (1 - poi(0, xV));
-        
-        document.getElementById('card-gft').innerHTML = 
-            getRow('+ 1.5 Goles', ov15) +
-            getRow('+ 1.75 Goles', getAO(1.75)) +
-            getRow('+ 2.0 Goles', getAO(2.0)) +
-            getRow('+ 2.25 Goles', getAO(2.25)) +
-            getRow('+ 2.5 Goles', ov25) +
-            getRow('+ 2.75 Goles', getAO(2.75)) +
-            getRow('+ 3.0 Goles', getAO(3.0)) +
-            getRow('+ 3.25 Goles', getAO(3.25)) +
-            getRow('+ 3.5 Goles', ov35) +
-            getRow('+ 3.75 Goles', getAO(3.75));
-
+        document.getElementById('card-gft').innerHTML = getRow('+ 1.5 Goles', ov15) + getRow('+ 1.75 Goles', getAO(1.75)) + getRow('+ 2.0 Goles', getAO(2.0)) + getRow('+ 2.25 Goles', getAO(2.25)) + getRow('+ 2.5 Goles', ov25) + getRow('+ 2.75 Goles', getAO(2.75)) + getRow('+ 3.0 Goles', getAO(3.0)) + getRow('+ 3.25 Goles', getAO(3.25)) + getRow('+ 3.5 Goles', ov35) + getRow('+ 3.75 Goles', getAO(3.75));
         document.getElementById('card-btts').innerHTML = getRow('BTTS SÍ', btts_si) + getRow('BTTS NO', 1-btts_si);
         document.getElementById('card-hl').innerHTML = getRow('Local -2.5', haM25) + getRow('Local -1.5', haM15) + getRow('Local -0.5', pH) + getRow('Local 0.0', dnbH) + getRow('Local +0.5', haP05) + getRow('Local +1.5', haP15);
         document.getElementById('card-hv').innerHTML = getRow('Visita -2.5', vaM25) + getRow('Visita -1.5', vaM15) + getRow('Visita -0.5', pV) + getRow('Visita 0.0', 1-dnbH) + getRow('Visita +0.5', vaP05) + getRow('Visita +1.5', vaP15);
