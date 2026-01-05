@@ -211,7 +211,7 @@
 
             <textarea id="hIn" placeholder="Datos Tabla LOCAL..." oninput="uH()"></textarea>
             <textarea id="vIn" placeholder="Datos Tabla VISITA..." oninput="uV()"></textarea>
-            <textarea id="sIn" placeholder="Promedios Liga..." oninput="uS()"></textarea>
+            <textarea id="sIn" placeholder="Promedios Liga (Caja Maestra)..." oninput="uS()"></textarea>
             
             <div class="select-container">
                 <select id="sH"></select>
@@ -405,9 +405,13 @@
     function uV(){ dV=ext(document.getElementById('vIn').value); fill(); }
     
     function uS(){
-        const t=document.getElementById('sIn').value;
-        const hm=t.match(/Home goals per match:\s*([\d.]+)/);
-        const am=t.match(/Away goals per match:\s*([\d.]+)/);
+        const t = document.getElementById('sIn').value;
+        
+        // EXTRACCIÓN DE PROMEDIOS PARA POISSON DESDE LA CAJA 3
+        const hm = t.match(/Home goals per match:\s*([\d.]+)/);
+        const am = t.match(/Away goals per match:\s*([\d.]+)/);
+        
+        // EXTRACCIÓN DE ESTADÍSTICAS REALES DE LA LIGA DESDE LA CAJA 3 PARA COMPARAR
         const realH = t.match(/Home win percentage:\s*([\d.]+)/);
         const realD = t.match(/Draw percentage:\s*([\d.]+)/);
         const realV = t.match(/Away win percentage:\s*([\d.]+)/);
@@ -415,13 +419,23 @@
         if(hm && am) {
             aH = parseFloat(hm[1]); 
             aV = parseFloat(am[1]);
-            let dr = (realH && realD && realV) ? {h:parseFloat(realH[1])/100, d:parseFloat(realD[1])/100, v:parseFloat(realV[1])/100} : null;
-            analyzeLeagueTrend(aH, aV, dr);
+            
+            let dataReal = null;
+            if(realH && realD && realV) {
+                dataReal = {
+                    h: parseFloat(realH[1]) / 100,
+                    d: parseFloat(realD[1]) / 100,
+                    v: parseFloat(realV[1]) / 100
+                };
+            }
+            // Ejecutar comparación y análisis de tendencia basándose solo en los datos de esta caja
+            analyzeLeagueTrend(aH, aV, dataReal);
         }
     }
 
     function analyzeLeagueTrend(lh, lv, real) {
         let pH=0, pD=0, pV=0, ov25=0, btts=0;
+        // Calculamos el Poisson Teórico de la liga basándonos en sus promedios
         for(let i=0; i<=10; i++) {
             for(let j=0; j<=10; j++) {
                 let p = poi(i, lh) * poi(j, lv);
@@ -440,14 +454,15 @@
         if(ov25 > 0.50) apto.push(`<span class="trend-badge">OVER 2.5</span> C. Mínima: <span class="min-odds-tag">${cMin(ov25)}</span>`);
         if(btts > 0.52) apto.push(`<span class="trend-badge">BTTS</span> C. Mínima: <span class="min-odds-tag">${cMin(btts)}</span>`);
         if(pD > 0.28) apto.push(`<span class="trend-badge">EMPATE</span> C. Mínima: <span class="min-odds-tag">${cMin(pD)}</span>`);
-        if(apto.length === 0) apto.push("Liga equilibrada/neutral.");
+        if(apto.length === 0) apto.push("Liga equilibrada.");
         trendContent.innerHTML = apto.join('<br><div style="margin-top:6px;"></div>');
 
         const relCont = document.getElementById('reliability-container');
         if(real) {
             relCont.style.display = 'flex';
+            // COMPARACIÓN DIRECTA: Poisson (Goles de caja 3) vs Realidad (Estadísticas de caja 3)
             const diff = Math.abs(pH - real.h) + Math.abs(pD - real.d) + Math.abs(pV - real.v);
-            let reliability = Math.max(0, 100 - (diff * 250)); // Sensibilidad ajustada
+            let reliability = Math.max(0, 100 - (diff * 250)); 
             
             const rBar = document.getElementById('reliability-bar');
             const rPct = document.getElementById('reliability-pct');
@@ -459,11 +474,11 @@
             if(reliability > 85) {
                 rPct.style.color = 'var(--value-color)';
                 rBar.style.background = 'var(--value-color)';
-                rMsg.innerText = "Esta liga respeta fielmente el modelo.";
+                rMsg.innerText = "La liga se adapta perfectamente a Poisson.";
             } else if(reliability < 65) {
                 rPct.style.color = 'var(--delete)';
                 rBar.style.background = 'var(--delete)';
-                rMsg.innerText = "Liga volátil. Cuidado con el azar.";
+                rMsg.innerText = "Desviación alta detectada en los resultados.";
             } else {
                 rPct.style.color = 'var(--accent-gold)';
                 rBar.style.background = 'var(--accent-gold)';
