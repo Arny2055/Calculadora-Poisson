@@ -73,6 +73,18 @@
         }
         .trend-badge { background: var(--accent-gold); color: #000; padding: 2px 5px; border-radius: 4px; font-weight: 800; font-size: 0.65rem; }
         .min-odds-tag { color: var(--fair-odds); font-family: monospace; font-weight: bold; }
+        
+        /* Estilo para el indicador de fiabilidad */
+        .reliability-score {
+            margin-top: 8px;
+            padding-top: 8px;
+            border-top: 1px solid rgba(255, 215, 0, 0.2);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .score-bar { height: 4px; background: #333; flex: 1; margin: 0 10px; border-radius: 2px; overflow: hidden; }
+        .score-fill { height: 100%; background: var(--accent-green); transition: width 0.5s; }
 
         .page { display: none; }
         .page.active { display: block; }
@@ -213,6 +225,11 @@
                     <i class="fa-solid fa-chart-line"></i> TENDENCIA DE LIGA & CUOTA MÍNIMA
                 </div>
                 <div id="trend-content"></div>
+                <div class="reliability-score" id="reliability-container">
+                    <span style="font-size: 0.6rem;">FIABILIDAD POISSON:</span>
+                    <div class="score-bar"><div id="reliability-bar" class="score-fill" style="width: 0%;"></div></div>
+                    <b id="reliability-pct" style="font-size: 0.65rem; color: var(--accent-green);">0%</b>
+                </div>
             </div>
         </div>
     </div>
@@ -397,14 +414,29 @@
         const t=document.getElementById('sIn').value;
         const hm=t.match(/Home goals per match:\s*([\d.]+)/);
         const am=t.match(/Away goals per match:\s*([\d.]+)/);
+        
+        // Capturar porcentajes reales de la liga para comparar
+        const realH = t.match(/Home win percentage:\s*([\d.]+)/);
+        const realD = t.match(/Draw percentage:\s*([\d.]+)/);
+        const realV = t.match(/Away win percentage:\s*([\d.]+)/);
+
         if(hm && am) {
             aH = parseFloat(hm[1]); 
             aV = parseFloat(am[1]);
-            analyzeLeagueTrend(aH, aV);
+            
+            let dataReal = null;
+            if(realH && realD && realV) {
+                dataReal = {
+                    h: parseFloat(realH[1]) / 100,
+                    d: parseFloat(realD[1]) / 100,
+                    v: parseFloat(realV[1]) / 100
+                };
+            }
+            analyzeLeagueTrend(aH, aV, dataReal);
         }
     }
 
-    function analyzeLeagueTrend(lh, lv) {
+    function analyzeLeagueTrend(lh, lv, real) {
         let pH=0, pD=0, pV=0, ov25=0, btts=0;
         for(let i=0; i<=10; i++) {
             for(let j=0; j<=10; j++) {
@@ -428,8 +460,30 @@
         if(pD > 0.28) apto.push(`<span class="trend-badge">EMPATE</span> C. Mínima: <span class="min-odds-tag">${cMin(pD)}</span>`);
         
         if(apto.length === 0) apto.push("Liga equilibrada: Seguir cuota mínima de 1.90.");
-
         trendContent.innerHTML = apto.join('<br><div style="margin-top:6px;"></div>');
+
+        // LÓGICA DE FIABILIDAD (Comparación Poisson vs Realidad)
+        if(real) {
+            // Calcular diferencia absoluta entre Poisson y Realidad
+            const diff = Math.abs(pH - real.h) + Math.abs(pD - real.d) + Math.abs(pV - real.v);
+            // Invertir diferencia para obtener puntaje (0.0 diff = 100% fiabilidad)
+            // Un diff de 0.20 es ya bastante alto, normalizamos sobre eso.
+            let reliability = Math.max(0, 100 - (diff * 200)); 
+            
+            document.getElementById('reliability-container').style.display = 'flex';
+            document.getElementById('reliability-bar').style.width = reliability + '%';
+            document.getElementById('reliability-pct').innerText = reliability.toFixed(0) + '%';
+            
+            if(reliability > 85) {
+                document.getElementById('reliability-pct').style.color = 'var(--value-color)';
+            } else if(reliability < 60) {
+                document.getElementById('reliability-pct').style.color = 'var(--delete)';
+            } else {
+                document.getElementById('reliability-pct').style.color = 'var(--accent-gold)';
+            }
+        } else {
+            document.getElementById('reliability-container').style.display = 'none';
+        }
     }
 
     function fill(){
@@ -519,7 +573,6 @@
         document.getElementById('card-ght').innerHTML = getRow('+ 0.5 Goles HT', ov05ht) + getRow('+ 1.5 Goles HT', ov15ht) + getRow('Ambos Marcan HT', btts_ht);
         const btts_si = (1 - poi(0, xH)) * (1 - poi(0, xV));
         
-        // Mercados POSITIVOS (+) filtrados: del 1.5 al 3.75
         document.getElementById('card-gft').innerHTML = 
             getRow('+ 1.5 Goles', ov15) +
             getRow('+ 1.75 Goles', getAO(1.75)) +
