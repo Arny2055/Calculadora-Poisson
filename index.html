@@ -322,6 +322,7 @@
     let dH={}, dV={}, aH=1.58, aV=1.22;
     let selectedMarket = { name: "", fairOdds: 0, pct: 0 };
     let currentLeagueName = "Liga Desconocida";
+    let globalReliability = 0; // Liga la fiabilidad globalmente
 
     function saveLeague() {
         const name = document.getElementById('leagueName').value.trim();
@@ -392,15 +393,11 @@
         message += `🎯 *PICK:* ${selectedMarket.name}\n`;
         message += `📊 Probabilidad: ${selectedMarket.pct.toFixed(1)}%\n`;
         message += `⚖️ Cuota Justa: ${selectedMarket.fairOdds}\n`;
+        message += `🛡 Fiabilidad Liga: ${globalReliability.toFixed(1)}%\n`;
         
         if(!isNaN(bookieOdds)) {
             const val = ((bookieOdds / selectedMarket.fairOdds) - 1) * 100;
-            const probCasa = (1 / bookieOdds);
-            const probContrariaQuantum = (1 - (selectedMarket.pct / 100));
-            let estimatedOverround = ((probCasa + probContrariaQuantum) - 1) * 100;
             message += `💰 *CUOTA (${bookieName}):* ${bookieOdds.toFixed(2)}\n`;
-            if(estimatedOverround < 0) message += `📈 Margen de Valor: +${Math.abs(estimatedOverround).toFixed(2)}%\n`;
-            else message += `📉 Overround Casa: ${estimatedOverround.toFixed(2)}%\n`;
             if(val > 0) message += `🔥 Valor Detectado: +${val.toFixed(1)}%\n`;
         }
         
@@ -438,8 +435,6 @@
     
     function uS(){
         const t = document.getElementById('sIn').value;
-        
-        // MOTOR DE BÚSQUEDA REFORZADO PARA TODOS LOS DATOS DE CONFIANZA
         const hm = t.match(/Home goals per match:\s*([\d.]+)/);
         const am = t.match(/Away goals per match:\s*([\d.]+)/);
         const realH = t.match(/Home wins:\s*([\d.]+)%/);
@@ -489,43 +484,33 @@
         const rMsg = document.getElementById('reliability-msg');
         
         if(real.h !== null) {
-            // CÁLCULO DE DESVIACIÓN MULTIVARIABLE (1X2 + Goles + BTTS)
-            let diffs = [
-                Math.abs(pH - real.h),
-                Math.abs(pD - real.d),
-                Math.abs(pV - real.v)
-            ];
+            let diffs = [Math.abs(pH - real.h), Math.abs(pD - real.d), Math.abs(pV - real.v)];
             if(real.ov25) diffs.push(Math.abs(ov25 - real.ov25));
             if(real.btts) diffs.push(Math.abs(btts - real.btts));
-
             const avgDiff = diffs.reduce((a,b)=>a+b, 0) / diffs.length;
-            let reliability = Math.max(0, 100 - (avgDiff * 450)); 
+            globalReliability = Math.max(0, 100 - (avgDiff * 450)); 
             
-            rBar.style.width = reliability + '%';
-            rPct.innerText = reliability.toFixed(1) + '%';
+            rBar.style.width = globalReliability + '%';
+            rPct.innerText = globalReliability.toFixed(1) + '%';
             rBar.classList.remove('quantum-pulse');
             rPct.style.color = 'var(--accent-gold)';
 
-            if(reliability >= 92) {
+            if(globalReliability >= 92) {
                 rBar.classList.add('quantum-pulse');
                 rPct.style.color = 'var(--quantum-blue)';
                 rMsg.innerText = "SISTEMA QUANTUM: Liga matemáticamente perfecta.";
-                rMsg.style.color = 'var(--quantum-blue)';
-            } else if(reliability > 78) {
+            } else if(globalReliability > 78) {
                 rMsg.innerText = "CONFIANZA ALTA: Poisson es altamente predictivo aquí.";
-                rMsg.style.color = 'var(--value-color)';
-            } else if(reliability < 60) {
-                rMsg.innerText = "AVISO: Resultados caóticos. Usa hándicaps conservadores.";
-                rMsg.style.color = 'var(--delete)';
+            } else if(globalReliability < 60) {
+                rMsg.innerText = "AVISO: Resultados caóticos. Algoritmo penalizado.";
             } else {
                 rMsg.innerText = "CONFIANZA MEDIA: Tendencias estables.";
-                rMsg.style.color = 'var(--accent-gold)';
             }
         } else {
+            globalReliability = 0;
             rBar.style.width = '0%';
             rPct.innerText = '0%';
             rMsg.innerText = "Faltan datos reales de la liga para validar.";
-            rMsg.style.color = 'var(--text-dim)';
         }
     }
 
@@ -542,13 +527,21 @@
         return (Math.pow(l,k)*Math.exp(-l))/f; 
     }
 
-    function getRow(label, prob) {
-        const p = prob * 100;
+    function getRow(label, rawProb) {
+        // LIGAR FIABILIDAD AL MERCADO:
+        // Si la fiabilidad es baja (<70%), empujamos la probabilidad hacia el 50% (incertidumbre)
+        let factor = globalReliability / 100;
+        let pAdjusted = (rawProb * factor) + (0.5 * (1 - factor));
+        
+        const p = pAdjusted * 100;
         const odds = p > 0 ? (100 / p).toFixed(2) : '0.00';
-        const isHighlight = p >= 55 && p <= 65;
+        
+        const isQuantum = globalReliability >= 92;
+        const icon = isQuantum ? '<i class="fa-solid fa-bolt" style="color:var(--quantum-blue); font-size:0.6rem; margin-right:4px;"></i>' : '';
+
         return `
-            <div class="row ${isHighlight ? 'target-range' : ''}" onclick="openShare('${label}', ${odds}, ${p})">
-                <span>${label}</span>
+            <div class="row" onclick="openShare('${label}', ${odds}, ${p})">
+                <span>${icon}${label}</span>
                 <div class="val-group">
                     <b class="odds">${odds}</b>
                     <b class="pct">${p.toFixed(1)}%</b>
@@ -587,15 +580,12 @@
             }
         }
         function getAO(line) { 
+            let win=0, loss=0;
             if(line % 1 === 0) { 
-                let win=0, loss=0;
                 for(let k=line+1; k<13; k++) win+=pE[k];
                 for(let k=0; k<line; k++) loss+=pE[k];
                 return win / (win + loss);
-            } else if(line % 1 === 0.25) { 
-                let wf=0; for(let k=Math.floor(line)+1; k<13; k++) wf+=pE[k];
-                return wf + (pE[Math.floor(line)] * 0.5);
-            } else { 
+            } else {
                 let wf=0; for(let k=Math.ceil(line); k<13; k++) wf+=pE[k];
                 return wf + (pE[Math.floor(line)] * 0.5);
             }
@@ -609,12 +599,12 @@
         const btts_ht = (1 - poi(0, xH_ht)) * (1 - poi(0, xV_ht));
         document.getElementById('card-ght').innerHTML = getRow('+ 0.5 Goles HT', ov05ht) + getRow('+ 1.5 Goles HT', ov15ht) + getRow('Ambos Marcan HT', btts_ht);
         const btts_si = (1 - poi(0, xH)) * (1 - poi(0, xV));
-        document.getElementById('card-gft').innerHTML = getRow('+ 1.5 Goles', ov15) + getRow('+ 1.75 Goles', getAO(1.75)) + getRow('+ 2.0 Goles', getAO(2.0)) + getRow('+ 2.25 Goles', getAO(2.25)) + getRow('+ 2.5 Goles', ov25) + getRow('+ 2.75 Goles', getAO(2.75)) + getRow('+ 3.0 Goles', getAO(3.0)) + getRow('+ 3.25 Goles', getAO(3.25)) + getRow('+ 3.5 Goles', ov35) + getRow('+ 3.75 Goles', getAO(3.75));
+        document.getElementById('card-gft').innerHTML = getRow('+ 1.5 Goles', ov15) + getRow('+ 2.0 Goles', getAO(2.0)) + getRow('+ 2.5 Goles', ov25) + getRow('+ 3.0 Goles', getAO(3.0)) + getRow('+ 3.5 Goles', ov35);
         document.getElementById('card-btts').innerHTML = getRow('BTTS SÍ', btts_si) + getRow('BTTS NO', 1-btts_si);
-        document.getElementById('card-hl').innerHTML = getRow('Local -2.5', haM25) + getRow('Local -1.5', haM15) + getRow('Local -0.5', pH) + getRow('Local 0.0', dnbH) + getRow('Local +0.5', haP05) + getRow('Local +1.5', haP15);
-        document.getElementById('card-hv').innerHTML = getRow('Visita -2.5', vaM25) + getRow('Visita -1.5', vaM15) + getRow('Visita -0.5', pV) + getRow('Visita 0.0', 1-dnbH) + getRow('Visita +0.5', vaP05) + getRow('Visita +1.5', vaP15);
+        document.getElementById('card-hl').innerHTML = getRow('Local -1.5', haM15) + getRow('Local -0.5', pH) + getRow('Local 0.0', dnbH) + getRow('Local +0.5', haP05);
+        document.getElementById('card-hv').innerHTML = getRow('Visita -1.5', vaM15) + getRow('Visita -0.5', pV) + getRow('Visita 0.0', 1-dnbH) + getRow('Visita +0.5', vaP05);
         sc.sort((a,b)=>b.p-a.p);
-        let h=""; sc.slice(0,15).forEach(m=>{ h+=getRow(m.s, m.p); });
+        let h=""; sc.slice(0,10).forEach(m=>{ h+=getRow(m.s, m.p); });
         document.getElementById('score-list').innerHTML=`<div class="card">${h}</div>`;
     }
 </script>
