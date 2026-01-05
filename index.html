@@ -215,8 +215,6 @@
             </div>
 
             <div id="p-goals" class="page">
-                <div class="section-title">Líneas Asiáticas de Goles (FT)</div>
-                <div class="card" id="card-gasian"></div>
                 <div class="section-title">Goles Primera Mitad (HT)</div>
                 <div class="card" id="card-ght"></div>
                 <div class="section-title">Goles Tiempo Completo (FT)</div>
@@ -424,16 +422,14 @@
         
         let pH=0, pD=0, pV=0, ov05=0, ov15=0, ov25=0, ov35=0, ov45=0, ov05ht=0, ov15ht=0, haM25=0, haM15=0, haP05=0, haP15=0, vaM25=0, vaM15=0, vaP05=0, vaP15=0, sc=[];
         
-        // Probabilidades de conteo exacto para líneas asiáticas
-        let probExact = Array(13).fill(0); 
+        let pE = Array(13).fill(0); // Probabilidades Exactas FT
 
         for(let i=0; i<=12; i++){
             for(let j=0; j<=12; j++){
                 let p = poi(i,xH)*poi(j,xV);
                 if(i>j) pH+=p; else if(i===j) pD+=p; else pV+=p;
                 let tot = i+j;
-                
-                if(tot < 13) probExact[tot] += p;
+                if(tot < 13) pE[tot] += p;
 
                 if(tot>0.5) ov05+=p; if(tot>1.5) ov15+=p; if(tot>2.5) ov25+=p; if(tot>3.5) ov35+=p; if(tot>4.5) ov45+=p;
                 if(i-j > 2.5) haM25+=p; if(i-j > 1.5) haM15+=p; if(i-j > -0.5) haP05+=p; if(i-j > -1.5) haP15+=p;
@@ -445,59 +441,54 @@
             }
         }
 
-        // Función para calcular Probabilidad de Over Asiático
-        // Over X.0: P(>X) / (1 - P(exactamente X)) -> Cuota ajustada por void
-        // Over X.25: (P(>X.5) + P(Over X.0)) / 2
-        // Over X.75: (P(>X.5) + P(>X.5) con mitad ganada...) Simplificado:
-        function getAsianOver(line) {
-            if (line % 1 === 0) { // Línea .0 (Void si es igual)
-                let pWin = 0;
-                for(let k=line+1; k<13; k++) pWin += probExact[k];
-                let pLoss = 0;
-                for(let k=0; k<line; k++) pLoss += probExact[k];
-                return pWin / (pWin + pLoss); 
-            } else if (line % 1 === 0.25) { // Línea .25 (Mitad void/Mitad win)
-                let base = Math.floor(line);
-                let pWinFull = 0; for(let k=base+1; k<13; k++) pWinFull += probExact[k];
-                let pHalfWin = probExact[base]; // Esto no es exacto para cuota, pero sí para probabilidad de acierto
-                return pWinFull + (probExact[base] * 0.5);
-            } else if (line % 1 === 0.75) { // Línea .75 (Mitad win/Mitad loss)
-                let upper = Math.ceil(line);
-                let pWinFull = 0; for(let k=upper; k<13; k++) pWinFull += probExact[k];
-                return pWinFull + (probExact[upper-1] * 0.5);
+        // Utilidades para líneas asiáticas FT
+        function getAO(line) { // Asian Over
+            if(line % 1 === 0) { // Entero (.0)
+                let win=0; for(let k=line+1; k<13; k++) win+=pE[k];
+                let loss=0; for(let k=0; k<line; k++) loss+=pE[k];
+                return win / (win + loss);
+            } else if(line % 1 === 0.25) { // Cuarto (.25)
+                let winFull=0; for(let k=Math.floor(line)+1; k<13; k++) winFull+=pE[k];
+                return winFull + (pE[Math.floor(line)] * 0.5);
+            } else { // Tres cuartos (.75)
+                let winFull=0; for(let k=Math.ceil(line); k<13; k++) winFull+=pE[k];
+                return winFull + (pE[Math.floor(line)] * 0.5);
             }
-            return 0;
+        }
+
+        function getAU(line) { // Asian Under
+            return 1 - getAO(line);
         }
 
         document.getElementById('setup-screen').style.display='none';
         document.getElementById('dashboard-screen').style.display='flex';
         document.getElementById('card-1x2').innerHTML = getRow('Local (1)', pH) + getRow('Empate (X)', pD) + getRow('Visita (2)', pV);
-        
         let dnbH = (pH + pV) > 0 ? pH / (pH + pV) : 0.5;
         document.getElementById('card-dnb').innerHTML = getRow('Local DNB', dnbH) + getRow('Visita DNB', 1-dnbH);
         document.getElementById('card-dc').innerHTML = getRow('1X', pH+pD) + getRow('X2', pV+pD) + getRow('12', pH+pV);
-        
         const btts_ht = (1 - poi(0, xH_ht)) * (1 - poi(0, xV_ht));
         document.getElementById('card-ght').innerHTML = getRow('+ 0.5 Goles HT', ov05ht) + getRow('+ 1.5 Goles HT', ov15ht) + getRow('Ambos Marcan HT', btts_ht);
-        
         const btts_si = (1 - poi(0, xH)) * (1 - poi(0, xV));
-        document.getElementById('card-gft').innerHTML = getRow('+ 0.5 Goles', ov05) + getRow('+ 1.5 Goles', ov15) + getRow('+ 2.5 Goles', ov25) + getRow('+ 3.5 Goles', ov35) + getRow('+ 4.5 Goles', ov45) + getRow('- 1.5 Goles', 1-ov15) + getRow('- 2.5 Goles', 1-ov25) + getRow('- 3.5 Goles', 1-ov35);
         
-        // Líneas Asiáticas
-        document.getElementById('card-gasian').innerHTML = 
-            getRow('Over 0.75 Goles', getAsianOver(0.75)) +
-            getRow('Over 1.0 Goles', getAsianOver(1.0)) +
-            getRow('Over 1.25 Goles', getAsianOver(1.25)) +
-            getRow('Over 1.75 Goles', getAsianOver(1.75)) +
-            getRow('Over 2.0 Goles', getAsianOver(2.0)) +
-            getRow('Over 2.25 Goles', getAsianOver(2.25)) +
-            getRow('Over 2.75 Goles', getAsianOver(2.75)) +
-            getRow('Over 3.0 Goles', getAsianOver(3.0));
+        // Mezcla de Goles FT (Estándar y Asiáticos)
+        document.getElementById('card-gft').innerHTML = 
+            getRow('+ 0.5 Goles', ov05) + getRow('- 0.5 Goles', 1-ov05) +
+            getRow('Over 0.75 Goles', getAO(0.75)) + getRow('Under 0.75 Goles', getAU(0.75)) +
+            getRow('Over 1.0 Goles', getAO(1.0)) + getRow('Under 1.0 Goles', getAU(1.0)) +
+            getRow('Over 1.25 Goles', getAO(1.25)) + getRow('Under 1.25 Goles', getAU(1.25)) +
+            getRow('+ 1.5 Goles', ov15) + getRow('- 1.5 Goles', 1-ov15) +
+            getRow('Over 1.75 Goles', getAO(1.75)) + getRow('Under 1.75 Goles', getAU(1.75)) +
+            getRow('Over 2.0 Goles', getAO(2.0)) + getRow('Under 2.0 Goles', getAU(2.0)) +
+            getRow('Over 2.25 Goles', getAO(2.25)) + getRow('Under 2.25 Goles', getAU(2.25)) +
+            getRow('+ 2.5 Goles', ov25) + getRow('- 2.5 Goles', 1-ov25) +
+            getRow('Over 2.75 Goles', getAO(2.75)) + getRow('Under 2.75 Goles', getAU(2.75)) +
+            getRow('Over 3.0 Goles', getAO(3.0)) + getRow('Under 3.0 Goles', getAU(3.0)) +
+            getRow('+ 3.5 Goles', ov35) + getRow('- 3.5 Goles', 1-ov35) +
+            getRow('+ 4.5 Goles', ov45) + getRow('- 4.5 Goles', 1-ov45);
 
         document.getElementById('card-btts').innerHTML = getRow('BTTS SÍ', btts_si) + getRow('BTTS NO', 1-btts_si);
         document.getElementById('card-hl').innerHTML = getRow('Local -2.5', haM25) + getRow('Local -1.5', haM15) + getRow('Local -0.5', pH) + getRow('Local 0.0', dnbH) + getRow('Local +0.5', haP05) + getRow('Local +1.5', haP15);
         document.getElementById('card-hv').innerHTML = getRow('Visita -2.5', vaM25) + getRow('Visita -1.5', vaM15) + getRow('Visita -0.5', pV) + getRow('Visita 0.0', 1-dnbH) + getRow('Visita +0.5', vaP05) + getRow('Visita +1.5', vaP15);
-        
         sc.sort((a,b)=>b.p-a.p);
         let h=""; sc.slice(0,15).forEach(m=>{ h+=getRow(m.s, m.p); });
         document.getElementById('score-list').innerHTML=`<div class="card">${h}</div>`;
