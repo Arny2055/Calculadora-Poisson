@@ -87,7 +87,6 @@
         .row.target-range { background: rgba(0, 191, 255, 0.08); border-radius: 8px; margin: 0 -4px; padding: 12px 8px; }
         .row.target-range b.pct { color: var(--highlight); font-weight: 800; }
 
-        /* MODAL PERSONALIZADO */
         #pick-modal {
             position: fixed; top: 0; left: 0; width: 100%; height: 100%; 
             background: rgba(0,0,0,0.85); z-index: 3000; display: none;
@@ -170,7 +169,7 @@
         <div class="header-box">
             <i class="fa-solid fa-bolt-lightning logo-icon"></i>
             <h2>EL GURÚ DE LAS APUESTAS</h2>
-            <small>Quantum Engine v45.0 (Pro Share)</small>
+            <small>Quantum Engine v46.0 (Overround Enabled)</small>
         </div>
         <div class="scroll-content">
             <div class="db-panel">
@@ -250,7 +249,6 @@
     let selectedMarket = { name: "", fairOdds: 0, pct: "" };
     let currentLeagueName = "Liga Desconocida";
 
-    // --- LOCAL STORAGE ---
     function saveLeague() {
         const name = document.getElementById('leagueName').value.trim();
         if(!name) { alert("Nombre requerido"); return; }
@@ -296,7 +294,6 @@
         Object.keys(db).sort().forEach(name => sel.add(new Option(name, name)));
     }
 
-    // --- COMPARTIR ---
     function openShare(name, fairOdds, pct) {
         selectedMarket = { name, fairOdds, pct };
         document.getElementById('modal-market-name').innerText = name;
@@ -308,7 +305,7 @@
     function closeModal() { document.getElementById('pick-modal').style.display = 'none'; }
 
     function sharePick(platform) {
-        const bookieOdds = document.getElementById('bookie-odds').value;
+        const bookieOdds = parseFloat(document.getElementById('bookie-odds').value);
         const bookieName = document.getElementById('bookie-name').value;
         const tH = document.getElementById('sH').value;
         const tV = document.getElementById('sV').value;
@@ -323,11 +320,16 @@
         
         if(bookieOdds) {
             const val = ((bookieOdds / selectedMarket.fairOdds) - 1) * 100;
-            message += `💰 *CUOTA (${bookieName}):* ${bookieOdds}\n`;
+            // Cálculo de Overround: (1/Cuota Casa + 1/Cuota Contraria Ideal) - 1. 
+            // Simplificado para el pick individual vs probabilidad:
+            const overround = ( (1/bookieOdds) * 100 );
+            
+            message += `💰 *CUOTA (${bookieName}):* ${bookieOdds.toFixed(2)}\n`;
             if(val > 0) message += `🔥 Valor detectado: +${val.toFixed(1)}%\n`;
+            message += `📈 Overround Estimado: ${overround.toFixed(1)}%\n`;
         }
         
-        message += `\n_Analizado con Quantum Engine v45_`;
+        message += `\n_Analizado con Quantum Engine v46_`;
 
         const encoded = encodeURIComponent(message);
         const url = platform === 'wa' 
@@ -344,7 +346,6 @@
         setTimeout(() => t.style.display = 'none', 1200);
     }
 
-    // --- ENGINE CORE ---
     function resetAnalysis(){ 
         document.getElementById('dashboard-screen').style.display='none';
         document.getElementById('setup-screen').style.display='flex';
@@ -409,14 +410,11 @@
     function calculate(){
         const tH=document.getElementById('sH').value, tV=document.getElementById('sV').value;
         if(!dH[tH] || !dV[tV]) return;
-        
         document.getElementById('match-title').innerText = `${tH} vs ${tV}`;
         const xH = (dH[tH].f/aH)*(dV[tV].a/aH)*aH;
         const xV = (dV[tV].f/aV)*(dH[tH].a/aV)*aV;
         const xH_ht = xH * 0.5; const xV_ht = xV * 0.5;
-        
         let pH=0, pD=0, pV=0, ov05=0, ov15=0, ov25=0, ov35=0, ov45=0, ov05ht=0, ov15ht=0, haM25=0, haM15=0, haP05=0, haP15=0, vaM25=0, vaM15=0, vaP05=0, vaP15=0, sc=[];
-
         for(let i=0; i<=12; i++){
             for(let j=0; j<=12; j++){
                 let p = poi(i,xH)*poi(j,xV);
@@ -430,25 +428,19 @@
                 if((i+j)>0.5) ov05ht += p_ht; if((i+j)>1.5) ov15ht += p_ht;
             }
         }
-
         document.getElementById('setup-screen').style.display='none';
         document.getElementById('dashboard-screen').style.display='flex';
-
         document.getElementById('card-1x2').innerHTML = getRow('Local (1)', pH) + getRow('Empate (X)', pD) + getRow('Visita (2)', pV);
         let dnbH = (pH + pV) > 0 ? pH / (pH + pV) : 0.5;
         document.getElementById('card-dnb').innerHTML = getRow('Local DNB', dnbH) + getRow('Visita DNB', 1-dnbH);
         document.getElementById('card-dc').innerHTML = getRow('1X', pH+pD) + getRow('X2', pV+pD) + getRow('12', pH+pV);
-
         const btts_ht = (1 - poi(0, xH_ht)) * (1 - poi(0, xV_ht));
         document.getElementById('card-ght').innerHTML = getRow('+ 0.5 Goles HT', ov05ht) + getRow('+ 1.5 Goles HT', ov15ht) + getRow('Ambos Marcan HT', btts_ht);
-        
         const btts_si = (1 - poi(0, xH)) * (1 - poi(0, xV));
         document.getElementById('card-gft').innerHTML = getRow('+ 0.5 Goles', ov05) + getRow('+ 1.5 Goles', ov15) + getRow('+ 2.5 Goles', ov25) + getRow('+ 3.5 Goles', ov35) + getRow('+ 4.5 Goles', ov45) + getRow('- 1.5 Goles', 1-ov15) + getRow('- 2.5 Goles', 1-ov25) + getRow('- 3.5 Goles', 1-ov35);
         document.getElementById('card-btts').innerHTML = getRow('BTTS SÍ', btts_si) + getRow('BTTS NO', 1-btts_si);
-
         document.getElementById('card-hl').innerHTML = getRow('Local -2.5', haM25) + getRow('Local -1.5', haM15) + getRow('Local -0.5', pH) + getRow('Local 0.0', dnbH) + getRow('Local +0.5', haP05) + getRow('Local +1.5', haP15);
         document.getElementById('card-hv').innerHTML = getRow('Visita -2.5', vaM25) + getRow('Visita -1.5', vaM15) + getRow('Visita -0.5', pV) + getRow('Visita 0.0', 1-dnbH) + getRow('Visita +0.5', vaP05) + getRow('Visita +1.5', vaP15);
-
         sc.sort((a,b)=>b.p-a.p);
         let h=""; sc.slice(0,15).forEach(m=>{ h+=getRow(m.s, m.p); });
         document.getElementById('score-list').innerHTML=`<div class="card">${h}</div>`;
