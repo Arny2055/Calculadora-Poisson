@@ -366,7 +366,7 @@
         Object.keys(db).sort().forEach(name => sel.add(new Option(name, name)));
     }
 
-    // --- PROCESAMIENTO POR LOTES OPTIMIZADO ---
+    // --- PROCESAMIENTO POR LOTES REFORZADO PARA TU FORMATO ---
     function processBatch() {
         const input = document.getElementById('batchMatches').value;
         if(!input.trim()) return;
@@ -375,10 +375,18 @@
         container.innerHTML = "";
         document.getElementById('batch-league-title').innerText = currentLeagueName;
 
-        // Limpieza profunda del input
+        // Limpieza: quitamos fechas, horas, "Matches" y "stats"
+        // Mantiene todo lo demás como posibles nombres de equipos
         let lines = input.split('\n')
             .map(l => l.trim())
-            .filter(l => l !== "" && !l.toLowerCase().includes('matches') && !l.toLowerCase().includes('stats') && !l.includes(':') && !l.match(/^[A-Za-z]{3}\s\d/));
+            .filter(l => {
+                if (!l) return false;
+                if (l.toLowerCase() === 'matches') return false;
+                if (l.toLowerCase() === 'stats') return false;
+                if (l.includes(':')) return false; // Filtra horas como 08:00
+                if (l.match(/^[A-Za-z]{3}\s\d/)) return false; // Filtra fechas como Tue 6
+                return true;
+            });
         
         let pairs = [];
         for(let i=0; i < lines.length; i+=2) {
@@ -388,15 +396,16 @@
         }
 
         if(pairs.length === 0) {
-            alert("No se detectaron equipos. Asegúrate de que el formato sea:\nEquipo Local\nEquipo Visita");
+            alert("No se detectaron equipos. Verifica que los equipos aparezcan uno tras otro después de limpiar fechas/horas.");
             return;
         }
 
         pairs.forEach(pair => {
             const res = calculateSilent(pair[0], pair[1]);
+            const card = document.createElement('div');
+            card.className = 'batch-card';
+            
             if(res) {
-                const card = document.createElement('div');
-                card.className = 'batch-card';
                 card.innerHTML = `
                     <div class="batch-match-name">${pair[0]} vs ${pair[1]}</div>
                     <div class="batch-grid">
@@ -410,8 +419,13 @@
                         <div class="batch-item" style="border-top:1px solid #444; margin-top:5px; grid-column: span 2;">Cuota Justa 1: <b style="color:var(--accent-gold)">${(100/res.pH).toFixed(2)}</b></div>
                     </div>
                 `;
-                container.appendChild(card);
+            } else {
+                card.innerHTML = `
+                    <div class="batch-match-name" style="color:#777;">${pair[0]} vs ${pair[1]}</div>
+                    <div style="font-size:10px; color:var(--delete);">Equipos no encontrados en las tablas actuales.</div>
+                `;
             }
+            container.appendChild(card);
         });
 
         document.getElementById('setup-screen').style.display = 'none';
@@ -419,9 +433,9 @@
     }
 
     function calculateSilent(tH, tV) {
-        // Buscamos coincidencia exacta o parcial para los nombres de equipos
-        let homeKey = Object.keys(dH).find(k => k.toLowerCase() === tH.toLowerCase() || tH.toLowerCase().includes(k.toLowerCase()));
-        let awayKey = Object.keys(dV).find(k => k.toLowerCase() === tV.toLowerCase() || tV.toLowerCase().includes(k.toLowerCase()));
+        // Búsqueda flexible: busca si el nombre pegado está contenido en la clave o viceversa
+        let homeKey = Object.keys(dH).find(k => k.toLowerCase().includes(tH.toLowerCase()) || tH.toLowerCase().includes(k.toLowerCase()));
+        let awayKey = Object.keys(dV).find(k => k.toLowerCase().includes(tV.toLowerCase()) || tV.toLowerCase().includes(k.toLowerCase()));
 
         if(!homeKey || !awayKey) return null;
 
