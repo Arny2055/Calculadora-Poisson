@@ -144,7 +144,6 @@
         .row b.pct { color: var(--accent-gold); font-size: 0.85rem; min-width: 45px; text-align: right; }
         .row b.odds { color: var(--fair-odds); font-size: 0.75rem; min-width: 35px; text-align: right; opacity: 0.8; }
 
-        /* Estilos Batch */
         .batch-card {
             background: #1e362d; border: 1px solid var(--border); border-radius: 12px;
             margin-bottom: 15px; padding: 12px;
@@ -256,7 +255,7 @@
             <button class="btn-main" onclick="calculate()">ANALIZAR PARTIDO INDIVIDUAL</button>
             
             <div class="section-title">Análisis en Lote (Próximos Partidos)</div>
-            <textarea id="batchMatches" placeholder="Tue 6 Jan&#10;14:00 West Ham Utd&#10;Nottm Forest stats..."></textarea>
+            <textarea id="batchMatches" placeholder="Copia aquí la lista de partidos de Flashscore/Otras webs..."></textarea>
             <button class="btn-secondary" onclick="processBatch()">ANALIZAR LISTA DE PARTIDOS</button>
 
             <div id="league-trend-box">
@@ -280,8 +279,7 @@
             <small id="batch-league-title">Liga</small>
         </div>
         <div id="fab-edit" onclick="resetAnalysis()"><i class="fa-solid fa-arrow-left"></i></div>
-        <div class="scroll-content" id="batch-results-container">
-            </div>
+        <div class="scroll-content" id="batch-results-container"></div>
     </div>
 
     <div id="dashboard-screen" style="display:none;">
@@ -323,7 +321,6 @@
     let currentLeagueName = "Liga Desconocida";
     let globalReliability = 0;
 
-    // --- LÓGICA DE PERSISTENCIA ---
     function saveLeague() {
         const name = document.getElementById('leagueName').value.trim();
         if(!name) { alert("Nombre requerido"); return; }
@@ -369,7 +366,7 @@
         Object.keys(db).sort().forEach(name => sel.add(new Option(name, name)));
     }
 
-    // --- PROCESAMIENTO POR LOTES (MEJORA SOLICITADA) ---
+    // --- PROCESAMIENTO POR LOTES OPTIMIZADO ---
     function processBatch() {
         const input = document.getElementById('batchMatches').value;
         if(!input.trim()) return;
@@ -378,22 +375,20 @@
         container.innerHTML = "";
         document.getElementById('batch-league-title').innerText = currentLeagueName;
 
-        // Regex para capturar equipos ignorando fechas y horas
-        // Formato esperado: Equipo Local \n Equipo Visita
-        const lines = input.split('\n').map(l => l.trim()).filter(l => l !== "" && !l.includes(':') && !l.match(/^[A-Za-z]{3}\s\d/));
+        // Limpieza profunda del input
+        let lines = input.split('\n')
+            .map(l => l.trim())
+            .filter(l => l !== "" && !l.toLowerCase().includes('matches') && !l.toLowerCase().includes('stats') && !l.includes(':') && !l.match(/^[A-Za-z]{3}\s\d/));
         
         let pairs = [];
         for(let i=0; i < lines.length; i+=2) {
             if(lines[i] && lines[i+1]) {
-                // Limpiar el "stats" si viene pegado al nombre del equipo
-                let h = lines[i].replace(/stats/gi, '').trim();
-                let v = lines[i+1].replace(/stats/gi, '').trim();
-                pairs.push([h, v]);
+                pairs.push([lines[i], lines[i+1]]);
             }
         }
 
         if(pairs.length === 0) {
-            alert("No se detectaron partidos. Asegúrate de que el formato sea:\nLocal\nVisita");
+            alert("No se detectaron equipos. Asegúrate de que el formato sea:\nEquipo Local\nEquipo Visita");
             return;
         }
 
@@ -408,9 +403,11 @@
                         <div class="batch-item">Local: <b>${res.pH.toFixed(1)}%</b></div>
                         <div class="batch-item">Empate: <b>${res.pD.toFixed(1)}%</b></div>
                         <div class="batch-item">Visita: <b>${res.pV.toFixed(1)}%</b></div>
-                        <div class="batch-item">+2.5 Goles: <b>${res.ov25.toFixed(1)}%</b></div>
+                        <div class="batch-item">Over 2.5: <b>${res.ov25.toFixed(1)}%</b></div>
+                        <div class="batch-item">Under 2.5: <b>${(100-res.ov25).toFixed(1)}%</b></div>
                         <div class="batch-item">BTTS Sí: <b>${res.btts.toFixed(1)}%</b></div>
-                        <div class="batch-item">Cuota 1: <b>${(100/res.pH).toFixed(2)}</b></div>
+                        <div class="batch-item">BTTS No: <b>${(100-res.btts).toFixed(1)}%</b></div>
+                        <div class="batch-item" style="border-top:1px solid #444; margin-top:5px; grid-column: span 2;">Cuota Justa 1: <b style="color:var(--accent-gold)">${(100/res.pH).toFixed(2)}</b></div>
                     </div>
                 `;
                 container.appendChild(card);
@@ -421,11 +418,15 @@
         document.getElementById('batch-screen').style.display = 'flex';
     }
 
-    // --- CÁLCULO SILENCIOSO PARA LOTES ---
     function calculateSilent(tH, tV) {
-        if(!dH[tH] || !dV[tV]) return null;
-        const xH = (dH[tH].f/aH)*(dV[tV].a/aH)*aH;
-        const xV = (dV[tV].f/aV)*(dH[tH].a/aV)*aV;
+        // Buscamos coincidencia exacta o parcial para los nombres de equipos
+        let homeKey = Object.keys(dH).find(k => k.toLowerCase() === tH.toLowerCase() || tH.toLowerCase().includes(k.toLowerCase()));
+        let awayKey = Object.keys(dV).find(k => k.toLowerCase() === tV.toLowerCase() || tV.toLowerCase().includes(k.toLowerCase()));
+
+        if(!homeKey || !awayKey) return null;
+
+        const xH = (dH[homeKey].f/aH)*(dV[awayKey].a/aH)*aH;
+        const xV = (dV[awayKey].f/aV)*(dH[homeKey].a/aV)*aV;
         
         let pH=0, pD=0, pV=0, ov25=0, btts=0;
         for(let i=0; i<=10; i++){
@@ -436,14 +437,12 @@
                 if(i>0 && j>0) btts+=p;
             }
         }
-        // Aplicar ajuste por fiabilidad de liga
         let factor = globalReliability / 100;
         const adj = (p) => ((p * factor) + (0.5 * (1 - factor))) * 100;
 
         return { pH: adj(pH), pD: adj(pD), pV: adj(pV), ov25: adj(ov25), btts: adj(btts) };
     }
 
-    // --- UTILIDADES ---
     function openShare(name, fairOdds, pctValue) {
         selectedMarket = { name, fairOdds, pct: pctValue };
         document.getElementById('modal-market-name').innerText = name;
