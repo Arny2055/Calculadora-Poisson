@@ -150,10 +150,15 @@
         }
         .batch-match-name { font-weight: 800; color: var(--accent-gold); font-size: 0.9rem; margin-bottom: 10px; border-bottom: 1px solid #333; padding-bottom: 5px;}
         .batch-section-row { display: flex; flex-direction: column; gap: 8px; }
-        .batch-sub-row { display: flex; justify-content: space-between; gap: 4px; padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.05); }
-        .batch-sub-row:last-child { border-bottom: none; }
-        .batch-item { font-size: 11px; color: var(--text-main); display: flex; align-items: center; background: rgba(0,0,0,0.2); padding: 5px 8px; border-radius: 4px; flex: 1; justify-content: space-between; }
-        .batch-item b { color: var(--accent-green); margin-left: 4px; }
+        .batch-sub-row { display: flex; justify-content: space-between; gap: 4px; padding: 4px 0; }
+        .batch-item { 
+            font-size: 10px; color: var(--text-main); display: flex; flex-direction: column; align-items: center; 
+            background: rgba(0,0,0,0.2); padding: 6px 4px; border-radius: 6px; flex: 1; cursor: pointer;
+        }
+        .batch-item:active { background: var(--border); }
+        .batch-item span { font-size: 9px; color: var(--text-dim); text-transform: uppercase; margin-bottom: 2px; }
+        .batch-item b { color: var(--accent-gold); font-size: 11px; }
+        .batch-item small { color: var(--fair-odds); font-size: 9px; margin-top: 2px; }
 
         #pick-modal {
             position: fixed; top: 0; left: 0; width: 100%; height: 100%; 
@@ -319,7 +324,7 @@
 
 <script>
     let dH={}, dV={}, aH=1.58, aV=1.22;
-    let selectedMarket = { name: "", fairOdds: 0, pct: 0 };
+    let selectedMarket = { name: "", fairOdds: 0, pct: 0, currentTeams: "" };
     let currentLeagueName = "Liga Desconocida";
     let globalReliability = 0;
 
@@ -368,7 +373,7 @@
         Object.keys(db).sort().forEach(name => sel.add(new Option(name, name)));
     }
 
-    // --- PROCESAMIENTO POR LOTES CON FORMATO MULTILÍNEA DE RESULTADOS ---
+    // --- PROCESAMIENTO POR LOTES CON CUOTAS JUSTAS Y SHARE ---
     function processBatch() {
         const input = document.getElementById('batchMatches').value;
         if(!input.trim()) return;
@@ -403,43 +408,42 @@
                 
                 if(res) {
                     matchesFound++;
+                    const cJ = (p) => (100/p).toFixed(2);
+                    const teams = `${local} vs ${visita}`;
+                    
                     card.innerHTML = `
-                        <div class="batch-match-name">${local} vs ${visita}</div>
+                        <div class="batch-match-name">${teams}</div>
                         <div class="batch-section-row">
                             <div class="batch-sub-row">
-                                <div class="batch-item">1: <b>${res.pH.toFixed(1)}%</b></div>
-                                <div class="batch-item">X: <b>${res.pD.toFixed(1)}%</b></div>
-                                <div class="batch-item">2: <b>${res.pV.toFixed(1)}%</b></div>
+                                <div class="batch-item" onclick="openShare('Local (1)', ${cJ(res.pH)}, ${res.pH}, '${teams}')"><span>1</span><b>${res.pH.toFixed(1)}%</b><small>${cJ(res.pH)}</small></div>
+                                <div class="batch-item" onclick="openShare('Empate (X)', ${cJ(res.pD)}, ${res.pD}, '${teams}')"><span>X</span><b>${res.pD.toFixed(1)}%</b><small>${cJ(res.pD)}</small></div>
+                                <div class="batch-item" onclick="openShare('Visita (2)', ${cJ(res.pV)}, ${res.pV}, '${teams}')"><span>2</span><b>${res.pV.toFixed(1)}%</b><small>${cJ(res.pV)}</small></div>
                             </div>
                             <div class="batch-sub-row">
-                                <div class="batch-item">Over 2.5: <b>${res.ov25.toFixed(1)}%</b></div>
-                                <div class="batch-item">Under 2.5: <b>${(100-res.ov25).toFixed(1)}%</b></div>
+                                <div class="batch-item" onclick="openShare('Over 2.5', ${cJ(res.ov25)}, ${res.ov25}, '${teams}')"><span>O 2.5</span><b>${res.ov25.toFixed(1)}%</b><small>${cJ(res.ov25)}</small></div>
+                                <div class="batch-item" onclick="openShare('Under 2.5', ${cJ(100-res.ov25)}, ${100-res.ov25}, '${teams}')"><span>U 2.5</span><b>${(100-res.ov25).toFixed(1)}%</b><small>${cJ(100-res.ov25)}</small></div>
                             </div>
                             <div class="batch-sub-row">
-                                <div class="batch-item">BTTS SÍ: <b>${res.btts.toFixed(1)}%</b></div>
-                                <div class="batch-item">BTTS NO: <b>${(100-res.btts).toFixed(1)}%</b></div>
-                            </div>
-                            <div class="batch-item" style="background:rgba(255,215,0,0.1); border:1px solid rgba(255,215,0,0.2); margin-top:4px;">
-                                Cuota Justa Local: <b style="color:var(--accent-gold)">${(100/res.pH).toFixed(2)}</b>
+                                <div class="batch-item" onclick="openShare('BTTS SÍ', ${cJ(res.btts)}, ${res.btts}, '${teams}')"><span>BTTS SÍ</span><b>${res.btts.toFixed(1)}%</b><small>${cJ(res.btts)}</small></div>
+                                <div class="batch-item" onclick="openShare('BTTS NO', ${cJ(100-res.btts)}, ${100-res.btts}, '${teams}')"><span>BTTS NO</span><b>${(100-res.btts).toFixed(1)}%</b><small>${cJ(100-res.btts)}</small></div>
                             </div>
                         </div>
                     `;
                 } else {
                     card.innerHTML = `
                         <div class="batch-match-name" style="color:#777;">${local} vs ${visita}</div>
-                        <div style="font-size:10px; color:var(--delete);">Equipos no encontrados en DB.</div>
+                        <div style="font-size:10px; color:var(--delete); text-align:center;">Equipos no encontrados en DB.</div>
                     `;
                 }
                 container.appendChild(card);
             }
         });
 
-        if(matchesFound === 0 && container.innerHTML === "") {
-            alert("No se pudo extraer información."); return;
+        if(matchesFound === 0) alert("No se pudo extraer información.");
+        else {
+            document.getElementById('setup-screen').style.display = 'none';
+            document.getElementById('batch-screen').style.display = 'flex';
         }
-
-        document.getElementById('setup-screen').style.display = 'none';
-        document.getElementById('batch-screen').style.display = 'flex';
     }
 
     function calculateSilent(tH, tV) {
@@ -462,8 +466,13 @@
         return { pH: adj(pH), pD: adj(pD), pV: adj(pV), ov25: adj(ov25), btts: adj(btts) };
     }
 
-    function openShare(name, fairOdds, pctValue) {
-        selectedMarket = { name, fairOdds, pct: pctValue };
+    function openShare(name, fairOdds, pctValue, batchTeams = null) {
+        selectedMarket = { 
+            name, 
+            fairOdds, 
+            pct: pctValue, 
+            currentTeams: batchTeams || `${document.getElementById('sH').value} vs ${document.getElementById('sV').value}` 
+        };
         document.getElementById('modal-market-name').innerText = name;
         document.getElementById('modal-fair-odds').innerText = fairOdds;
         document.getElementById('pick-modal').style.display = 'flex';
@@ -476,10 +485,9 @@
         const bookieOddsInput = document.getElementById('bookie-odds').value;
         const bookieOdds = parseFloat(bookieOddsInput);
         const bookieName = document.getElementById('bookie-name').value;
-        const tH = document.getElementById('sH').value;
-        const tV = document.getElementById('sV').value;
+        
         let message = `🏆 *EL GURÚ DE LAS APUESTAS*\n━━━━━━━━━━━━━━━━━\n`;
-        message += `🏟 *LIGA:* ${currentLeagueName}\n⚽️ *PARTIDO:* ${tH} vs ${tV}\n\n`;
+        message += `🏟 *LIGA:* ${currentLeagueName}\n⚽️ *PARTIDO:* ${selectedMarket.currentTeams}\n\n`;
         message += `🎯 *PICK:* ${selectedMarket.name}\n📊 Probabilidad: ${selectedMarket.pct.toFixed(1)}%\n`;
         message += `⚖️ Cuota Justa: ${selectedMarket.fairOdds}\n🛡 Fiabilidad Liga: ${globalReliability.toFixed(1)}%\n`;
         if(!isNaN(bookieOdds)) {
