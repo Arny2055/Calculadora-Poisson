@@ -255,7 +255,7 @@
             <button class="btn-main" onclick="calculate()">ANALIZAR PARTIDO INDIVIDUAL</button>
             
             <div class="section-title">Análisis en Lote (Próximos Partidos)</div>
-            <textarea id="batchMatches" placeholder="Copia aquí la lista de partidos de Flashscore/Otras webs..."></textarea>
+            <textarea id="batchMatches" placeholder="Copia aquí el lote de partidos..."></textarea>
             <button class="btn-secondary" onclick="processBatch()">ANALIZAR LISTA DE PARTIDOS</button>
 
             <div id="league-trend-box">
@@ -366,7 +366,7 @@
         Object.keys(db).sort().forEach(name => sel.add(new Option(name, name)));
     }
 
-    // --- PROCESAMIENTO POR LOTES REFORZADO PARA TU FORMATO ---
+    // --- PROCESAMIENTO POR LOTES OPTIMIZADO PARA TU NUEVO FORMATO ---
     function processBatch() {
         const input = document.getElementById('batchMatches').value;
         if(!input.trim()) return;
@@ -375,65 +375,72 @@
         container.innerHTML = "";
         document.getElementById('batch-league-title').innerText = currentLeagueName;
 
-        // Limpieza: quitamos fechas, horas, "Matches" y "stats"
-        // Mantiene todo lo demás como posibles nombres de equipos
-        let lines = input.split('\n')
-            .map(l => l.trim())
-            .filter(l => {
-                if (!l) return false;
-                if (l.toLowerCase() === 'matches') return false;
-                if (l.toLowerCase() === 'stats') return false;
-                if (l.includes(':')) return false; // Filtra horas como 08:00
-                if (l.match(/^[A-Za-z]{3}\s\d/)) return false; // Filtra fechas como Tue 6
-                return true;
-            });
-        
-        let pairs = [];
-        for(let i=0; i < lines.length; i+=2) {
-            if(lines[i] && lines[i+1]) {
-                pairs.push([lines[i], lines[i+1]]);
-            }
-        }
+        const lines = input.split('\n');
+        let matchesFound = 0;
 
-        if(pairs.length === 0) {
-            alert("No se detectaron equipos. Verifica que los equipos aparezcan uno tras otro después de limpiar fechas/horas.");
+        lines.forEach(line => {
+            if(!line.trim()) return;
+
+            // Lógica para separar equipos: Buscamos la hora (HH:MM) como separador central
+            // Tue 6 Jan    Pisa    08:00    Como
+            const parts = line.split(/\s{2,}|[\t]/); // Divide por tabulaciones o múltiples espacios
+            
+            let local = "", visita = "";
+
+            if (parts.length >= 4) {
+                // Formato con fecha y hora: [Fecha, Local, Hora, Visita]
+                local = parts[1].trim();
+                visita = parts[3].trim();
+            } else if (line.includes(':')) {
+                // Fallback si los espacios no son claros: busca la hora y divide
+                const timeMatch = line.match(/\d{2}:\d{2}/);
+                if (timeMatch) {
+                    const segments = line.split(timeMatch[0]);
+                    local = segments[0].replace(/^[A-Za-z]{3}\s\d+\s[A-Za-z]{3}/, "").trim();
+                    visita = segments[1].trim();
+                }
+            }
+
+            if(local && visita) {
+                const res = calculateSilent(local, visita);
+                const card = document.createElement('div');
+                card.className = 'batch-card';
+                
+                if(res) {
+                    matchesFound++;
+                    card.innerHTML = `
+                        <div class="batch-match-name">${local} vs ${visita}</div>
+                        <div class="batch-grid">
+                            <div class="batch-item">Local: <b>${res.pH.toFixed(1)}%</b></div>
+                            <div class="batch-item">Empate: <b>${res.pD.toFixed(1)}%</b></div>
+                            <div class="batch-item">Visita: <b>${res.pV.toFixed(1)}%</b></div>
+                            <div class="batch-item">Over 2.5: <b>${res.ov25.toFixed(1)}%</b></div>
+                            <div class="batch-item">Under 2.5: <b>${(100-res.ov25).toFixed(1)}%</b></div>
+                            <div class="batch-item">BTTS Sí: <b>${res.btts.toFixed(1)}%</b></div>
+                            <div class="batch-item">BTTS No: <b>${(100-res.btts).toFixed(1)}%</b></div>
+                            <div class="batch-item" style="border-top:1px solid #444; margin-top:5px; grid-column: span 2;">Cuota Justa 1: <b style="color:var(--accent-gold)">${(100/res.pH).toFixed(2)}</b></div>
+                        </div>
+                    `;
+                } else {
+                    card.innerHTML = `
+                        <div class="batch-match-name" style="color:#777;">${local} vs ${visita}</div>
+                        <div style="font-size:10px; color:var(--delete);">Equipos no encontrados en DB. Revisa nombres.</div>
+                    `;
+                }
+                container.appendChild(card);
+            }
+        });
+
+        if(matchesFound === 0 && container.innerHTML === "") {
+            alert("No se pudo extraer información. Asegúrate de copiar las líneas completas.");
             return;
         }
-
-        pairs.forEach(pair => {
-            const res = calculateSilent(pair[0], pair[1]);
-            const card = document.createElement('div');
-            card.className = 'batch-card';
-            
-            if(res) {
-                card.innerHTML = `
-                    <div class="batch-match-name">${pair[0]} vs ${pair[1]}</div>
-                    <div class="batch-grid">
-                        <div class="batch-item">Local: <b>${res.pH.toFixed(1)}%</b></div>
-                        <div class="batch-item">Empate: <b>${res.pD.toFixed(1)}%</b></div>
-                        <div class="batch-item">Visita: <b>${res.pV.toFixed(1)}%</b></div>
-                        <div class="batch-item">Over 2.5: <b>${res.ov25.toFixed(1)}%</b></div>
-                        <div class="batch-item">Under 2.5: <b>${(100-res.ov25).toFixed(1)}%</b></div>
-                        <div class="batch-item">BTTS Sí: <b>${res.btts.toFixed(1)}%</b></div>
-                        <div class="batch-item">BTTS No: <b>${(100-res.btts).toFixed(1)}%</b></div>
-                        <div class="batch-item" style="border-top:1px solid #444; margin-top:5px; grid-column: span 2;">Cuota Justa 1: <b style="color:var(--accent-gold)">${(100/res.pH).toFixed(2)}</b></div>
-                    </div>
-                `;
-            } else {
-                card.innerHTML = `
-                    <div class="batch-match-name" style="color:#777;">${pair[0]} vs ${pair[1]}</div>
-                    <div style="font-size:10px; color:var(--delete);">Equipos no encontrados en las tablas actuales.</div>
-                `;
-            }
-            container.appendChild(card);
-        });
 
         document.getElementById('setup-screen').style.display = 'none';
         document.getElementById('batch-screen').style.display = 'flex';
     }
 
     function calculateSilent(tH, tV) {
-        // Búsqueda flexible: busca si el nombre pegado está contenido en la clave o viceversa
         let homeKey = Object.keys(dH).find(k => k.toLowerCase().includes(tH.toLowerCase()) || tH.toLowerCase().includes(k.toLowerCase()));
         let awayKey = Object.keys(dV).find(k => k.toLowerCase().includes(tV.toLowerCase()) || tV.toLowerCase().includes(k.toLowerCase()));
 
