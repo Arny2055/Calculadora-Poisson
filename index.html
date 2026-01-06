@@ -163,6 +163,7 @@
         .value-detected { border: 1px solid var(--accent-green) !important; box-shadow: 0 0 12px rgba(60, 179, 113, 0.4); background: rgba(60, 179, 113, 0.05); }
         .value-tag { position: absolute; top: -8px; right: 12px; background: var(--accent-green); color: #000; font-size: 0.55rem; font-weight: 900; padding: 2px 6px; border-radius: 4px; text-transform: uppercase; }
 
+        .label-stack { display: flex; flex-direction: column; }
         .label-stack .m-name { font-size: 0.8rem; color: #fff; font-weight: 800; text-transform: uppercase; margin-bottom: 2px; }
         .label-stack .m-prob { font-size: 1.2rem; color: var(--accent-gold); font-weight: 900; }
         .odds-stack { text-align: right; }
@@ -479,34 +480,18 @@
         const bookieOddsInput = document.getElementById('bookie-odds').value;
         const bookieOdds = parseFloat(bookieOddsInput);
         const bookieName = document.getElementById('bookie-name').value;
-        const isQuantum = globalReliability >= 92;
         
-        // Estrellas por probabilidad
-        let stars = "⭐";
-        if(selectedMarket.pct > 65) stars = "⭐⭐";
-        if(selectedMarket.pct > 75) stars = "⭐⭐⭐";
-        if(selectedMarket.pct > 85) stars = "⭐⭐⭐⭐";
-
-        let message = `🚀 *PRONÓSTICO PREMIUM*\n`;
-        message += `━━━━━━━━━━━━━━━━━━\n`;
-        if(isQuantum) message += `⚡ *[ALGORITMO QUANTUM ACTIVO]*\n`;
-        message += `🏟 *LIGA:* ${currentLeagueName}\n`;
-        message += `⚽ *PARTIDO:* ${selectedMarket.currentTeams}\n\n`;
+        let message = `🏆 *EL GURÚ DE LAS APUESTAS*\n━━━━━━━━━━━━━━━━━\n`;
+        message += `🏟 *LIGA:* ${currentLeagueName}\n⚽️ *PARTIDO:* ${selectedMarket.currentTeams}\n\n`;
         message += `📊 *MERCADO:* ${selectedMarket.category}\n`;
         message += `🎯 *PICK:* ${selectedMarket.name}\n`;
-        message += `📈 *CONFIANZA:* ${selectedMarket.pct.toFixed(1)}% ${stars}\n\n`;
-        message += `⚖️ *CUOTA JUSTA:* ${selectedMarket.fairOdds}\n`;
-        
+        message += `📈 Probabilidad: ${selectedMarket.pct.toFixed(1)}%\n`;
+        message += `⚖️ Cuota Justa: ${selectedMarket.fairOdds}\n🛡 Fiabilidad: ${globalReliability.toFixed(1)}%\n`;
         if(!isNaN(bookieOdds)) {
             const val = ((bookieOdds / selectedMarket.fairOdds) - 1) * 100;
             message += `💰 *CUOTA (${bookieName}):* ${bookieOdds.toFixed(2)}\n`;
-            if(val > 0) message += `🔥 *VALOR DETECTADO:* +${val.toFixed(1)}%\n`;
+            if(val > 0) message += `🔥 Valor Detectado: +${val.toFixed(1)}%\n`;
         }
-        
-        message += `━━━━━━━━━━━━━━━━━━\n`;
-        message += `🛡 *FIABILIDAD POISSON:* ${globalReliability.toFixed(1)}%\n`;
-        message += `🍀 _¡Vamos por el verde!_`;
-
         const encoded = encodeURIComponent(message);
         const url = platform === 'wa' ? `https://api.whatsapp.com/send?text=${encoded}` : `https://t.me/share/url?url=${encoded}`;
         window.open(url, '_blank');
@@ -635,7 +620,14 @@
         const xH = (dH[tH].f/aH)*(dV[tV].a/aH)*aH;
         const xV = (dV[tV].f/aV)*(dH[tH].a/aV)*aV;
         const xH_ht = xH * 0.5; const xV_ht = xV * 0.5;
-        let pH=0, pD=0, pV=0, ov15=0, ov25=0, ov35=0, ov05ht=0, ov15ht=0, haP05=0, vaP05=0, sc=[];
+        let pH=0, pD=0, pV=0, ov15=0, ov25=0, ov35=0, ov05ht=0, ov15ht=0, sc=[];
+        
+        // Contenedores de hándicap para el cálculo robusto
+        let h_L_m15=0, h_L_m10_win=0, h_L_m10_push=0, h_L_m05=0, h_L_p05=0, h_L_p10_win=0, h_L_p10_push=0, h_L_p15=0;
+        let h_V_m15=0, h_V_m10_win=0, h_V_m10_push=0, h_V_m05=0, h_V_p05=0, h_V_p10_win=0, h_V_p10_push=0, h_V_p15=0;
+        // Hándicaps de Cuartos
+        let h_L_m075=0, h_L_m125=0, h_V_m075=0, h_V_m125=0;
+
         let pE = Array(13).fill(0); 
         for(let i=0; i<=12; i++){
             for(let j=0; j<=12; j++){
@@ -643,12 +635,43 @@
                 if(i>j) pH+=p; else if(i===j) pD+=p; else pV+=p;
                 let tot = i+j; if(tot < 13) pE[tot] += p;
                 if(tot>1.5) ov15+=p; if(tot>2.5) ov25+=p; if(tot>3.5) ov35+=p;
-                if(i-j > -0.5) haP05+=p; if(j-i > -0.5) vaP05+=p;
+                
+                let diff = i - j;
+                // LOCAL
+                if(diff > 1.5) h_L_m15 += p;
+                if(diff > 1.0) h_L_m10_win += p; else if(diff === 1) h_L_m10_push += p;
+                if(diff > 0.5) h_L_m05 += p;
+                if(diff > -0.5) h_L_p05 += p;
+                if(diff > -1.0) h_L_p10_win += p; else if(diff === -1) h_L_p10_push += p;
+                if(diff > -1.5) h_L_p15 += p;
+                
+                // VISITA
+                if(diff < -1.5) h_V_m15 += p;
+                if(diff < -1.0) h_V_m10_win += p; else if(diff === -1) h_V_m10_push += p;
+                if(diff < -0.5) h_V_m05 += p;
+                if(diff < 0.5) h_V_p05 += p;
+                if(diff < 1.0) h_V_p10_win += p; else if(diff === 1) h_V_p10_push += p;
+                if(diff < 1.5) h_V_p15 += p;
+
                 if(i<=5 && j<=5) sc.push({s:`${i} - ${j}`, p:p});
                 let p_ht = poi(i, xH_ht)*poi(j, xV_ht);
                 if((i+j)>0.5) ov05ht += p_ht; if((i+j)>1.5) ov15ht += p_ht;
             }
         }
+
+        // Función para procesar hándicaps asiáticos con PUSH (Excluyendo el push del cálculo de cuota)
+        const calcAsian = (win, push) => (win / (1 - push));
+
+        document.getElementById('setup-screen').style.display='none';
+        document.getElementById('dashboard-screen').style.display='flex';
+        document.getElementById('card-1x2').innerHTML = getRow('Local (1)', pH, 'Resultado Final 1X2') + getRow('Empate (X)', pD, 'Resultado Final 1X2') + getRow('Visita (2)', pV, 'Resultado Final 1X2');
+        let dnbH = (pH + pV) > 0 ? pH / (pH + pV) : 0.5;
+        document.getElementById('card-dnb').innerHTML = getRow('Local DNB', dnbH, 'Empate No Acción') + getRow('Visita DNB', 1-dnbH, 'Empate No Acción');
+        document.getElementById('card-dc').innerHTML = getRow('1X', pH+pD, 'Doble Oportunidad') + getRow('X2', pV+pD, 'Doble Oportunidad') + getRow('12', pH+pV, 'Doble Oportunidad');
+        const btts_ht = (1 - poi(0, xH_ht)) * (1 - poi(0, xV_ht));
+        document.getElementById('card-ght').innerHTML = getRow('+ 0.5 Goles HT', ov05ht, 'Goles HT') + getRow('+ 1.5 Goles HT', ov15ht, 'Goles HT') + getRow('Ambos Marcan HT', btts_ht, 'Goles HT');
+        const btts_si = (1 - poi(0, xH)) * (1 - poi(0, xV));
+        
         function getAO(line) { 
             let win=0, loss=0;
             if(line % 1 === 0) { 
@@ -660,19 +683,32 @@
                 return wf + (pE[Math.floor(line)] * 0.5);
             }
         }
-        document.getElementById('setup-screen').style.display='none';
-        document.getElementById('dashboard-screen').style.display='flex';
-        document.getElementById('card-1x2').innerHTML = getRow('Local (1)', pH, 'Resultado Final 1X2') + getRow('Empate (X)', pD, 'Resultado Final 1X2') + getRow('Visita (2)', pV, 'Resultado Final 1X2');
-        let dnbH = (pH + pV) > 0 ? pH / (pH + pV) : 0.5;
-        document.getElementById('card-dnb').innerHTML = getRow('Local DNB', dnbH, 'Empate No Acción') + getRow('Visita DNB', 1-dnbH, 'Empate No Acción');
-        document.getElementById('card-dc').innerHTML = getRow('1X', pH+pD, 'Doble Oportunidad') + getRow('X2', pV+pD, 'Doble Oportunidad') + getRow('12', pH+pV, 'Doble Oportunidad');
-        const btts_ht = (1 - poi(0, xH_ht)) * (1 - poi(0, xV_ht));
-        document.getElementById('card-ght').innerHTML = getRow('+ 0.5 Goles HT', ov05ht, 'Goles HT') + getRow('+ 1.5 Goles HT', ov15ht, 'Goles HT') + getRow('Ambos Marcan HT', btts_ht, 'Goles HT');
-        const btts_si = (1 - poi(0, xH)) * (1 - poi(0, xV));
+
         document.getElementById('card-gft').innerHTML = getRow('+ 1.5 Goles', ov15, 'Goles FT') + getRow('+ 2.0 Goles', getAO(2.0), 'Goles FT') + getRow('+ 2.5 Goles', ov25, 'Goles FT') + getRow('+ 3.5 Goles', ov35, 'Goles FT');
         document.getElementById('card-btts').innerHTML = getRow('BTTS SÍ', btts_si, 'Ambos Marcan') + getRow('BTTS NO', 1-btts_si, 'Ambos Marcan');
-        document.getElementById('card-hl').innerHTML = getRow('Local -0.5', pH, 'Hándicap Local') + getRow('Local +0.5', haP05, 'Hándicap Local');
-        document.getElementById('card-hv').innerHTML = getRow('Visita -0.5', pV, 'Hándicap Visita') + getRow('Visita +0.5', vaP05, 'Hándicap Visita');
+        
+        // LOCAL Hándicap con lógica de cuartos integrada
+        document.getElementById('card-hl').innerHTML = 
+            getRow('Local -1.5', h_L_m15, 'Hándicap Local') + 
+            getRow('Local -1.25', (h_L_m15 + calcAsian(h_L_m10_win, h_L_m10_push))/2, 'Hándicap Local') +
+            getRow('Local -1.0', calcAsian(h_L_m10_win, h_L_m10_push), 'Hándicap Local') + 
+            getRow('Local -0.75', (calcAsian(h_L_m10_win, h_L_m10_push) + h_L_m05)/2, 'Hándicap Local') +
+            getRow('Local -0.5', h_L_m05, 'Hándicap Local') +
+            getRow('Local +0.5', h_L_p05, 'Hándicap Local') +
+            getRow('Local +1.0', calcAsian(h_L_p10_win, h_L_p10_push), 'Hándicap Local') +
+            getRow('Local +1.5', h_L_p15, 'Hándicap Local');
+
+        // VISITA Hándicap con lógica de cuartos integrada
+        document.getElementById('card-hv').innerHTML = 
+            getRow('Visita -1.5', h_V_m15, 'Hándicap Visita') + 
+            getRow('Visita -1.25', (h_V_m15 + calcAsian(h_V_m10_win, h_V_m10_push))/2, 'Hándicap Visita') +
+            getRow('Visita -1.0', calcAsian(h_V_m10_win, h_V_m10_push), 'Hándicap Visita') + 
+            getRow('Visita -0.75', (calcAsian(h_V_m10_win, h_V_m10_push) + h_V_m05)/2, 'Hándicap Visita') +
+            getRow('Visita -0.5', h_V_m05, 'Hándicap Visita') +
+            getRow('Visita +0.5', h_V_p05, 'Hándicap Visita') +
+            getRow('Visita +1.0', calcAsian(h_V_p10_win, h_V_p10_push), 'Hándicap Visita') +
+            getRow('Visita +1.5', h_V_p15, 'Hándicap Visita');
+
         sc.sort((a,b)=>b.p-a.p);
         let h=""; sc.slice(0,10).forEach(m=>{ h+=getRow(m.s, m.p, 'Marcador Exacto'); });
         document.getElementById('score-list').innerHTML=`<div class="card">${h}</div>`;
