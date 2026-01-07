@@ -434,9 +434,12 @@
                     <div class="stat-card"><span class="stat-label">Picks</span><span id="stat-count" class="stat-val">0</span></div>
                 </div>
 
-                <div class="section-title">REGISTRO DE OPERACIONES ELITE</div>
+                <div class="section-title">Picks Pendientes</div>
+                <div id="history-pending-container" style="margin-bottom: 25px;"></div>
+
+                <div class="section-title">Picks Resueltos</div>
                 <div class="history-scroll-container">
-                    <div id="history-container"></div>
+                    <div id="history-resolved-container"></div>
                 </div>
                 <button class="btn-secondary" style="border-color:var(--delete); color:var(--delete); margin-top: 20px;" onclick="clearHistory()">BORRAR TODO EL CONTROL</button>
             </div>
@@ -660,15 +663,18 @@
     }
 
     function loadHistory() {
-        const container = document.getElementById('history-container');
         const history = JSON.parse(localStorage.getItem('guru_history_v2') || '[]');
+        const pendingContainer = document.getElementById('history-pending-container');
+        const resolvedContainer = document.getElementById('history-resolved-container');
+        
         let totalUnits = 0, totalStaked = 0, wins = 0, resolvedCount = 0;
         let streak = [];
 
         generateWeeklyReport(history);
 
         if(history.length === 0) {
-            container.innerHTML = "<p style='text-align:center; color:var(--text-dim);'>No hay operaciones.</p>";
+            pendingContainer.innerHTML = "<p style='text-align:center; color:var(--text-dim); font-size:0.7rem;'>No hay picks pendientes.</p>";
+            resolvedContainer.innerHTML = "<p style='text-align:center; color:var(--text-dim); font-size:0.7rem;'>No hay historial.</p>";
             document.getElementById('total-units').innerText = "0.00";
             document.getElementById('stat-yield').innerText = "0%";
             document.getElementById('stat-wr').innerText = "0%";
@@ -678,21 +684,47 @@
             return;
         }
 
-        container.innerHTML = history.map(item => {
-            // SOLO CONTABILIZAR SI NO ES PENDING
-            if(item.status !== 'pending') {
+        let pendingHTML = "";
+        let resolvedHTML = "";
+
+        history.forEach(item => {
+            const stars = item.conf >= 85 ? "⭐⭐⭐⭐⭐" : item.conf >= 70 ? "⭐⭐⭐⭐" : item.conf >= 55 ? "⭐⭐⭐" : item.conf >= 40 ? "⭐⭐" : "⭐";
+            const valNum = parseFloat(item.value);
+            
+            const cardHTML = `
+                <div class="history-item ${item.status}">
+                    <button class="btn-del-single" onclick="deleteSinglePick(${item.id})"><i class="fa-solid fa-trash"></i></button>
+                    <div class="h-row"><span>${item.date}</span> <span>Conf: ${item.conf}% ${stars}</span></div>
+                    <span class="h-league">${item.league}</span>
+                    <span class="h-match">${item.teams}</span>
+                    <span class="h-market">${item.market} ${valNum > 10 ? '<span class="efficiency-badge">ALTA EFICIENCIA</span>' : ''}</span>
+                    <div style="display:flex; gap:8px; margin:8px 0; font-size:0.65rem;">
+                        <span style="color:var(--fair-odds)">Fair: ${item.fair}</span> 
+                        <span style="color:var(--quantum-blue)">Bookie: ${item.odds.toFixed(2)}</span> 
+                        ${valNum>0 ? `<span style="color:var(--accent-green)">+${item.value}% Val</span>`:''}
+                    </div>
+                    <div class="h-actions">
+                        <button class="h-btn w" onclick="updateStatus(${item.id}, 'win')">WIN</button>
+                        <button class="h-btn l" onclick="updateStatus(${item.id}, 'loss')">LOSS</button>
+                        <button class="h-btn p" onclick="updateStatus(${item.id}, 'push')">PUSH</button>
+                    </div>
+                </div>`;
+
+            if(item.status === 'pending') {
+                pendingHTML += cardHTML;
+            } else {
+                resolvedHTML += cardHTML;
                 totalUnits += item.units;
                 totalStaked += 1;
                 resolvedCount++;
                 if(item.status === 'win') wins++;
                 streak.push(item.status === 'win' ? 'W' : item.status === 'loss' ? 'L' : 'P');
             }
-            const stars = item.conf >= 85 ? "⭐⭐⭐⭐⭐" : item.conf >= 70 ? "⭐⭐⭐⭐" : item.conf >= 55 ? "⭐⭐⭐" : item.conf >= 40 ? "⭐⭐" : "⭐";
-            const valNum = parseFloat(item.value);
-            return `<div class="history-item ${item.status}"><button class="btn-del-single" onclick="deleteSinglePick(${item.id})"><i class="fa-solid fa-trash"></i></button><div class="h-row"><span>${item.date}</span> <span>Conf: ${item.conf}% ${stars}</span></div><span class="h-league">${item.league}</span><span class="h-match">${item.teams}</span><span class="h-market">${item.market} ${valNum > 10 ? '<span class="efficiency-badge">ALTA EFICIENCIA</span>' : ''}</span><div style="display:flex; gap:8px; margin:8px 0; font-size:0.65rem;"><span style="color:var(--fair-odds)">Fair: ${item.fair}</span> <span style="color:var(--quantum-blue)">Bookie: ${item.odds.toFixed(2)}</span> ${valNum>0 ? `<span style="color:var(--accent-green)">+${item.value}% Val</span>`:''}</div><div class="h-actions"><button class="h-btn w" onclick="updateStatus(${item.id}, 'win')">WIN</button><button class="h-btn l" onclick="updateStatus(${item.id}, 'loss')">LOSS</button><button class="h-btn p" onclick="updateStatus(${item.id}, 'push')">PUSH</button></div></div>`;
-        }).join('');
+        });
 
-        // CALCULAR ESTADÍSTICAS BASADAS SOLO EN RESOLVED COUNT
+        pendingContainer.innerHTML = pendingHTML || "<p style='text-align:center; color:var(--text-dim); font-size:0.7rem;'>Sin picks por resolver.</p>";
+        resolvedContainer.innerHTML = resolvedHTML || "<p style='text-align:center; color:var(--text-dim); font-size:0.7rem;'>Sin historial resuelto.</p>";
+
         const yieldVal = totalStaked > 0 ? (totalUnits / totalStaked) * 100 : 0;
         const wrVal = resolvedCount > 0 ? (wins / resolvedCount) * 100 : 0;
         
