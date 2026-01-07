@@ -248,7 +248,6 @@
         .streak-dot.L { background: var(--delete); }
         .streak-dot.P { background: var(--text-dim); }
 
-        /* NUEVOS ESTILOS ELITE (BETPRACTICE / CORNERPRO / BETMINES) */
         .efficiency-badge { 
             font-size: 0.6rem; padding: 2px 6px; border-radius: 4px; 
             background: rgba(0,255,255,0.1); color: var(--quantum-blue); border: 1px solid var(--quantum-blue);
@@ -266,6 +265,18 @@
         }
         .pm-label { font-size: 0.55rem; color: var(--text-dim); display: block; }
         .pm-val { font-size: 0.85rem; font-weight: 900; color: var(--accent-gold); }
+
+        /* INFORME DE RIESGO SEMANAL STYLES */
+        .report-card {
+            background: linear-gradient(135deg, #1a1a1a, #262626);
+            border: 1px solid var(--accent-gold);
+            border-radius: 12px; padding: 15px; margin-bottom: 20px;
+        }
+        .report-title { color: var(--accent-gold); font-size: 0.9rem; font-weight: 900; margin-bottom: 10px; display: flex; align-items: center; gap: 8px; }
+        .market-rank-item { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.05); }
+        .mr-label { font-size: 0.75rem; color: #fff; }
+        .mr-stat { font-size: 0.75rem; font-weight: bold; color: var(--accent-green); }
+        .diagnostic-msg { background: rgba(0,255,255,0.05); border-left: 3px solid var(--quantum-blue); padding: 10px; font-size: 0.7rem; color: #ccc; margin-top: 15px; line-height: 1.4; }
 
     </style>
 </head>
@@ -388,6 +399,8 @@
                 <div class="section-title">Marcadores Probables (FT)</div><div id="score-list"></div>
             </div>
             <div id="p-history" class="page">
+                <div id="weekly-report-container"></div>
+
                 <div class="balance-box">
                     <span class="bal-label">PROFIT TOTAL (UNIDADES)</span>
                     <span id="total-units" class="bal-val">0.00</span>
@@ -574,11 +587,55 @@
         }
     }
 
+    function generateWeeklyReport(history) {
+        const reportContainer = document.getElementById('weekly-report-container');
+        if(history.length < 3) { reportContainer.innerHTML = ""; return; }
+
+        let marketStats = {};
+        history.filter(i => i.status !== 'pending').forEach(item => {
+            if(!marketStats[item.category]) marketStats[item.category] = { wins: 0, total: 0, profit: 0 };
+            marketStats[item.category].total++;
+            if(item.status === 'win') marketStats[item.category].wins++;
+            marketStats[item.category].profit += item.units;
+        });
+
+        let marketsArr = Object.keys(marketStats).map(key => ({
+            name: key,
+            wr: (marketStats[key].wins / marketStats[key].total * 100).toFixed(1),
+            profit: marketStats[key].profit.toFixed(2)
+        })).sort((a,b) => b.profit - a.profit);
+
+        if(marketsArr.length === 0) return;
+
+        let best = marketsArr[0];
+        let worst = marketsArr[marketsArr.length - 1];
+
+        let html = `
+            <div class="report-card">
+                <div class="report-title"><i class="fa-solid fa-chart-pie"></i> INFORME DE RIESGO SEMANAL</div>
+                ${marketsArr.slice(0, 3).map(m => `
+                    <div class="market-rank-item">
+                        <span class="mr-label">${m.name}</span>
+                        <span class="mr-stat" style="color:${m.profit >= 0 ? 'var(--accent-green)' : 'var(--delete)'}">${m.profit} uds (${m.wr}%)</span>
+                    </div>
+                `).join('')}
+                <div class="diagnostic-msg">
+                    <b>DIAGNÓSTICO QUANTUM:</b><br>
+                    Tu mejor mercado es <b>${best.name}</b>. 
+                    ${worst.profit < 0 ? `Atención: El mercado <b>${worst.name}</b> está drenando tu banca (${worst.profit} uds). Reduce el stake aquí.` : 'Sigue operando con la gestión de riesgo actual.'}
+                </div>
+            </div>
+        `;
+        reportContainer.innerHTML = html;
+    }
+
     function loadHistory() {
         const container = document.getElementById('history-container');
         const history = JSON.parse(localStorage.getItem('guru_history_v2') || '[]');
         let totalUnits = 0, totalStaked = 0, wins = 0, resolvedCount = 0;
         let streak = [];
+
+        generateWeeklyReport(history);
 
         if(history.length === 0) {
             container.innerHTML = "<p style='text-align:center; color:var(--text-dim);'>No hay operaciones.</p>";
@@ -735,7 +792,6 @@
         document.getElementById('card-gft').innerHTML = getRow('+ 1.5 FT', ov15, 'Goles FT') + getRow('+ 2.0 FT', getAO(2.0), 'Goles FT') + getRow('+ 2.5 FT', ov25, 'Goles FT') + getRow('+ 3.5 FT', ov35, 'Goles FT');
         document.getElementById('card-btts').innerHTML = getRow('BTTS SÍ', (1-poi(0,xH))*(1-poi(0,xV)), 'BTTS') + getRow('BTTS NO', 1-((1-poi(0,xH))*(1-poi(0,xV))), 'BTTS');
         
-        // CORNER PROJECTION (CORNERPRO STYLE)
         const cornersEst = ((xH + xV) * 2.8).toFixed(1);
         document.getElementById('card-corners').innerHTML = getRow(`+ ${Math.floor(cornersEst - 1.5)} Córners`, 0.75, 'Córners') + getRow(`+ ${Math.floor(cornersEst)} Córners`, 0.55, 'Córners');
 
