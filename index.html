@@ -622,40 +622,78 @@
 
     function generateWeeklyReport(history) {
         const reportContainer = document.getElementById('weekly-report-container');
-        if(history.length < 3) { reportContainer.innerHTML = ""; return; }
+        const resolvedPicks = history.filter(i => i.status !== 'pending');
+        if(resolvedPicks.length < 3) { reportContainer.innerHTML = ""; return; }
 
         let marketStats = {};
-        history.filter(i => i.status !== 'pending').forEach(item => {
+        let totalValDetected = 0;
+        let winOddsSum = 0;
+        let lossOddsSum = 0;
+        let winCount = 0;
+        let lossCount = 0;
+
+        resolvedPicks.forEach(item => {
             if(!marketStats[item.category]) marketStats[item.category] = { wins: 0, total: 0, profit: 0 };
             marketStats[item.category].total++;
-            if(item.status === 'win') marketStats[item.category].wins++;
+            totalValDetected += parseFloat(item.value);
+            if(item.status === 'win') {
+                marketStats[item.category].wins++;
+                winOddsSum += item.odds;
+                winCount++;
+            } else if(item.status === 'loss') {
+                lossOddsSum += item.odds;
+                lossCount++;
+            }
             marketStats[item.category].profit += item.units;
         });
 
         let marketsArr = Object.keys(marketStats).map(key => ({
             name: key,
             wr: (marketStats[key].wins / marketStats[key].total * 100).toFixed(1),
-            profit: marketStats[key].profit.toFixed(2)
+            profit: marketStats[key].profit.toFixed(2),
+            total: marketStats[key].total
         })).sort((a,b) => b.profit - a.profit);
 
-        if(marketsArr.length === 0) return;
+        const best = marketsArr[marketsArr.length - 1];
+        const worst = marketsArr[0];
+        const avgVal = (totalValDetected / resolvedPicks.length).toFixed(1);
+        const avgWinOdds = winCount > 0 ? (winOddsSum / winCount).toFixed(2) : 0;
+        const avgLossOdds = lossCount > 0 ? (lossOddsSum / lossCount).toFixed(2) : 0;
 
-        let best = marketsArr[0];
-        let worst = marketsArr[marketsArr.length - 1];
+        let advice = "";
+        if (parseFloat(avgVal) < 5) {
+            advice = "Tus entradas tienen poco 'Value' (+"+avgVal+"%). Estás forzando picks en cuotas muy similares a la cuota justa. Sé más selectivo.";
+        } else if (winCount > 0 && avgWinOdds < 1.60) {
+            advice = "Ganas con cuotas bajas ("+avgWinOdds+"). Un solo fallo destruye el beneficio de 2 aciertos. Intenta buscar cuotas > 1.80.";
+        } else if (worst.profit < 0) {
+            advice = "El mercado **" + worst.name + "** está dañando tu banca. Tienes un " + worst.wr + "% de acierto ahí. Suspende operaciones en este mercado.";
+        } else {
+            advice = "Estrategia sólida. Tu valor promedio de entrada es de +"+avgVal+"%. Mantén la disciplina con el mercado " + best.name + ".";
+        }
 
         let html = `
             <div class="report-card">
-                <div class="report-title"><i class="fa-solid fa-chart-pie"></i> INFORME DE RIESGO SEMANAL</div>
-                ${marketsArr.slice(0, 3).map(m => `
+                <div class="report-title"><i class="fa-solid fa-brain"></i> DIAGNÓSTICO QUANTUM PRO</div>
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:15px;">
+                    <div class="stat-card" style="border-color:var(--quantum-blue)">
+                        <span class="stat-label">Valor Promedio</span>
+                        <span class="stat-val" style="color:var(--quantum-blue)">+${avgVal}%</span>
+                    </div>
+                    <div class="stat-card" style="border-color:var(--accent-gold)">
+                        <span class="stat-label">Cuota Media Win</span>
+                        <span class="stat-val" style="color:var(--accent-gold)">${avgWinOdds}</span>
+                    </div>
+                </div>
+                <div class="section-title" style="margin-top:0; font-size:0.6rem;">RENDIMIENTO POR CATEGORÍA</div>
+                ${marketsArr.reverse().slice(0, 3).map(m => `
                     <div class="market-rank-item">
-                        <span class="mr-label">${m.name}</span>
-                        <span class="mr-stat" style="color:${m.profit >= 0 ? 'var(--accent-green)' : 'var(--delete)'}">${m.profit} uds (${m.wr}%)</span>
+                        <span class="mr-label">${m.name} (${m.total} p.)</span>
+                        <span class="mr-stat" style="color:${m.profit >= 0 ? 'var(--accent-green)' : 'var(--delete)'}">${m.profit > 0 ? '+' : ''}${m.profit} u.</span>
                     </div>
                 `).join('')}
                 <div class="diagnostic-msg">
-                    <b>DIAGNÓSTICO QUANTUM:</b><br>
-                    Tu mejor mercado es <b>${best.name}</b>. 
-                    ${worst.profit < 0 ? `Atención: El mercado <b>${worst.name}</b> está drenando tu banca (${worst.profit} uds). Reduce el stake aquí.` : 'Sigue operando con la gestión de riesgo actual.'}
+                    <i class="fa-solid fa-lightbulb" style="color:var(--accent-gold)"></i> <b>RETROALIMENTACIÓN:</b><br>
+                    ${advice}
                 </div>
             </div>
         `;
