@@ -430,8 +430,10 @@
                 <div class="elite-stats-grid">
                     <div class="stat-card"><span class="stat-label">Yield %</span><span id="stat-yield" class="stat-val">0%</span></div>
                     <div class="stat-card"><span class="stat-label">Win Rate</span><span id="stat-wr" class="stat-val">0%</span></div>
-                    <div class="stat-card"><span class="stat-label">ROI</span><span id="stat-roi" class="stat-val">0%</span></div>
-                    <div class="stat-card"><span class="stat-label">Picks Resueltos</span><span id="stat-count" class="stat-val">0</span></div>
+                    <div class="stat-card"><span class="stat-label">Drawdown Máx</span><span id="stat-drawdown" class="stat-val">0.0u</span></div>
+                    <div class="stat-card"><span class="stat-label">Factor Profit</span><span id="stat-pf" class="stat-val">0.0</span></div>
+                    <div class="stat-card"><span class="stat-label">Profit / Pick</span><span id="stat-avg-profit" class="stat-val">0.0u</span></div>
+                    <div class="stat-card"><span class="stat-label">Resueltos</span><span id="stat-count" class="stat-val">0</span></div>
                 </div>
 
                 <div class="section-title">Picks Pendientes</div>
@@ -707,6 +709,12 @@
         
         let totalUnits = 0, totalStaked = 0, wins = 0, resolvedCount = 0;
         let streak = [];
+        let totalWinUnits = 0, totalLossUnits = 0;
+        
+        // Métricas para Drawdown
+        let peakBalance = 0;
+        let currentBalance = 0;
+        let maxDrawdown = 0;
 
         generateWeeklyReport(history);
 
@@ -716,7 +724,9 @@
             document.getElementById('total-units').innerText = "0.00";
             document.getElementById('stat-yield').innerText = "0%";
             document.getElementById('stat-wr').innerText = "0%";
-            document.getElementById('stat-roi').innerText = "0%";
+            document.getElementById('stat-drawdown').innerText = "0.0u";
+            document.getElementById('stat-pf').innerText = "0.0";
+            document.getElementById('stat-avg-profit').innerText = "0.0u";
             document.getElementById('stat-count').innerText = "0";
             document.getElementById('streak-box').innerHTML = "";
             return;
@@ -724,6 +734,20 @@
 
         let pendingHTML = "";
         let resolvedHTML = "";
+
+        // Procesar cronológicamente para el drawdown (del más antiguo al más nuevo)
+        const chronoHistory = [...history].reverse();
+        chronoHistory.forEach(item => {
+            if(item.status !== 'pending') {
+                currentBalance += item.units;
+                if(currentBalance > peakBalance) peakBalance = currentBalance;
+                let dd = peakBalance - currentBalance;
+                if(dd > maxDrawdown) maxDrawdown = dd;
+                
+                if(item.units > 0) totalWinUnits += item.units;
+                else if(item.units < 0) totalLossUnits += Math.abs(item.units);
+            }
+        });
 
         history.forEach(item => {
             const stars = item.conf >= 85 ? "⭐⭐⭐⭐⭐" : item.conf >= 70 ? "⭐⭐⭐⭐" : item.conf >= 55 ? "⭐⭐⭐" : item.conf >= 40 ? "⭐⭐" : "⭐";
@@ -763,15 +787,18 @@
         pendingContainer.innerHTML = pendingHTML || "<p style='text-align:center; color:var(--text-dim); font-size:0.7rem;'>Sin picks por resolver.</p>";
         resolvedContainer.innerHTML = resolvedHTML || "<p style='text-align:center; color:var(--text-dim); font-size:0.7rem;'>Sin historial resuelto.</p>";
 
-        // Estadísticas solo para picks resueltos
         const yieldVal = totalStaked > 0 ? (totalUnits / totalStaked) * 100 : 0;
         const wrVal = resolvedCount > 0 ? (wins / resolvedCount) * 100 : 0;
+        const pfVal = totalLossUnits > 0 ? (totalWinUnits / totalLossUnits).toFixed(2) : totalWinUnits.toFixed(2);
+        const avgProfitVal = resolvedCount > 0 ? (totalUnits / resolvedCount).toFixed(2) : "0.00";
         
         document.getElementById('total-units').innerText = (totalUnits >= 0 ? "+" : "") + totalUnits.toFixed(2);
         document.getElementById('stat-yield').innerText = yieldVal.toFixed(1) + "%";
         document.getElementById('stat-wr').innerText = wrVal.toFixed(0) + "%";
-        document.getElementById('stat-roi').innerText = (yieldVal).toFixed(1) + "%";
-        document.getElementById('stat-count').innerText = resolvedCount; // Solo cuenta resueltos
+        document.getElementById('stat-drawdown').innerText = maxDrawdown.toFixed(1) + "u";
+        document.getElementById('stat-pf').innerText = pfVal;
+        document.getElementById('stat-avg-profit').innerText = avgProfitVal + "u";
+        document.getElementById('stat-count').innerText = resolvedCount;
         
         const streakBox = document.getElementById('streak-box');
         streakBox.innerHTML = streak.slice(0, 10).map(s => `<div class="streak-dot ${s}"></div>`).join('');
