@@ -197,7 +197,6 @@
         .row b.pct { color: var(--accent-gold); font-size: 0.85rem; min-width: 45px; text-align: right; }
         .row b.odds { color: var(--fair-odds); font-size: 0.75rem; min-width: 35px; text-align: right; opacity: 0.8; }
 
-        /* Estilos para etiquetas de confianza */
         .conf-badge {
             font-size: 0.5rem;
             padding: 1px 4px;
@@ -367,8 +366,14 @@
                 <i class="fa-solid fa-briefcase"></i> ACCEDER A MI CONTROL
             </button>
 
+            <div class="section-title">Tablas de Clasificación (Ataque/Defensa)</div>
             <textarea id="hIn" placeholder="Datos Tabla LOCAL..." oninput="uH()"></textarea>
             <textarea id="vIn" placeholder="Datos Tabla VISITA..." oninput="uV()"></textarea>
+
+            <div class="section-title">Estadísticas de Goles (Frecuencia %)</div>
+            <textarea id="hgIn" placeholder="Goles Totales LOCAL (At Home)..." oninput="uHG()"></textarea>
+            <textarea id="vgIn" placeholder="Goles Totales VISITA (Away)..." oninput="uVG()"></textarea>
+
             <textarea id="sIn" placeholder="Promedios Liga (Caja Maestra)..." oninput="uS()"></textarea>
             
             <div class="select-container">
@@ -469,7 +474,7 @@
     </div>
 
 <script>
-    let dH={}, dV={}, aH=1.58, aV=1.22;
+    let dH={}, dV={}, dHG={}, dVG={}, aH=1.58, aV=1.22;
     let selectedMarket = { name: "", category: "", fairOdds: 0, pct: 0, currentTeams: "", pressure: 0 };
     let currentLeagueName = "Liga Desconocida";
     let globalReliability = 0;
@@ -485,7 +490,13 @@
     function saveLeague() {
         const name = document.getElementById('leagueName').value.trim();
         if(!name) { alert("Nombre requerido"); return; }
-        const data = { h: document.getElementById('hIn').value, v: document.getElementById('vIn').value, s: document.getElementById('sIn').value };
+        const data = { 
+            h: document.getElementById('hIn').value, 
+            v: document.getElementById('vIn').value, 
+            s: document.getElementById('sIn').value,
+            hg: document.getElementById('hgIn').value,
+            vg: document.getElementById('vgIn').value
+        };
         let db = JSON.parse(localStorage.getItem('guru_db') || '{}');
         db[name] = data;
         localStorage.setItem('guru_db', JSON.stringify(db));
@@ -503,7 +514,9 @@
             document.getElementById('hIn').value = data.h;
             document.getElementById('vIn').value = data.v;
             document.getElementById('sIn').value = data.s;
-            uH(); uV(); uS();
+            document.getElementById('hgIn').value = data.hg || "";
+            document.getElementById('vgIn').value = data.vg || "";
+            uH(); uV(); uS(); uHG(); uVG();
             showToast("DATOS CARGADOS");
         }
     }
@@ -587,10 +600,22 @@
         let homeKey = Object.keys(dH).find(k => k.toLowerCase().includes(tH.toLowerCase()) || tH.toLowerCase().includes(k.toLowerCase()));
         let awayKey = Object.keys(dV).find(k => k.toLowerCase().includes(tV.toLowerCase()) || tV.toLowerCase().includes(k.toLowerCase()));
         if(!homeKey || !awayKey) return null;
+        
         const xH = (dH[homeKey].f/aH)*(dV[awayKey].a/aH) * aH;
         const xV = (dV[awayKey].f/aV)*(dH[homeKey].a/aV) * aV;
+        
         let pH=0, pD=0, pV=0, ov25=0, btts=0;
         for(let i=0; i<=10; i++){ for(let j=0; j<=10; j++){ let p = poi(i,xH)*poi(j,xV); if(i>j) pH+=p; else if(i===j) pD+=p; else pV+=p; if((i+j)>2.5) ov25+=p; if(i>0 && j>0) btts+=p; } }
+        
+        let freqOv25 = 0;
+        let gKeyH = Object.keys(dHG).find(k => k.toLowerCase().includes(tH.toLowerCase()) || tH.toLowerCase().includes(k.toLowerCase()));
+        let gKeyV = Object.keys(dVG).find(k => k.toLowerCase().includes(tV.toLowerCase()) || tV.toLowerCase().includes(k.toLowerCase()));
+        
+        if(gKeyH && gKeyV) {
+            freqOv25 = (dHG[gKeyH].o25 + dVG[gKeyV].o25) / 2;
+            ov25 = (ov25 * 0.6) + (freqOv25 * 0.4);
+        }
+
         let f = globalReliability / 100;
         const adj = (p) => ((p * f) + (0.5 * (1 - f))) * 100;
         return { pH: adj(pH), pD: adj(pD), pV: adj(pV), ov25: adj(ov25), btts: adj(btts) };
@@ -854,10 +879,32 @@
 
     function showToast(txt) { const t = document.getElementById('reset-toast'); t.innerText = txt; t.style.display = 'block'; setTimeout(() => t.style.display = 'none', 1200); }
     function resetAnalysis(){ document.getElementById('dashboard-screen').style.display='none'; document.getElementById('batch-screen').style.display='none'; document.getElementById('setup-screen').style.display='flex'; }
+    
     window.onload = function() { refreshLeagueList(); };
+    
     function ext(t) { const o={}; t.split('\n').forEach(l => { const m = l.trim().match(/^(\d+)\s+(.+?)\s+(\d+)\s+\d+\s+\d+\s+\d+\s+(\d+)\s+(\d+)/); if(m) { const gp=parseInt(m[3]); if(gp>0) o[m[2].trim()]={f:parseInt(m[4])/gp, a:parseInt(m[5])/gp}; } }); return o; }
+    
+    function extGoals(t) {
+        const o={};
+        const lines = t.split('\n');
+        lines.forEach(l => {
+            const m = l.trim().match(/^(.+?)\s+\d+\s+[\d.]+\s+\d+%\s+(\d+)%\s+(\d+)%\s+(\d+)%/);
+            if(m) {
+                o[m[1].trim()] = {
+                    o15: parseInt(m[2])/100,
+                    o25: parseInt(m[3])/100,
+                    o35: parseInt(m[4])/100
+                };
+            }
+        });
+        return o;
+    }
+
     function uH(){ dH=ext(document.getElementById('hIn').value); fill(); }
     function uV(){ dV=ext(document.getElementById('vIn').value); fill(); }
+    function uHG(){ dHG=extGoals(document.getElementById('hgIn').value); }
+    function uVG(){ dVG=extGoals(document.getElementById('vgIn').value); }
+
     function uS(){
         const t = document.getElementById('sIn').value;
         const hm = t.match(/Home goals per match:\s*([\d.]+)/);
@@ -935,11 +982,14 @@
         const tH=document.getElementById('sH').value, tV=document.getElementById('sV').value;
         if(!dH[tH] || !dV[tV]) return;
         document.getElementById('match-title').innerText = `${tH} vs ${tV}`;
+        
         const xH = (dH[tH].f/aH)*(dV[tV].a/aH)*aH, xV = (dV[tV].f/aV)*(dH[tH].a/aV)*aV;
         const xH_ht = xH * 0.5, xV_ht = xV * 0.5;
+        
         let pH=0, pD=0, pV=0, ov15=0, ov25=0, ov35=0, ov05ht=0, ov15ht=0, sc=[], pE=Array(13).fill(0);
         let h_L_m15=0, h_L_m10_win=0, h_L_m10_push=0, h_L_m05=0, h_L_0_win=0, h_L_0_push=0, h_L_p05=0, h_L_p10_win=0, h_L_p10_push=0, h_L_p15=0;
         let h_V_m15=0, h_V_m10_win=0, h_V_m10_push=0, h_V_m05=0, h_V_0_win=0, h_V_0_push=0, h_V_p05=0, h_V_p10_win=0, h_V_p10_push=0, h_V_p15=0;
+        
         for(let i=0; i<=12; i++){
             for(let j=0; j<=12; j++){
                 let p = poi(i,xH)*poi(j,xV);
@@ -960,12 +1010,23 @@
                 if((i+j)>0.5) ov05ht += p_ht; if((i+j)>1.5) ov15ht += p_ht;
             }
         }
+
+        // Ajuste con Tablas de Frecuencia de Goles
+        let freqH = dHG[tH] || null;
+        let freqV = dVG[tV] || null;
+        if(freqH && freqV) {
+            ov15 = (ov15 * 0.6) + (((freqH.o15 + freqV.o15)/2) * 0.4);
+            ov25 = (ov25 * 0.6) + (((freqH.o25 + freqV.o25)/2) * 0.4);
+            ov35 = (ov35 * 0.6) + (((freqH.o35 + freqV.o35)/2) * 0.4);
+        }
+
         const calcAsian = (win, push) => (win / (1 - push));
         function getAO(line) { 
             let win=0, loss=0;
             if(line % 1 === 0) { for(let k=line+1; k<13; k++) win+=pE[k]; for(let k=0; k<line; k++) loss+=pE[k]; return win / (win + loss); } 
             else { let wf=0; for(let k=Math.ceil(line); k<13; k++) wf+=pE[k]; return wf + (pE[Math.floor(line)] * 0.5); }
         }
+
         document.getElementById('setup-screen').style.display='none'; document.getElementById('dashboard-screen').style.display='flex';
         document.getElementById('card-1x2').innerHTML = getRow('Local (1)', pH, '1X2') + getRow('Empate (X)', pD, '1X2') + getRow('Visita (2)', pV, '1X2');
         let dnbH = (pH + pV) > 0 ? pH / (pH + pV) : 0.5;
