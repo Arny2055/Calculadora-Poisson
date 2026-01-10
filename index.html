@@ -306,6 +306,17 @@
         .mr-stat { font-size: 0.75rem; font-weight: bold; color: var(--accent-green); }
         .diagnostic-msg { background: rgba(0,255,255,0.05); border-left: 3px solid var(--quantum-blue); padding: 10px; font-size: 0.7rem; color: #ccc; margin-top: 15px; line-height: 1.4; }
 
+        .match-reliability-card {
+            background: rgba(0, 255, 255, 0.05);
+            border: 1px solid var(--quantum-blue);
+            padding: 10px;
+            border-radius: 10px;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
     </style>
 </head>
 <body>
@@ -392,7 +403,7 @@
                 <div id="trend-content"></div>
                 <div id="reliability-panel" class="reliability-card">
                     <div class="score-header">
-                        <span class="score-label">FIABILIDAD MATEMÁTICA</span>
+                        <span class="score-label">FIABILIDAD MATEMÁTICA LIGA</span>
                         <span id="reliability-pct" class="score-value">0%</span>
                     </div>
                     <div class="progress-container"><div id="reliability-bar" class="progress-fill"></div></div>
@@ -418,6 +429,15 @@
         </div>
         <div id="fab-edit" onclick="resetAnalysis()"><i class="fa-solid fa-pen"></i></div>
         <div class="scroll-content">
+            
+            <div class="match-reliability-card">
+                <div>
+                    <div style="font-size:0.6rem; color:var(--quantum-blue); font-weight:bold; text-transform:uppercase;">Confianza Específica Evento</div>
+                    <div id="match-rel-status" style="font-size:0.9rem; font-weight:900; color:#fff;">CALCULANDO...</div>
+                </div>
+                <div id="match-rel-pct" style="font-size:1.4rem; font-weight:900; color:var(--quantum-blue);">0%</div>
+            </div>
+
             <div id="p-win" class="page active">
                 <div class="section-title">Resultado Final 1X2</div><div class="card" id="card-1x2"></div>
                 <div class="section-title">Empate No Acción (DNB)</div><div class="card" id="card-dnb"></div>
@@ -478,6 +498,7 @@
     let selectedMarket = { name: "", category: "", fairOdds: 0, pct: 0, currentTeams: "", pressure: 0 };
     let currentLeagueName = "Liga Desconocida";
     let globalReliability = 0;
+    let currentMatchReliability = 0; // NUEVA VARIABLE GLOBAL
 
     function goToControlDirectly() {
         document.getElementById('setup-screen').style.display = 'none';
@@ -565,7 +586,10 @@
                     matchesFound++;
                     const cJ = (p) => (100/p).toFixed(2);
                     const teams = `${local} vs ${visita}`;
-                    const threshold = 100 - (globalReliability * 0.4); 
+                    
+                    // Aquí usamos un mix entre fiabilidad de liga y fiabilidad de partido estimada
+                    const matchReliabilityFactor = (globalReliability + res.matchConf) / 2;
+                    const threshold = 100 - (matchReliabilityFactor * 0.4); 
 
                     const createItem = (mName, prob, fOdds, cat) => {
                         const isValue = prob >= threshold;
@@ -588,7 +612,11 @@
                         </div>`;
                     };
 
-                    card.innerHTML = `<div class="batch-match-header"><div class="batch-match-name">${teams}</div></div><div class="batch-market-list">${createItem('Más de 2.5 Goles', res.ov25, cJ(res.ov25), 'Goles Tiempo Completo (FT)')}${createItem('Menos de 2.5 Goles', 100-res.ov25, cJ(100-res.ov25), 'Goles Tiempo Completo (FT)')}${createItem('Ambos Marcan: SÍ', res.btts, cJ(res.btts), 'Ambos Marcan (BTTS)')}${createItem('Ambos Marcan: NO', 100-res.btts, cJ(100-res.btts), 'Ambos Marcan (BTTS)')}</div>`;
+                    card.innerHTML = `<div class="batch-match-header">
+                        <div class="batch-match-name">${teams}</div>
+                        <div style="font-size:0.55rem; color:var(--quantum-blue); margin-top:4px;">CONF. EVENTO: ${res.matchConf.toFixed(0)}%</div>
+                    </div>
+                    <div class="batch-market-list">${createItem('Más de 2.5 Goles', res.ov25, cJ(res.ov25), 'Goles Tiempo Completo (FT)')}${createItem('Menos de 2.5 Goles', 100-res.ov25, cJ(100-res.ov25), 'Goles Tiempo Completo (FT)')}${createItem('Ambos Marcan: SÍ', res.btts, cJ(res.btts), 'Ambos Marcan (BTTS)')}${createItem('Ambos Marcan: NO', 100-res.btts, cJ(100-res.btts), 'Ambos Marcan (BTTS)')}</div>`;
                 } else { card.innerHTML = `<div class="batch-match-header" style="opacity:0.5;"><div class="batch-match-name">${local} vs ${visita}</div></div><div style="padding:20px; font-size:12px; color:var(--delete); text-align:center;">⚠️ EQUIPO NO EN BD</div>`; }
                 container.appendChild(card);
             }
@@ -604,6 +632,10 @@
         const xH = (dH[homeKey].f/aH)*(dV[awayKey].a/aH) * aH;
         const xV = (dV[awayKey].f/aV)*(dH[homeKey].a/aV) * aV;
         
+        // Calcular Fiabilidad del Partido (Entropía)
+        const entropy = Math.abs(xH - aH) + Math.abs(xV - aV);
+        const matchConf = Math.min(100, Math.max(40, 100 - (entropy * 15)));
+
         let pH=0, pD=0, pV=0, ov25=0, btts=0;
         for(let i=0; i<=10; i++){ for(let j=0; j<=10; j++){ let p = poi(i,xH)*poi(j,xV); if(i>j) pH+=p; else if(i===j) pD+=p; else pV+=p; if((i+j)>2.5) ov25+=p; if(i>0 && j>0) btts+=p; } }
         
@@ -616,9 +648,9 @@
             ov25 = (ov25 * 0.6) + (freqOv25 * 0.4);
         }
 
-        let f = globalReliability / 100;
+        let f = ((globalReliability + matchConf) / 2) / 100;
         const adj = (p) => ((p * f) + (0.5 * (1 - f))) * 100;
-        return { pH: adj(pH), pD: adj(pD), pV: adj(pV), ov25: adj(ov25), btts: adj(btts) };
+        return { pH: adj(pH), pD: adj(pD), pV: adj(pV), ov25: adj(ov25), btts: adj(btts), matchConf: matchConf };
     }
 
     function openShare(name, fairOdds, pctValue, batchTeams = null, category = "Mercado General") {
@@ -950,11 +982,12 @@
     function poi(k,l){ if(l <= 0) return k === 0 ? 1 : 0; let f=1; for(let i=2; i<=k; i++) f*=i; return (Math.pow(l,k)*Math.exp(-l))/f; }
 
     function getRow(label, rawProb, cat) {
-        let f = globalReliability / 100;
+        // Combinamos fiabilidad de liga y fiabilidad de partido
+        let f = ((globalReliability + currentMatchReliability) / 2) / 100;
         let pAdj = ((rawProb * f) + (0.5 * (1 - f))) * 100;
         const odds = pAdj > 0 ? (100 / pAdj).toFixed(2) : '0.00';
         
-        const threshold = 100 - (globalReliability * 0.4); 
+        const threshold = 100 - (((globalReliability + currentMatchReliability) / 2) * 0.4); 
         const isValue = pAdj >= threshold;
 
         let confClass = "";
@@ -985,6 +1018,26 @@
         
         const xH = (dH[tH].f/aH)*(dV[tV].a/aH)*aH, xV = (dV[tV].f/aV)*(dH[tH].a/aV)*aV;
         const xH_ht = xH * 0.5, xV_ht = xV * 0.5;
+
+        // CÁLCULO DE FIABILIDAD ESPECÍFICA DEL PARTIDO (ENTROPÍA POISSON)
+        // Medimos qué tan lejos están los xG calculados de los promedios base de la liga.
+        const entropy = Math.abs(xH - aH) + Math.abs(xV - aV);
+        currentMatchReliability = Math.min(100, Math.max(40, 100 - (entropy * 15)));
+        
+        const relPctElem = document.getElementById('match-rel-pct');
+        const relStatusElem = document.getElementById('match-rel-status');
+        relPctElem.innerText = currentMatchReliability.toFixed(0) + "%";
+        
+        if(currentMatchReliability >= 80) {
+            relStatusElem.innerText = "ALTA PREDICTIBILIDAD";
+            relPctElem.style.color = "var(--accent-green)";
+        } else if(currentMatchReliability >= 60) {
+            relStatusElem.innerText = "ESTÁNDAR VOLÁTIL";
+            relPctElem.style.color = "var(--accent-gold)";
+        } else {
+            relStatusElem.innerText = "BAJA PREDICTIBILIDAD";
+            relPctElem.style.color = "var(--delete)";
+        }
         
         let pH=0, pD=0, pV=0, ov15=0, ov25=0, ov35=0, ov05ht=0, ov15ht=0, sc=[], pE=Array(13).fill(0);
         let h_L_m15=0, h_L_m10_win=0, h_L_m10_push=0, h_L_m05=0, h_L_0_win=0, h_L_0_push=0, h_L_p05=0, h_L_p10_win=0, h_L_p10_push=0, h_L_p15=0;
@@ -1011,7 +1064,6 @@
             }
         }
 
-        // Ajuste con Tablas de Frecuencia de Goles
         let freqH = dHG[tH] || null;
         let freqV = dVG[tV] || null;
         if(freqH && freqV) {
