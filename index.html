@@ -513,7 +513,6 @@
         return LIGAS_CONFIG[key];
     }
 
-    // Funciones de Modal Info adaptado
     function openInfo() { 
         updateStrategyModalContent();
         document.getElementById('info-modal').style.display = 'flex'; 
@@ -615,7 +614,6 @@
         Object.keys(db).sort().forEach(name => sel.add(new Option(name, name)));
     }
 
-    // Algoritmo para calcular fiabilidad específica del partido basándose en desviaciones
     function calculateMatchReliability(tH, tV) {
         if(!dH[tH] || !dV[tV]) return 0;
         const devH = Math.abs(dH[tH].f - aH) + Math.abs(dH[tH].a - aV);
@@ -631,43 +629,73 @@
         const container = document.getElementById('batch-results-container');
         container.innerHTML = "";
         document.getElementById('batch-league-title').innerText = currentLeagueName;
+        
         const lines = input.split('\n');
         let matchesFound = 0;
+
         lines.forEach(line => {
             if(!line.trim()) return;
-            const parts = line.split(/\s{2,}|[\t]/); 
-            let local = "", visita = "";
-            if (parts.length >= 4) { local = parts[1].trim(); visita = parts[3].trim(); } 
-            else if (line.includes(':')) {
-                const timeMatch = line.match(/\d{2}:\d{2}/);
-                if (timeMatch) { const segments = line.split(timeMatch[0]); local = segments[0].replace(/^[A-Za-z]{3}\s\d+\s[A-Za-z]{3}/, "").trim(); visita = segments[1].trim(); }
+            const parts = line.split(/\t/); // Detectar pestañas (Excel/Sheets)
+            
+            let local = "", visita = "", realOv = null, realBtts = null;
+
+            // DETECTOR DE FORMATO AVANZADO (COLUMNAS EXCEL)
+            if (parts.length >= 15) {
+                // El formato que pegaste tiene el local en la col 10 y visita en la 12 (aprox)
+                // O local en la col 2/3 dependiendo de la liga.
+                // Buscamos las palabras 'home' y 'away' como anclaje
+                const homeIdx = parts.indexOf("home");
+                const awayIdx = parts.indexOf("away");
+                if(homeIdx !== -1 && awayIdx !== -1) {
+                    local = parts[homeIdx + 1].trim();
+                    visita = parts[awayIdx - 1].trim();
+                    // Extraer porcentajes reales de las columnas 1 (Over 2.5) y 2 (BTTS)
+                    realOv = parseFloat(parts[1]) || null;
+                    realBtts = parseFloat(parts[2]) || null;
+                }
+            } else {
+                // Formato simple por defecto
+                const simpleParts = line.split(/\s{2,}|[\t]/);
+                if (simpleParts.length >= 4) { local = simpleParts[1].trim(); visita = simpleParts[3].trim(); }
             }
+
             if(local && visita) {
                 const res = calculateSilent(local, visita);
                 const card = document.createElement('div');
                 card.className = 'batch-card';
+                
                 if(res) {
                     matchesFound++;
+                    let finalOv = res.ov25;
+                    let finalBtts = res.btts;
+                    let finalRel = res.matchRel;
+
+                    // AJUSTE CUÁNTICO CON DATOS REALES SI EXISTEN
+                    if(realOv !== null) {
+                        finalOv = (res.ov25 * 0.4) + (realOv * 0.6); // Ponderación de datos reales
+                        finalRel += 5; // Aumentar fiabilidad por tener datos reales
+                    }
+                    if(realBtts !== null) finalBtts = (res.btts * 0.4) + (realBtts * 0.6);
+
                     const cJ = (p) => (100/p).toFixed(2);
                     const teams = `${local} vs ${visita}`;
-                    const mRel = calculateMatchReliability(res.hKey, res.vKey);
-                    const threshold = 100 - (mRel * 0.4); 
+                    const threshold = 100 - (finalRel * 0.4); 
                     
                     const createItem = (mName, prob, fOdds, cat) => {
                         const isValue = prob >= threshold;
-                        return `<div class="batch-item-pro ${isValue ? 'value-detected' : ''}" onclick="openShare('${mName}', ${fOdds}, ${prob}, '${teams}', '${cat}', ${mRel})">${isValue ? '<span class="value-tag"><i class="fa-solid fa-fire"></i> VALOR</span>' : ''}<div class="label-stack"><span class="m-name">${mName}</span><span class="m-prob">${prob.toFixed(1)}%</span></div><div class="odds-stack"><span class="m-tag">CUOTA JUSTA</span><span class="m-fair">${fOdds}</span></div></div>`;
+                        return `<div class="batch-item-pro ${isValue ? 'value-detected' : ''}" onclick="openShare('${mName}', ${fOdds}, ${prob}, '${teams}', '${cat}', ${finalRel})">${isValue ? '<span class="value-tag"><i class="fa-solid fa-fire"></i> VALOR</span>' : ''}<div class="label-stack"><span class="m-name">${mName}</span><span class="m-prob">${prob.toFixed(1)}%</span></div><div class="odds-stack"><span class="m-tag">CUOTA JUSTA</span><span class="m-fair">${fOdds}</span></div></div>`;
                     };
                     
                     card.innerHTML = `
                         <div class="batch-match-header">
                             <div class="batch-match-name">${teams}</div>
-                            <div style="font-size:0.6rem; color:var(--accent-gold); margin-top:4px;">FIABILIDAD PARTIDO: ${mRel.toFixed(1)}%</div>
+                            <div style="font-size:0.6rem; color:var(--accent-gold); margin-top:4px;">FIABILIDAD: ${Math.min(99.9, finalRel).toFixed(1)}% ${realOv ? ' | DATOS REALES INCLUIDOS' : ''}</div>
                         </div>
                         <div class="batch-market-list">
-                            ${createItem('Más de 2.5 Goles', res.ov25, cJ(res.ov25), 'Más de 2.5 Goles')}
-                            ${createItem('Menos de 2.5 Goles', 100-res.ov25, cJ(100-res.ov25), 'Menos de 2.5 Goles')}
-                            ${createItem('Ambos Marcan: SÍ', res.btts, cJ(res.btts), 'Ambos Marcan Sí')}
-                            ${createItem('Ambos Marcan: NO', 100-res.btts, cJ(100-res.btts), 'Ambos Marcan No')}
+                            ${createItem('Más de 2.5 Goles', finalOv, cJ(finalOv), 'Más de 2.5 Goles')}
+                            ${createItem('Menos de 2.5 Goles', 100-finalOv, cJ(100-finalOv), 'Menos de 2.5 Goles')}
+                            ${createItem('Ambos Marcan: SÍ', finalBtts, cJ(finalBtts), 'Ambos Marcan Sí')}
+                            ${createItem('Ambos Marcan: NO', 100-finalBtts, cJ(100-finalBtts), 'Ambos Marcan No')}
                         </div>`;
                 } else { card.innerHTML = `<div class="batch-match-header" style="opacity:0.5;"><div class="batch-match-name">${local} vs ${visita}</div></div><div style="padding:20px; font-size:12px; color:var(--delete); text-align:center;">⚠️ EQUIPO NO EN BD</div>`; }
                 container.appendChild(card);
@@ -769,7 +797,6 @@
         let lossCount = 0;
 
         resolvedPicks.forEach(item => {
-            // Usamos la categoría o el nombre del mercado para el desglose específico
             let key = item.category;
             if(!marketStats[key]) marketStats[key] = { wins: 0, total: 0, profit: 0 };
             marketStats[key].total++;
@@ -849,16 +876,7 @@
         let maxDrawdown = 0;
         generateWeeklyReport(history);
         if(history.length === 0) {
-            pendingContainer.innerHTML = "<p style='text-align:center; color:var(--text-dim); font-size:0.7rem;'>No hay picks pendientes.</p>";
-            resolvedContainer.innerHTML = "<p style='text-align:center; color:var(--text-dim); font-size:0.7rem;'>No hay historial.</p>";
             document.getElementById('total-units').innerText = "0.00";
-            document.getElementById('stat-yield').innerText = "0%";
-            document.getElementById('stat-wr').innerText = "0%";
-            document.getElementById('stat-drawdown').innerText = "0.0u";
-            document.getElementById('stat-pf').innerText = "0.0";
-            document.getElementById('stat-avg-profit').innerText = "0.0u";
-            document.getElementById('stat-count').innerText = "0";
-            document.getElementById('streak-box').innerHTML = "";
             return;
         }
         let pendingHTML = "";
