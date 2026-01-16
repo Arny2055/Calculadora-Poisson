@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>BetAGS - Pro Analytics & Visual Control</title>
+    <title>BetAGS - Pro Analytics & Kelly Control</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
@@ -119,6 +119,13 @@
             cursor: pointer; margin-top: 10px; display: none;
         }
 
+        .kelly-info {
+            font-size: 0.65rem;
+            color: var(--texto-amarillo);
+            margin-top: 5px;
+            display: block;
+        }
+
         .btn-clear {
             background: none; border: none; color: var(--delete);
             font-size: 0.7rem; cursor: pointer; text-decoration: underline; margin-top: 10px;
@@ -167,6 +174,9 @@
     <div class="container">
         
         <div id="calc-screen" class="screen active-screen">
+            <div style="background: rgba(0,255,136,0.05); padding: 10px; border-radius: 8px; border: 1px solid var(--accent-green); margin-bottom: 20px; text-align: center; font-size: 0.8rem;">
+                <i class="fa-solid fa-bank"></i> Banca Base de Gestión: <b>$100.00</b> | Fracción Kelly: <b>25%</b>
+            </div>
             <div class="grid" id="calculadoras-container">
                 </div>
         </div>
@@ -191,8 +201,7 @@
                 <canvas id="growthChart"></canvas>
             </div>
 
-            <div id="history-list">
-                </div>
+            <div id="history-list"></div>
             
             <button onclick="clearAllHistory()" style="width:100%; background:none; color:var(--delete); border:1px solid var(--delete); padding:10px; border-radius:6px; margin-top:20px; cursor:pointer; font-weight:bold;">LIMPIAR TODO EL HISTORIAL</button>
         </div>
@@ -200,6 +209,9 @@
     </div>
 
     <script>
+        const BANCA_BASE = 100;
+        const KELLY_FRACTION = 0.25;
+
         const mercados = [
             { id: 'Over', title: 'OVER (Más Goles)' },
             { id: 'Under', title: 'UNDER (Menos Goles)' },
@@ -210,7 +222,6 @@
         let apuestas = JSON.parse(localStorage.getItem('betags_history')) || [];
         let growthChart = null;
 
-        // Generar UI de calculadoras
         function renderCalculators() {
             const container = document.getElementById('calculadoras-container');
             container.innerHTML = mercados.map(m => `
@@ -237,8 +248,9 @@
                             <span>Overround: <b id="ovr_${m.id}">0.00%</b></span>
                         </div>
                         <div style="margin-top:15px; text-align:left;">
-                            <label>Stake para registro ($)</label>
-                            <input type="number" id="stake_${m.id}" value="10">
+                            <label>Stake Sugerido (Kelly 25%)</label>
+                            <input type="number" id="stake_${m.id}" value="0.00">
+                            <span id="kelly_pct_${m.id}" class="kelly-info"></span>
                         </div>
                         <button id="btn_${m.id}" class="btn-register" onclick="registerBet('${m.id}')">REGISTRAR EN CONTROL</button>
                     </div>
@@ -256,6 +268,8 @@
             const edgeEl = document.getElementById(`edge_${id}`);
             const ovrEl = document.getElementById(`ovr_${id}`);
             const btnReg = document.getElementById(`btn_${id}`);
+            const stakeInput = document.getElementById(`stake_${id}`);
+            const kellyInfo = document.getElementById(`kelly_pct_${id}`);
 
             if (odds > 1 && contra > 1 && prob > 0) {
                 const overround = ((1/odds) + (1/contra) - 1) * 100;
@@ -269,21 +283,35 @@
                 const ruleOvr = (overround <= 8);
                 const ruleVs = (edge > overround);
 
+                // Cálculo de Kelly
+                // Kelly % = (p*b - q) / b  donde b = odds - 1
+                const p = prob / 100;
+                const b = odds - 1;
+                const kellyFull = (p * odds - 1) / b;
+                const kellySugerido = Math.max(0, kellyFull * KELLY_FRACTION);
+                const stakeFinal = BANCA_BASE * kellySugerido;
+
                 if (ruleEdge && ruleOvr && ruleVs) {
                     recEl.innerText = "✓ APUESTA RENTABLE";
                     recEl.className = "recommendation status-bet";
                     btnReg.style.display = "block";
                     edgeEl.style.color = "var(--accent-green)";
+                    stakeInput.value = stakeFinal.toFixed(2);
+                    kellyInfo.innerText = "Sugerencia basada en Kelly al " + (kellySugerido * 100).toFixed(2) + "% de la banca.";
                 } else if (edge > 0) {
-                    recEl.innerText = "⚠ NO CUMPLE REGLAS SEGURAS";
+                    recEl.innerText = "⚠ FUERA DE RANGO SEGURO";
                     recEl.className = "recommendation status-danger";
                     btnReg.style.display = "block";
                     edgeEl.style.color = "var(--texto-amarillo)";
+                    stakeInput.value = stakeFinal.toFixed(2);
+                    kellyInfo.innerText = "Edge detectado, pero fuera de parámetros.";
                 } else {
                     recEl.innerText = "✗ SIN VALOR";
                     recEl.className = "recommendation status-no";
                     btnReg.style.display = "none";
                     edgeEl.style.color = "var(--delete)";
+                    stakeInput.value = "0.00";
+                    kellyInfo.innerText = "";
                 }
             }
         }
@@ -294,6 +322,11 @@
             const prob = document.getElementById(`prob_${id}`).value;
             const stake = parseFloat(document.getElementById(`stake_${id}`).value) || 0;
             const mercadoName = mercados.find(m => m.id === id).title;
+
+            if (stake <= 0) {
+                alert("El stake debe ser mayor a 0 para registrar.");
+                return;
+            }
 
             const nuevaApuesta = {
                 id: Date.now(),
@@ -308,7 +341,7 @@
 
             apuestas.unshift(nuevaApuesta);
             localStorage.setItem('betags_history', JSON.stringify(apuestas));
-            alert("Registrado correctamente.");
+            alert("Registrado en Control.");
             loadHistory();
         }
 
@@ -317,7 +350,6 @@
             let profit = 0, inversion = 0, ganadas = 0, terminadas = 0;
             let cumulativeData = [0];
 
-            // Invertimos para la gráfica (orden cronológico)
             const sortedHistory = [...apuestas].reverse();
             let currentProfit = 0;
 
@@ -330,7 +362,6 @@
                 if (a.status !== 'pending') cumulativeData.push(parseFloat(currentProfit.toFixed(2)));
             });
 
-            // UI del Historial
             list.innerHTML = apuestas.map(a => {
                 if (a.status === 'win') {
                     profit += (a.cuota - 1) * a.stake;
@@ -350,7 +381,7 @@
                             <small>${a.fecha}</small>
                         </div>
                         <div style="font-size:0.7rem; color:#888; margin:5px 0;">
-                            Cuota: ${a.cuota} | Stake: ${a.stake}$ | Edge: ${a.edge}
+                            Cuota: ${a.cuota} | Stake: ${a.stake.toFixed(2)}$ | Edge: ${a.edge}
                         </div>
                         <div class="actions">
                             ${a.status === 'pending' ? `
@@ -363,7 +394,6 @@
                 `;
             }).join('');
 
-            // Actualizar Estadísticas
             document.getElementById('stat-profit').innerText = profit.toFixed(2) + " $";
             document.getElementById('stat-profit').style.color = profit >= 0 ? "var(--accent-green)" : "var(--delete)";
             document.getElementById('stat-wr').innerText = terminadas > 0 ? ((ganadas/terminadas)*100).toFixed(1) + "%" : "0%";
@@ -374,24 +404,18 @@
 
         function updateChart(dataPoints) {
             const ctx = document.getElementById('growthChart').getContext('2d');
-            
-            if (growthChart) {
-                growthChart.destroy();
-            }
+            if (growthChart) growthChart.destroy();
 
-            // Lógica de color de línea: Roja si < 0, Verde si >= 0
             growthChart = new Chart(ctx, {
                 type: 'line',
                 data: {
                     labels: dataPoints.map((_, i) => i),
                     datasets: [{
-                        label: 'Profit Acumulado',
                         data: dataPoints,
                         borderWidth: 3,
                         tension: 0.3,
                         pointRadius: 4,
                         pointBackgroundColor: '#fff',
-                        // Segmentación de colores
                         segment: {
                             borderColor: ctx => ctx.p0.parsed.y < 0 && ctx.p1.parsed.y < 0 ? '#ff4d4d' : '#00ff88',
                             backgroundColor: ctx => ctx.p0.parsed.y < 0 && ctx.p1.parsed.y < 0 ? 'rgba(255, 77, 77, 0.1)' : 'rgba(0, 255, 136, 0.1)',
@@ -402,22 +426,10 @@
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
-                    plugins: {
-                        legend: { display: false }
-                    },
+                    plugins: { legend: { display: false } },
                     scales: {
-                        x: {
-                            grid: { color: 'rgba(255,255,255,0.05)' },
-                            ticks: { color: '#7f9c93', font: { size: 10 } }
-                        },
-                        y: {
-                            grid: { color: 'rgba(255,255,255,0.05)' },
-                            ticks: { 
-                                color: '#7f9c93', 
-                                font: { size: 10 },
-                                callback: value => value + '$'
-                            }
-                        }
+                        x: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#7f9c93', font: { size: 10 } } },
+                        y: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#7f9c93', font: { size: 10 }, callback: v => v + '$' } }
                     }
                 }
             });
@@ -439,7 +451,7 @@
         }
 
         function clearAllHistory() {
-            if(confirm("¿ESTÁS SEGURO? Se borrarán todos tus datos de forma permanente.")) {
+            if(confirm("¿BORRAR TODO?")) {
                 apuestas = [];
                 localStorage.removeItem('betags_history');
                 loadHistory();
@@ -451,10 +463,12 @@
             document.getElementById(`contra_${id}`).value = "";
             document.getElementById(`prob_${id}`).value = "";
             document.getElementById(`rec_${id}`).innerText = "ESPERANDO DATOS";
-            document.getElementById('rec_'+id).className = "recommendation status-no";
+            document.getElementById(`rec_${id}`).className = "recommendation status-no";
             document.getElementById(`edge_${id}`).innerText = "0.00%";
             document.getElementById(`ovr_${id}`).innerText = "0.00%";
             document.getElementById(`btn_${id}`).style.display = "none";
+            document.getElementById(`stake_${id}`).value = "0.00";
+            document.getElementById(`kelly_pct_${id}`).innerText = "";
         }
 
         function nav(screenId, el) {
@@ -465,7 +479,6 @@
             if (screenId === 'control-screen') loadHistory();
         }
 
-        // Inicialización
         renderCalculators();
         loadHistory();
     </script>
