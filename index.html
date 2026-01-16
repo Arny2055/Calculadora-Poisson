@@ -100,7 +100,7 @@
             box-sizing: border-box; font-weight: bold; font-family: inherit;
         }
 
-        textarea { resize: none; font-size: 0.75rem; height: 50px; margin-bottom: 10px; }
+        textarea { resize: none; font-size: 0.75rem; height: 75px; margin-bottom: 10px; }
 
         .results-box {
             background: rgba(0,0,0,0.3);
@@ -194,15 +194,21 @@
             text-transform: uppercase;
             font-weight: bold;
             display: block;
-            margin-bottom: 2px;
         }
 
         .history-event {
             font-size: 0.9rem;
             color: var(--texto-amarillo);
-            margin-bottom: 8px;
+            margin: 4px 0;
             display: block;
             font-weight: bold;
+        }
+
+        .history-date {
+            font-size: 0.65rem;
+            color: #777;
+            display: block;
+            margin-bottom: 8px;
         }
 
         .actions { display: flex; gap: 10px; margin-top: 10px; }
@@ -299,8 +305,8 @@
                             <span>Edge: <b id="edge_${m.id}">0.00%</b></span>
                             <span>Overround: <b id="ovr_${m.id}">0.00%</b></span>
                         </div>
-                        <label>País - Liga - Partido</label>
-                        <textarea id="event_${m.id}" placeholder="Ej: México - Liga MX - América vs Chivas"></textarea>
+                        <label>Datos del Evento (Liga / Equipos / Fecha)</label>
+                        <textarea id="event_${m.id}" placeholder="Pega aquí los datos..."></textarea>
                         
                         <div style="text-align:left;">
                             <label>Stake Sugerido (Kelly)</label>
@@ -335,7 +341,6 @@
                 const ruleOvr = (overround <= 8);
                 const ruleVs = (edge > overround);
 
-                // Kelly 25%
                 const p = prob / 100;
                 const b = odds - 1;
                 const fKelly = Math.max(0, ((p * odds - 1) / b) * KELLY_FRACTION);
@@ -368,38 +373,39 @@
             const edge = parseFloat(document.getElementById(`edge_${id}`).innerText);
             const ovr = parseFloat(document.getElementById(`ovr_${id}`).innerText);
             const stake = parseFloat(document.getElementById(`stake_${id}`).value) || 0;
-            const rawEvent = document.getElementById(`event_${id}`).value || "General - Evento Desconocido";
+            const rawEvent = document.getElementById(`event_${id}`).value.trim();
             const mercadoName = mercados.find(m => m.id === id).title;
 
-            // Lógica de separación: "País - Liga - Partido"
-            let partes = rawEvent.split('-').map(p => p.trim());
+            // PARSEO MULTILÍNEA
+            const lineas = rawEvent.split('\n').map(l => l.trim()).filter(l => l !== "");
+            
             let liga = "General";
-            let partido = rawEvent;
+            let partido = "Evento Desconocido";
+            let fecha = "Sin fecha";
 
-            if (partes.length >= 2) {
-                partido = partes.pop(); // El último elemento es el partido
-                liga = partes.join(' - '); // Lo anterior es la liga/país
-            }
+            if (lineas.length >= 1) liga = lineas[0];
+            if (lineas.length >= 2) partido = lineas[1].replace('🆚', '').trim();
+            if (lineas.length >= 3) fecha = lineas[2].replace('🗓', '').trim();
 
             const nuevaApuesta = {
                 id: Date.now(),
                 liga: liga,
                 partido: partido,
+                fecha_evento: fecha,
                 mercado: mercadoName,
                 cuota: odds,
                 edge: edge,
                 overround: ovr,
                 stake: stake,
                 status: 'pending',
-                fecha: new Date().toLocaleDateString()
+                registro: new Date().toLocaleDateString()
             };
 
             apuestas.unshift(nuevaApuesta);
             localStorage.setItem('betags_history', JSON.stringify(apuestas));
             
-            // Limpiar calculadora tras registro
             clearCalc(id);
-            alert("Apuesta registrada con éxito.");
+            alert("¡Apuesta enviada al Control!");
         }
 
         function loadHistory() {
@@ -445,11 +451,14 @@
                 <div class="history-item ${a.status}">
                     <span class="history-league">${a.liga}</span>
                     <span class="history-event">${a.partido}</span>
-                    <div style="display:flex; justify-content:space-between; font-weight:bold;">
+                    <span class="history-date"><i class="fa-regular fa-calendar"></i> ${a.fecha_evento}</span>
+                    
+                    <div style="display:flex; justify-content:space-between; font-weight:bold; border-top:1px solid rgba(255,255,255,0.05); padding-top:8px;">
                         <span>${a.mercado} @${a.cuota}</span>
                         <span>$${a.stake.toFixed(2)}</span>
                     </div>
                     <div style="font-size:0.7rem; color:#888; margin-top:5px;">Edge: ${a.edge}% | OV: ${a.overround}%</div>
+                    
                     <div class="actions">
                         ${a.status === 'pending' ? `
                             <button class="btn-win" onclick="updateStatus(${a.id}, 'win')">GANADA</button>
@@ -470,7 +479,6 @@
 
         function renderBacktestUI(mercados, cuotas, edges, ligas) {
             const btContainer = document.getElementById('backtest-results');
-            
             const createBTBox = (title, data) => {
                 let html = `<div class="bt-card"><h3>${title}</h3>`;
                 let keys = Object.keys(data);
@@ -481,12 +489,7 @@
                 });
                 return html + `</div>`;
             };
-
-            btContainer.innerHTML = 
-                createBTBox('Por Mercado', mercados) +
-                createBTBox('Por Cuota', cuotas) +
-                createBTBox('Por Edge', edges) +
-                createBTBox('Top Ligas/Países', ligas);
+            btContainer.innerHTML = createBTBox('Por Mercado', mercados) + createBTBox('Por Cuota', cuotas) + createBTBox('Por Edge', edges) + createBTBox('Top Ligas', ligas);
         }
 
         function updateChart(dataPoints) {
@@ -534,7 +537,7 @@
         }
 
         function clearAllHistory() {
-            if(confirm("¡ATENCIÓN! Se borrará todo el historial y el análisis acumulado.")) {
+            if(confirm("¡ATENCIÓN! Se borrará todo el historial.")) {
                 apuestas = [];
                 localStorage.removeItem('betags_history');
                 loadHistory();
