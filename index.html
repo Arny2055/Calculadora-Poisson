@@ -122,7 +122,12 @@
             cursor: pointer; margin-top: 10px; display: none;
         }
 
-        /* --- SECCIÓN BACKTESTING (NUEVA) --- */
+        .btn-clear {
+            width: 100%; background: none; border: 1px solid #333; color: #555;
+            padding: 5px; margin-top: 10px; border-radius: 4px; cursor: pointer; font-size: 0.7rem;
+        }
+
+        /* --- SECCIÓN BACKTESTING --- */
         .backtest-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
@@ -183,14 +188,21 @@
         .history-item.win { border-left-color: var(--accent-green); }
         .history-item.loss { border-left-color: var(--delete); }
 
+        .history-league {
+            font-size: 0.65rem;
+            color: var(--blue-info);
+            text-transform: uppercase;
+            font-weight: bold;
+            display: block;
+            margin-bottom: 2px;
+        }
+
         .history-event {
-            font-size: 0.8rem;
+            font-size: 0.9rem;
             color: var(--texto-amarillo);
-            background: rgba(0,0,0,0.2);
-            padding: 5px 10px;
-            border-radius: 4px;
             margin-bottom: 8px;
-            display: inline-block;
+            display: block;
+            font-weight: bold;
         }
 
         .actions { display: flex; gap: 10px; margin-top: 10px; }
@@ -238,8 +250,7 @@
             </div>
 
             <h2 style="color: var(--blue-info); font-size: 1rem; margin-bottom: 15px;"><i class="fa-solid fa-vial-circle-check"></i> Backtesting de Estrategia</h2>
-            <div class="backtest-grid" id="backtest-results">
-                </div>
+            <div class="backtest-grid" id="backtest-results"></div>
 
             <h2 style="color: var(--texto-amarillo); font-size: 1rem; margin-bottom: 15px;"><i class="fa-solid fa-list"></i> Historial de Apuestas</h2>
             <div id="history-list"></div>
@@ -288,8 +299,8 @@
                             <span>Edge: <b id="edge_${m.id}">0.00%</b></span>
                             <span>Overround: <b id="ovr_${m.id}">0.00%</b></span>
                         </div>
-                        <label>País / Liga / Partido</label>
-                        <textarea id="event_${m.id}" placeholder="Pegar datos del evento..."></textarea>
+                        <label>País - Liga - Partido</label>
+                        <textarea id="event_${m.id}" placeholder="Ej: México - Liga MX - América vs Chivas"></textarea>
                         
                         <div style="text-align:left;">
                             <label>Stake Sugerido (Kelly)</label>
@@ -357,12 +368,23 @@
             const edge = parseFloat(document.getElementById(`edge_${id}`).innerText);
             const ovr = parseFloat(document.getElementById(`ovr_${id}`).innerText);
             const stake = parseFloat(document.getElementById(`stake_${id}`).value) || 0;
-            const evento = document.getElementById(`event_${id}`).value || "Sin Datos";
+            const rawEvent = document.getElementById(`event_${id}`).value || "General - Evento Desconocido";
             const mercadoName = mercados.find(m => m.id === id).title;
+
+            // Lógica de separación: "País - Liga - Partido"
+            let partes = rawEvent.split('-').map(p => p.trim());
+            let liga = "General";
+            let partido = rawEvent;
+
+            if (partes.length >= 2) {
+                partido = partes.pop(); // El último elemento es el partido
+                liga = partes.join(' - '); // Lo anterior es la liga/país
+            }
 
             const nuevaApuesta = {
                 id: Date.now(),
-                evento: evento,
+                liga: liga,
+                partido: partido,
                 mercado: mercadoName,
                 cuota: odds,
                 edge: edge,
@@ -374,7 +396,10 @@
 
             apuestas.unshift(nuevaApuesta);
             localStorage.setItem('betags_history', JSON.stringify(apuestas));
-            loadHistory();
+            
+            // Limpiar calculadora tras registro
+            clearCalc(id);
+            alert("Apuesta registrada con éxito.");
         }
 
         function loadHistory() {
@@ -382,7 +407,6 @@
             let profit = 0, inversion = 0, ganadas = 0, terminadas = 0;
             let cumulativeData = [0];
 
-            // Datos para Backtesting
             let statsMercado = {}, statsCuota = { 'Baja (<1.70)':0, 'Media (1.7-2.2)':0, 'Alta (>2.2)':0 };
             let statsEdge = { 'Bajo (3-7%)':0, 'Medio (7-11%)':0, 'Alto (>11%)':0 };
             let statsLiga = {};
@@ -396,36 +420,31 @@
                     currentProfit += res;
                     cumulativeData.push(parseFloat(currentProfit.toFixed(2)));
 
-                    // Backtesting Mercado
                     if(!statsMercado[a.mercado]) statsMercado[a.mercado] = 0;
                     statsMercado[a.mercado] += res;
 
-                    // Backtesting Cuota
                     if(a.cuota < 1.7) statsCuota['Baja (<1.70)'] += res;
                     else if(a.cuota <= 2.2) statsCuota['Media (1.7-2.2)'] += res;
                     else statsCuota['Alta (>2.2)'] += res;
 
-                    // Backtesting Edge
                     if(a.edge < 7) statsEdge['Bajo (3-7%)'] += res;
                     else if(a.edge <= 11) statsEdge['Medio (7-11%)'] += res;
                     else statsEdge['Alto (>11%)'] += res;
 
-                    // Backtesting Liga (Extrayendo primer palabra antes de guión o espacio)
-                    let liga = a.evento.split('-')[0].split(' ')[0].trim();
-                    if(!statsLiga[liga]) statsLiga[liga] = 0;
-                    statsLiga[liga] += res;
+                    if(!statsLiga[a.liga]) statsLiga[a.liga] = 0;
+                    statsLiga[a.liga] += res;
                 }
 
                 if (a.status === 'win') { profit += (a.cuota - 1) * a.stake; inversion += a.stake; ganadas++; terminadas++; }
                 else if (a.status === 'loss') { profit -= a.stake; inversion += a.stake; terminadas++; }
             });
 
-            // Render Backtesting UI
             renderBacktestUI(statsMercado, statsCuota, statsEdge, statsLiga);
 
             list.innerHTML = apuestas.map(a => `
                 <div class="history-item ${a.status}">
-                    <span class="history-event">${a.evento}</span>
+                    <span class="history-league">${a.liga}</span>
+                    <span class="history-event">${a.partido}</span>
                     <div style="display:flex; justify-content:space-between; font-weight:bold;">
                         <span>${a.mercado} @${a.cuota}</span>
                         <span>$${a.stake.toFixed(2)}</span>
@@ -454,10 +473,12 @@
             
             const createBTBox = (title, data) => {
                 let html = `<div class="bt-card"><h3>${title}</h3>`;
-                for(let key in data) {
+                let keys = Object.keys(data);
+                if(keys.length === 0) html += `<div class="insight-row"><span>Sin datos</span></div>`;
+                keys.forEach(key => {
                     const val = data[key];
                     html += `<div class="insight-row"><span>${key}</span><span class="${val>=0?'val-pos':'val-neg'}">${val>=0?'+':''}${val.toFixed(2)}$</span></div>`;
-                }
+                });
                 return html + `</div>`;
             };
 
@@ -480,10 +501,8 @@
                         borderWidth: 2,
                         tension: 0.3,
                         pointRadius: 0,
-                        segment: {
-                            borderColor: ctx => ctx.p0.parsed.y < 0 ? '#ff4d4d' : '#00ff88',
-                            backgroundColor: ctx => ctx.p0.parsed.y < 0 ? 'rgba(255, 77, 77, 0.1)' : 'rgba(0, 255, 136, 0.1)',
-                        },
+                        borderColor: '#00ff88',
+                        backgroundColor: 'rgba(0, 255, 136, 0.1)',
                         fill: true
                     }]
                 },
@@ -530,6 +549,9 @@
             document.getElementById(`rec_${id}`).innerText = "ESPERANDO DATOS";
             document.getElementById(`rec_${id}`).className = "recommendation status-no";
             document.getElementById(`btn_${id}`).style.display = "none";
+            document.getElementById(`edge_${id}`).innerText = "0.00%";
+            document.getElementById(`ovr_${id}`).innerText = "0.00%";
+            document.getElementById(`stake_${id}`).value = "0.00";
         }
 
         function nav(screenId, el) {
