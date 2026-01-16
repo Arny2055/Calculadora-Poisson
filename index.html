@@ -127,10 +127,10 @@
             padding: 5px; margin-top: 10px; border-radius: 4px; cursor: pointer; font-size: 0.7rem;
         }
 
-        /* --- SECCIÓN BACKTESTING --- */
+        /* --- SECCIÓN BACKTESTING (MEJORADA) --- */
         .backtest-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
             gap: 15px;
             margin-bottom: 25px;
         }
@@ -148,19 +148,32 @@
             color: var(--blue-info);
             text-transform: uppercase;
             letter-spacing: 1px;
+            border-bottom: 1px solid rgba(0, 212, 255, 0.1);
+            padding-bottom: 5px;
+        }
+
+        .bt-header {
+            display: grid;
+            grid-template-columns: 2fr 1fr 1fr 1fr;
+            font-size: 0.55rem;
+            color: #555;
+            font-weight: bold;
+            margin-bottom: 5px;
+            text-transform: uppercase;
         }
 
         .insight-row {
-            display: flex;
-            justify-content: space-between;
-            font-size: 0.8rem;
-            margin-bottom: 5px;
-            padding-bottom: 5px;
-            border-bottom: 1px solid rgba(255,255,255,0.05);
+            display: grid;
+            grid-template-columns: 2fr 1fr 1fr 1fr;
+            font-size: 0.75rem;
+            margin-bottom: 3px;
+            padding: 5px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.03);
         }
 
         .val-pos { color: var(--accent-green); font-weight: bold; }
         .val-neg { color: var(--delete); font-weight: bold; }
+        .val-neutral { color: var(--blue-info); }
 
         /* --- CONTROL / HISTORIAL --- */
         .stats-grid {
@@ -255,7 +268,7 @@
                 <canvas id="growthChart"></canvas>
             </div>
 
-            <h2 style="color: var(--blue-info); font-size: 1rem; margin-bottom: 15px;"><i class="fa-solid fa-vial-circle-check"></i> Backtesting de Estrategia</h2>
+            <h2 style="color: var(--blue-info); font-size: 1rem; margin-bottom: 15px;"><i class="fa-solid fa-vial-circle-check"></i> Análisis de Estrategia (Backtesting)</h2>
             <div class="backtest-grid" id="backtest-results"></div>
 
             <h2 style="color: var(--texto-amarillo); font-size: 1rem; margin-bottom: 15px;"><i class="fa-solid fa-list"></i> Historial de Apuestas</h2>
@@ -373,7 +386,6 @@
             const rawEvent = document.getElementById(`event_${id}`).value.trim();
             const mercadoName = mercados.find(m => m.id === id).title;
 
-            // --- LÓGICA DE PARSEO POR EMOJIS ---
             let liga = "General";
             let partido = "Evento Desconocido";
             let fecha = "Sin fecha";
@@ -381,12 +393,11 @@
             if (rawEvent.includes('🆚') && rawEvent.includes('🗓️')) {
                 const indexVs = rawEvent.indexOf('🆚');
                 const indexCal = rawEvent.indexOf('🗓️');
-
                 liga = rawEvent.substring(0, indexVs).trim();
                 partido = rawEvent.substring(indexVs + 1, indexCal).trim();
                 fecha = rawEvent.substring(indexCal + 1).trim();
             } else {
-                partido = rawEvent; // Fallback si no detecta los símbolos
+                partido = rawEvent || "Manual Bet";
             }
 
             const nuevaApuesta = {
@@ -405,62 +416,72 @@
 
             apuestas.unshift(nuevaApuesta);
             localStorage.setItem('betags_history', JSON.stringify(apuestas));
-            
             clearCalc(id);
-            alert("¡Apuesta registrada exitosamente!");
+            alert("¡Apuesta registrada!");
         }
 
         function loadHistory() {
             const list = document.getElementById('history-list');
-            let profit = 0, inversion = 0, ganadas = 0, terminadas = 0;
+            let totalProfit = 0, totalInversion = 0, totalGanadas = 0, totalTerminadas = 0;
             let cumulativeData = [0];
 
-            let statsMercado = {}, statsCuota = { 'Baja (<1.70)':0, 'Media (1.7-2.2)':0, 'Alta (>2.2)':0 };
-            let statsEdge = { 'Bajo (3-7%)':0, 'Medio (7-11%)':0, 'Alto (>11%)':0 };
-            let statsLiga = {};
+            // Estructura para Analytics profundo
+            const initStat = () => ({ profit: 0, inversion: 0, ganadas: 0, count: 0 });
+            let statsMercado = {}, statsCuota = {}, statsEdge = {}, statsOvr = {}, statsLiga = {};
 
             const sortedHistory = [...apuestas].reverse();
             let currentProfit = 0;
 
-            sortedHistory.forEach(a => {
+            apuestas.forEach(a => {
                 if (a.status !== 'pending') {
-                    const res = (a.status === 'win') ? (a.cuota - 1) * a.stake : -a.stake;
-                    currentProfit += res;
-                    cumulativeData.push(parseFloat(currentProfit.toFixed(2)));
+                    const isWin = a.status === 'win';
+                    const res = isWin ? (a.cuota - 1) * a.stake : -a.stake;
+                    
+                    // Categorizar Rangos
+                    let rangoCuota = a.cuota < 1.7 ? 'Baja (<1.7)' : (a.cuota <= 2.2 ? 'Media (1.7-2.2)' : 'Alta (>2.2)');
+                    let rangoEdge = a.edge < 7 ? 'Bajo (3-7%)' : (a.edge <= 11 ? 'Medio (7-11%)' : 'Alto (>11%)');
+                    let rangoOvr = a.overround < 4 ? 'Bajo (<4%)' : (a.overround <= 7 ? 'Medio (4-7%)' : 'Alto (>7%)');
 
-                    if(!statsMercado[a.mercado]) statsMercado[a.mercado] = 0;
-                    statsMercado[a.mercado] += res;
+                    const update = (obj, key) => {
+                        if(!obj[key]) obj[key] = initStat();
+                        obj[key].profit += res;
+                        obj[key].inversion += a.stake;
+                        obj[key].count++;
+                        if(isWin) obj[key].ganadas++;
+                    };
 
-                    if(a.cuota < 1.7) statsCuota['Baja (<1.70)'] += res;
-                    else if(a.cuota <= 2.2) statsCuota['Media (1.7-2.2)'] += res;
-                    else statsCuota['Alta (>2.2)'] += res;
+                    update(statsMercado, a.mercado);
+                    update(statsCuota, rangoCuota);
+                    update(statsEdge, rangoEdge);
+                    update(statsOvr, rangoOvr);
+                    update(statsLiga, a.liga);
 
-                    if(a.edge < 7) statsEdge['Bajo (3-7%)'] += res;
-                    else if(a.edge <= 11) statsEdge['Medio (7-11%)'] += res;
-                    else statsEdge['Alto (>11%)'] += res;
-
-                    if(!statsLiga[a.liga]) statsLiga[a.liga] = 0;
-                    statsLiga[a.liga] += res;
+                    totalProfit += res;
+                    totalInversion += a.stake;
+                    totalTerminadas++;
+                    if(isWin) totalGanadas++;
                 }
-
-                if (a.status === 'win') { profit += (a.cuota - 1) * a.stake; inversion += a.stake; ganadas++; terminadas++; }
-                else if (a.status === 'loss') { profit -= a.stake; inversion += a.stake; terminadas++; }
             });
 
-            renderBacktestUI(statsMercado, statsCuota, statsEdge, statsLiga);
+            // Actualizar Chart
+            sortedHistory.filter(a => a.status !== 'pending').forEach(a => {
+                const res = (a.status === 'win') ? (a.cuota - 1) * a.stake : -a.stake;
+                currentProfit += res;
+                cumulativeData.push(parseFloat(currentProfit.toFixed(2)));
+            });
+
+            renderBacktestUI(statsMercado, statsCuota, statsEdge, statsOvr, statsLiga);
 
             list.innerHTML = apuestas.map(a => `
                 <div class="history-item ${a.status}">
                     <span class="history-league">${a.liga}</span>
                     <span class="history-event">${a.partido}</span>
                     <span class="history-date"><i class="fa-regular fa-calendar-check"></i> ${a.fecha_evento}</span>
-                    
                     <div style="display:flex; justify-content:space-between; font-weight:bold; border-top:1px solid rgba(255,255,255,0.05); padding-top:8px;">
                         <span>${a.mercado} @${a.cuota}</span>
                         <span>$${a.stake.toFixed(2)}</span>
                     </div>
                     <div style="font-size:0.7rem; color:#888; margin-top:5px;">Edge: ${a.edge}% | OV: ${a.overround}%</div>
-                    
                     <div class="actions">
                         ${a.status === 'pending' ? `
                             <button class="btn-win" onclick="updateStatus(${a.id}, 'win')">GANADA</button>
@@ -471,27 +492,49 @@
                 </div>
             `).join('');
 
-            document.getElementById('stat-profit').innerText = profit.toFixed(2) + " $";
-            document.getElementById('stat-profit').style.color = profit >= 0 ? "var(--accent-green)" : "var(--delete)";
-            document.getElementById('stat-wr').innerText = terminadas > 0 ? ((ganadas/terminadas)*100).toFixed(1) + "%" : "0%";
-            document.getElementById('stat-yield').innerText = inversion > 0 ? ((profit/inversion)*100).toFixed(1) + "%" : "0%";
+            document.getElementById('stat-profit').innerText = totalProfit.toFixed(2) + " $";
+            document.getElementById('stat-profit').style.color = totalProfit >= 0 ? "var(--accent-green)" : "var(--delete)";
+            document.getElementById('stat-wr').innerText = totalTerminadas > 0 ? ((totalGanadas/totalTerminadas)*100).toFixed(1) + "%" : "0%";
+            document.getElementById('stat-yield').innerText = totalInversion > 0 ? ((totalProfit/totalInversion)*100).toFixed(1) + "%" : "0%";
 
             updateChart(cumulativeData);
         }
 
-        function renderBacktestUI(mercados, cuotas, edges, ligas) {
+        function renderBacktestUI(mercados, cuotas, edges, ovrs, ligas) {
             const btContainer = document.getElementById('backtest-results');
+            
             const createBTBox = (title, data) => {
                 let html = `<div class="bt-card"><h3>${title}</h3>`;
-                let keys = Object.keys(data);
-                if(keys.length === 0) html += `<div class="insight-row"><span>Esperando datos...</span></div>`;
+                html += `<div class="bt-header"><span>Categoría</span><span>P/L</span><span>WR%</span><span>Yield</span></div>`;
+                
+                let keys = Object.keys(data).sort((a,b) => data[b].profit - data[a].profit);
+                
+                if(keys.length === 0) {
+                    html += `<div style="font-size:0.7rem; color:#444; padding:10px;">Sin datos finalizados</div>`;
+                }
+
                 keys.forEach(key => {
-                    const val = data[key];
-                    html += `<div class="insight-row"><span>${key}</span><span class="${val>=0?'val-pos':'val-neg'}">${val>=0?'+':''}${val.toFixed(2)}$</span></div>`;
+                    const d = data[key];
+                    const yieldVal = ((d.profit / d.inversion) * 100).toFixed(1);
+                    const wrVal = ((d.ganadas / d.count) * 100).toFixed(0);
+                    
+                    html += `
+                        <div class="insight-row">
+                            <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; padding-right:5px;">${key}</span>
+                            <span class="${d.profit>=0?'val-pos':'val-neg'}">${d.profit.toFixed(1)}$</span>
+                            <span class="val-neutral">${wrVal}%</span>
+                            <span class="${yieldVal>=0?'val-pos':'val-neg'}" style="font-size:0.65rem;">${yieldVal}%</span>
+                        </div>`;
                 });
                 return html + `</div>`;
             };
-            btContainer.innerHTML = createBTBox('Por Mercado', mercados) + createBTBox('Por Cuota', cuotas) + createBTBox('Por Edge', edges) + createBTBox('Top Ligas', ligas);
+
+            btContainer.innerHTML = 
+                createBTBox('Por Mercado', mercados) + 
+                createBTBox('Por Cuota', cuotas) + 
+                createBTBox('Por Edge', edges) + 
+                createBTBox('Por Overround', ovrs) + 
+                createBTBox('Top Ligas', ligas);
         }
 
         function updateChart(dataPoints) {
@@ -505,7 +548,7 @@
                         data: dataPoints,
                         borderWidth: 2,
                         tension: 0.3,
-                        pointRadius: 0,
+                        pointRadius: 2,
                         borderColor: '#00ff88',
                         backgroundColor: 'rgba(0, 255, 136, 0.1)',
                         fill: true
@@ -531,7 +574,7 @@
         }
 
         function deleteBet(id) {
-            if(confirm("¿Eliminar apuesta?")) {
+            if(confirm("¿Eliminar?")) {
                 apuestas = apuestas.filter(a => a.id !== id);
                 localStorage.setItem('betags_history', JSON.stringify(apuestas));
                 loadHistory();
@@ -539,7 +582,7 @@
         }
 
         function clearAllHistory() {
-            if(confirm("¡CUIDADO! Se borrará todo el historial.")) {
+            if(confirm("¡BORRADO TOTAL!")) {
                 apuestas = [];
                 localStorage.removeItem('betags_history');
                 loadHistory();
