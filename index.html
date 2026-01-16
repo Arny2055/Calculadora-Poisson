@@ -3,8 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>BetAGS - Pro Control & Analytics</title>
+    <title>BetAGS - Pro Analytics & Visual Control</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         :root {
             --fondo: #050d0a;
@@ -41,7 +42,7 @@
             text-align: center;
             cursor: pointer;
             font-weight: bold;
-            color: var(--text-dim);
+            color: #7f9c93;
             transition: 0.3s;
             text-transform: uppercase;
             font-size: 0.8rem;
@@ -77,7 +78,7 @@
         }
 
         .card h2 {
-            margin-top: 0;
+            margin: 0 0 10px 0;
             color: var(--texto-amarillo);
             font-size: 1rem;
             border-bottom: 1px solid var(--border);
@@ -133,6 +134,15 @@
         }
         .stat-val { font-size: 1.2rem; font-weight: 900; display: block; }
 
+        .chart-container {
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 15px;
+            margin-bottom: 20px;
+            height: 250px;
+        }
+
         .history-item {
             background: var(--card-bg); padding: 15px; border-radius: 10px;
             margin-bottom: 10px; border-left: 5px solid #444; position: relative;
@@ -151,7 +161,7 @@
 
     <div class="nav-tabs">
         <div class="tab-link active" onclick="nav('calc-screen', this)"><i class="fa-solid fa-calculator"></i> Calculadoras</div>
-        <div class="tab-link" onclick="nav('control-screen', this)"><i class="fa-solid fa-book"></i> Control de Apuestas</div>
+        <div class="tab-link" onclick="nav('control-screen', this)"><i class="fa-solid fa-chart-line"></i> Control & Gráfica</div>
     </div>
 
     <div class="container">
@@ -177,10 +187,14 @@
                 </div>
             </div>
 
+            <div class="chart-container">
+                <canvas id="growthChart"></canvas>
+            </div>
+
             <div id="history-list">
                 </div>
             
-            <button onclick="clearAllHistory()" style="width:100%; background:none; color:var(--delete); border:1px solid var(--delete); padding:10px; border-radius:6px; margin-top:20px; cursor:pointer;">BORRAR TODO EL HISTORIAL</button>
+            <button onclick="clearAllHistory()" style="width:100%; background:none; color:var(--delete); border:1px solid var(--delete); padding:10px; border-radius:6px; margin-top:20px; cursor:pointer; font-weight:bold;">LIMPIAR TODO EL HISTORIAL</button>
         </div>
 
     </div>
@@ -194,6 +208,7 @@
         ];
 
         let apuestas = JSON.parse(localStorage.getItem('betags_history')) || [];
+        let growthChart = null;
 
         // Generar UI de calculadoras
         function renderCalculators() {
@@ -221,13 +236,13 @@
                             <span>Edge: <b id="edge_${m.id}">0.00%</b></span>
                             <span>Overround: <b id="ovr_${m.id}">0.00%</b></span>
                         </div>
-                        <div style="margin-top:10px;">
+                        <div style="margin-top:15px; text-align:left;">
                             <label>Stake para registro ($)</label>
-                            <input type="number" id="stake_${m.id}" value="100">
+                            <input type="number" id="stake_${m.id}" value="10">
                         </div>
                         <button id="btn_${m.id}" class="btn-register" onclick="registerBet('${m.id}')">REGISTRAR EN CONTROL</button>
                     </div>
-                    <button class="btn-clear" onclick="clearCalc('${m.id}')">Limpiar</button>
+                    <button class="btn-clear" onclick="clearCalc('${m.id}')">Limpiar datos</button>
                 </div>
             `).join('');
         }
@@ -249,7 +264,7 @@
                 ovrEl.innerText = overround.toFixed(2) + "%";
                 edgeEl.innerText = edge.toFixed(2) + "%";
 
-                // REGLAS
+                // REGLAS BETAGS
                 const ruleEdge = (edge >= 3 && edge <= 15);
                 const ruleOvr = (overround <= 8);
                 const ruleVs = (edge > overround);
@@ -260,7 +275,7 @@
                     btnReg.style.display = "block";
                     edgeEl.style.color = "var(--accent-green)";
                 } else if (edge > 0) {
-                    recEl.innerText = "⚠ FUERA DE RANGO SEGURO";
+                    recEl.innerText = "⚠ NO CUMPLE REGLAS SEGURAS";
                     recEl.className = "recommendation status-danger";
                     btnReg.style.display = "block";
                     edgeEl.style.color = "var(--texto-amarillo)";
@@ -293,16 +308,30 @@
 
             apuestas.unshift(nuevaApuesta);
             localStorage.setItem('betags_history', JSON.stringify(apuestas));
-            alert("¡Apuesta registrada en el Control!");
+            alert("Registrado correctamente.");
             loadHistory();
         }
 
         function loadHistory() {
             const list = document.getElementById('history-list');
             let profit = 0, inversion = 0, ganadas = 0, terminadas = 0;
+            let cumulativeData = [0];
 
+            // Invertimos para la gráfica (orden cronológico)
+            const sortedHistory = [...apuestas].reverse();
+            let currentProfit = 0;
+
+            sortedHistory.forEach(a => {
+                if (a.status === 'win') {
+                    currentProfit += (a.cuota - 1) * a.stake;
+                } else if (a.status === 'loss') {
+                    currentProfit -= a.stake;
+                }
+                if (a.status !== 'pending') cumulativeData.push(parseFloat(currentProfit.toFixed(2)));
+            });
+
+            // UI del Historial
             list.innerHTML = apuestas.map(a => {
-                let statusClass = a.status;
                 if (a.status === 'win') {
                     profit += (a.cuota - 1) * a.stake;
                     inversion += a.stake;
@@ -320,25 +349,78 @@
                             <b>${a.mercado}</b>
                             <small>${a.fecha}</small>
                         </div>
-                        <div style="font-size:0.75rem; color:#aaa; margin:5px 0;">
+                        <div style="font-size:0.7rem; color:#888; margin:5px 0;">
                             Cuota: ${a.cuota} | Stake: ${a.stake}$ | Edge: ${a.edge}
                         </div>
                         <div class="actions">
                             ${a.status === 'pending' ? `
                                 <button class="btn-win" onclick="updateStatus(${a.id}, 'win')">GANADA</button>
                                 <button class="btn-loss" onclick="updateStatus(${a.id}, 'loss')">PERDIDA</button>
-                            ` : `<b style="text-transform:uppercase; color:${a.status==='win'?'var(--accent-green)':'var(--delete)'}">${a.status}</b>`}
+                            ` : `<b style="font-size:0.8rem; text-transform:uppercase; color:${a.status==='win'?'var(--accent-green)':'var(--delete)'}">${a.status === 'win' ? '¡ACERTADA!' : 'FALLADA'}</b>`}
                             <button class="btn-del" onclick="deleteBet(${a.id})"><i class="fa-solid fa-trash"></i></button>
                         </div>
                     </div>
                 `;
             }).join('');
 
-            // Actualizar Stats
+            // Actualizar Estadísticas
             document.getElementById('stat-profit').innerText = profit.toFixed(2) + " $";
             document.getElementById('stat-profit').style.color = profit >= 0 ? "var(--accent-green)" : "var(--delete)";
             document.getElementById('stat-wr').innerText = terminadas > 0 ? ((ganadas/terminadas)*100).toFixed(1) + "%" : "0%";
             document.getElementById('stat-yield').innerText = inversion > 0 ? ((profit/inversion)*100).toFixed(1) + "%" : "0%";
+
+            updateChart(cumulativeData);
+        }
+
+        function updateChart(dataPoints) {
+            const ctx = document.getElementById('growthChart').getContext('2d');
+            
+            if (growthChart) {
+                growthChart.destroy();
+            }
+
+            // Lógica de color de línea: Roja si < 0, Verde si >= 0
+            growthChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: dataPoints.map((_, i) => i),
+                    datasets: [{
+                        label: 'Profit Acumulado',
+                        data: dataPoints,
+                        borderWidth: 3,
+                        tension: 0.3,
+                        pointRadius: 4,
+                        pointBackgroundColor: '#fff',
+                        // Segmentación de colores
+                        segment: {
+                            borderColor: ctx => ctx.p0.parsed.y < 0 && ctx.p1.parsed.y < 0 ? '#ff4d4d' : '#00ff88',
+                            backgroundColor: ctx => ctx.p0.parsed.y < 0 && ctx.p1.parsed.y < 0 ? 'rgba(255, 77, 77, 0.1)' : 'rgba(0, 255, 136, 0.1)',
+                        },
+                        fill: true
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false }
+                    },
+                    scales: {
+                        x: {
+                            grid: { color: 'rgba(255,255,255,0.05)' },
+                            ticks: { color: '#7f9c93', font: { size: 10 } }
+                        },
+                        y: {
+                            grid: { color: 'rgba(255,255,255,0.05)' },
+                            ticks: { 
+                                color: '#7f9c93', 
+                                font: { size: 10 },
+                                callback: value => value + '$'
+                            }
+                        }
+                    }
+                }
+            });
         }
 
         function updateStatus(id, status) {
@@ -357,7 +439,7 @@
         }
 
         function clearAllHistory() {
-            if(confirm("¿ESTÁS SEGURO? Se borrarán todas las estadísticas.")) {
+            if(confirm("¿ESTÁS SEGURO? Se borrarán todos tus datos de forma permanente.")) {
                 apuestas = [];
                 localStorage.removeItem('betags_history');
                 loadHistory();
@@ -369,7 +451,7 @@
             document.getElementById(`contra_${id}`).value = "";
             document.getElementById(`prob_${id}`).value = "";
             document.getElementById(`rec_${id}`).innerText = "ESPERANDO DATOS";
-            document.getElementById(`rec_${id}`).className = "recommendation status-no";
+            document.getElementById('rec_'+id).className = "recommendation status-no";
             document.getElementById(`edge_${id}`).innerText = "0.00%";
             document.getElementById(`ovr_${id}`).innerText = "0.00%";
             document.getElementById(`btn_${id}`).style.display = "none";
@@ -380,9 +462,10 @@
             document.querySelectorAll('.tab-link').forEach(t => t.classList.remove('active'));
             document.getElementById(screenId).classList.add('active-screen');
             el.classList.add('active');
+            if (screenId === 'control-screen') loadHistory();
         }
 
-        // Inicializar
+        // Inicialización
         renderCalculators();
         loadHistory();
     </script>
