@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>BetAGS - Pro Analytics & Kelly Control</title>
+    <title>BetAGS - Pro Analytics & Event Control</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
@@ -93,10 +93,17 @@
         }
 
         label { display: block; font-size: 0.7rem; color: #888; margin-bottom: 4px; }
-        input {
+        input, textarea {
             width: 100%; padding: 10px; background: var(--input-bg);
             border: 1px solid var(--border); color: white; border-radius: 6px;
-            box-sizing: border-box; font-weight: bold;
+            box-sizing: border-box; font-weight: bold; font-family: inherit;
+        }
+
+        textarea {
+            resize: none;
+            font-size: 0.75rem;
+            height: 60px;
+            margin-bottom: 10px;
         }
 
         .results-box {
@@ -157,6 +164,16 @@
         .history-item.win { border-left-color: var(--accent-green); }
         .history-item.loss { border-left-color: var(--delete); }
 
+        .history-event {
+            font-size: 0.85rem;
+            color: var(--texto-amarillo);
+            margin-bottom: 5px;
+            display: block;
+            background: rgba(0,0,0,0.2);
+            padding: 5px;
+            border-radius: 4px;
+        }
+
         .actions { display: flex; gap: 10px; margin-top: 10px; }
         .btn-win { background: var(--accent-green); border: none; padding: 5px 15px; border-radius: 4px; font-weight: bold; cursor: pointer; }
         .btn-loss { background: var(--delete); border: none; padding: 5px 15px; border-radius: 4px; color: white; font-weight: bold; cursor: pointer; }
@@ -175,7 +192,7 @@
         
         <div id="calc-screen" class="screen active-screen">
             <div style="background: rgba(0,255,136,0.05); padding: 10px; border-radius: 8px; border: 1px solid var(--accent-green); margin-bottom: 20px; text-align: center; font-size: 0.8rem;">
-                <i class="fa-solid fa-bank"></i> Banca Base de Gestión: <b>$100.00</b> | Fracción Kelly: <b>25%</b>
+                <i class="fa-solid fa-bank"></i> Banca Base: <b>$100.00</b> | Kelly: <b>25%</b>
             </div>
             <div class="grid" id="calculadoras-container">
                 </div>
@@ -247,7 +264,11 @@
                             <span>Edge: <b id="edge_${m.id}">0.00%</b></span>
                             <span>Overround: <b id="ovr_${m.id}">0.00%</b></span>
                         </div>
+                        
                         <div style="margin-top:15px; text-align:left;">
+                            <label>País / Liga / Partido</label>
+                            <textarea id="event_${m.id}" placeholder="Ej: México - Liga MX - América vs Chivas"></textarea>
+                            
                             <label>Stake Sugerido (Kelly 25%)</label>
                             <input type="number" id="stake_${m.id}" value="0.00">
                             <span id="kelly_pct_${m.id}" class="kelly-info"></span>
@@ -278,13 +299,10 @@
                 ovrEl.innerText = overround.toFixed(2) + "%";
                 edgeEl.innerText = edge.toFixed(2) + "%";
 
-                // REGLAS BETAGS
                 const ruleEdge = (edge >= 3 && edge <= 15);
                 const ruleOvr = (overround <= 8);
                 const ruleVs = (edge > overround);
 
-                // Cálculo de Kelly
-                // Kelly % = (p*b - q) / b  donde b = odds - 1
                 const p = prob / 100;
                 const b = odds - 1;
                 const kellyFull = (p * odds - 1) / b;
@@ -297,14 +315,14 @@
                     btnReg.style.display = "block";
                     edgeEl.style.color = "var(--accent-green)";
                     stakeInput.value = stakeFinal.toFixed(2);
-                    kellyInfo.innerText = "Sugerencia basada en Kelly al " + (kellySugerido * 100).toFixed(2) + "% de la banca.";
+                    kellyInfo.innerText = "Sugerencia Kelly: " + (kellySugerido * 100).toFixed(2) + "%";
                 } else if (edge > 0) {
-                    recEl.innerText = "⚠ FUERA DE RANGO SEGURO";
+                    recEl.innerText = "⚠ NO CUMPLE REGLAS SEGURAS";
                     recEl.className = "recommendation status-danger";
                     btnReg.style.display = "block";
                     edgeEl.style.color = "var(--texto-amarillo)";
                     stakeInput.value = stakeFinal.toFixed(2);
-                    kellyInfo.innerText = "Edge detectado, pero fuera de parámetros.";
+                    kellyInfo.innerText = "Edge positivo pero riesgo elevado.";
                 } else {
                     recEl.innerText = "✗ SIN VALOR";
                     recEl.className = "recommendation status-no";
@@ -319,21 +337,21 @@
         function registerBet(id) {
             const odds = parseFloat(document.getElementById(`odds_${id}`).value);
             const edge = document.getElementById(`edge_${id}`).innerText;
-            const prob = document.getElementById(`prob_${id}`).value;
             const stake = parseFloat(document.getElementById(`stake_${id}`).value) || 0;
+            const evento = document.getElementById(`event_${id}`).value || "Evento sin nombre";
             const mercadoName = mercados.find(m => m.id === id).title;
 
             if (stake <= 0) {
-                alert("El stake debe ser mayor a 0 para registrar.");
+                alert("Asigna un stake para registrar.");
                 return;
             }
 
             const nuevaApuesta = {
                 id: Date.now(),
+                evento: evento,
                 mercado: mercadoName,
                 cuota: odds,
                 edge: edge,
-                prob: prob,
                 stake: stake,
                 status: 'pending',
                 fecha: new Date().toLocaleDateString()
@@ -341,7 +359,7 @@
 
             apuestas.unshift(nuevaApuesta);
             localStorage.setItem('betags_history', JSON.stringify(apuestas));
-            alert("Registrado en Control.");
+            alert("¡Registrada!");
             loadHistory();
         }
 
@@ -376,6 +394,7 @@
 
                 return `
                     <div class="history-item ${a.status}">
+                        <span class="history-event"><i class="fa-solid fa-location-dot"></i> ${a.evento}</span>
                         <div style="display:flex; justify-content:space-between;">
                             <b>${a.mercado}</b>
                             <small>${a.fecha}</small>
@@ -385,8 +404,8 @@
                         </div>
                         <div class="actions">
                             ${a.status === 'pending' ? `
-                                <button class="btn-win" onclick="updateStatus(${a.id}, 'win')">GANADA</button>
-                                <button class="btn-loss" onclick="updateStatus(${a.id}, 'loss')">PERDIDA</button>
+                                <button class="btn-win" onclick="updateStatus(${a.id}, 'win')">W</button>
+                                <button class="btn-loss" onclick="updateStatus(${a.id}, 'loss')">L</button>
                             ` : `<b style="font-size:0.8rem; text-transform:uppercase; color:${a.status==='win'?'var(--accent-green)':'var(--delete)'}">${a.status === 'win' ? '¡ACERTADA!' : 'FALLADA'}</b>`}
                             <button class="btn-del" onclick="deleteBet(${a.id})"><i class="fa-solid fa-trash"></i></button>
                         </div>
@@ -451,7 +470,7 @@
         }
 
         function clearAllHistory() {
-            if(confirm("¿BORRAR TODO?")) {
+            if(confirm("¿BORRAR TODO EL HISTORIAL?")) {
                 apuestas = [];
                 localStorage.removeItem('betags_history');
                 loadHistory();
@@ -462,6 +481,7 @@
             document.getElementById(`odds_${id}`).value = "";
             document.getElementById(`contra_${id}`).value = "";
             document.getElementById(`prob_${id}`).value = "";
+            document.getElementById(`event_${id}`).value = "";
             document.getElementById(`rec_${id}`).innerText = "ESPERANDO DATOS";
             document.getElementById(`rec_${id}`).className = "recommendation status-no";
             document.getElementById(`edge_${id}`).innerText = "0.00%";
