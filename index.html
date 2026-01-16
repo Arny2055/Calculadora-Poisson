@@ -127,10 +127,10 @@
             padding: 5px; margin-top: 10px; border-radius: 4px; cursor: pointer; font-size: 0.7rem;
         }
 
-        /* --- SECCIÓN BACKTESTING (MEJORADA) --- */
+        /* --- SECCIÓN BACKTESTING --- */
         .backtest-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
             gap: 15px;
             margin-bottom: 25px;
         }
@@ -400,8 +400,10 @@
                 partido = rawEvent || "Manual Bet";
             }
 
+            const now = new Date();
             const nuevaApuesta = {
                 id: Date.now(),
+                timestamp: now.getTime(),
                 liga: liga,
                 partido: partido,
                 fecha_evento: fecha,
@@ -411,7 +413,7 @@
                 overround: ovr,
                 stake: stake,
                 status: 'pending',
-                registro: new Date().toLocaleDateString()
+                registro: now.toLocaleString()
             };
 
             apuestas.unshift(nuevaApuesta);
@@ -425,22 +427,35 @@
             let totalProfit = 0, totalInversion = 0, totalGanadas = 0, totalTerminadas = 0;
             let cumulativeData = [0];
 
-            // Estructura para Analytics profundo
             const initStat = () => ({ profit: 0, inversion: 0, ganadas: 0, count: 0 });
-            let statsMercado = {}, statsCuota = {}, statsEdge = {}, statsOvr = {}, statsLiga = {};
+            let statsMercado = {}, statsCuota = {}, statsEdge = {}, statsOvr = {}, statsLiga = {}, statsDia = {}, statsHora = {};
 
-            const sortedHistory = [...apuestas].reverse();
-            let currentProfit = 0;
+            const diasSemana = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
 
             apuestas.forEach(a => {
                 if (a.status !== 'pending') {
                     const isWin = a.status === 'win';
                     const res = isWin ? (a.cuota - 1) * a.stake : -a.stake;
                     
-                    // Categorizar Rangos
                     let rangoCuota = a.cuota < 1.7 ? 'Baja (<1.7)' : (a.cuota <= 2.2 ? 'Media (1.7-2.2)' : 'Alta (>2.2)');
                     let rangoEdge = a.edge < 7 ? 'Bajo (3-7%)' : (a.edge <= 11 ? 'Medio (7-11%)' : 'Alto (>11%)');
                     let rangoOvr = a.overround < 4 ? 'Bajo (<4%)' : (a.overround <= 7 ? 'Medio (4-7%)' : 'Alto (>7%)');
+
+                    // Lógica para Día y Hora
+                    const dateObj = new Date(a.timestamp || a.id);
+                    let diaNombre = diasSemana[dateObj.getDay()];
+                    
+                    // Intentar extraer día del texto pegado si existe (ej: "vie.", "sáb.")
+                    const textoFecha = a.fecha_evento.toLowerCase();
+                    if(textoFecha.includes('lun')) diaNombre = 'Lunes';
+                    else if(textoFecha.includes('mar')) diaNombre = 'Martes';
+                    else if(textoFecha.includes('mié') || textoFecha.includes('mie')) diaNombre = 'Miércoles';
+                    else if(textoFecha.includes('jue')) diaNombre = 'Jueves';
+                    else if(textoFecha.includes('vie')) diaNombre = 'Viernes';
+                    else if(textoFecha.includes('sáb') || textoFecha.includes('sab')) diaNombre = 'Sábado';
+                    else if(textoFecha.includes('dom')) diaNombre = 'Domingo';
+
+                    let horaStr = dateObj.getHours().toString().padStart(2, '0') + ":00";
 
                     const update = (obj, key) => {
                         if(!obj[key]) obj[key] = initStat();
@@ -455,6 +470,8 @@
                     update(statsEdge, rangoEdge);
                     update(statsOvr, rangoOvr);
                     update(statsLiga, a.liga);
+                    update(statsDia, diaNombre);
+                    update(statsHora, horaStr);
 
                     totalProfit += res;
                     totalInversion += a.stake;
@@ -463,20 +480,21 @@
                 }
             });
 
-            // Actualizar Chart
-            sortedHistory.filter(a => a.status !== 'pending').forEach(a => {
+            const sortedForChart = [...apuestas].reverse().filter(a => a.status !== 'pending');
+            let currentProfit = 0;
+            sortedForChart.forEach(a => {
                 const res = (a.status === 'win') ? (a.cuota - 1) * a.stake : -a.stake;
                 currentProfit += res;
                 cumulativeData.push(parseFloat(currentProfit.toFixed(2)));
             });
 
-            renderBacktestUI(statsMercado, statsCuota, statsEdge, statsOvr, statsLiga);
+            renderBacktestUI(statsMercado, statsCuota, statsEdge, statsOvr, statsLiga, statsDia, statsHora);
 
             list.innerHTML = apuestas.map(a => `
                 <div class="history-item ${a.status}">
                     <span class="history-league">${a.liga}</span>
                     <span class="history-event">${a.partido}</span>
-                    <span class="history-date"><i class="fa-regular fa-calendar-check"></i> ${a.fecha_evento}</span>
+                    <span class="history-date"><i class="fa-regular fa-calendar-check"></i> ${a.fecha_evento} <small>(${a.registro})</small></span>
                     <div style="display:flex; justify-content:space-between; font-weight:bold; border-top:1px solid rgba(255,255,255,0.05); padding-top:8px;">
                         <span>${a.mercado} @${a.cuota}</span>
                         <span>$${a.stake.toFixed(2)}</span>
@@ -500,24 +518,23 @@
             updateChart(cumulativeData);
         }
 
-        function renderBacktestUI(mercados, cuotas, edges, ovrs, ligas) {
+        function renderBacktestUI(mercados, cuotas, edges, ovrs, ligas, dias, horas) {
             const btContainer = document.getElementById('backtest-results');
             
-            const createBTBox = (title, data) => {
+            const createBTBox = (title, data, sortMode = 'profit') => {
                 let html = `<div class="bt-card"><h3>${title}</h3>`;
                 html += `<div class="bt-header"><span>Categoría</span><span>P/L</span><span>WR%</span><span>Yield</span></div>`;
                 
-                let keys = Object.keys(data).sort((a,b) => data[b].profit - data[a].profit);
-                
-                if(keys.length === 0) {
-                    html += `<div style="font-size:0.7rem; color:#444; padding:10px;">Sin datos finalizados</div>`;
-                }
+                let keys = Object.keys(data);
+                if(sortMode === 'profit') keys.sort((a,b) => data[b].profit - data[a].profit);
+                else keys.sort(); // Para horas por ejemplo
+
+                if(keys.length === 0) html += `<div style="font-size:0.7rem; color:#444; padding:10px;">Sin datos</div>`;
 
                 keys.forEach(key => {
                     const d = data[key];
                     const yieldVal = ((d.profit / d.inversion) * 100).toFixed(1);
                     const wrVal = ((d.ganadas / d.count) * 100).toFixed(0);
-                    
                     html += `
                         <div class="insight-row">
                             <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; padding-right:5px;">${key}</span>
@@ -533,6 +550,8 @@
                 createBTBox('Por Mercado', mercados) + 
                 createBTBox('Por Cuota', cuotas) + 
                 createBTBox('Por Edge', edges) + 
+                createBTBox('Día de la Semana', dias) +
+                createBTBox('Franja Horaria', horas, 'key') +
                 createBTBox('Por Overround', ovrs) + 
                 createBTBox('Top Ligas', ligas);
         }
