@@ -34,7 +34,7 @@
             border: 1px solid #374151 !important;
             border-radius: 0.5rem;
         }
-        input:focus { border-color: var(--bet-yellow) !important; outline: none; box-shadow: 0 0 0 2px rgba(255, 235, 0, 0.1); }
+        input:focus, select:focus { border-color: var(--bet-yellow) !important; outline: none; box-shadow: 0 0 0 2px rgba(255, 235, 0, 0.1); }
         .glass-card { background: rgba(17, 24, 39, 0.7); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.05); }
 
         /* Estilos Neón */
@@ -114,6 +114,13 @@
             color: #475569;
             font-size: 12px;
             font-weight: bold;
+        }
+
+        /* Estilos Filtros */
+        .filter-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+            gap: 12px;
         }
     </style>
 </head>
@@ -231,6 +238,48 @@
         </div>
 
         <div id="bank" class="tab-content space-y-6">
+            <div class="glass-card p-6 rounded-2xl">
+                <div class="flex justify-between items-center mb-4 border-b border-slate-800 pb-2">
+                    <h2 class="text-sm font-black text-emerald-400 uppercase italic">Filtros Avanzados de Control</h2>
+                    <button onclick="resetFilters()" class="text-[10px] text-slate-500 hover:text-white transition-all uppercase font-bold">Limpiar Filtros</button>
+                </div>
+                <div class="filter-grid">
+                    <div>
+                        <label class="text-[9px] font-bold text-slate-500 uppercase block mb-1">Min/Max Edge (%)</label>
+                        <div class="flex gap-1">
+                            <input type="number" id="f_edge_min" placeholder="Min" class="w-full p-1 text-xs" oninput="applyFilters()">
+                            <input type="number" id="f_edge_max" placeholder="Max" class="w-full p-1 text-xs" oninput="applyFilters()">
+                        </div>
+                    </div>
+                    <div>
+                        <label class="text-[9px] font-bold text-slate-500 uppercase block mb-1">Min/Max Overround (%)</label>
+                        <div class="flex gap-1">
+                            <input type="number" id="f_ov_min" placeholder="Min" class="w-full p-1 text-xs" oninput="applyFilters()">
+                            <input type="number" id="f_ov_max" placeholder="Max" class="w-full p-1 text-xs" oninput="applyFilters()">
+                        </div>
+                    </div>
+                    <div>
+                        <label class="text-[9px] font-bold text-slate-500 uppercase block mb-1">Min/Max Cuota</label>
+                        <div class="flex gap-1">
+                            <input type="number" id="f_odd_min" placeholder="Min" class="w-full p-1 text-xs" oninput="applyFilters()">
+                            <input type="number" id="f_odd_max" placeholder="Max" class="w-full p-1 text-xs" oninput="applyFilters()">
+                        </div>
+                    </div>
+                    <div>
+                        <label class="text-[9px] font-bold text-slate-500 uppercase block mb-1">Mercado</label>
+                        <select id="f_market" class="w-full p-1 text-xs" onchange="applyFilters()">
+                            <option value="">TODOS</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="text-[9px] font-bold text-slate-500 uppercase block mb-1">Liga</label>
+                        <select id="f_league" class="w-full p-1 text-xs" onchange="applyFilters()">
+                            <option value="">TODAS</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
             <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 <div class="lg:col-span-2 glass-card p-6 rounded-2xl">
                     <h2 class="text-lg font-bold mb-4 text-emerald-400">Crecimiento del Bankroll</h2>
@@ -261,6 +310,7 @@
         const BANKROLL_BASE = 100;
         const KELLY_FRAC = 0.25;
         let bets = JSON.parse(localStorage.getItem('betags_pro_v3')) || [];
+        let filteredBets = []; // Almacena las apuestas después de filtros
         let pChart, bChart;
 
         // Variables para Scroll Infinito
@@ -304,13 +354,11 @@
             }
             renderPoissonChart(labels, h_p, a_p);
 
-            // HT Estimations (aprox 45% de los goles totales ocurren en el 1er tiempo)
             const home_ht_xg = home_xg * 0.45;
             const away_ht_xg = away_xg * 0.45;
             const p_u05_ht = poissonProb(0, home_ht_xg) * poissonProb(0, away_ht_xg);
             const p_o05_ht = 1 - p_u05_ht;
 
-            // Probabilidad Over/Under 2.5 FT
             let p_u25 = 0;
             for(let h=0; h<=2; h++) {
                 for(let a=0; a<=(2-h); a++) {
@@ -319,7 +367,6 @@
             }
             const p_o25 = 1 - p_u25;
 
-            // BTTS
             const p_btts_y = (1 - poissonProb(0, home_xg)) * (1 - poissonProb(0, away_xg));
             const p_btts_n = 1 - p_btts_y;
 
@@ -369,7 +416,6 @@
         }
 
         function updateOverrounds() {
-            // Overround Goles (Calcula basado en los inputs activos)
             const o25 = parseFloat(document.getElementById('odd_o25').value) || 0;
             const u25 = parseFloat(document.getElementById('odd_u25').value) || 0;
             const o05ht = parseFloat(document.getElementById('odd_o05ht').value) || 0;
@@ -465,10 +511,62 @@
             updateStats();
         }
 
-        // --- SCROLL INFINITO Y RENDERIZADO ---
-        function updateStats() {
+        // --- SISTEMA DE FILTROS ---
+        function populateFilterDropdowns() {
+            const markets = [...new Set(bets.map(b => b.market))];
+            const leagues = [...new Set(bets.map(b => b.league))];
+            
+            const mSelect = document.getElementById('f_market');
+            const lSelect = document.getElementById('f_league');
+            
+            const currentM = mSelect.value;
+            const currentL = lSelect.value;
+
+            mSelect.innerHTML = '<option value="">TODOS</option>';
+            lSelect.innerHTML = '<option value="">TODAS</option>';
+
+            markets.forEach(m => mSelect.innerHTML += `<option value="${m}">${m}</option>`);
+            leagues.forEach(l => lSelect.innerHTML += `<option value="${l}">${l}</option>`);
+
+            mSelect.value = currentM;
+            lSelect.value = currentL;
+        }
+
+        function applyFilters() {
+            const eMin = parseFloat(document.getElementById('f_edge_min').value) || -999;
+            const eMax = parseFloat(document.getElementById('f_edge_max').value) || 999;
+            const ovMin = parseFloat(document.getElementById('f_ov_min').value) || -999;
+            const ovMax = parseFloat(document.getElementById('f_ov_max').value) || 999;
+            const oMin = parseFloat(document.getElementById('f_odd_min').value) || 0;
+            const oMax = parseFloat(document.getElementById('f_odd_max').value) || 999;
+            const market = document.getElementById('f_market').value;
+            const league = document.getElementById('f_league').value;
+
+            filteredBets = bets.filter(b => {
+                const bEdge = parseFloat(b.edge);
+                const bOv = parseFloat(b.overround) || 0;
+                const matchEdge = bEdge >= eMin && bEdge <= eMax;
+                const matchOv = bOv >= ovMin && bOv <= ovMax;
+                const matchOdd = b.odd >= oMin && b.odd <= oMax;
+                const matchMarket = market === "" || b.market === market;
+                const matchLeague = league === "" || b.league === league;
+                return matchEdge && matchOv && matchOdd && matchMarket && matchLeague;
+            });
+
             lastDisplayedIndex = 0;
             document.getElementById('history-grid').innerHTML = '';
+            renderNextBetsBatch();
+        }
+
+        function resetFilters() {
+            document.querySelectorAll('.filter-grid input').forEach(i => i.value = '');
+            document.querySelectorAll('.filter-grid select').forEach(s => s.value = '');
+            applyFilters();
+        }
+
+        // --- RENDERIZADO Y ESTADÍSTICAS ---
+        function updateStats() {
+            populateFilterDropdowns();
             
             let totalProfit = 0, totalStaked = 0, wins = 0, finished = 0;
 
@@ -489,16 +587,17 @@
             document.getElementById('top-wr').innerText = finished > 0 ? ((wins / finished) * 100).toFixed(0) + "%" : "0%";
             
             renderBankrollChart();
-            renderNextBetsBatch();
+            applyFilters(); // Esto inicializa filteredBets y renderiza la rejilla
             initInfiniteScroll();
         }
 
         function renderNextBetsBatch() {
             const grid = document.getElementById('history-grid');
-            const nextBatch = bets.slice(lastDisplayedIndex, lastDisplayedIndex + itemsPerLoad);
+            const nextBatch = filteredBets.slice(lastDisplayedIndex, lastDisplayedIndex + itemsPerLoad);
             
-            if (nextBatch.length === 0) {
-                document.getElementById('load-status').innerText = "Fin del historial";
+            if (nextBatch.length === 0 && lastDisplayedIndex === 0) {
+                grid.innerHTML = '<p class="col-span-full text-center text-slate-500 py-10 font-bold">No se encontraron apuestas con estos filtros.</p>';
+                document.getElementById('load-status').innerText = "";
                 return;
             }
 
@@ -538,16 +637,14 @@
             });
 
             lastDisplayedIndex += nextBatch.length;
-            if (lastDisplayedIndex >= bets.length) {
-                document.getElementById('load-status').innerText = "Fin del historial";
-            }
+            document.getElementById('load-status').innerText = lastDisplayedIndex >= filteredBets.length ? "Fin del historial" : "Cargando más apuestas...";
         }
 
         function initInfiniteScroll() {
             if (isObserverActive) return;
             const trigger = document.getElementById('infinite-scroll-trigger');
             const observer = new IntersectionObserver((entries) => {
-                if (entries[0].isIntersecting && lastDisplayedIndex < bets.length) {
+                if (entries[0].isIntersecting && lastDisplayedIndex < filteredBets.length) {
                     setTimeout(() => renderNextBetsBatch(), 200);
                 }
             }, { threshold: 0.5 });
