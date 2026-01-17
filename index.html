@@ -173,6 +173,7 @@
                                 <th class="p-4">Fecha / Hora</th>
                                 <th class="p-4">Cuota</th>
                                 <th class="p-4">Edge</th>
+                                <th class="p-4">Overround</th>
                                 <th class="p-4">Stake</th>
                                 <th class="p-4 text-center">Estado</th>
                                 <th class="p-4 text-right">Acción</th>
@@ -199,10 +200,8 @@
         function showTab(tabId) {
             document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
             document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('bg-slate-700', 'text-bet-yellow'));
-            
             document.getElementById(tabId).classList.add('active');
             document.getElementById('btn-' + tabId).classList.add('bg-slate-700', 'text-bet-yellow');
-            
             updateStats();
             if(tabId === 'insights') runBacktesting();
         }
@@ -217,21 +216,16 @@
             const h_gc = parseFloat(document.getElementById('h_gc').value);
             const a_gf = parseFloat(document.getElementById('a_gf').value);
             const a_gc = parseFloat(document.getElementById('a_gc').value);
-
             if(!h_gf || !h_gc || !a_gf || !a_gc) return alert("Ingresa datos de equipos");
-
             const home_xg = (h_gf / l_h) * (a_gc / l_h) * l_h;
             const away_xg = (a_gf / l_a) * (h_gc / l_a) * l_a;
-
             let h_p = [], a_p = [], labels = [];
             for(let i=0; i<=6; i++) {
                 labels.push(i + " G");
                 h_p.push(poissonProb(i, home_xg));
                 a_p.push(poissonProb(i, away_xg));
             }
-
             renderPoissonChart(labels, h_p, a_p);
-
             let p_u25 = 0;
             for(let h=0; h<=2; h++) {
                 for(let a=0; a<=(2-h); a++) {
@@ -241,7 +235,6 @@
             const p_o25 = 1 - p_u25;
             const p_btts_y = (1 - poissonProb(0, home_xg)) * (1 - poissonProb(0, away_xg));
             const p_btts_n = 1 - p_btts_y;
-
             renderMarketTable([
                 { id: 'o25', name: 'OVER 2.5', prob: p_o25 },
                 { id: 'u25', name: 'UNDER 2.5', prob: p_u25 },
@@ -274,12 +267,10 @@
             const odd = parseFloat(document.getElementById('odd_' + id).value) || 0;
             const edgeEl = document.getElementById('edge_' + id);
             const stakeEl = document.getElementById('stake_' + id);
-
             if(odd > 1) {
                 const edge = (odd * prob) - 1;
                 const kelly = Math.max(0, (edge / (odd - 1)) * KELLY_FRAC);
                 const stake = BANKROLL_BASE * kelly;
-
                 edgeEl.innerText = (edge * 100).toFixed(2) + "%";
                 edgeEl.className = edge > 0 ? "p-4 text-emerald-400 font-bold" : "p-4 text-red-500";
                 stakeEl.innerText = stake > 0 ? "$" + stake.toFixed(2) : "--";
@@ -304,23 +295,33 @@
 
         function registerBet(id, market, prob) {
             const odd = parseFloat(document.getElementById('odd_' + id).value);
-            const fullEvent = document.getElementById('event_name').value || "Varios 🆚 Local - Vis 🗓️ Pendiente";
+            const rawEvent = document.getElementById('event_name').value || "Varios 🆚 Local - Vis 🗓️ Pendiente";
             if(!odd) return alert("Falta cuota de mercado");
 
-            // PARSEO DE LA INFORMACIÓN
+            // Limpiar saltos de línea y espacios extras del texto pegado
+            const fullEvent = rawEvent.replace(/[\n\r]+/g, ' ').trim();
+
+            // Capturar Overround actual según mercado
+            const isOU = id.includes('25');
+            const currentOv = isOU ? document.getElementById('ov-ou').innerText : document.getElementById('ov-btts').innerText;
+
             let leaguePart = "Varios", teamsPart = "Partido", datePart = "Pendiente";
             
-            try {
-                if(fullEvent.includes('🆚') && fullEvent.includes('🗓️')) {
-                    const splitVersus = fullEvent.split('🆚');
-                    leaguePart = splitVersus[0].trim();
-                    const splitDate = splitVersus[1].split('🗓️');
-                    teamsPart = splitDate[0].trim();
-                    datePart = splitDate[1].trim();
+            // Detección flexible de emojis (algunos traen selectores de variación invisibles)
+            const vsEmoji = "🆚";
+            const calEmoji = fullEvent.includes("🗓️") ? "🗓️" : "🗓";
+
+            if (fullEvent.includes(vsEmoji)) {
+                const partsVs = fullEvent.split(vsEmoji);
+                leaguePart = partsVs[0].trim();
+                if (partsVs[1].includes(calEmoji)) {
+                    const partsCal = partsVs[1].split(calEmoji);
+                    teamsPart = partsCal[0].trim();
+                    datePart = partsCal[1].trim();
                 } else {
-                    teamsPart = fullEvent;
+                    teamsPart = partsVs[1].trim();
                 }
-            } catch(e) {
+            } else {
                 teamsPart = fullEvent;
             }
 
@@ -334,6 +335,7 @@
                 teams: teamsPart,
                 matchTime: datePart,
                 market, odd, edge: (edge * 100).toFixed(2),
+                overround: currentOv,
                 stake, status: 'pending', profit: 0
             };
 
@@ -377,7 +379,7 @@
                 history.innerHTML += `
                     <tr class="hover:bg-slate-800/40">
                         <td class="p-4">
-                            <span class="text-[10px] bg-slate-800 px-2 py-1 rounded text-slate-400 font-bold border border-slate-700 uppercase">${b.league}</span>
+                            <span class="text-[10px] bg-slate-800 px-2 py-1 rounded text-slate-400 font-bold border border-slate-700 uppercase whitespace-nowrap">${b.league}</span>
                         </td>
                         <td class="p-4">
                             <div class="font-bold text-slate-200 text-xs">${b.teams}</div>
@@ -387,7 +389,8 @@
                              <i class="fa-regular fa-clock mr-1"></i>${b.matchTime}
                         </td>
                         <td class="p-4 font-mono font-bold text-bet-yellow">${b.odd.toFixed(2)}</td>
-                        <td class="p-4 text-xs font-bold ${b.edge > 0 ? 'text-emerald-400' : 'text-red-400'}">${b.edge}%</td>
+                        <td class="p-4 text-xs font-bold ${parseFloat(b.edge) > 0 ? 'text-emerald-400' : 'text-red-400'}">${b.edge}%</td>
+                        <td class="p-4 text-[10px] text-slate-500 font-mono">${b.overround || '0%'}</td>
                         <td class="p-4 text-slate-200 font-bold">$${b.stake.toFixed(2)}</td>
                         <td class="p-4">
                             <div class="flex gap-1 justify-center">
@@ -427,7 +430,7 @@
                 });
                 let html = `<div class="glass-card p-4 rounded-2xl"><h3 class="text-xs font-black text-bet-yellow mb-4 uppercase border-b border-slate-800 pb-2">${title}</h3>`;
                 Object.entries(stats).forEach(([name, data]) => {
-                    const yld = ((data.profit / data.stake) * 100).toFixed(1);
+                    const yld = data.stake > 0 ? ((data.profit / data.stake) * 100).toFixed(1) : 0;
                     html += `<div class="flex justify-between items-center mb-3 text-xs"><span class="text-slate-400 font-bold uppercase">${name}</span><div class="text-right"><div class="${data.profit >= 0 ? 'text-emerald-400' : 'text-red-400'} font-bold">$${data.profit.toFixed(1)}</div><div class="text-[9px] text-slate-500 italic">Yield: ${yld}% | WR: ${((data.wins/data.count)*100).toFixed(0)}%</div></div></div>`;
                 });
                 grid.innerHTML += html + `</div>`;
@@ -467,7 +470,6 @@
         }
 
         function resetSystem() { if(confirm("¿Borrar todo?")) { localStorage.clear(); location.reload(); } }
-
         updateStats();
     </script>
 </body>
