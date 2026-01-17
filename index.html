@@ -130,6 +130,20 @@
             grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
             gap: 12px;
         }
+
+        /* Estilo para la vista de Porcentaje */
+        .stats-view-container {
+            grid-column: 1 / -1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 60px 20px;
+            background: rgba(0,0,0,0.3);
+            border-radius: 24px;
+            border: 2px dashed rgba(255,255,255,0.1);
+            cursor: pointer;
+        }
     </style>
 </head>
 <body>
@@ -301,8 +315,8 @@
                 </div>
             </div>
 
-            <div id="history-grid" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 py-4">
-                </div>
+            <div id="history-grid" onclick="toggleHistoryView()" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 py-4 cursor-pointer">
+            </div>
             
             <div id="infinite-scroll-trigger">
                 <span id="load-status">Cargando más apuestas...</span>
@@ -326,6 +340,9 @@
         let lastDisplayedIndex = 0;
         let isObserverActive = false;
 
+        // NUEVO: Estado de la vista del historial
+        let viewMode = 'picks'; // 'picks' o 'accuracy'
+
         function showTab(tabId) {
             document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
             document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('bg-slate-700', 'text-bet-yellow'));
@@ -338,16 +355,19 @@
             if(tabId === 'insights') runBacktesting();
         }
 
+        // --- LÓGICA DE VISTA DINÁMICA ---
+        function toggleHistoryView() {
+            viewMode = (viewMode === 'picks') ? 'accuracy' : 'picks';
+            applyFilters(); // Re-renderiza con el nuevo modo
+        }
+
         // --- LÓGICA DE CÁLCULO DINÁMICO ---
         function getCurrentBankroll() {
-            // Profit de apuestas resueltas
             const totalProfit = bets.reduce((acc, b) => acc + (b.profit || 0), 0);
-            // Dinero actualmente en juego (Stake de pendientes)
             const pendingStakes = bets.filter(b => b.status === 'pending').reduce((acc, b) => acc + (b.stake || 0), 0);
             return BANKROLL_BASE + totalProfit - pendingStakes;
         }
 
-        // --- LÓGICA DE CÁLCULO (POISSON) ---
         function factorial(n) { return n <= 1 ? 1 : n * factorial(n - 1); }
         function poissonProb(k, lambda) { return (Math.pow(lambda, k) * Math.exp(-lambda)) / factorial(k); }
 
@@ -425,8 +445,6 @@
             if(odd > 1) {
                 const edge = (odd * prob) - 1;
                 const kelly = Math.max(0, (edge / (odd - 1)) * KELLY_FRAC);
-                
-                // CAMBIO AQUÍ: Usar el Bankroll Disponible en lugar de BANKROLL_BASE fijo
                 const availableBank = getCurrentBankroll();
                 const stake = availableBank * kelly;
                 
@@ -459,7 +477,6 @@
             }
         }
 
-        // --- GESTIÓN DE APUESTAS ---
         function registerBet(id, market, prob) {
             const odd = parseFloat(document.getElementById('odd_' + id).value);
             const rawEvent = document.getElementById('event_name').value || "Varios 🆚 Local - Vis 🗓️ Pendiente";
@@ -488,8 +505,6 @@
             }
 
             const edge = (odd * prob) - 1;
-            
-            // CAMBIO AQUÍ: Usar el Bankroll Disponible actual
             const availableBank = getCurrentBankroll();
             const stake = availableBank * Math.max(0, (edge / (odd - 1)) * KELLY_FRAC);
 
@@ -513,7 +528,6 @@
             save();
             alert("✓ Apuesta registrada correctamente con bankroll dinámico");
             
-            // Limpiar inputs del mercado registrado para evitar duplicados accidentales
             document.getElementById('odd_' + id).value = '';
             document.getElementById('edge_' + id).innerText = '--';
             document.getElementById('stake_' + id).innerText = '--';
@@ -545,7 +559,6 @@
             updateStats();
         }
 
-        // --- SISTEMA DE FILTROS ---
         function populateFilterDropdowns() {
             const markets = [...new Set(bets.map(b => b.market))];
             const leagues = [...new Set(bets.map(b => b.league))];
@@ -582,13 +595,11 @@
                 return matchEdge && matchOv && matchOdd && matchMarket && matchLeague;
             });
 
-            let totalProfit = 0, totalStaked = 0, wins = 0, finished = 0;
+            let totalProfit = 0, totalStaked = 0;
             filteredBets.forEach(b => {
                 totalProfit += b.profit;
                 if(b.status !== 'pending') {
                     totalStaked += b.stake;
-                    finished++;
-                    if(b.status === 'win') wins++;
                 }
             });
 
@@ -596,7 +607,6 @@
             document.getElementById('top-profit').className = `text-xl font-bold ${totalProfit >= 0 ? 'neon-text-green' : 'neon-text-pink'}`;
             document.getElementById('top-count').innerText = filteredBets.length;
             
-            // Actualizar Bankroll Disponible Global (No filtrado para evitar confusión)
             const availableBank = getCurrentBankroll();
             document.getElementById('top-bankroll').innerText = `$${availableBank.toFixed(2)}`;
             document.getElementById('top-bankroll').className = `text-xl font-bold ${availableBank >= BANKROLL_BASE ? 'neon-text-blue' : 'text-orange-400'}`;
@@ -607,7 +617,32 @@
             runBacktesting();
             lastDisplayedIndex = 0;
             document.getElementById('history-grid').innerHTML = '';
-            renderNextBetsBatch();
+            
+            // Renderizado condicional basado en viewMode
+            if (viewMode === 'picks') {
+                renderNextBetsBatch();
+                document.getElementById('infinite-scroll-trigger').style.display = 'flex';
+            } else {
+                renderAccuracyStats();
+                document.getElementById('infinite-scroll-trigger').style.display = 'none';
+            }
+        }
+
+        // NUEVA FUNCIÓN: Muestra el porcentaje de acierto
+        function renderAccuracyStats() {
+            const grid = document.getElementById('history-grid');
+            const finished = filteredBets.filter(b => b.status !== 'pending');
+            const wins = finished.filter(b => b.status === 'win').length;
+            const rate = finished.length > 0 ? ((wins / finished.length) * 100).toFixed(1) : "0.0";
+
+            grid.innerHTML = `
+                <div class="stats-view-container glass-card">
+                    <p class="text-slate-500 uppercase font-black tracking-widest text-xs mb-2">Porcentaje de Acierto (Win Rate)</p>
+                    <h2 class="text-7xl font-black neon-text-yellow">${rate}%</h2>
+                    <p class="text-slate-400 mt-4 text-sm font-bold uppercase">Muestra: ${finished.length} Apuestas Finalizadas</p>
+                    <p class="text-[10px] text-emerald-500 mt-6 animate-pulse">TOCA PARA VOLVER A LOS PICKS</p>
+                </div>
+            `;
         }
 
         function resetFilters() {
@@ -616,7 +651,6 @@
             applyFilters();
         }
 
-        // --- RENDERIZADO Y ESTADÍSTICAS ---
         function updateStats() {
             populateFilterDropdowns();
             renderBankrollChart();
@@ -626,6 +660,8 @@
 
         function renderNextBetsBatch() {
             const grid = document.getElementById('history-grid');
+            if (viewMode !== 'picks') return;
+
             const nextBatch = filteredBets.slice(lastDisplayedIndex, lastDisplayedIndex + itemsPerLoad);
             
             if (nextBatch.length === 0 && lastDisplayedIndex === 0) {
@@ -649,19 +685,19 @@
                     <div class="text-[11px] text-slate-400 uppercase tracking-tight mb-4">
                         LIGA: ${b.league} | Cuota: ${b.odd.toFixed(2)} | Stake: ${b.stake.toFixed(2)}$
                     </div>
-                    <div class="flex gap-2 mb-6">
+                    <div class="flex gap-2 mb-6" onclick="event.stopPropagation()">
                         <div class="badge-edge">EDGE: ${b.edge}%</div>
                         <div class="badge-ov">OV: ${b.overround}</div>
                         <div class="badge-clv">CLV: ${b.closingOdd ? 'OK' : 'N/A%'}</div>
                     </div>
-                    <div class="flex items-center gap-3 mb-6">
+                    <div class="flex items-center gap-3 mb-6" onclick="event.stopPropagation()">
                         <span class="text-slate-400 text-sm">Cuota Cierre:</span>
                         <input type="number" step="0.01" value="${b.closingOdd}" 
                                onchange="updateClosingOdd(${b.id}, this.value)" 
                                placeholder="Cierre" 
                                class="input-cierre text-xs text-white">
                     </div>
-                    <div class="flex gap-3">
+                    <div class="flex gap-3" onclick="event.stopPropagation()">
                         <button onclick="resolve(${b.id}, 'win')" 
                             class="btn-status-sq bg-emerald-500 hover:bg-emerald-400 text-black ${b.status === 'win' ? 'ring-2 ring-white ring-offset-2 ring-offset-black' : ''}">W</button>
                         <button onclick="resolve(${b.id}, 'loss')" 
@@ -681,7 +717,7 @@
             if (isObserverActive) return;
             const trigger = document.getElementById('infinite-scroll-trigger');
             const observer = new IntersectionObserver((entries) => {
-                if (entries[0].isIntersecting && lastDisplayedIndex < filteredBets.length) {
+                if (entries[0].isIntersecting && lastDisplayedIndex < filteredBets.length && viewMode === 'picks') {
                     setTimeout(() => renderNextBetsBatch(), 200);
                 }
             }, { threshold: 0.5 });
@@ -689,7 +725,6 @@
             isObserverActive = true;
         }
 
-        // --- BACKTESTING Y GRÁFICAS ---
         function runBacktesting() {
             const grid = document.getElementById('backtest-grid');
             if (!grid) return;
