@@ -164,20 +164,23 @@
             </div>
 
             <div class="glass-card rounded-2xl overflow-hidden">
-                <table class="w-full text-left text-sm">
-                    <thead class="bg-slate-900 text-slate-500 uppercase text-xs">
-                        <tr>
-                            <th class="p-4">Fecha</th>
-                            <th class="p-4">Evento / Mercado</th>
-                            <th class="p-4">Cuota</th>
-                            <th class="p-4">Edge</th>
-                            <th class="p-4">Stake</th>
-                            <th class="p-4">Estado</th>
-                            <th class="p-4 text-right">Acción</th>
-                        </tr>
-                    </thead>
-                    <tbody id="history-table" class="divide-y divide-slate-800"></tbody>
-                </table>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left text-sm">
+                        <thead class="bg-slate-900 text-slate-500 uppercase text-[10px]">
+                            <tr>
+                                <th class="p-4">Liga</th>
+                                <th class="p-4">Equipos / Mercado</th>
+                                <th class="p-4">Cuota</th>
+                                <th class="p-4">Edge</th>
+                                <th class="p-4">Overround</th>
+                                <th class="p-4">Stake</th>
+                                <th class="p-4 text-center">Estado</th>
+                                <th class="p-4 text-right">Borrar</th>
+                            </tr>
+                        </thead>
+                        <tbody id="history-table" class="divide-y divide-slate-800"></tbody>
+                    </table>
+                </div>
             </div>
         </div>
 
@@ -305,18 +308,24 @@
         // --- PERSISTENCIA & CONTROL ---
         function registerBet(id, market, prob) {
             const odd = parseFloat(document.getElementById('odd_' + id).value);
-            const event = document.getElementById('event_name').value || "Evento Sin Nombre";
+            const eventInput = document.getElementById('event_name').value || "Equipo A vs Equipo B - Liga";
             if(!odd) return alert("Falta cuota de mercado");
 
             const edge = (odd * prob) - 1;
             const stake = BANKROLL_BASE * Math.max(0, (edge / (odd - 1)) * KELLY_FRAC);
+            
+            // Capturar Overround actual según mercado
+            const isOU = id.includes('25');
+            const currentOv = isOU ? document.getElementById('ov-ou').innerText : document.getElementById('ov-btts').innerText;
 
             const bet = {
                 id: Date.now(),
                 date: new Date().toLocaleDateString(),
-                event, market, odd, edge: (edge * 100).toFixed(2),
+                event: eventInput, 
+                market, odd, edge: (edge * 100).toFixed(2),
+                overround: currentOv,
                 stake, status: 'pending', profit: 0,
-                league: event.includes('-') ? event.split('-')[1].trim() : "Varios"
+                league: eventInput.includes('-') ? eventInput.split('-')[1].trim() : "Varios"
             };
 
             bets.unshift(bet);
@@ -326,6 +335,7 @@
 
         function resolve(id, status) {
             const b = bets.find(x => x.id === id);
+            if(!b) return;
             b.status = status;
             b.profit = status === 'win' ? b.stake * (b.odd - 1) : (status === 'loss' ? -b.stake : 0);
             save();
@@ -357,24 +367,34 @@
                     if(b.status === 'win') wins++;
                 }
 
+                // Split equipos
+                const eventName = b.event.split('-')[0].trim();
+
                 history.innerHTML += `
-                    <tr class="hover:bg-slate-800/40">
-                        <td class="p-4 text-[10px] text-slate-500">${b.date}</td>
+                    <tr class="hover:bg-slate-800/40 transition-colors">
                         <td class="p-4">
-                            <div class="font-bold text-slate-200">${b.event}</div>
-                            <div class="text-[10px] text-emerald-400 uppercase">${b.market}</div>
+                            <span class="px-2 py-1 bg-slate-800 rounded text-[10px] font-bold text-slate-400 uppercase border border-slate-700">${b.league}</span>
                         </td>
-                        <td class="p-4 font-mono font-bold">${b.odd.toFixed(2)}</td>
-                        <td class="p-4 text-xs ${b.edge > 0 ? 'text-emerald-400' : 'text-red-400'}">${b.edge}%</td>
-                        <td class="p-4 text-slate-400 font-bold">$${b.stake.toFixed(2)}</td>
                         <td class="p-4">
-                            <select onchange="resolve(${b.id}, this.value)" class="text-[10px] p-1 rounded ${b.status === 'win' ? 'text-emerald-400' : (b.status === 'loss' ? 'text-red-400' : '')}">
-                                <option value="pending" ${b.status === 'pending' ? 'selected' : ''}>Pendiente</option>
-                                <option value="win" ${b.status === 'win' ? 'selected' : ''}>WIN</option>
-                                <option value="loss" ${b.status === 'loss' ? 'selected' : ''}>LOSS</option>
-                            </select>
+                            <div class="font-bold text-slate-200 text-xs">${eventName}</div>
+                            <div class="text-[10px] text-emerald-400 font-black uppercase tracking-tighter">${b.market}</div>
                         </td>
-                        <td class="p-4 text-right"><button onclick="deleteBet(${b.id})" class="text-slate-600 hover:text-red-500 px-2">✕</button></td>
+                        <td class="p-4 font-mono font-bold text-bet-yellow">${b.odd.toFixed(2)}</td>
+                        <td class="p-4 text-xs font-bold ${b.edge > 0 ? 'text-emerald-400' : 'text-red-400'}">${b.edge}%</td>
+                        <td class="p-4 text-[10px] text-slate-500 font-mono">${b.overround || '0%'}</td>
+                        <td class="p-4 text-slate-200 font-bold">$${b.stake.toFixed(2)}</td>
+                        <td class="p-4">
+                            <div class="flex items-center justify-center gap-1">
+                                <button onclick="resolve(${b.id}, 'win')" class="w-7 h-7 rounded-lg flex items-center justify-center text-[10px] font-bold transition-all ${b.status === 'win' ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-900/40' : 'bg-slate-800 text-slate-500 hover:bg-emerald-900/40'}">G</button>
+                                <button onclick="resolve(${b.id}, 'loss')" class="w-7 h-7 rounded-lg flex items-center justify-center text-[10px] font-bold transition-all ${b.status === 'loss' ? 'bg-red-600 text-white shadow-lg shadow-red-900/40' : 'bg-slate-800 text-slate-500 hover:bg-red-900/40'}">P</button>
+                                <button onclick="resolve(${b.id}, 'pending')" class="w-7 h-7 rounded-lg flex items-center justify-center text-[10px] font-bold transition-all ${b.status === 'pending' ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-500 hover:bg-blue-900/40'}">?</button>
+                            </div>
+                        </td>
+                        <td class="p-4 text-right">
+                            <button onclick="deleteBet(${b.id})" class="text-slate-600 hover:text-red-500 transition-colors">
+                                <i class="fa-solid fa-trash-can"></i>
+                            </button>
+                        </td>
                     </tr>
                 `;
             });
