@@ -140,8 +140,8 @@
 
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div class="glass-card p-4 rounded-xl">
-                    <label class="text-[10px] font-bold text-slate-500 uppercase block mb-2">Evento / Liga (Opcional)</label>
-                    <input type="text" id="event_name" placeholder="Ej: Real Madrid vs Barca - LaLiga" class="w-full p-2 text-sm">
+                    <label class="text-[10px] font-bold text-slate-500 uppercase block mb-2">Evento / Liga (Pega aquí la info)</label>
+                    <input type="text" id="event_name" placeholder="País Liga 🆚 Equipo A - Equipo B 🗓️ Fecha Hora" class="w-full p-2 text-sm">
                 </div>
                 <div class="glass-card p-4 rounded-xl flex items-center justify-between">
                     <span class="text-xs text-slate-400">Overround Goles O/U: <b id="ov-ou" class="text-bet-yellow">0%</b></span>
@@ -169,13 +169,13 @@
                         <thead class="bg-slate-900 text-slate-500 uppercase text-[10px]">
                             <tr>
                                 <th class="p-4">Liga</th>
-                                <th class="p-4">Equipos / Mercado</th>
+                                <th class="p-4">Partido / Mercado</th>
+                                <th class="p-4">Fecha / Hora</th>
                                 <th class="p-4">Cuota</th>
                                 <th class="p-4">Edge</th>
-                                <th class="p-4">Overround</th>
                                 <th class="p-4">Stake</th>
                                 <th class="p-4 text-center">Estado</th>
-                                <th class="p-4 text-right">Borrar</th>
+                                <th class="p-4 text-right">Acción</th>
                             </tr>
                         </thead>
                         <tbody id="history-table" class="divide-y divide-slate-800"></tbody>
@@ -207,7 +207,6 @@
             if(tabId === 'insights') runBacktesting();
         }
 
-        // --- MATH ENGINE ---
         function factorial(n) { return n <= 1 ? 1 : n * factorial(n - 1); }
         function poissonProb(k, lambda) { return (Math.pow(lambda, k) * Math.exp(-lambda)) / factorial(k); }
 
@@ -233,7 +232,6 @@
 
             renderPoissonChart(labels, h_p, a_p);
 
-            // Probabilidades de Mercado
             let p_u25 = 0;
             for(let h=0; h<=2; h++) {
                 for(let a=0; a<=(2-h); a++) {
@@ -296,7 +294,6 @@
                 const ov = ((1/o + 1/u) - 1) * 100;
                 document.getElementById('ov-ou').innerText = ov.toFixed(2) + "%";
             }
-
             const by = parseFloat(document.getElementById('odd_bttsy').value) || 0;
             const bn = parseFloat(document.getElementById('odd_bttsn').value) || 0;
             if(by > 0 && bn > 0) {
@@ -305,27 +302,39 @@
             }
         }
 
-        // --- PERSISTENCIA & CONTROL ---
         function registerBet(id, market, prob) {
             const odd = parseFloat(document.getElementById('odd_' + id).value);
-            const eventInput = document.getElementById('event_name').value || "Equipo A vs Equipo B - Liga";
+            const fullEvent = document.getElementById('event_name').value || "Varios 🆚 Local - Vis 🗓️ Pendiente";
             if(!odd) return alert("Falta cuota de mercado");
+
+            // PARSEO DE LA INFORMACIÓN
+            let leaguePart = "Varios", teamsPart = "Partido", datePart = "Pendiente";
+            
+            try {
+                if(fullEvent.includes('🆚') && fullEvent.includes('🗓️')) {
+                    const splitVersus = fullEvent.split('🆚');
+                    leaguePart = splitVersus[0].trim();
+                    const splitDate = splitVersus[1].split('🗓️');
+                    teamsPart = splitDate[0].trim();
+                    datePart = splitDate[1].trim();
+                } else {
+                    teamsPart = fullEvent;
+                }
+            } catch(e) {
+                teamsPart = fullEvent;
+            }
 
             const edge = (odd * prob) - 1;
             const stake = BANKROLL_BASE * Math.max(0, (edge / (odd - 1)) * KELLY_FRAC);
-            
-            // Capturar Overround actual según mercado
-            const isOU = id.includes('25');
-            const currentOv = isOU ? document.getElementById('ov-ou').innerText : document.getElementById('ov-btts').innerText;
 
             const bet = {
                 id: Date.now(),
-                date: new Date().toLocaleDateString(),
-                event: eventInput, 
+                dateRegistered: new Date().toLocaleDateString(),
+                league: leaguePart,
+                teams: teamsPart,
+                matchTime: datePart,
                 market, odd, edge: (edge * 100).toFixed(2),
-                overround: currentOv,
-                stake, status: 'pending', profit: 0,
-                league: eventInput.includes('-') ? eventInput.split('-')[1].trim() : "Varios"
+                stake, status: 'pending', profit: 0
             };
 
             bets.unshift(bet);
@@ -335,7 +344,6 @@
 
         function resolve(id, status) {
             const b = bets.find(x => x.id === id);
-            if(!b) return;
             b.status = status;
             b.profit = status === 'win' ? b.stake * (b.odd - 1) : (status === 'loss' ? -b.stake : 0);
             save();
@@ -356,7 +364,6 @@
         function updateStats() {
             const history = document.getElementById('history-table');
             history.innerHTML = '';
-            
             let totalProfit = 0, totalStaked = 0, wins = 0, finished = 0;
 
             bets.forEach(b => {
@@ -367,33 +374,30 @@
                     if(b.status === 'win') wins++;
                 }
 
-                // Split equipos
-                const eventName = b.event.split('-')[0].trim();
-
                 history.innerHTML += `
-                    <tr class="hover:bg-slate-800/40 transition-colors">
+                    <tr class="hover:bg-slate-800/40">
                         <td class="p-4">
-                            <span class="px-2 py-1 bg-slate-800 rounded text-[10px] font-bold text-slate-400 uppercase border border-slate-700">${b.league}</span>
+                            <span class="text-[10px] bg-slate-800 px-2 py-1 rounded text-slate-400 font-bold border border-slate-700 uppercase">${b.league}</span>
                         </td>
                         <td class="p-4">
-                            <div class="font-bold text-slate-200 text-xs">${eventName}</div>
+                            <div class="font-bold text-slate-200 text-xs">${b.teams}</div>
                             <div class="text-[10px] text-emerald-400 font-black uppercase tracking-tighter">${b.market}</div>
+                        </td>
+                        <td class="p-4 text-[10px] text-slate-500 italic">
+                             <i class="fa-regular fa-clock mr-1"></i>${b.matchTime}
                         </td>
                         <td class="p-4 font-mono font-bold text-bet-yellow">${b.odd.toFixed(2)}</td>
                         <td class="p-4 text-xs font-bold ${b.edge > 0 ? 'text-emerald-400' : 'text-red-400'}">${b.edge}%</td>
-                        <td class="p-4 text-[10px] text-slate-500 font-mono">${b.overround || '0%'}</td>
                         <td class="p-4 text-slate-200 font-bold">$${b.stake.toFixed(2)}</td>
                         <td class="p-4">
-                            <div class="flex items-center justify-center gap-1">
-                                <button onclick="resolve(${b.id}, 'win')" class="w-7 h-7 rounded-lg flex items-center justify-center text-[10px] font-bold transition-all ${b.status === 'win' ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-900/40' : 'bg-slate-800 text-slate-500 hover:bg-emerald-900/40'}">G</button>
-                                <button onclick="resolve(${b.id}, 'loss')" class="w-7 h-7 rounded-lg flex items-center justify-center text-[10px] font-bold transition-all ${b.status === 'loss' ? 'bg-red-600 text-white shadow-lg shadow-red-900/40' : 'bg-slate-800 text-slate-500 hover:bg-red-900/40'}">P</button>
-                                <button onclick="resolve(${b.id}, 'pending')" class="w-7 h-7 rounded-lg flex items-center justify-center text-[10px] font-bold transition-all ${b.status === 'pending' ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-500 hover:bg-blue-900/40'}">?</button>
+                            <div class="flex gap-1 justify-center">
+                                <button onclick="resolve(${b.id}, 'win')" class="w-7 h-7 rounded-lg text-[10px] font-bold ${b.status === 'win' ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-900/40' : 'bg-slate-800 text-slate-500 hover:bg-emerald-900/40'}">G</button>
+                                <button onclick="resolve(${b.id}, 'loss')" class="w-7 h-7 rounded-lg text-[10px] font-bold ${b.status === 'loss' ? 'bg-red-600 text-white shadow-lg shadow-red-900/40' : 'bg-slate-800 text-slate-500 hover:bg-red-900/40'}">P</button>
+                                <button onclick="resolve(${b.id}, 'pending')" class="w-7 h-7 rounded-lg text-[10px] font-bold ${b.status === 'pending' ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-500 hover:bg-blue-900/40'}">?</button>
                             </div>
                         </td>
                         <td class="p-4 text-right">
-                            <button onclick="deleteBet(${b.id})" class="text-slate-600 hover:text-red-500 transition-colors">
-                                <i class="fa-solid fa-trash-can"></i>
-                            </button>
+                            <button onclick="deleteBet(${b.id})" class="text-slate-600 hover:text-red-500 transition-colors"><i class="fa-solid fa-trash-can"></i></button>
                         </td>
                     </tr>
                 `;
@@ -402,20 +406,16 @@
             document.getElementById('top-profit').innerText = `$${totalProfit.toFixed(2)}`;
             document.getElementById('top-profit').className = `text-xl font-bold ${totalProfit >= 0 ? 'text-emerald-400' : 'text-red-500'}`;
             document.getElementById('top-count').innerText = bets.length;
-            
             const yieldVal = totalStaked > 0 ? (totalProfit / totalStaked) * 100 : 0;
             document.getElementById('top-yield').innerText = yieldVal.toFixed(1) + "%";
             document.getElementById('top-wr').innerText = finished > 0 ? ((wins / finished) * 100).toFixed(0) + "%" : "0%";
-
             renderBankrollChart();
         }
 
-        // --- BACKTESTING ---
         function runBacktesting() {
             const grid = document.getElementById('backtest-grid');
             grid.innerHTML = '';
             const categories = { 'Mercados': 'market', 'Ligas': 'league' };
-
             for (const [title, key] of Object.entries(categories)) {
                 let stats = {};
                 bets.filter(b => b.status !== 'pending').forEach(b => {
@@ -425,24 +425,15 @@
                     stats[b[key]].count++;
                     if(b.status === 'win') stats[b[key]].wins++;
                 });
-
                 let html = `<div class="glass-card p-4 rounded-2xl"><h3 class="text-xs font-black text-bet-yellow mb-4 uppercase border-b border-slate-800 pb-2">${title}</h3>`;
                 Object.entries(stats).forEach(([name, data]) => {
                     const yld = ((data.profit / data.stake) * 100).toFixed(1);
-                    html += `
-                        <div class="flex justify-between items-center mb-3 text-xs">
-                            <span class="text-slate-400 font-bold uppercase">${name}</span>
-                            <div class="text-right">
-                                <div class="${data.profit >= 0 ? 'text-emerald-400' : 'text-red-400'} font-bold">$${data.profit.toFixed(1)}</div>
-                                <div class="text-[9px] text-slate-500 italic">Yield: ${yld}% | WR: ${((data.wins/data.count)*100).toFixed(0)}%</div>
-                            </div>
-                        </div>`;
+                    html += `<div class="flex justify-between items-center mb-3 text-xs"><span class="text-slate-400 font-bold uppercase">${name}</span><div class="text-right"><div class="${data.profit >= 0 ? 'text-emerald-400' : 'text-red-400'} font-bold">$${data.profit.toFixed(1)}</div><div class="text-[9px] text-slate-500 italic">Yield: ${yld}% | WR: ${((data.wins/data.count)*100).toFixed(0)}%</div></div></div>`;
                 });
                 grid.innerHTML += html + `</div>`;
             }
         }
 
-        // --- CHARTS ---
         function renderPoissonChart(labels, home, away) {
             const ctx = document.getElementById('poissonChart').getContext('2d');
             if(pChart) pChart.destroy();
@@ -455,11 +446,7 @@
                         { label: 'Visitante', data: away, borderColor: '#f97316', backgroundColor: 'rgba(249, 115, 22, 0.1)', fill: true, tension: 0.4 }
                     ]
                 },
-                options: { 
-                    responsive: true, maintainAspectRatio: false,
-                    plugins: { legend: { labels: { color: '#64748b' } } },
-                    scales: { y: { grid: { color: '#1f2937' }, ticks: { color: '#64748b' } }, x: { ticks: { color: '#64748b' } } }
-                }
+                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { labels: { color: '#64748b' } } }, scales: { y: { grid: { color: '#1f2937' }, ticks: { color: '#64748b' } }, x: { ticks: { color: '#64748b' } } } }
             });
         }
 
@@ -474,10 +461,7 @@
             });
             bChart = new Chart(ctx, {
                 type: 'line',
-                data: {
-                    labels,
-                    datasets: [{ label: 'Profit', data: data, borderColor: '#00ff88', tension: 0.3, fill: true, backgroundColor: 'rgba(0,255,136,0.05)', pointRadius: 0 }]
-                },
+                data: { labels, datasets: [{ label: 'Profit', data: data, borderColor: '#00ff88', tension: 0.3, fill: true, backgroundColor: 'rgba(0,255,136,0.05)', pointRadius: 0 }] },
                 options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { grid: { color: '#1f2937' } }, x: { display: false } } }
             });
         }
