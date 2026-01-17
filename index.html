@@ -323,10 +323,9 @@
         const BANKROLL_BASE = 100;
         const KELLY_FRAC = 0.25;
         let bets = JSON.parse(localStorage.getItem('betags_pro_v3')) || [];
-        let filteredBets = []; // Almacena las apuestas después de filtros
+        let filteredBets = []; 
         let pChart, bChart;
 
-        // Variables para Scroll Infinito
         let itemsPerLoad = 9;
         let lastDisplayedIndex = 0;
         let isObserverActive = false;
@@ -528,19 +527,14 @@
         function populateFilterDropdowns() {
             const markets = [...new Set(bets.map(b => b.market))];
             const leagues = [...new Set(bets.map(b => b.league))];
-            
             const mSelect = document.getElementById('f_market');
             const lSelect = document.getElementById('f_league');
-            
             const currentM = mSelect.value;
             const currentL = lSelect.value;
-
             mSelect.innerHTML = '<option value="">TODOS</option>';
             lSelect.innerHTML = '<option value="">TODAS</option>';
-
             markets.forEach(m => mSelect.innerHTML += `<option value="${m}">${m}</option>`);
             leagues.forEach(l => lSelect.innerHTML += `<option value="${l}">${l}</option>`);
-
             mSelect.value = currentM;
             lSelect.value = currentL;
         }
@@ -566,6 +560,26 @@
                 return matchEdge && matchOv && matchOdd && matchMarket && matchLeague;
             });
 
+            // NUEVO: Recalcular Profit basándose en Filtros
+            let totalProfit = 0, totalStaked = 0, wins = 0, finished = 0;
+            filteredBets.forEach(b => {
+                totalProfit += b.profit;
+                if(b.status !== 'pending') {
+                    totalStaked += b.stake;
+                    finished++;
+                    if(b.status === 'win') wins++;
+                }
+            });
+
+            document.getElementById('top-profit').innerText = `$${totalProfit.toFixed(2)}`;
+            document.getElementById('top-profit').className = `text-xl font-bold ${totalProfit >= 0 ? 'neon-text-green' : 'neon-text-pink'}`;
+            document.getElementById('top-count').innerText = filteredBets.length;
+            const yieldVal = totalStaked > 0 ? (totalProfit / totalStaked) * 100 : 0;
+            document.getElementById('top-yield').innerText = yieldVal.toFixed(1) + "%";
+            document.getElementById('top-wr').innerText = finished > 0 ? ((wins / finished) * 100).toFixed(0) + "%" : "0%";
+
+            // Actualizar Backtesting y Grid
+            runBacktesting();
             lastDisplayedIndex = 0;
             document.getElementById('history-grid').innerHTML = '';
             renderNextBetsBatch();
@@ -580,27 +594,8 @@
         // --- RENDERIZADO Y ESTADÍSTICAS ---
         function updateStats() {
             populateFilterDropdowns();
-            
-            let totalProfit = 0, totalStaked = 0, wins = 0, finished = 0;
-
-            bets.forEach(b => {
-                totalProfit += b.profit;
-                if(b.status !== 'pending') {
-                    totalStaked += b.stake;
-                    finished++;
-                    if(b.status === 'win') wins++;
-                }
-            });
-
-            document.getElementById('top-profit').innerText = `$${totalProfit.toFixed(2)}`;
-            document.getElementById('top-profit').className = `text-xl font-bold ${totalProfit >= 0 ? 'neon-text-green' : 'neon-text-pink'}`;
-            document.getElementById('top-count').innerText = bets.length;
-            const yieldVal = totalStaked > 0 ? (totalProfit / totalStaked) * 100 : 0;
-            document.getElementById('top-yield').innerText = yieldVal.toFixed(1) + "%";
-            document.getElementById('top-wr').innerText = finished > 0 ? ((wins / finished) * 100).toFixed(0) + "%" : "0%";
-            
             renderBankrollChart();
-            applyFilters(); // Esto inicializa filteredBets y renderiza la rejilla
+            applyFilters(); // applyFilters ya se encarga de los números superiores ahora
             initInfiniteScroll();
         }
 
@@ -616,8 +611,6 @@
 
             nextBatch.forEach(b => {
                 const isPending = b.status === 'pending';
-                
-                // Determinar clase de color según estado
                 let statusClass = "";
                 if (b.status === 'win') statusClass = "status-win";
                 else if (b.status === 'loss') statusClass = "status-loss";
@@ -674,11 +667,15 @@
         // --- BACKTESTING Y GRÁFICAS ---
         function runBacktesting() {
             const grid = document.getElementById('backtest-grid');
+            if (!grid) return;
             grid.innerHTML = '';
             const categories = { 'Mercados': 'market', 'Ligas': 'league' };
+            // Usamos filteredBets para que el backtest también se ajuste
+            const source = filteredBets.length > 0 ? filteredBets : bets;
+
             for (const [title, key] of Object.entries(categories)) {
                 let stats = {};
-                bets.filter(b => b.status !== 'pending').forEach(b => {
+                source.filter(b => b.status !== 'pending').forEach(b => {
                     if(!stats[b[key]]) stats[b[key]] = { profit: 0, stake: 0, count: 0, wins: 0 };
                     stats[b[key]].profit += b.profit;
                     stats[b[key]].stake += b.stake;
