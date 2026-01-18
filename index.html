@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>BetAGS Ultimate - Pro Analytics</title>
+    <title>BetAGS Ultimate - Pro Analytics & AI Assistant</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -143,9 +143,62 @@
             border: 2px dashed rgba(255,255,255,0.1);
             cursor: pointer;
         }
+
+        /* Virtual Assistant Styles */
+        #ai-assistant-panel {
+            position: fixed;
+            right: -320px;
+            top: 80px;
+            width: 300px;
+            height: calc(100vh - 100px);
+            background: rgba(15, 23, 42, 0.95);
+            border-left: 2px solid var(--accent-green);
+            z-index: 100;
+            transition: right 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            padding: 20px;
+            overflow-y: auto;
+            box-shadow: -10px 0 30px rgba(0,0,0,0.5);
+        }
+        #ai-assistant-panel.open { right: 0; }
+        .ai-trigger {
+            position: fixed;
+            right: 0;
+            top: 50%;
+            transform: translateY(-50%);
+            background: var(--accent-green);
+            color: black;
+            padding: 15px 10px;
+            border-radius: 10px 0 0 10px;
+            cursor: pointer;
+            z-index: 101;
+            font-weight: 900;
+            writing-mode: vertical-rl;
+            text-orientation: mixed;
+        }
+        .ai-log-entry {
+            border-left: 2px solid #334155;
+            padding-left: 12px;
+            margin-bottom: 15px;
+            font-size: 11px;
+        }
+        .ai-log-entry.alert { border-color: var(--neon-pink); }
+        .ai-log-entry.success { border-color: var(--accent-green); }
     </style>
 </head>
 <body>
+
+    <div class="ai-trigger shadow-2xl" onclick="toggleAI()">AI ASSISTANT</div>
+    <div id="ai-assistant-panel" class="glass-card">
+        <h3 class="text-emerald-400 font-black text-xs uppercase mb-4 flex items-center gap-2">
+            <i class="fa-solid fa-robot animate-bounce"></i> AVA - Monitor de Estrategias
+        </h3>
+        <div id="ai-status" class="mb-4 p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-lg">
+            <p class="text-[10px] text-slate-400 uppercase font-bold">Estado del Sistema</p>
+            <p class="text-xs font-mono text-emerald-400">Escaneando patrones...</p>
+        </div>
+        <div id="ai-logs" class="space-y-2">
+            </div>
+    </div>
 
     <nav class="sticky top-0 z-50 bg-slate-900/90 backdrop-blur border-b border-emerald-500/20 p-4">
         <div class="container mx-auto flex flex-col md:flex-row justify-between items-center gap-4">
@@ -344,6 +397,58 @@
         let isObserverActive = false;
         let viewMode = 'picks'; 
 
+        function toggleAI() {
+            document.getElementById('ai-assistant-panel').classList.toggle('open');
+        }
+
+        function runAIAssistant() {
+            const logs = document.getElementById('ai-logs');
+            const statusText = document.querySelector('#ai-status p.text-emerald-400');
+            logs.innerHTML = '';
+            
+            const finished = bets.filter(b => b.status !== 'pending');
+            const markets = [...new Set(bets.map(b => b.market))];
+
+            // 1. Análisis de Rachas
+            const last5 = finished.slice(0, 5);
+            const wins = last5.filter(b => b.status === 'win').length;
+            if(wins >= 4) {
+                addAILog("¡Racha caliente detectada! Estás en un ciclo de varianza positiva. Mantén la disciplina con el Stake.", "success");
+            } else if(wins <= 1 && last5.length === 5) {
+                addAILog("Varianza negativa detectada. Revisa si las cuotas de cierre están bajando respecto a tu entrada.", "alert");
+            }
+
+            // 2. Escaneo de Mercados Deficientes
+            markets.forEach(m => {
+                const mBets = finished.filter(b => b.market === m);
+                const mProfit = mBets.reduce((acc, b) => acc + b.profit, 0);
+                if(mBets.length >= 5 && mProfit < -10) {
+                    addAILog(`Fuga de capital en: ${m}. Considera reducir el Kelly en este mercado.`, "alert");
+                }
+            });
+
+            // 3. Monitoreo de Valor de Cierre (CLV)
+            const clvCount = finished.filter(b => b.closingOdd && parseFloat(b.closingOdd) < b.odd).length;
+            if(finished.length > 0 && (clvCount / finished.length) > 0.6) {
+                addAILog("Excelente selección: Estás batiendo al mercado en más del 60% de tus picks.", "success");
+            }
+
+            // 4. Alerta de Overround
+            const overroundSum = bets.slice(0, 1).reduce((acc, b) => acc + (parseFloat(b.overround) || 0), 0);
+            if(overroundSum > 7) {
+                addAILog("Cuidado: El overround de tu último registro es alto (>7%). Busca mejores casas de apuestas.", "alert");
+            }
+
+            statusText.innerText = "Monitor Activo - " + new Date().toLocaleTimeString();
+        }
+
+        function addAILog(text, type) {
+            const log = document.createElement('div');
+            log.className = `ai-log-entry ${type}`;
+            log.innerHTML = `<p class="font-bold uppercase text-[9px] text-slate-500">${new Date().toLocaleTimeString()}</p><p class="text-white">${text}</p>`;
+            document.getElementById('ai-logs').appendChild(log);
+        }
+
         function showTab(tabId) {
             document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
             document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('bg-slate-700', 'text-bet-yellow'));
@@ -540,6 +645,7 @@
             b.closingOdd = value;
             localStorage.setItem('betags_pro_v3', JSON.stringify(bets));
             renderBankrollChart();
+            runAIAssistant();
         }
 
         function deleteBet(id) {
@@ -552,6 +658,7 @@
         function save() {
             localStorage.setItem('betags_pro_v3', JSON.stringify(bets));
             updateStats();
+            runAIAssistant();
         }
 
         function populateFilterDropdowns() {
@@ -569,7 +676,6 @@
             lSelect.value = currentL;
         }
 
-        // --- NUEVA LÓGICA DE ESTADÍSTICA AVANZADA (T-STAT) ---
         function calculateLuckFactor(filteredBets) {
             const finished = filteredBets.filter(b => b.status !== 'pending');
             const n = finished.length;
@@ -583,13 +689,11 @@
             });
 
             const yieldVal = totalProfit / totalStaked;
-            // Desviación estándar aproximada de los retornos
             const avgOdd = finished.reduce((acc, b) => acc + b.odd, 0) / n;
-            const stdDev = Math.sqrt(avgOdd - 1); // Simplificación pro-betting
+            const stdDev = Math.sqrt(avgOdd - 1); 
             
             const tStat = (yieldVal * Math.sqrt(n)) / stdDev;
             
-            // Interpretación del T-Stat (p-value)
             if (tStat > 2) return { score: "Habilidad Alta", color: "neon-text-green" };
             if (tStat > 1.65) return { score: "Prob. Habilidad", color: "neon-text-blue" };
             if (tStat > 0) return { score: "Neutral / Azar", color: "neon-text-yellow" };
@@ -802,7 +906,10 @@
         }
 
         function resetSystem() { if(confirm("¿Borrar todo el historial?")) { localStorage.clear(); location.reload(); } }
+        
+        // Initializing system
         updateStats();
+        runAIAssistant();
     </script>
 </body>
 </html>
