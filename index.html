@@ -131,7 +131,6 @@
             gap: 12px;
         }
 
-        /* Estilo para la vista de Porcentaje */
         .stats-view-container {
             grid-column: 1 / -1;
             display: flex;
@@ -151,7 +150,7 @@
     <nav class="sticky top-0 z-50 bg-slate-900/90 backdrop-blur border-b border-emerald-500/20 p-4">
         <div class="container mx-auto flex flex-col md:flex-row justify-between items-center gap-4">
             <h1 class="text-2xl font-black italic text-white tracking-tighter">
-                BET<span class="text-bet-yellow">AGS</span> <span class="text-[10px] uppercase tracking-widest text-emerald-400 not-italic ml-1">Ultimate v3.2 (Dynamic)</span>
+                BET<span class="text-bet-yellow">AGS</span> <span class="text-[10px] uppercase tracking-widest text-emerald-400 not-italic ml-1">Ultimate v3.3 (Pro Analytics)</span>
             </h1>
             <div class="flex bg-slate-800 p-1 rounded-xl gap-1">
                 <button onclick="showTab('calc')" class="tab-btn px-4 py-2 rounded-lg text-sm font-bold transition-all active bg-slate-700 text-bet-yellow" id="btn-calc">CALCULADORA</button>
@@ -163,7 +162,7 @@
 
     <div class="container mx-auto p-4 max-w-7xl">
         
-        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+        <div class="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
             <div class="glass-card p-4 rounded-2xl border-l-4 border-bet-yellow">
                 <p class="text-[10px] uppercase font-black text-slate-500">Net Profit</p>
                 <p id="top-profit" class="text-xl font-bold">$0.00</p>
@@ -173,12 +172,16 @@
                 <p id="top-yield" class="text-xl font-bold">0%</p>
             </div>
             <div class="glass-card p-4 rounded-2xl border-l-4 border-emerald-500">
-                <p class="text-[10px] uppercase font-black text-slate-500">Bankroll Disponible</p>
+                <p class="text-[10px] uppercase font-black text-slate-500">Banca</p>
                 <p id="top-bankroll" class="text-xl font-bold">$100.00</p>
             </div>
             <div class="glass-card p-4 rounded-2xl border-l-4 border-purple-500">
                 <p class="text-[10px] uppercase font-black text-slate-500">Picks</p>
                 <p id="top-count" class="text-xl font-bold">0</p>
+            </div>
+            <div class="glass-card p-4 rounded-2xl border-l-4 border-pink-500">
+                <p class="text-[10px] uppercase font-black text-slate-500">Skill Score (p-v)</p>
+                <p id="top-skill" class="text-xl font-bold">--</p>
             </div>
         </div>
 
@@ -304,7 +307,7 @@
 
             <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 <div class="lg:col-span-2 glass-card p-6 rounded-2xl">
-                    <h2 class="text-lg font-bold mb-4 text-emerald-400">Crecimiento del Bankroll</h2>
+                    <h2 class="text-lg font-bold mb-4 text-emerald-400">Curva de Rendimiento</h2>
                     <div class="h-[300px]"><canvas id="bankrollChart"></canvas></div>
                 </div>
                 <div class="glass-card p-6 rounded-2xl flex flex-col justify-center">
@@ -339,9 +342,7 @@
         let itemsPerLoad = 9;
         let lastDisplayedIndex = 0;
         let isObserverActive = false;
-
-        // NUEVO: Estado de la vista del historial
-        let viewMode = 'picks'; // 'picks' o 'accuracy'
+        let viewMode = 'picks'; 
 
         function showTab(tabId) {
             document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
@@ -355,13 +356,11 @@
             if(tabId === 'insights') runBacktesting();
         }
 
-        // --- LÓGICA DE VISTA DINÁMICA ---
         function toggleHistoryView() {
             viewMode = (viewMode === 'picks') ? 'accuracy' : 'picks';
-            applyFilters(); // Re-renderiza con el nuevo modo
+            applyFilters();
         }
 
-        // --- LÓGICA DE CÁLCULO DINÁMICO ---
         function getCurrentBankroll() {
             const totalProfit = bets.reduce((acc, b) => acc + (b.profit || 0), 0);
             const pendingStakes = bets.filter(b => b.status === 'pending').reduce((acc, b) => acc + (b.stake || 0), 0);
@@ -508,10 +507,6 @@
             const availableBank = getCurrentBankroll();
             const stake = availableBank * Math.max(0, (edge / (odd - 1)) * KELLY_FRAC);
 
-            if(stake > availableBank) {
-                alert("Atención: El stake sugerido supera tu banca disponible.");
-            }
-
             const bet = {
                 id: Date.now(),
                 dateRegistered: new Date().toLocaleDateString(),
@@ -526,7 +521,7 @@
 
             bets.unshift(bet);
             save();
-            alert("✓ Apuesta registrada correctamente con bankroll dinámico");
+            alert("✓ Apuesta registrada");
             
             document.getElementById('odd_' + id).value = '';
             document.getElementById('edge_' + id).innerText = '--';
@@ -574,6 +569,33 @@
             lSelect.value = currentL;
         }
 
+        // --- NUEVA LÓGICA DE ESTADÍSTICA AVANZADA (T-STAT) ---
+        function calculateLuckFactor(filteredBets) {
+            const finished = filteredBets.filter(b => b.status !== 'pending');
+            const n = finished.length;
+            if (n < 30) return { score: "Muestra Baja", color: "text-slate-500" };
+
+            let totalProfit = 0;
+            let totalStaked = 0;
+            finished.forEach(b => {
+                totalProfit += b.profit;
+                totalStaked += b.stake;
+            });
+
+            const yieldVal = totalProfit / totalStaked;
+            // Desviación estándar aproximada de los retornos
+            const avgOdd = finished.reduce((acc, b) => acc + b.odd, 0) / n;
+            const stdDev = Math.sqrt(avgOdd - 1); // Simplificación pro-betting
+            
+            const tStat = (yieldVal * Math.sqrt(n)) / stdDev;
+            
+            // Interpretación del T-Stat (p-value)
+            if (tStat > 2) return { score: "Habilidad Alta", color: "neon-text-green" };
+            if (tStat > 1.65) return { score: "Prob. Habilidad", color: "neon-text-blue" };
+            if (tStat > 0) return { score: "Neutral / Azar", color: "neon-text-yellow" };
+            return { score: "Inclinación Azar", color: "neon-text-pink" };
+        }
+
         function applyFilters() {
             const eMin = parseFloat(document.getElementById('f_edge_min').value) || -999;
             const eMax = parseFloat(document.getElementById('f_edge_max').value) || 999;
@@ -598,19 +620,19 @@
             let totalProfit = 0, totalStaked = 0;
             filteredBets.forEach(b => {
                 totalProfit += b.profit;
-                if(b.status !== 'pending') {
-                    totalStaked += b.stake;
-                }
+                if(b.status !== 'pending') totalStaked += b.stake;
             });
 
             document.getElementById('top-profit').innerText = `$${totalProfit.toFixed(2)}`;
             document.getElementById('top-profit').className = `text-xl font-bold ${totalProfit >= 0 ? 'neon-text-green' : 'neon-text-pink'}`;
             document.getElementById('top-count').innerText = filteredBets.length;
             
+            const skill = calculateLuckFactor(filteredBets);
+            document.getElementById('top-skill').innerText = skill.score;
+            document.getElementById('top-skill').className = `text-sm font-black uppercase ${skill.color}`;
+
             const availableBank = getCurrentBankroll();
             document.getElementById('top-bankroll').innerText = `$${availableBank.toFixed(2)}`;
-            document.getElementById('top-bankroll').className = `text-xl font-bold ${availableBank >= BANKROLL_BASE ? 'neon-text-blue' : 'text-orange-400'}`;
-
             const yieldVal = totalStaked > 0 ? (totalProfit / totalStaked) * 100 : 0;
             document.getElementById('top-yield').innerText = yieldVal.toFixed(1) + "%";
 
@@ -618,7 +640,6 @@
             lastDisplayedIndex = 0;
             document.getElementById('history-grid').innerHTML = '';
             
-            // Renderizado condicional basado en viewMode
             if (viewMode === 'picks') {
                 renderNextBetsBatch();
                 document.getElementById('infinite-scroll-trigger').style.display = 'flex';
@@ -628,7 +649,6 @@
             }
         }
 
-        // NUEVA FUNCIÓN: Muestra el porcentaje de acierto
         function renderAccuracyStats() {
             const grid = document.getElementById('history-grid');
             const finished = filteredBets.filter(b => b.status !== 'pending');
@@ -661,20 +681,16 @@
         function renderNextBetsBatch() {
             const grid = document.getElementById('history-grid');
             if (viewMode !== 'picks') return;
-
             const nextBatch = filteredBets.slice(lastDisplayedIndex, lastDisplayedIndex + itemsPerLoad);
             
             if (nextBatch.length === 0 && lastDisplayedIndex === 0) {
-                grid.innerHTML = '<p class="col-span-full text-center text-slate-500 py-10 font-bold">No se encontraron apuestas.</p>';
-                document.getElementById('load-status').innerText = "";
+                grid.innerHTML = '<p class="col-span-full text-center text-slate-500 py-10 font-bold">No hay registros.</p>';
                 return;
             }
 
             nextBatch.forEach(b => {
                 const isPending = b.status === 'pending';
-                let statusClass = "";
-                if (b.status === 'win') statusClass = "status-win";
-                else if (b.status === 'loss') statusClass = "status-loss";
+                let statusClass = b.status === 'win' ? "status-win" : (b.status === 'loss' ? "status-loss" : "");
 
                 const card = document.createElement('div');
                 card.className = `bet-card-custom relative ${statusClass}`;
@@ -683,34 +699,26 @@
                     <h4 class="text-white font-bold text-xl mb-1">${b.teams}</h4>
                     <p class="text-bet-yellow font-bold text-lg mb-1 uppercase">${b.market}</p>
                     <div class="text-[11px] text-slate-400 uppercase tracking-tight mb-4">
-                        LIGA: ${b.league} | Cuota: ${b.odd.toFixed(2)} | Stake: ${b.stake.toFixed(2)}$
+                        LIGA: ${b.league} | Cuota: ${b.odd.toFixed(2)} | Stake: $${b.stake.toFixed(2)}
                     </div>
                     <div class="flex gap-2 mb-6" onclick="event.stopPropagation()">
                         <div class="badge-edge">EDGE: ${b.edge}%</div>
                         <div class="badge-ov">OV: ${b.overround}</div>
-                        <div class="badge-clv">CLV: ${b.closingOdd ? 'OK' : 'N/A%'}</div>
+                        <div class="badge-clv">CLV: ${b.closingOdd ? 'OK' : 'N/A'}</div>
                     </div>
                     <div class="flex items-center gap-3 mb-6" onclick="event.stopPropagation()">
-                        <span class="text-slate-400 text-sm">Cuota Cierre:</span>
-                        <input type="number" step="0.01" value="${b.closingOdd}" 
-                               onchange="updateClosingOdd(${b.id}, this.value)" 
-                               placeholder="Cierre" 
-                               class="input-cierre text-xs text-white">
+                        <span class="text-slate-400 text-sm">Cierre:</span>
+                        <input type="number" step="0.01" value="${b.closingOdd}" onchange="updateClosingOdd(${b.id}, this.value)" class="input-cierre text-xs text-white">
                     </div>
                     <div class="flex gap-3" onclick="event.stopPropagation()">
-                        <button onclick="resolve(${b.id}, 'win')" 
-                            class="btn-status-sq bg-emerald-500 hover:bg-emerald-400 text-black ${b.status === 'win' ? 'ring-2 ring-white ring-offset-2 ring-offset-black' : ''}">W</button>
-                        <button onclick="resolve(${b.id}, 'loss')" 
-                            class="btn-status-sq bg-red-500 hover:bg-red-400 text-white ${b.status === 'loss' ? 'ring-2 ring-white ring-offset-2 ring-offset-black' : ''}">L</button>
-                        <button onclick="deleteBet(${b.id})" 
-                            class="btn-status-sq bg-slate-800 hover:bg-red-900 text-slate-400 hover:text-white"><i class="fa-solid fa-trash-can text-sm"></i></button>
+                        <button onclick="resolve(${b.id}, 'win')" class="btn-status-sq bg-emerald-500 text-black">W</button>
+                        <button onclick="resolve(${b.id}, 'loss')" class="btn-status-sq bg-red-500 text-white">L</button>
+                        <button onclick="deleteBet(${b.id})" class="btn-status-sq bg-slate-800 text-slate-400"><i class="fa-solid fa-trash-can"></i></button>
                     </div>
                 `;
                 grid.appendChild(card);
             });
-
             lastDisplayedIndex += nextBatch.length;
-            document.getElementById('load-status').innerText = lastDisplayedIndex >= filteredBets.length ? "Fin del historial" : "Cargando más apuestas...";
         }
 
         function initInfiniteScroll() {
@@ -718,7 +726,7 @@
             const trigger = document.getElementById('infinite-scroll-trigger');
             const observer = new IntersectionObserver((entries) => {
                 if (entries[0].isIntersecting && lastDisplayedIndex < filteredBets.length && viewMode === 'picks') {
-                    setTimeout(() => renderNextBetsBatch(), 200);
+                    renderNextBetsBatch();
                 }
             }, { threshold: 0.5 });
             observer.observe(trigger);
@@ -769,10 +777,8 @@
         function renderBankrollChart() {
             const ctx = document.getElementById('bankrollChart').getContext('2d');
             if(bChart) bChart.destroy();
-            
             let data = [BANKROLL_BASE], labels = ['Start'], closingData = [BANKROLL_BASE];
             let current = BANKROLL_BASE, currentClosing = BANKROLL_BASE;
-            
             [...bets].reverse().filter(b => b.status !== 'pending').forEach((b, i) => {
                 current += b.profit;
                 data.push(current);
@@ -782,26 +788,20 @@
                 closingData.push(currentClosing);
                 labels.push(i + 1);
             });
-            
             bChart = new Chart(ctx, {
                 type: 'line',
                 data: { 
                     labels, 
                     datasets: [
-                        { label: 'Bankroll Real', data: data, borderColor: '#00ff88', tension: 0.3, fill: false, pointRadius: 0 },
-                        { label: 'Bankroll Cierre (CLV)', data: closingData, borderColor: '#ffeb00', tension: 0.3, fill: false, pointRadius: 0 }
+                        { label: 'Real', data: data, borderColor: '#00ff88', tension: 0.3, pointRadius: 0 },
+                        { label: 'CLV (Cierre)', data: closingData, borderColor: '#ffeb00', tension: 0.3, pointRadius: 0 }
                     ] 
                 },
-                options: { 
-                    responsive: true, 
-                    maintainAspectRatio: false, 
-                    plugins: { legend: { display: true, labels: { color: '#64748b', boxWidth: 12, font: { size: 10 } } } }, 
-                    scales: { y: { grid: { color: '#1f2937' }, ticks: { color: '#64748b' } }, x: { display: false } } 
-                }
+                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: true, labels: { color: '#64748b' } } }, scales: { y: { grid: { color: '#1f2937' }, ticks: { color: '#64748b' } }, x: { display: false } } }
             });
         }
 
-        function resetSystem() { if(confirm("¿Borrar todo el historial y reiniciar banca a $100?")) { localStorage.clear(); location.reload(); } }
+        function resetSystem() { if(confirm("¿Borrar todo el historial?")) { localStorage.clear(); location.reload(); } }
         updateStats();
     </script>
 </body>
