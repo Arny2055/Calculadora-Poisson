@@ -180,6 +180,20 @@
         }
         input:checked + .slider { background-color: var(--accent-green); }
         input:checked + .slider:before { transform: translateX(20px); }
+
+        .banca-selector {
+            background: #1e293b;
+            border: 2px solid #334155;
+            color: #94a3b8;
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-weight: 900;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        .banca-selector.active-main { border-color: var(--accent-green); color: var(--accent-green); background: rgba(0, 255, 136, 0.05); }
+        .banca-selector.active-xg { border-color: var(--neon-blue); color: var(--neon-blue); background: rgba(0, 210, 255, 0.05); }
     </style>
 </head>
 <body>
@@ -189,10 +203,16 @@
             <h1 class="text-2xl font-black italic text-white tracking-tighter">
                 BET<span class="text-bet-yellow">AGS</span> <span class="text-[10px] uppercase tracking-widest text-emerald-400 not-italic ml-1">Ultimate v3.3 (Pro Analytics)</span>
             </h1>
-            <div class="flex bg-slate-800 p-1 rounded-xl gap-1">
-                <button onclick="showTab('calc')" class="tab-btn px-4 py-2 rounded-lg text-sm font-bold transition-all active bg-slate-700 text-bet-yellow" id="btn-calc">CALCULADORA</button>
-                <button onclick="showTab('bank')" class="tab-btn px-4 py-2 rounded-lg text-sm font-bold transition-all text-slate-400" id="btn-bank">CONTROL</button>
-                <button onclick="showTab('insights')" class="tab-btn px-4 py-2 rounded-lg text-sm font-bold transition-all text-slate-400" id="btn-insights">BACKTESTING</button>
+            <div class="flex items-center gap-4">
+                <div class="flex bg-slate-800 p-1 rounded-full gap-1 border border-slate-700">
+                    <button id="select-main" onclick="switchBanca('main')" class="banca-selector active-main">PRINCIPAL</button>
+                    <button id="select-xg" onclick="switchBanca('xg')" class="banca-selector">ESPEJO xG</button>
+                </div>
+                <div class="flex bg-slate-800 p-1 rounded-xl gap-1">
+                    <button onclick="showTab('calc')" class="tab-btn px-4 py-2 rounded-lg text-sm font-bold transition-all active bg-slate-700 text-bet-yellow" id="btn-calc">CALCULADORA</button>
+                    <button onclick="showTab('bank')" class="tab-btn px-4 py-2 rounded-lg text-sm font-bold transition-all text-slate-400" id="btn-bank">CONTROL</button>
+                    <button onclick="showTab('insights')" class="tab-btn px-4 py-2 rounded-lg text-sm font-bold transition-all text-slate-400" id="btn-insights">BACKTESTING</button>
+                </div>
             </div>
         </div>
     </nav>
@@ -209,7 +229,7 @@
                 <p id="top-yield" class="text-xl font-bold">0%</p>
             </div>
             <div class="glass-card p-4 rounded-2xl border-l-4 border-emerald-500">
-                <p class="text-[10px] uppercase font-black text-slate-500">Banca</p>
+                <p class="text-[10px] uppercase font-black text-slate-500">Banca (<span id="banca-label-stats">P</span>)</p>
                 <p id="top-bankroll" class="text-xl font-bold">$100.00</p>
             </div>
             <div class="glass-card p-4 rounded-2xl border-l-4 border-purple-500">
@@ -329,7 +349,7 @@
         <div id="bank" class="tab-content space-y-6">
             <div class="glass-card p-6 rounded-2xl">
                 <div class="flex justify-between items-center mb-4 border-b border-slate-800 pb-2">
-                    <h2 class="text-sm font-black text-emerald-400 uppercase italic">Filtros Avanzados de Control</h2>
+                    <h2 class="text-sm font-black text-emerald-400 uppercase italic">Filtros Avanzados - Banca actual: <span id="banca-label-filter" class="text-white">Principal</span></h2>
                     <button onclick="resetFilters()" class="text-[10px] text-slate-500 hover:text-white transition-all uppercase font-bold">Limpiar Filtros</button>
                 </div>
                 <div class="filter-grid">
@@ -384,8 +404,8 @@
                 <div class="glass-card p-6 rounded-2xl flex flex-col justify-center">
                     <h2 class="text-xl font-bold mb-2">Gestión de Banca</h2>
                     <p class="text-sm text-slate-400 mb-4">Base Inicial: <b>$100.00</b> | Fracción Kelly: <b>0.25</b></p>
-                    <p class="text-xs text-slate-500 mb-6 italic">*El stake se calcula sobre el capital disponible (Base + Profit - Apuestas en juego).</p>
-                    <button onclick="resetSystem()" class="w-full bg-red-900/20 text-red-500 border border-red-900/50 p-3 rounded-xl font-bold text-xs hover:bg-red-900/40 transition-all">RESETEAR SISTEMA COMPLETO</button>
+                    <p class="text-xs text-slate-500 mb-6 italic">*El stake se calcula sobre el capital disponible de la banca seleccionada.</p>
+                    <button onclick="resetSystem()" class="w-full bg-red-900/20 text-red-500 border border-red-900/50 p-3 rounded-xl font-bold text-xs hover:bg-red-900/40 transition-all">RESETEAR BANCA ACTUAL</button>
                 </div>
             </div>
 
@@ -405,7 +425,11 @@
     <script>
         const BANKROLL_BASE = 100;
         const KELLY_FRAC = 0.25;
-        let bets = JSON.parse(localStorage.getItem('betags_pro_v3')) || [];
+        
+        // Sistema de banca dual
+        let currentBancaType = 'main'; // 'main' o 'xg'
+        let bets = []; // Se cargará dinámicamente según la banca
+        
         let filteredBets = []; 
         let pChart, bChart;
 
@@ -413,6 +437,24 @@
         let lastDisplayedIndex = 0;
         let isObserverActive = false;
         let viewMode = 'picks'; 
+
+        function switchBanca(type) {
+            currentBancaType = type;
+            
+            // UI Updates
+            document.getElementById('select-main').classList.toggle('active-main', type === 'main');
+            document.getElementById('select-xg').classList.toggle('active-xg', type === 'xg');
+            document.getElementById('banca-label-stats').innerText = type === 'main' ? 'P' : 'xG';
+            document.getElementById('banca-label-filter').innerText = type === 'main' ? 'Principal' : 'Espejo xG';
+            
+            loadBets();
+            updateStats();
+        }
+
+        function loadBets() {
+            const storageKey = currentBancaType === 'main' ? 'betags_pro_v3' : 'betags_xg_v3';
+            bets = JSON.parse(localStorage.getItem(storageKey)) || [];
+        }
 
         function showTab(tabId) {
             document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
@@ -528,7 +570,17 @@
             if(odd > 1) {
                 const edge = (odd * prob) - 1;
                 const kelly = Math.max(0, (edge / (odd - 1)) * KELLY_FRAC);
-                const availableBank = getCurrentBankroll();
+                
+                // Calculamos stake basado en la banca actual correspondiente al modo
+                const isManual = document.getElementById('manual_mode_toggle').checked;
+                const tempType = isManual ? 'xg' : 'main';
+                const tempKey = tempType === 'main' ? 'betags_pro_v3' : 'betags_xg_v3';
+                const tempBets = JSON.parse(localStorage.getItem(tempKey)) || [];
+                
+                const totalProfit = tempBets.reduce((acc, b) => acc + (b.profit || 0), 0);
+                const pendingStakes = tempBets.filter(b => b.status === 'pending').reduce((acc, b) => acc + (b.stake || 0), 0);
+                const availableBank = BANKROLL_BASE + totalProfit - pendingStakes;
+
                 const stake = availableBank * kelly;
                 
                 edgeEl.innerText = (edge * 100).toFixed(2) + "%";
@@ -584,8 +636,18 @@
             } else teamsPart = fullEvent;
 
             const edge = (odd * prob) - 1;
-            const fairOdd = (1 / prob).toFixed(2);
-            const availableBank = getCurrentBankroll();
+            
+            // Lógica para decidir en qué banca guardar
+            const isManual = document.getElementById('manual_mode_toggle').checked;
+            const targetBanca = isManual ? 'xg' : 'main';
+            const targetKey = targetBanca === 'main' ? 'betags_pro_v3' : 'betags_xg_v3';
+            
+            // Cargar banca destino temporalmente para calcular stake
+            let targetBets = JSON.parse(localStorage.getItem(targetKey)) || [];
+            const tProfit = targetBets.reduce((acc, b) => acc + (b.profit || 0), 0);
+            const tPending = targetBets.filter(b => b.status === 'pending').reduce((acc, b) => acc + (b.stake || 0), 0);
+            const availableBank = BANKROLL_BASE + tProfit - tPending;
+            
             const stake = availableBank * Math.max(0, (edge / (odd - 1)) * KELLY_FRAC);
 
             const bet = {
@@ -594,15 +656,23 @@
                 league: leaguePart,
                 teams: teamsPart,
                 matchTime: datePart,
-                market, odd, fairOdd, edge: (edge * 100).toFixed(2),
+                market, odd, fairOdd: (1 / prob).toFixed(2), 
+                edge: (edge * 100).toFixed(2),
                 overround: currentOv,
                 closingOdd: '',
                 stake, status: 'pending', profit: 0
             };
 
-            bets.unshift(bet);
-            save();
-            alert("✓ Apuesta registrada");
+            targetBets.unshift(bet);
+            localStorage.setItem(targetKey, JSON.stringify(targetBets));
+            
+            // Si la banca en la que registramos es la que estamos viendo, recargamos
+            if(currentBancaType === targetBanca) {
+                loadBets();
+                updateStats();
+            }
+
+            alert(`✓ Apuesta registrada en Banca ${targetBanca.toUpperCase()}`);
             document.getElementById('odd_' + id).value = '';
             document.getElementById('edge_' + id).innerText = '--';
             document.getElementById('stake_' + id).innerText = '--';
@@ -629,7 +699,8 @@
         }
 
         function save() {
-            localStorage.setItem('betags_pro_v3', JSON.stringify(bets));
+            const storageKey = currentBancaType === 'main' ? 'betags_pro_v3' : 'betags_xg_v3';
+            localStorage.setItem(storageKey, JSON.stringify(bets));
             updateStats();
         }
 
@@ -831,15 +902,24 @@
             bChart = new Chart(ctx, {
                 type: 'line',
                 data: { labels, datasets: [
-                    { label: 'Real', data: data, borderColor: '#00ff88', tension: 0.3, pointRadius: 0 },
+                    { label: 'Real', data: data, borderColor: currentBancaType === 'main' ? '#00ff88' : '#00d2ff', tension: 0.3, pointRadius: 0 },
                     { label: 'CLV', data: closingData, borderColor: '#ffeb00', tension: 0.3, pointRadius: 0 }
                 ]},
                 options: { responsive: true, maintainAspectRatio: false, scales: { y: { grid: { color: '#1f2937' } }, x: { display: false } } }
             });
         }
 
-        function resetSystem() { if(confirm("¿Borrar todo?")) { localStorage.clear(); location.reload(); } }
+        function resetSystem() { 
+            if(confirm(`¿Borrar todos los registros de la Banca ${currentBancaType.toUpperCase()}?`)) { 
+                const storageKey = currentBancaType === 'main' ? 'betags_pro_v3' : 'betags_xg_v3';
+                localStorage.removeItem(storageKey);
+                loadBets();
+                updateStats();
+            } 
+        }
         
+        // Carga inicial
+        loadBets();
         updateStats();
     </script>
 </body>
