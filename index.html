@@ -219,6 +219,32 @@
             background: rgba(0,0,0,0.4);
             border-top: 1px solid rgba(255,255,255,0.05);
         }
+
+        /* AVA Quick Keyboard Styles */
+        .ava-keyboard {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 6px;
+            margin-bottom: 12px;
+        }
+        .key-btn {
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            color: #94a3b8;
+            font-size: 9px;
+            padding: 6px;
+            border-radius: 6px;
+            text-align: center;
+            text-transform: uppercase;
+            font-weight: 800;
+            transition: all 0.2s;
+            cursor: pointer;
+        }
+        .key-btn:hover {
+            background: rgba(0, 255, 136, 0.1);
+            border-color: var(--accent-green);
+            color: var(--accent-green);
+        }
     </style>
 </head>
 <body>
@@ -227,9 +253,12 @@
     
     <div id="ai-assistant-panel">
         <div class="p-4 border-b border-emerald-500/20">
-            <h3 class="text-emerald-400 font-black text-xs uppercase flex items-center gap-2">
-                <i class="fa-solid fa-robot animate-pulse"></i> AVA - Asistente Virtual
-            </h3>
+            <div class="flex justify-between items-center">
+                <h3 class="text-emerald-400 font-black text-xs uppercase flex items-center gap-2">
+                    <i class="fa-solid fa-robot animate-pulse"></i> AVA - Asistente Virtual
+                </h3>
+                <button onclick="toggleAI()" class="text-slate-500 hover:text-white"><i class="fa-solid fa-xmark"></i></button>
+            </div>
             <p id="ai-status-text" class="text-[9px] text-slate-500 mt-1 font-mono uppercase">Sistema listo...</p>
         </div>
 
@@ -240,8 +269,15 @@
         </div>
 
         <div class="ai-input-container">
+            <div class="ava-keyboard">
+                <div class="key-btn" onclick="quickAsk('¿Cómo mejorar?')">📊 Analizar Skill</div>
+                <div class="key-btn" onclick="quickAsk('¿Donde apostar?')">🎯 Mejor Mercado</div>
+                <div class="key-btn" onclick="quickAsk('Consejo de valor')">💡 Buscar Valor</div>
+                <div class="key-btn" onclick="quickAsk('Resumen general')">📋 Resumen Pro</div>
+            </div>
+            
             <div class="flex gap-2">
-                <input type="text" id="ai-query" placeholder="Ej: ¿Dónde debo apostar?" class="flex-1 text-xs p-2 rounded-lg bg-slate-900 border-slate-700 outline-none focus:border-emerald-500">
+                <input type="text" id="ai-query" placeholder="Escribe aquí..." class="flex-1 text-xs p-2 rounded-lg bg-slate-900 border-slate-700 outline-none focus:border-emerald-500">
                 <button onclick="askAVA()" class="bg-emerald-500 text-black px-3 py-2 rounded-lg hover:bg-emerald-400 transition-all">
                     <i class="fa-solid fa-paper-plane"></i>
                 </button>
@@ -458,6 +494,12 @@
             document.getElementById('ai-assistant-panel').classList.toggle('open');
         }
 
+        // Función para el teclado de AVA
+        function quickAsk(text) {
+            document.getElementById('ai-query').value = text;
+            askAVA();
+        }
+
         function askAVA() {
             const input = document.getElementById('ai-query');
             const query = input.value.trim().toLowerCase();
@@ -492,14 +534,14 @@
             const totalProfit = finished.reduce((acc, b) => acc + b.profit, 0);
             
             // Lógica de respuesta según contenido
-            if (query.includes('mejorar') || query.includes('consejo')) {
+            if (query.includes('mejorar') || query.includes('consejo') || query.includes('skill')) {
                 const clvCount = finished.filter(b => b.closingOdd && parseFloat(b.closingOdd) < b.odd).length;
                 const clvRate = finished.length > 0 ? (clvCount / finished.length) * 100 : 0;
                 
                 if (clvRate < 50 && finished.length > 5) {
-                    return `<b>Consejo Pro:</b> Tu CLV (Valor al cierre) es de solo el ${clvRate.toFixed(1)}%. Estás apostando muy cerca del inicio del partido. Intenta entrar antes a los mercados para batir a la casa.`;
+                    return `<b>Análisis de Habilidad:</b> Tu CLV (Valor al cierre) es de solo el ${clvRate.toFixed(1)}%. Estás apostando muy tarde. Intenta entrar antes a los mercados para batir a la casa antes de que las cuotas bajen.`;
                 }
-                return "Tu gestión de banca es sólida. Mantén el Kelly al 25% para evitar rachas de varianza agresivas.";
+                return "Tu gestión de banca es sólida. Mantén el Kelly al 25% para evitar rachas de varianza agresivas. Tu Skill Score actual es: " + calculateLuckFactor(finished).score;
             }
 
             if (query.includes('dónde') || query.includes('donde') || query.includes('apostar') || query.includes('mercado')) {
@@ -508,8 +550,10 @@
                     if(!marketStats[b.market]) marketStats[b.market] = 0;
                     marketStats[b.market] += b.profit;
                 });
-                const bestMarket = Object.keys(marketStats).reduce((a, b) => marketStats[a] > marketStats[b] ? a : b, 'Ninguno aún');
+                const keys = Object.keys(marketStats);
+                if(keys.length === 0) return "Aún no tengo datos suficientes. Registra algunas apuestas para decirte dónde eres más fuerte.";
                 
+                const bestMarket = keys.reduce((a, b) => marketStats[a] > marketStats[b] ? a : b);
                 return `Basado en tu historial, tu mercado más rentable es <b>${bestMarket}</b>. Te sugiero priorizar este mercado y buscar cuotas con Edge > 5%.`;
             }
 
@@ -796,7 +840,6 @@
             }
 
             nextBatch.forEach(b => {
-                // CÁLCULO DE CUOTA JUSTA BASADO EN ODD Y EDGE (Solicitado por el usuario)
                 const calculatedFairOdd = (b.odd / (1 + (parseFloat(b.edge) / 100))).toFixed(2);
                 
                 let statusClass = b.status === 'win' ? "status-win" : (b.status === 'loss' ? "status-loss" : "");
@@ -833,7 +876,7 @@
         function calculateLuckFactor(filteredBets) {
             const finished = filteredBets.filter(b => b.status !== 'pending');
             const n = finished.length;
-            if (n < 20) return { score: "Muestra Baja", color: "text-slate-500" };
+            if (n < 10) return { score: "Muestra Baja", color: "text-slate-500" };
             let tp = 0, ts = 0;
             finished.forEach(b => { tp += b.profit; ts += b.stake; });
             const yld = tp / ts;
@@ -939,7 +982,6 @@
 
         function resetSystem() { if(confirm("¿Borrar todo?")) { localStorage.clear(); location.reload(); } }
         
-        // Listener para el ENTER en el chat de AVA
         document.getElementById('ai-query').addEventListener('keypress', function(e) {
             if (e.key === 'Enter') askAVA();
         });
