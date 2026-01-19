@@ -152,6 +152,34 @@
             border: 2px dashed rgba(255,255,255,0.1);
             cursor: pointer;
         }
+
+        /* Toggle Switch Custom */
+        .switch {
+            position: relative;
+            display: inline-block;
+            width: 40px;
+            height: 20px;
+        }
+        .switch input { opacity: 0; width: 0; height: 0; }
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background-color: #374151;
+            transition: .4s;
+            border-radius: 20px;
+        }
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 14px; width: 14px;
+            left: 3px; bottom: 3px;
+            background-color: white;
+            transition: .4s;
+            border-radius: 50%;
+        }
+        input:checked + .slider { background-color: var(--accent-green); }
+        input:checked + .slider:before { transform: translateX(20px); }
     </style>
 </head>
 <body>
@@ -197,8 +225,18 @@
         <div id="calc" class="tab-content active space-y-6">
             <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 <div class="glass-card p-6 rounded-2xl">
-                    <h2 class="text-lg font-bold mb-4 text-bet-yellow uppercase tracking-tighter">1. Parámetros de Simulación</h2>
-                    <div class="space-y-4">
+                    <div class="flex justify-between items-center mb-4">
+                        <h2 class="text-lg font-bold text-bet-yellow uppercase tracking-tighter">1. Parámetros</h2>
+                        <div class="flex items-center gap-2">
+                            <span class="text-[9px] font-bold text-slate-400 uppercase" id="mode-label">Auto</span>
+                            <label class="switch">
+                                <input type="checkbox" id="manual_mode_toggle" onchange="toggleManualMode()">
+                                <span class="slider"></span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <div id="auto-inputs" class="space-y-4">
                         <div class="grid grid-cols-2 gap-2">
                             <div>
                                 <label class="text-[10px] font-bold text-slate-500 uppercase">Liga Local AVG</label>
@@ -223,10 +261,27 @@
                                 <input type="number" id="a_gc" step="0.01" placeholder="GC" class="p-2">
                             </div>
                         </div>
-                        <button onclick="calculate()" class="w-full bg-emerald-600 hover:bg-emerald-500 py-3 rounded-xl font-black text-sm transition-all uppercase tracking-widest shadow-lg shadow-emerald-900/40">
-                            Ejecutar Poisson
-                        </button>
                     </div>
+
+                    <div id="manual-inputs" class="space-y-4 hidden">
+                        <div class="p-3 bg-emerald-500/5 rounded-xl border border-emerald-500/20">
+                            <p class="text-[10px] font-bold text-emerald-400 mb-2 uppercase italic">Entrada Directa de xG (Expected Goals)</p>
+                            <div class="space-y-3">
+                                <div>
+                                    <label class="text-[9px] text-slate-500 uppercase font-bold">Goles Esperados Local (xG)</label>
+                                    <input type="number" id="manual_home_xg" step="0.01" placeholder="Ej: 1.75" class="w-full p-2">
+                                </div>
+                                <div>
+                                    <label class="text-[9px] text-slate-500 uppercase font-bold">Goles Esperados Visitante (xG)</label>
+                                    <input type="number" id="manual_away_xg" step="0.01" placeholder="Ej: 1.20" class="w-full p-2">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <button onclick="calculate()" class="w-full mt-4 bg-emerald-600 hover:bg-emerald-500 py-3 rounded-xl font-black text-sm transition-all uppercase tracking-widest shadow-lg shadow-emerald-900/40">
+                        Ejecutar Poisson
+                    </button>
                 </div>
 
                 <div class="lg:col-span-2 glass-card p-6 rounded-2xl">
@@ -369,6 +424,13 @@
             if(tabId === 'insights') runBacktesting();
         }
 
+        function toggleManualMode() {
+            const isManual = document.getElementById('manual_mode_toggle').checked;
+            document.getElementById('auto-inputs').classList.toggle('hidden', isManual);
+            document.getElementById('manual-inputs').classList.toggle('hidden', !isManual);
+            document.getElementById('mode-label').innerText = isManual ? "Manual" : "Auto";
+        }
+
         function toggleHistoryView() {
             viewMode = (viewMode === 'picks') ? 'accuracy' : 'picks';
             applyFilters();
@@ -384,16 +446,25 @@
         function poissonProb(k, lambda) { return (Math.pow(lambda, k) * Math.exp(-lambda)) / factorial(k); }
 
         function calculate() {
-            const l_h = parseFloat(document.getElementById('l_h_avg').value);
-            const l_a = parseFloat(document.getElementById('l_a_avg').value);
-            const h_gf = parseFloat(document.getElementById('h_gf').value);
-            const h_gc = parseFloat(document.getElementById('h_gc').value);
-            const a_gf = parseFloat(document.getElementById('a_gf').value);
-            const a_gc = parseFloat(document.getElementById('a_gc').value);
-            if(!h_gf || !h_gc || !a_gf || !a_gc) return alert("Ingresa datos de equipos");
-            
-            const home_xg = (h_gf / l_h) * (a_gc / l_h) * l_h;
-            const away_xg = (a_gf / l_a) * (h_gc / l_a) * l_a;
+            let home_xg, away_xg;
+            const isManual = document.getElementById('manual_mode_toggle').checked;
+
+            if (isManual) {
+                home_xg = parseFloat(document.getElementById('manual_home_xg').value);
+                away_xg = parseFloat(document.getElementById('manual_away_xg').value);
+                if(isNaN(home_xg) || isNaN(away_xg)) return alert("Ingresa los Goles Esperados (xG)");
+            } else {
+                const l_h = parseFloat(document.getElementById('l_h_avg').value);
+                const l_a = parseFloat(document.getElementById('l_a_avg').value);
+                const h_gf = parseFloat(document.getElementById('h_gf').value);
+                const h_gc = parseFloat(document.getElementById('h_gc').value);
+                const a_gf = parseFloat(document.getElementById('a_gf').value);
+                const a_gc = parseFloat(document.getElementById('a_gc').value);
+                if(!h_gf || !h_gc || !a_gf || !a_gc) return alert("Ingresa datos de equipos");
+                
+                home_xg = (h_gf / l_h) * (a_gc / l_h) * l_h;
+                away_xg = (a_gf / l_a) * (h_gc / l_a) * l_a;
+            }
             
             let h_p = [], a_p = [], labels = [];
             for(let i=0; i<=6; i++) {
