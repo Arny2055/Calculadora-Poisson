@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>BetAGS </title>
+    <title>BetAGS Pro - Hybrid Edition</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -153,7 +153,6 @@
             cursor: pointer;
         }
 
-        /* Toggle Switch Custom */
         .switch {
             position: relative;
             display: inline-block;
@@ -268,24 +267,26 @@
                             </div>
                         </div>
                         <div class="p-3 bg-blue-500/5 rounded-xl border border-blue-500/20">
-                            <p class="text-[10px] font-bold text-blue-400 mb-2 uppercase">Local (Promedios)</p>
-                            <div class="grid grid-cols-2 gap-2">
+                            <p class="text-[10px] font-bold text-blue-400 mb-2 uppercase">Local (Goles Reales + xG Opcional)</p>
+                            <div class="grid grid-cols-3 gap-2">
                                 <input type="number" id="h_gf" step="0.01" placeholder="GF" class="p-2">
                                 <input type="number" id="h_gc" step="0.01" placeholder="GC" class="p-2">
+                                <input type="number" id="h_xg_besoccer" step="0.01" placeholder="xG BSP" class="p-2 border-blue-500/50">
                             </div>
                         </div>
                         <div class="p-3 bg-orange-500/5 rounded-xl border border-orange-500/20">
-                            <p class="text-[10px] font-bold text-orange-400 mb-2 uppercase">Visitante (Promedios)</p>
-                            <div class="grid grid-cols-2 gap-2">
+                            <p class="text-[10px] font-bold text-orange-400 mb-2 uppercase">Visitante (Goles Reales + xG Opcional)</p>
+                            <div class="grid grid-cols-3 gap-2">
                                 <input type="number" id="a_gf" step="0.01" placeholder="GF" class="p-2">
                                 <input type="number" id="a_gc" step="0.01" placeholder="GC" class="p-2">
+                                <input type="number" id="a_xg_besoccer" step="0.01" placeholder="xG BSP" class="p-2 border-orange-500/50">
                             </div>
                         </div>
                     </div>
 
                     <div id="manual-inputs" class="space-y-4 hidden">
                         <div class="p-3 bg-emerald-500/5 rounded-xl border border-emerald-500/20">
-                            <p class="text-[10px] font-bold text-emerald-400 mb-2 uppercase italic">Entrada Directa de xG (Expected Goals)</p>
+                            <p class="text-[10px] font-bold text-emerald-400 mb-2 uppercase italic">Entrada Directa de xG (BeSoccerPlus)</p>
                             <div class="space-y-3">
                                 <div>
                                     <label class="text-[9px] text-slate-500 uppercase font-bold">Goles Esperados Local (xG)</label>
@@ -304,11 +305,17 @@
                     </button>
                 </div>
 
-                <div class="lg:col-span-2 glass-card p-6 rounded-2xl">
+                <div class="lg:col-span-2 glass-card p-6 rounded-2xl relative">
+                    <div id="hybrid-badge" class="absolute top-4 right-6 hidden">
+                        <span class="bg-blue-600/20 text-blue-400 border border-blue-500/50 px-3 py-1 rounded-full text-[10px] font-bold italic uppercase tracking-widest">
+                            Modelo Híbrido (Goles + xG)
+                        </span>
+                    </div>
                     <h2 class="text-lg font-bold mb-4 text-slate-400 uppercase tracking-tighter">Curva de Probabilidad</h2>
                     <div class="h-[280px]">
                         <canvas id="poissonChart"></canvas>
                     </div>
+                    <div id="convergencia-alert" class="mt-2 text-[10px] font-bold uppercase tracking-tight text-slate-500 flex gap-4"></div>
                 </div>
             </div>
 
@@ -426,9 +433,8 @@
         const BANKROLL_BASE = 100;
         const KELLY_FRAC = 0.25;
         
-        // Sistema de banca dual
-        let currentBancaType = 'main'; // 'main' o 'xg'
-        let bets = []; // Se cargará dinámicamente según la banca
+        let currentBancaType = 'main'; 
+        let bets = []; 
         
         let filteredBets = []; 
         let pChart, bChart;
@@ -440,13 +446,10 @@
 
         function switchBanca(type) {
             currentBancaType = type;
-            
-            // UI Updates
             document.getElementById('select-main').classList.toggle('active-main', type === 'main');
             document.getElementById('select-xg').classList.toggle('active-xg', type === 'xg');
             document.getElementById('banca-label-stats').innerText = type === 'main' ? 'P' : 'xG';
             document.getElementById('banca-label-filter').innerText = type === 'main' ? 'Principal' : 'BeSoccer Plus';
-            
             loadBets();
             updateStats();
         }
@@ -461,7 +464,6 @@
             document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('bg-slate-700', 'text-bet-yellow'));
             document.getElementById(tabId).classList.add('active');
             document.getElementById('btn-' + tabId).classList.add('bg-slate-700', 'text-bet-yellow');
-            
             if(tabId === 'bank') updateStats(); 
             if(tabId === 'insights') runBacktesting();
         }
@@ -490,6 +492,11 @@
         function calculate() {
             let home_xg, away_xg;
             const isManual = document.getElementById('manual_mode_toggle').checked;
+            const hybridBadge = document.getElementById('hybrid-badge');
+            const convAlert = document.getElementById('convergencia-alert');
+            
+            convAlert.innerHTML = '';
+            hybridBadge.classList.add('hidden');
 
             if (isManual) {
                 home_xg = parseFloat(document.getElementById('manual_home_xg').value);
@@ -502,10 +509,33 @@
                 const h_gc = parseFloat(document.getElementById('h_gc').value);
                 const a_gf = parseFloat(document.getElementById('a_gf').value);
                 const a_gc = parseFloat(document.getElementById('a_gc').value);
+                
+                // Nuevos campos xG opcionales
+                const h_xg_besoccer = parseFloat(document.getElementById('h_xg_besoccer').value);
+                const a_xg_besoccer = parseFloat(document.getElementById('a_xg_besoccer').value);
+
                 if(!h_gf || !h_gc || !a_gf || !a_gc) return alert("Ingresa datos de equipos");
                 
-                home_xg = (h_gf / l_h) * (a_gc / l_h) * l_h;
-                away_xg = (a_gf / l_a) * (h_gc / l_a) * l_a;
+                let raw_home_xg = (h_gf / l_h) * (a_gc / l_h) * l_h;
+                let raw_away_xg = (a_gf / l_a) * (h_gc / l_a) * l_a;
+
+                // LOGICA HIBRIDA: Si hay xG de BeSoccer, promediamos
+                if(!isNaN(h_xg_besoccer) && !isNaN(a_xg_besoccer)) {
+                    home_xg = (raw_home_xg + h_xg_besoccer) / 2;
+                    away_xg = (raw_away_xg + a_xg_besoccer) / 2;
+                    hybridBadge.classList.remove('hidden');
+                    
+                    // Análisis de Convergencia
+                    const h_diff = (h_xg_besoccer - raw_home_xg).toFixed(2);
+                    const a_diff = (a_xg_besoccer - raw_away_xg).toFixed(2);
+                    convAlert.innerHTML = `
+                        <span>Local: ${h_diff > 0 ? '🔥 Underperforming' : '❄️ Overperforming'} (${h_diff})</span>
+                        <span>Vis: ${a_diff > 0 ? '🔥 Underperforming' : '❄️ Overperforming'} (${a_diff})</span>
+                    `;
+                } else {
+                    home_xg = raw_home_xg;
+                    away_xg = raw_away_xg;
+                }
             }
             
             let h_p = [], a_p = [], labels = [];
@@ -570,17 +600,13 @@
             if(odd > 1) {
                 const edge = (odd * prob) - 1;
                 const kelly = Math.max(0, (edge / (odd - 1)) * KELLY_FRAC);
-                
-                // Calculamos stake basado en la banca actual correspondiente al modo
                 const isManual = document.getElementById('manual_mode_toggle').checked;
                 const tempType = isManual ? 'xg' : 'main';
                 const tempKey = tempType === 'main' ? 'betags_pro_v3' : 'betags_xg_v3';
                 const tempBets = JSON.parse(localStorage.getItem(tempKey)) || [];
-                
                 const totalProfit = tempBets.reduce((acc, b) => acc + (b.profit || 0), 0);
                 const pendingStakes = tempBets.filter(b => b.status === 'pending').reduce((acc, b) => acc + (b.stake || 0), 0);
                 const availableBank = BANKROLL_BASE + totalProfit - pendingStakes;
-
                 const stake = availableBank * kelly;
                 
                 edgeEl.innerText = (edge * 100).toFixed(2) + "%";
@@ -595,7 +621,6 @@
             const u25 = parseFloat(document.getElementById('odd_u25').value) || 0;
             const o05ht = parseFloat(document.getElementById('odd_o05ht').value) || 0;
             const u05ht = parseFloat(document.getElementById('odd_u05ht').value) || 0;
-
             if(o25 > 0 && u25 > 0) {
                 const ov = ((1/o25 + 1/u25) - 1) * 100;
                 document.getElementById('ov-ou').innerText = ov.toFixed(2) + "%";
@@ -603,7 +628,6 @@
                 const ov = ((1/o05ht + 1/u05ht) - 1) * 100;
                 document.getElementById('ov-ou').innerText = ov.toFixed(2) + "%";
             }
-
             const by = parseFloat(document.getElementById('odd_bttsy').value) || 0;
             const bn = parseFloat(document.getElementById('odd_bttsn').value) || 0;
             if(by > 0 && bn > 0) {
@@ -616,15 +640,12 @@
             const odd = parseFloat(document.getElementById('odd_' + id).value);
             const rawEvent = document.getElementById('event_name').value || "Varios 🆚 Local - Vis 🗓️ Pendiente";
             if(!odd) return alert("Falta cuota de mercado");
-
             const fullEvent = rawEvent.replace(/[\n\r]+/g, ' ').trim();
             const isOU = id.includes('25') || id.includes('05');
             const currentOv = isOU ? document.getElementById('ov-ou').innerText : document.getElementById('ov-btts').innerText;
-
             let leaguePart = "Varios", teamsPart = "Partido", datePart = "Pendiente";
             const vsEmoji = "🆚";
             const calEmoji = fullEvent.includes("🗓️") ? "🗓️" : "🗓";
-
             if (fullEvent.includes(vsEmoji)) {
                 const partsVs = fullEvent.split(vsEmoji);
                 leaguePart = partsVs[0].trim();
@@ -634,22 +655,15 @@
                     datePart = partsCal[1].trim();
                 } else teamsPart = partsVs[1].trim();
             } else teamsPart = fullEvent;
-
             const edge = (odd * prob) - 1;
-            
-            // Lógica para decidir en qué banca guardar
             const isManual = document.getElementById('manual_mode_toggle').checked;
             const targetBanca = isManual ? 'xg' : 'main';
             const targetKey = targetBanca === 'main' ? 'betags_pro_v3' : 'betags_xg_v3';
-            
-            // Cargar banca destino temporalmente para calcular stake
             let targetBets = JSON.parse(localStorage.getItem(targetKey)) || [];
             const tProfit = targetBets.reduce((acc, b) => acc + (b.profit || 0), 0);
             const tPending = targetBets.filter(b => b.status === 'pending').reduce((acc, b) => acc + (b.stake || 0), 0);
             const availableBank = BANKROLL_BASE + tProfit - tPending;
-            
             const stake = availableBank * Math.max(0, (edge / (odd - 1)) * KELLY_FRAC);
-
             const bet = {
                 id: Date.now(),
                 dateRegistered: new Date().toLocaleDateString(),
@@ -659,24 +673,15 @@
                 market, odd, fairOdd: (1 / prob).toFixed(2), 
                 edge: (edge * 100).toFixed(2),
                 overround: currentOv,
-                preMatchOdd: '', // NUEVO CAMPO: Cuota 1h antes
+                preMatchOdd: '', 
                 closingOdd: '',
                 stake, status: 'pending', profit: 0
             };
-
             targetBets.unshift(bet);
             localStorage.setItem(targetKey, JSON.stringify(targetBets));
-            
-            // Si la banca en la que registramos es la que estamos viendo, recargamos
-            if(currentBancaType === targetBanca) {
-                loadBets();
-                updateStats();
-            }
-
+            if(currentBancaType === targetBanca) { loadBets(); updateStats(); }
             alert(`✓ Apuesta registrada en Banca ${targetBanca.toUpperCase()}`);
             document.getElementById('odd_' + id).value = '';
-            document.getElementById('edge_' + id).innerText = '--';
-            document.getElementById('stake_' + id).innerText = '--';
         }
 
         function resolve(id, status) {
@@ -692,7 +697,6 @@
             save();
         }
 
-        // NUEVA FUNCION: Actualizar Cuota 1h antes
         function updatePreMatchOdd(id, value) {
             const b = bets.find(x => x.id === id);
             b.preMatchOdd = value;
@@ -723,7 +727,6 @@
             const oMax = parseFloat(document.getElementById('f_odd_max').value) || 999;
             const market = document.getElementById('f_market').value;
             const league = document.getElementById('f_league').value;
-
             filteredBets = bets.filter(b => {
                 const bEdge = parseFloat(b.edge);
                 const bFair = parseFloat(b.fairOdd) || 0;
@@ -735,28 +738,22 @@
                        (market === "" || b.market === market) &&
                        (league === "" || b.league === league);
             });
-
             let totalProfit = 0, totalStaked = 0;
             filteredBets.forEach(b => {
                 totalProfit += b.profit;
                 if(b.status !== 'pending') totalStaked += b.stake;
             });
-
             document.getElementById('top-profit').innerText = `$${totalProfit.toFixed(2)}`;
             document.getElementById('top-profit').className = `text-xl font-bold ${totalProfit >= 0 ? 'neon-text-green' : 'neon-text-pink'}`;
             document.getElementById('top-count').innerText = filteredBets.length;
-            
             const skill = calculateLuckFactor(filteredBets);
             document.getElementById('top-skill').innerText = skill.score;
             document.getElementById('top-skill').className = `text-sm font-black uppercase ${skill.color}`;
-
             document.getElementById('top-bankroll').innerText = `$${getCurrentBankroll().toFixed(2)}`;
             document.getElementById('top-yield').innerText = (totalStaked > 0 ? (totalProfit / totalStaked) * 100 : 0).toFixed(1) + "%";
-
             renderBankrollChart(); 
             lastDisplayedIndex = 0;
             document.getElementById('history-grid').innerHTML = '';
-            
             if (viewMode === 'picks') {
                 renderNextBetsBatch();
                 document.getElementById('infinite-scroll-trigger').style.display = 'flex';
@@ -770,15 +767,12 @@
             const grid = document.getElementById('history-grid');
             if (viewMode !== 'picks') return;
             const nextBatch = filteredBets.slice(lastDisplayedIndex, lastDisplayedIndex + itemsPerLoad);
-            
             if (nextBatch.length === 0 && lastDisplayedIndex === 0) {
                 grid.innerHTML = '<p class="col-span-full text-center text-slate-500 py-10 font-bold">No hay registros.</p>';
                 return;
             }
-
             nextBatch.forEach(b => {
                 const calculatedFairOdd = (b.odd / (1 + (parseFloat(b.edge) / 100))).toFixed(2);
-                
                 let statusClass = b.status === 'win' ? "status-win" : (b.status === 'loss' ? "status-loss" : "");
                 const card = document.createElement('div');
                 card.className = `bet-card-custom relative ${statusClass}`;
@@ -795,7 +789,6 @@
                         <div class="badge-ov">OV: ${b.overround}</div>
                         <div class="badge-clv">CLV: ${b.closingOdd ? 'OK' : 'N/A'}</div>
                     </div>
-                    
                     <div class="grid grid-cols-2 gap-2 mb-6" onclick="event.stopPropagation()">
                         <div>
                             <span class="text-slate-500 text-[10px] uppercase font-bold block mb-1">Cuota 1h antes:</span>
@@ -806,7 +799,6 @@
                             <input type="number" step="0.01" value="${b.closingOdd || ''}" onchange="updateClosingOdd(${b.id}, this.value)" class="input-cierre text-xs text-white w-full">
                         </div>
                     </div>
-
                     <div class="flex gap-3" onclick="event.stopPropagation()">
                         <button onclick="resolve(${b.id}, 'win')" class="btn-status-sq bg-emerald-500 text-black">W</button>
                         <button onclick="resolve(${b.id}, 'loss')" class="btn-status-sq bg-red-500 text-white">L</button>
@@ -934,7 +926,6 @@
             } 
         }
         
-        // Carga inicial
         loadBets();
         updateStats();
     </script>
