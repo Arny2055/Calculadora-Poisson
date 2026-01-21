@@ -101,7 +101,7 @@
 
         .filter-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+            grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
             gap: 12px;
         }
     </style>
@@ -281,12 +281,24 @@
                         <input type="number" id="f_min_edge" class="w-full p-1 text-xs" oninput="applyFilters()" placeholder="0">
                     </div>
                     <div>
+                        <label class="text-[9px] font-bold text-slate-500 uppercase block mb-1">Max Edge (%)</label>
+                        <input type="number" id="f_max_edge" class="w-full p-1 text-xs" oninput="applyFilters()" placeholder="100">
+                    </div>
+                    <div>
+                        <label class="text-[9px] font-bold text-slate-500 uppercase block mb-1">Min Overround</label>
+                        <input type="number" id="f_min_ov" class="w-full p-1 text-xs" oninput="applyFilters()" placeholder="0">
+                    </div>
+                    <div>
                         <label class="text-[9px] font-bold text-slate-500 uppercase block mb-1">Max Overround</label>
                         <input type="number" id="f_max_ov" class="w-full p-1 text-xs" oninput="applyFilters()" placeholder="10">
                     </div>
                     <div>
                         <label class="text-[9px] font-bold text-slate-500 uppercase block mb-1">Min Cuota</label>
                         <input type="number" id="f_min_odd" class="w-full p-1 text-xs" oninput="applyFilters()" placeholder="1.0">
+                    </div>
+                    <div>
+                        <label class="text-[9px] font-bold text-slate-500 uppercase block mb-1">Max Cuota</label>
+                        <input type="number" id="f_max_odd" class="w-full p-1 text-xs" oninput="applyFilters()" placeholder="50">
                     </div>
                 </div>
             </div>
@@ -456,10 +468,9 @@
             const edge = (odd * prob) - 1;
             const stake = getCurrentBankroll() * Math.max(0, (edge / (odd - 1)) * KELLY_FRAC);
 
-            // Capturar Overround del mercado correspondiente
-            let ov = 0;
+            let ov = "0%";
             if(market.includes('2.5')) ov = document.getElementById('ov-ou').innerText;
-            else ov = document.getElementById('ov-btts').innerText;
+            else if(market.includes('BTTS')) ov = document.getElementById('ov-btts').innerText;
             
             bets.unshift({
                 id: Date.now(),
@@ -472,7 +483,7 @@
                 engine: motor
             });
             save();
-            alert("Registrada!");
+            alert("¡Apuesta Registrada!");
         }
 
         function resolve(id, status) {
@@ -480,6 +491,13 @@
             b.status = status;
             b.profit = status === 'win' ? b.stake * (b.odd - 1) : -b.stake;
             save();
+        }
+
+        function deleteBet(id) {
+            if(confirm('¿Eliminar esta apuesta del registro?')) {
+                bets = bets.filter(x => x.id !== id);
+                save();
+            }
         }
 
         function save() {
@@ -492,17 +510,21 @@
             const fEngine = document.getElementById('f_engine').value;
             const fMarket = document.getElementById('f_market').value;
             const fMinEdge = parseFloat(document.getElementById('f_min_edge').value) || -999;
+            const fMaxEdge = parseFloat(document.getElementById('f_max_edge').value) || 999;
+            const fMinOv = parseFloat(document.getElementById('f_min_ov').value) || -999;
             const fMaxOv = parseFloat(document.getElementById('f_max_ov').value) || 999;
             const fMinOdd = parseFloat(document.getElementById('f_min_odd').value) || 0;
+            const fMaxOdd = parseFloat(document.getElementById('f_max_odd').value) || 999;
 
             filteredBets = bets.filter(b => {
                 const ovNum = parseFloat(b.overround) || 0;
+                const edgeNum = parseFloat(b.edge) || 0;
                 return (fLeague === "" || b.league.toLowerCase().includes(fLeague)) &&
                        (fEngine === "" || b.engine === fEngine) &&
                        (fMarket === "" || b.market === fMarket) &&
-                       (parseFloat(b.edge) >= fMinEdge) &&
-                       (ovNum <= fMaxOv) &&
-                       (b.odd >= fMinOdd);
+                       (edgeNum >= fMinEdge && edgeNum <= fMaxEdge) &&
+                       (ovNum >= fMinOv && ovNum <= fMaxOv) &&
+                       (b.odd >= fMinOdd && b.odd <= fMaxOdd);
             });
 
             const totalProfit = filteredBets.reduce((a, b) => a + b.profit, 0);
@@ -528,7 +550,12 @@
                 card.innerHTML = `
                     <div class="flex justify-between mb-1">
                         <span class="text-[9px] font-bold text-emerald-400 uppercase">${b.engine} | ${b.league}</span>
-                        <span class="text-[10px] text-slate-500 font-bold">${b.market}</span>
+                        <div class="flex gap-2 items-center">
+                            <span class="text-[10px] text-slate-500 font-bold">${b.market}</span>
+                            <button onclick="deleteBet(${b.id})" class="text-red-500 hover:text-red-300 transition-colors">
+                                <i class="fa-solid fa-trash-can text-[10px]"></i>
+                            </button>
+                        </div>
                     </div>
                     <h4 class="text-white font-bold mb-2 text-sm">${b.teams}</h4>
                     <div class="grid grid-cols-2 gap-x-4 gap-y-1 mb-3 text-[10px]">
@@ -538,8 +565,8 @@
                         <div class="text-slate-400">OV: <b class="text-yellow-500">${b.overround}</b></div>
                     </div>
                     <div class="flex gap-2">
-                        <button onclick="resolve(${b.id}, 'win')" class="btn-status-sq bg-emerald-500 text-black">W</button>
-                        <button onclick="resolve(${b.id}, 'loss')" class="btn-status-sq bg-red-500 text-white">L</button>
+                        <button onclick="resolve(${b.id}, 'win')" class="btn-status-sq bg-emerald-500 text-black shadow-lg shadow-emerald-500/20">W</button>
+                        <button onclick="resolve(${b.id}, 'loss')" class="btn-status-sq bg-red-500 text-white shadow-lg shadow-red-500/20">L</button>
                     </div>
                 `;
                 grid.appendChild(card);
@@ -561,7 +588,7 @@
                         { label: 'Visitante', data: away, borderColor: '#f97316', backgroundColor: 'rgba(249, 115, 22, 0.1)', fill: true, tension: 0.4 } 
                     ] 
                 }, 
-                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { labels: { color: '#94a3b8' } } } } 
+                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { labels: { color: '#94a3b8', font: { size: 10 } } } }, scales: { x: { ticks: { color: '#475569' } }, y: { ticks: { color: '#475569' } } } } 
             });
         }
 
@@ -574,9 +601,9 @@
                 type: 'line', 
                 data: { 
                     labels: data.map((_, i) => i), 
-                    datasets: [ { label: 'Banca', data: data, borderColor: '#00ff88', tension: 0.3, pointRadius: 0 } ] 
+                    datasets: [ { label: 'Banca', data: data, borderColor: '#00ff88', borderWidth: 2, tension: 0.3, pointRadius: 0, fill: { target: 'origin', above: 'rgba(0, 255, 136, 0.05)' } } ] 
                 }, 
-                options: { responsive: true, maintainAspectRatio: false } 
+                options: { responsive: true, maintainAspectRatio: false, scales: { x: { display: false }, y: { ticks: { color: '#475569' } } } } 
             });
         }
         
