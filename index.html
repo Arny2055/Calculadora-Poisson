@@ -527,7 +527,6 @@
                 const a_gf = parseFloat(document.getElementById('a_gf').value);
                 const a_gc = parseFloat(document.getElementById('a_gc').value);
                 
-                // Nuevos campos xG opcionales
                 const h_xg_besoccer = parseFloat(document.getElementById('h_xg_besoccer').value);
                 const a_xg_besoccer = parseFloat(document.getElementById('a_xg_besoccer').value);
 
@@ -536,14 +535,11 @@
                 let raw_home_xg = (h_gf / l_h) * (a_gc / l_h) * l_h;
                 let raw_away_xg = (a_gf / l_a) * (h_gc / l_a) * l_a;
 
-                // LOGICA HIBRIDA: Ponderación basada en fiabilidad (xG suele ser mejor predictor)
-                // Usamos 60% xG y 40% Goles Reales para mayor "justicia" estadística
                 if(!isNaN(h_xg_besoccer) && !isNaN(a_xg_besoccer)) {
                     home_xg = (raw_home_xg * 0.4) + (h_xg_besoccer * 0.6);
                     away_xg = (raw_away_xg * 0.4) + (a_xg_besoccer * 0.6);
                     hybridBadge.classList.remove('hidden');
                     
-                    // Análisis de Convergencia
                     const h_diff = (h_xg_besoccer - raw_home_xg).toFixed(2);
                     const a_diff = (a_xg_besoccer - raw_away_xg).toFixed(2);
                     convAlert.innerHTML = `
@@ -564,10 +560,16 @@
             }
             renderPoissonChart(labels, h_p, a_p);
 
-            const home_ht_xg = home_xg * 0.45;
-            const away_ht_xg = away_xg * 0.45;
-            const p_u05_ht = poissonProb(0, home_ht_xg) * poissonProb(0, away_ht_xg);
-            const p_o05_ht = 1 - p_u05_ht;
+            // CALCULOS 1X2
+            let p_win = 0, p_draw = 0, p_loss = 0;
+            for(let h=0; h<=8; h++) {
+                for(let a=0; a<=8; a++) {
+                    let prob = poissonProb(h, home_xg) * poissonProb(a, away_xg);
+                    if(h > a) p_win += prob;
+                    else if(h === a) p_draw += prob;
+                    else p_loss += prob;
+                }
+            }
 
             let p_u25 = 0;
             for(let h=0; h<=2; h++) {
@@ -581,8 +583,9 @@
             const p_btts_n = 1 - p_btts_y;
 
             renderMarketTable([
-                { id: 'o05ht', name: 'HT OVER 0.5', prob: p_o05_ht },
-                { id: 'u05ht', name: 'HT UNDER 0.5', prob: p_u05_ht },
+                { id: 'home', name: 'LOCAL (1)', prob: p_win },
+                { id: 'draw', name: 'EMPATE (X)', prob: p_draw },
+                { id: 'away', name: 'VISITA (2)', prob: p_loss },
                 { id: 'o25', name: 'OVER 2.5', prob: p_o25 },
                 { id: 'u25', name: 'UNDER 2.5', prob: p_u25 },
                 { id: 'bttsy', name: 'BTTS SÍ', prob: p_btts_y },
@@ -596,7 +599,7 @@
             data.forEach(m => {
                 table.innerHTML += `
                     <tr class="hover:bg-slate-800/30 transition-colors">
-                        <td class="p-4 font-bold text-slate-200 uppercase">${m.name} ${m.id.includes('ht') ? '<span class="text-[9px] text-emerald-500 ml-1">1ST HALF</span>' : ''}</td>
+                        <td class="p-4 font-bold text-slate-200 uppercase">${m.name}</td>
                         <td class="p-4 text-emerald-400 font-mono">${(m.prob * 100).toFixed(1)}%</td>
                         <td class="p-4 text-slate-500 font-mono">${(1/m.prob).toFixed(2)}</td>
                         <td class="p-4"><input type="number" step="0.01" class="w-20 p-1 text-xs" oninput="updateEdge('${m.id}', ${m.prob})" id="odd_${m.id}"></td>
@@ -637,13 +640,8 @@
         function updateOverrounds() {
             const o25 = parseFloat(document.getElementById('odd_o25').value) || 0;
             const u25 = parseFloat(document.getElementById('odd_u25').value) || 0;
-            const o05ht = parseFloat(document.getElementById('odd_o05ht').value) || 0;
-            const u05ht = parseFloat(document.getElementById('odd_u05ht').value) || 0;
             if(o25 > 0 && u25 > 0) {
                 const ov = ((1/o25 + 1/u25) - 1) * 100;
-                document.getElementById('ov-ou').innerText = ov.toFixed(2) + "%";
-            } else if(o05ht > 0 && u05ht > 0) {
-                const ov = ((1/o05ht + 1/u05ht) - 1) * 100;
                 document.getElementById('ov-ou').innerText = ov.toFixed(2) + "%";
             }
             const by = parseFloat(document.getElementById('odd_bttsy').value) || 0;
@@ -676,7 +674,6 @@
             const edge = (odd * prob) - 1;
             const isManual = document.getElementById('manual_mode_toggle').checked;
             
-            // Verificación si es HÍBRIDO
             const h_xg_bsp = parseFloat(document.getElementById('h_xg_besoccer').value);
             const a_xg_bsp = parseFloat(document.getElementById('a_xg_besoccer').value);
             const isHybrid = !isManual && !isNaN(h_xg_bsp) && !isNaN(a_xg_bsp);
@@ -698,10 +695,9 @@
                 market, odd, fairOdd: (1 / prob).toFixed(2), 
                 edge: (edge * 100).toFixed(2),
                 overround: currentOv,
-                preMatchOdd: '', 
                 closingOdd: '',
                 stake, status: 'pending', profit: 0,
-                isHybrid: isHybrid // NUEVO INDICADOR
+                isHybrid: isHybrid
             };
             targetBets.unshift(bet);
             localStorage.setItem(targetKey, JSON.stringify(targetBets));
@@ -720,12 +716,6 @@
         function updateClosingOdd(id, value) {
             const b = bets.find(x => x.id === id);
             b.closingOdd = value;
-            save();
-        }
-
-        function updatePreMatchOdd(id, value) {
-            const b = bets.find(x => x.id === id);
-            b.preMatchOdd = value;
             save();
         }
 
@@ -753,14 +743,13 @@
             const oMax = parseFloat(document.getElementById('f_odd_max').value) || 999;
             const market = document.getElementById('f_market').value;
             const league = document.getElementById('f_league').value;
-            const modelFilter = document.getElementById('f_model').value; // FILTRO MODELO
+            const modelFilter = document.getElementById('f_model').value;
 
             filteredBets = bets.filter(b => {
                 const bEdge = parseFloat(b.edge);
                 const bFair = parseFloat(b.fairOdd) || 0;
                 const bOv = parseFloat(b.overround) || 0;
                 
-                // Lógica de filtro de modelo
                 let matchesModel = true;
                 if(modelFilter === 'hybrid') matchesModel = b.isHybrid === true;
                 if(modelFilter === 'normal') matchesModel = !b.isHybrid;
@@ -825,11 +814,7 @@
                         ${b.isHybrid ? '<div class="badge-hybrid">HÍBRIDO</div>' : ''}
                         <div class="badge-clv">CLV: ${b.closingOdd ? 'OK' : 'N/A'}</div>
                     </div>
-                    <div class="grid grid-cols-2 gap-2 mb-6" onclick="event.stopPropagation()">
-                        <div>
-                            <span class="text-slate-500 text-[10px] uppercase font-bold block mb-1">Cuota 1h antes:</span>
-                            <input type="number" step="0.01" value="${b.preMatchOdd || ''}" onchange="updatePreMatchOdd(${b.id}, this.value)" class="input-cierre text-xs text-white w-full border-emerald-500/30">
-                        </div>
+                    <div class="grid grid-cols-1 gap-2 mb-6" onclick="event.stopPropagation()">
                         <div>
                             <span class="text-slate-500 text-[10px] uppercase font-bold block mb-1">Cuota Cierre:</span>
                             <input type="number" step="0.01" value="${b.closingOdd || ''}" onchange="updateClosingOdd(${b.id}, this.value)" class="input-cierre text-xs text-white w-full">
