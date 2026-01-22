@@ -339,6 +339,10 @@
                 <div class="glass-card p-6 rounded-2xl">
                     <h2 class="text-sm font-black text-emerald-400 uppercase italic mb-4">Minado & Filtros</h2>
                     <div class="space-y-4">
+                        <button onclick="sendResolvedToBacktesting()" class="w-full bg-purple-600 hover:bg-purple-500 text-white text-[11px] py-3 rounded-xl uppercase font-black transition-all shadow-lg shadow-purple-900/40 mb-2 border border-purple-400/30">
+                            <i class="fa-solid fa-paper-plane mr-2"></i> Enviar Resueltas a Backtesting
+                        </button>
+                        
                         <div>
                             <label class="text-[9px] text-slate-500 uppercase block mb-1">Filtrar por Motor</label>
                             <select id="f_engine" class="w-full p-2 text-xs" onchange="applyFilters()">
@@ -536,18 +540,43 @@
             updateStats();
         }
 
+        // --- NUEVA FUNCIÓN PARA ENVIAR A BACKTESTING ---
+        function sendResolvedToBacktesting() {
+            const resolvedBets = bets.filter(b => b.status === 'win' || b.status === 'loss');
+            
+            if(resolvedBets.length === 0) {
+                return alert("No hay apuestas resueltas para enviar.");
+            }
+
+            // Mapeamos al formato que suele usar el backtesting
+            const dataToBacktest = resolvedBets.map(b => ({
+                id: b.id,
+                fecha: new Date(b.id).toLocaleDateString(),
+                liga: b.league,
+                evento: b.teams,
+                mercado: b.market,
+                cuota: b.odd,
+                probabilidad: (b.prob * 100).toFixed(2),
+                edge: b.edge,
+                stake: b.stake,
+                resultado: b.status,
+                profit: b.profit,
+                motor: b.engine
+            }));
+
+            localStorage.setItem('backtesting_data', JSON.stringify(dataToBacktest));
+            alert(`Se han enviado ${dataToBacktest.length} apuestas al módulo de Backtesting.`);
+        }
+
         function applyFilters() {
             const fEng = document.getElementById('f_engine').value;
             const fMar = document.getElementById('f_market').value;
 
-            // Filtro general para la visualización
             const filtered = bets.filter(b => (fEng === "" || b.engine === fEng) && (fMar === "" || b.market === fMar));
             const resolved = filtered.filter(b => b.status !== 'pending');
 
-            // --- CÁLCULO POR MOTOR (V1 y V2) ---
             const allResolved = bets.filter(b => b.status !== 'pending');
             
-            // Motor V1
             const v1Bets = allResolved.filter(b => b.engine === 'v1');
             const v1Profit = v1Bets.reduce((a, b) => a + b.profit, 0);
             const v1Staked = v1Bets.reduce((a, b) => a + b.stake, 0);
@@ -555,7 +584,6 @@
             document.getElementById('v1-profit').innerText = "$" + v1Profit.toFixed(2);
             document.getElementById('v1-count').innerText = v1Bets.length;
 
-            // Motor V2
             const v2Bets = allResolved.filter(b => b.engine === 'v2');
             const v2Profit = v2Bets.reduce((a, b) => a + b.profit, 0);
             const v2Staked = v2Bets.reduce((a, b) => a + b.stake, 0);
@@ -563,7 +591,6 @@
             document.getElementById('v2-profit').innerText = "$" + v2Profit.toFixed(2);
             document.getElementById('v2-count').innerText = v2Bets.length;
 
-            // --- ESTADÍSTICAS GLOBALES FILTRADAS ---
             const totalProfit = resolved.reduce((a, b) => a + b.profit, 0);
             const totalStaked = resolved.reduce((a, b) => a + b.stake, 0);
             const wins = resolved.filter(b => b.status === 'win').length;
@@ -596,7 +623,6 @@
             renderBankrollChart(resolved);
         }
 
-        /* --- FUNCIÓN MEJORADA: RENDER HISTORY --- */
         function renderHistory(data) {
             const grid = document.getElementById('history-grid');
             grid.innerHTML = '';
@@ -604,14 +630,12 @@
                 const card = document.createElement('div');
                 card.className = "bet-card-custom";
                 
-                // Determinación de colores según estado
                 let statusColor = "#eab308";
                 let statusClass = "status-pending-border";
                 let statusIcon = "P";
                 if(b.status === 'win') { statusColor = "#22c55e"; statusClass = "status-win-border"; statusIcon = "WIN"; }
                 if(b.status === 'loss') { statusColor = "#ef4444"; statusClass = "status-loss-border"; statusIcon = "LOSS"; }
 
-                // Lógica de CLV
                 let clvText = "N/A";
                 let clvBadgeClass = "badge-clv";
                 if(b.closingOdd > 0) {
