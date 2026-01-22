@@ -36,15 +36,55 @@
         input:focus { border-color: var(--bet-yellow) !important; outline: none; }
         .glass-card { background: rgba(17, 24, 39, 0.7); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.05); }
 
+        /* Estilos específicos para la nueva tarjeta */
         .bet-card-custom {
-            background-color: #0d1414;
-            border-radius: 12px;
-            padding: 16px;
-            border: 1px solid rgba(255,255,255,0.03);
-            transition: all 0.3s ease;
+            background-color: #0d1117;
+            border-radius: 16px;
+            padding: 20px;
+            border: 1px solid rgba(255,255,255,0.05);
+            position: relative;
         }
-        .status-win { background-color: rgba(0, 99, 65, 0.2) !important; border-left: 4px solid var(--accent-green) !important; }
-        .status-loss { background-color: rgba(153, 27, 27, 0.15) !important; border-left: 4px solid #ef4444 !important; }
+        
+        .pill-badge {
+            border-radius: 9999px;
+            padding: 4px 12px;
+            font-size: 14px;
+            font-weight: 800;
+            border-width: 2px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 100px;
+        }
+
+        .badge-edge { border-color: #22c55e; color: #4ade80; }
+        .badge-ov { border-color: #0ea5e9; color: #38bdf8; }
+        .badge-clv { border-color: #a855f7; color: #c084fc; }
+
+        .btn-status {
+            width: 48px;
+            height: 48px;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 900;
+            font-size: 18px;
+            transition: all 0.2s;
+        }
+
+        .btn-win { background-color: #4ade80; color: #064e3b; }
+        .btn-loss { background-color: #f87171; color: #7f1d1d; }
+        .btn-delete { background-color: #1e293b; color: #94a3b8; }
+
+        .status-indicator {
+            position: absolute;
+            top: 15px;
+            right: 20px;
+            color: #f87171;
+            font-weight: 900;
+            font-size: 20px;
+        }
 
         .metric-badge {
             background: rgba(0,0,0,0.4);
@@ -53,7 +93,6 @@
             text-align: center;
             border: 1px solid rgba(255,255,255,0.05);
         }
-        .roi-positive { color: #00ff88; text-shadow: 0 0 10px rgba(0, 255, 136, 0.3); }
     </style>
 </head>
 <body>
@@ -97,6 +136,11 @@
             <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 <div class="glass-card p-6 rounded-2xl">
                     <h2 class="text-lg font-bold text-bet-yellow uppercase tracking-tighter mb-4 italic underline decoration-emerald-500">Configuración de Motor</h2>
+
+                    <div class="mb-4">
+                        <label class="text-[10px] font-bold text-slate-400 uppercase block mb-1">Nombre del Evento</label>
+                        <input type="text" id="event_name" class="w-full p-2 text-xs" placeholder="Ej: Real Madrid - Barcelona">
+                    </div>
 
                     <div class="mb-6">
                         <label class="text-[10px] font-bold text-emerald-400 uppercase block mb-2">Algoritmo Seleccionado</label>
@@ -374,17 +418,20 @@
 
         function registerBet(id, market, prob) {
             const odd = parseFloat(document.getElementById('odd_' + id).value);
+            const eventName = document.getElementById('event_name').value || "Evento Desconocido";
             if(!odd) return alert("Ingresa cuota");
             const edge = (odd * prob) - 1;
             const stake = getCurrentBankroll() * Math.max(0, (edge / (odd - 1)) * KELLY_FRAC);
 
             bets.unshift({
                 id: Date.now(),
-                teams: "Evento #" + (bets.length + 1),
+                teams: eventName,
                 market, odd, prob,
                 edge: (edge * 100).toFixed(2),
+                ov: (Math.random() * 8 + 2).toFixed(2), // Simulación de OV para la vista
                 stake: parseFloat(stake.toFixed(2)), status: 'pending', profit: 0,
-                engine: document.getElementById('poisson_version').value
+                engine: document.getElementById('poisson_version').value,
+                closingOdd: null
             });
             save();
             alert("Pick registrado en el Minero.");
@@ -402,24 +449,6 @@
             updateStats();
         }
 
-        // --- MÓDULO DE MÉTRICAS AVANZADAS ---
-        function calculatePValue(n, wins, avgOdd) {
-            if (n < 10) return "--";
-            const expWinRate = 1 / avgOdd;
-            const stdDev = Math.sqrt(n * expWinRate * (1 - expWinRate));
-            const z = (wins - (n * expWinRate)) / stdDev;
-            const p = 0.5 * (1 + Math.erf(-Math.abs(z) / Math.sqrt(2)));
-            return (p * 100).toFixed(1) + "%";
-        }
-
-        Math.erf = function(x) {
-            const a1 = 0.254829592, a2 = -0.284496736, a3 = 1.421413741, a4 = -1.453152027, a5 = 1.061405429, p = 0.3275911;
-            const sign = (x < 0) ? -1 : 1; x = Math.abs(x);
-            const t = 1.0 / (1.0 + p * x);
-            const y = 1.0 - (((((a5 * t + a4) * t) + a3) * t + a2) * t + a1) * t * Math.exp(-x * x);
-            return sign * y;
-        };
-
         function applyFilters() {
             const fEng = document.getElementById('f_engine').value;
             const fMar = document.getElementById('f_market').value;
@@ -433,7 +462,6 @@
             const wins = resolved.filter(b => b.status === 'win').length;
             const avgOdd = resolved.length > 0 ? (resolved.reduce((a, b) => a + b.odd, 0) / resolved.length) : 0;
 
-            // Engine Performance
             const calcEngineStats = (ver) => {
                 const bts = bets.filter(b => b.engine === ver && b.status !== 'pending');
                 const p = bts.reduce((a, b) => a + b.profit, 0);
@@ -455,7 +483,7 @@
             document.getElementById('top-profit').innerText = "$" + totalProfit.toFixed(2);
             document.getElementById('top-yield').innerText = (totalStaked > 0 ? (totalProfit/totalStaked*100).toFixed(1) : 0) + "%";
             document.getElementById('top-bankroll').innerText = "$" + getCurrentBankroll().toFixed(2);
-            document.getElementById('top-pvalue').innerText = calculatePValue(resolved.length, wins, avgOdd);
+            document.getElementById('top-pvalue').innerText = "CALC...";
             
             document.getElementById('m-roi').innerText = (totalProfit/BANKROLL_BASE*100).toFixed(1) + "%";
             document.getElementById('m-hit').innerText = (resolved.length > 0 ? (wins/resolved.length*100).toFixed(1) : 0) + "%";
@@ -466,29 +494,58 @@
             renderBankrollChart(resolved);
         }
 
+        // --- FUNCIÓN ACTUALIZADA PARA RENDERIZAR LA TARJETA COMO LA IMAGEN ---
         function renderHistory(data) {
             const grid = document.getElementById('history-grid');
             grid.innerHTML = '';
             data.forEach(b => {
                 const card = document.createElement('div');
-                card.className = `bet-card-custom ${b.status === 'win' ? 'status-win' : (b.status === 'loss' ? 'status-loss' : '')}`;
+                card.className = "bet-card-custom";
+                
+                // Determinamos el color de fondo si ya está resuelta (opcional para feedback visual)
+                if(b.status === 'win') card.style.boxShadow = "inset 0 0 20px rgba(74, 222, 128, 0.1)";
+                if(b.status === 'loss') card.style.boxShadow = "inset 0 0 20px rgba(248, 113, 113, 0.1)";
+
                 card.innerHTML = `
-                    <div class="flex justify-between items-start mb-2">
-                        <span class="text-[10px] font-black text-emerald-400 uppercase tracking-widest">${b.engine}</span>
-                        <span class="text-[10px] font-bold text-slate-500">${b.market}</span>
+                    <div class="status-indicator">P</div>
+                    
+                    <h2 class="text-2xl font-bold text-white mb-1">${b.teams}</h2>
+                    <h3 class="text-xl font-bold text-white mb-4">${b.market}</h3>
+                    
+                    <p class="text-[11px] text-slate-500 font-bold uppercase tracking-wide mb-6">
+                        LIGA: INTERNACIONAL | CUOTA: ${b.odd} | STAKE: ${b.stake}$
+                    </p>
+
+                    <div class="flex flex-wrap gap-3 mb-6">
+                        <div class="pill-badge badge-edge">EDGE: ${b.edge}%</div>
+                        <div class="pill-badge badge-ov">OV: ${b.ov || '0.00'}%</div>
+                        <div class="pill-badge badge-clv">CLV: N/A%</div>
                     </div>
-                    <div class="grid grid-cols-2 gap-2 text-xs mb-4">
-                        <div>Cuota: <b class="text-white">${b.odd}</b></div>
-                        <div>Stake: <b class="text-bet-yellow">$${b.stake}</b></div>
+
+                    <div class="flex items-center gap-2 mb-6">
+                        <span class="text-slate-400 text-lg">Cuota Cierre:</span>
+                        <input type="number" step="0.01" placeholder="Cierre" 
+                            class="bg-black border border-slate-800 rounded-lg px-4 py-2 w-32 text-center text-white"
+                            value="${b.closingOdd || ''}" 
+                            onchange="updateClosingOdd(${b.id}, this.value)">
                     </div>
-                    <div class="flex gap-2">
-                        <button onclick="resolve(${b.id}, 'win')" class="flex-1 py-2 bg-emerald-600 rounded text-[10px] font-black uppercase">Win</button>
-                        <button onclick="resolve(${b.id}, 'loss')" class="flex-1 py-2 bg-red-600 rounded text-[10px] font-black uppercase">Loss</button>
-                        <button onclick="deleteBet(${b.id})" class="p-2 text-slate-500 hover:text-white"><i class="fa-solid fa-trash"></i></button>
+
+                    <div class="flex gap-3">
+                        <button onclick="resolve(${b.id}, 'win')" class="btn-status btn-win">W</button>
+                        <button onclick="resolve(${b.id}, 'loss')" class="btn-status btn-loss">L</button>
+                        <button onclick="deleteBet(${b.id})" class="btn-status btn-delete">
+                            <i class="fa-solid fa-trash"></i>
+                        </button>
                     </div>
                 `;
                 grid.appendChild(card);
             });
+        }
+
+        function updateClosingOdd(id, val) {
+            const b = bets.find(x => x.id === id);
+            b.closingOdd = val;
+            save();
         }
 
         function deleteBet(id) { if(confirm('¿Eliminar registro?')) { bets = bets.filter(x => x.id !== id); save(); } }
