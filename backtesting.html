@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BetAGS - Backtesting Monte Carlo</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        body { background-color: #050d0a; color: #f8fafc; font-family: 'Inter', sans-serif; }
+        .glass-card { background: rgba(17, 24, 39, 0.7); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.05); }
+    </style>
+</head>
+<body class="p-4 md:p-8">
+
+    <div class="max-w-6xl mx-auto">
+        <div class="flex justify-between items-center mb-8">
+            <h1 class="text-3xl font-black italic text-purple-400 tracking-tighter">
+                BACKTESTING <span class="text-white">LABS</span>
+            </h1>
+            <a href="index.html" class="bg-slate-800 px-4 py-2 rounded-xl text-xs font-bold hover:bg-slate-700 transition-all">
+                <i class="fa-solid fa-arrow-left mr-2"></i> VOLVER AL MINERO
+            </a>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+            <div class="glass-card p-6 rounded-3xl">
+                <h2 class="text-sm font-black text-purple-400 uppercase mb-4 tracking-widest">Parámetros de Simulación</h2>
+                <div class="space-y-4">
+                    <div>
+                        <label class="text-[10px] text-slate-500 uppercase block mb-1">Escenarios (Monte Carlo)</label>
+                        <input type="number" id="sim_runs" class="w-full bg-slate-800 p-2 rounded border border-white/10 text-sm" value="100">
+                    </div>
+                    <div>
+                        <label class="text-[10px] text-slate-500 uppercase block mb-1">Picks a Simular</label>
+                        <input type="number" id="sim_picks" class="w-full bg-slate-800 p-2 rounded border border-white/10 text-sm" value="500">
+                    </div>
+                    <button onclick="runMonteCarlo()" class="w-full bg-purple-600 hover:bg-purple-500 py-3 rounded-xl font-black text-xs uppercase tracking-widest transition-all">
+                        Lanzar Simulación
+                    </button>
+                </div>
+            </div>
+
+            <div class="lg:col-span-2 glass-card p-6 rounded-3xl grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div class="text-center p-4 bg-black/20 rounded-2xl border border-white/5">
+                    <p class="text-[10px] text-slate-500 uppercase font-bold">Prob. Quiebra</p>
+                    <p id="stat-ruin" class="text-2xl font-black text-red-500">--</p>
+                </div>
+                <div class="text-center p-4 bg-black/20 rounded-2xl border border-white/5">
+                    <p class="text-[10px] text-slate-500 uppercase font-bold">Max Drawdown</p>
+                    <p id="stat-mdd" class="text-2xl font-black text-orange-400">--</p>
+                </div>
+                <div class="text-center p-4 bg-black/20 rounded-2xl border border-white/5">
+                    <p class="text-[10px] text-slate-500 uppercase font-bold">Prob. Profit</p>
+                    <p id="stat-win-prob" class="text-2xl font-black text-emerald-400">--</p>
+                </div>
+                <div class="text-center p-4 bg-black/20 rounded-2xl border border-white/5">
+                    <p class="text-[10px] text-slate-500 uppercase font-bold">Profit Mediano</p>
+                    <p id="stat-median" class="text-2xl font-black text-white">--</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="glass-card p-6 rounded-3xl h-[450px]">
+            <canvas id="mcChart"></canvas>
+        </div>
+    </div>
+
+    <script>
+        let mcChart;
+        const savedBets = JSON.parse(localStorage.getItem('betags_v3_miner')) || [];
+
+        function runMonteCarlo() {
+            const resolved = savedBets.filter(b => b.status !== 'pending');
+            if (resolved.length < 5) return alert("Necesitas al menos 5 picks resueltos para simular.");
+
+            const runs = parseInt(document.getElementById('sim_runs').value);
+            const picks = parseInt(document.getElementById('sim_picks').value);
+            const ctx = document.getElementById('mcChart').getContext('2d');
+            
+            // Extraer métricas reales de los datos del usuario
+            const hitRate = resolved.filter(b => b.status === 'win').length / resolved.length;
+            const avgOdd = resolved.reduce((a, b) => a + b.odd, 0) / resolved.length;
+            const avgStake = resolved.reduce((a, b) => a + b.stake, 0) / resolved.length;
+            const initialBank = 100;
+
+            let allPaths = [];
+            let ruinCount = 0;
+            let positiveRuns = 0;
+            let drawdowns = [];
+
+            for (let r = 0; r < runs; r++) {
+                let path = [initialBank];
+                let currentBank = initialBank;
+                let maxBank = initialBank;
+                let maxDD = 0;
+
+                for (let p = 0; p < picks; p++) {
+                    const win = Math.random() < hitRate;
+                    const profit = win ? avgStake * (avgOdd - 1) : -avgStake;
+                    currentBank += profit;
+                    
+                    if (currentBank <= 0) { 
+                        currentBank = 0; 
+                        ruinCount++; 
+                        path.push(0);
+                        break; 
+                    }
+
+                    path.push(currentBank);
+                    
+                    // Cálculo Drawdown
+                    if (currentBank > maxBank) maxBank = currentBank;
+                    let dd = (maxBank - currentBank) / maxBank;
+                    if (dd > maxDD) maxDD = dd;
+                }
+                
+                if (currentBank > initialBank) positiveRuns++;
+                drawdowns.push(maxDD);
+                allPaths.push(path);
+            }
+
+            // Estadísticas
+            document.getElementById('stat-ruin').innerText = ((ruinCount / runs) * 100).toFixed(1) + "%";
+            document.getElementById('stat-win-prob').innerText = ((positiveRuns / runs) * 100).toFixed(1) + "%";
+            const avgMaxDD = (drawdowns.reduce((a, b) => a + b, 0) / runs) * 100;
+            document.getElementById('stat-mdd').innerText = avgMaxDD.toFixed(1) + "%";
+            
+            const lastValues = allPaths.map(p => p[p.length - 1]).sort((a,b) => a-b);
+            const median = lastValues[Math.floor(runs / 2)];
+            document.getElementById('stat-median').innerText = "$" + median.toFixed(0);
+
+            renderChart(allPaths);
+        }
+
+        function renderChart(paths) {
+            if (mcChart) mcChart.destroy();
+            
+            const datasets = paths.map((p, i) => ({
+                label: 'Sim ' + i,
+                data: p,
+                borderColor: i === 0 ? '#a855f7' : 'rgba(168, 85, 247, 0.1)',
+                borderWidth: i === 0 ? 3 : 1,
+                pointRadius: 0,
+                fill: false
+            }));
+
+            mcChart = new Chart(document.getElementById('mcChart'), {
+                type: 'line',
+                data: {
+                    labels: Array.from({length: parseInt(document.getElementById('sim_picks').value) + 1}, (_, i) => i),
+                    datasets: datasets
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        y: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#94a3b8' } },
+                        x: { display: false }
+                    }
+                }
+            });
+        }
+
+        // Ejecutar por defecto al cargar si hay datos
+        window.onload = () => { if(savedBets.length >= 5) runMonteCarlo(); };
+    </script>
+</body>
+</html>
