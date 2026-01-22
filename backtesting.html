@@ -10,18 +10,28 @@
     <style>
         body { background-color: #050d0a; color: #f8fafc; font-family: 'Inter', sans-serif; }
         .glass-card { background: rgba(17, 24, 39, 0.7); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.05); }
+        .data-badge { background: rgba(168, 85, 247, 0.1); border: 1px solid rgba(168, 85, 247, 0.3); color: #a855f7; }
     </style>
 </head>
 <body class="p-4 md:p-8">
 
     <div class="max-w-6xl mx-auto">
-        <div class="flex justify-between items-center mb-8">
-            <h1 class="text-3xl font-black italic text-purple-400 tracking-tighter">
-                BACKTESTING <span class="text-white">LABS</span>
-            </h1>
-            <a href="index.html" class="bg-slate-800 px-4 py-2 rounded-xl text-xs font-bold hover:bg-slate-700 transition-all">
-                <i class="fa-solid fa-arrow-left mr-2"></i> VOLVER AL MINERO
-            </a>
+        <div class="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
+            <div>
+                <h1 class="text-3xl font-black italic text-purple-400 tracking-tighter">
+                    BACKTESTING <span class="text-white">LABS</span>
+                </h1>
+                <div id="data-status" class="mt-2 text-[10px] uppercase tracking-widest font-bold flex gap-2">
+                    </div>
+            </div>
+            <div class="flex gap-2">
+                <button onclick="clearBacktestingData()" class="bg-red-500/10 text-red-400 px-4 py-2 rounded-xl text-xs font-bold border border-red-500/20 hover:bg-red-500 hover:text-white transition-all">
+                    <i class="fa-solid fa-trash mr-2"></i> LIMPIAR DATOS
+                </button>
+                <a href="index.html" class="bg-slate-800 px-4 py-2 rounded-xl text-xs font-bold hover:bg-slate-700 transition-all border border-white/5">
+                    <i class="fa-solid fa-arrow-left mr-2"></i> VOLVER AL MINERO
+                </a>
+            </div>
         </div>
 
         <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
@@ -33,10 +43,21 @@
                         <input type="number" id="sim_runs" class="w-full bg-slate-800 p-2 rounded border border-white/10 text-sm" value="100">
                     </div>
                     <div>
-                        <label class="text-[10px] text-slate-500 uppercase block mb-1">Picks a Simular</label>
+                        <label class="text-[10px] text-slate-500 uppercase block mb-1">Picks a Proyectar</label>
                         <input type="number" id="sim_picks" class="w-full bg-slate-800 p-2 rounded border border-white/10 text-sm" value="500">
                     </div>
-                    <button onclick="runMonteCarlo()" class="w-full bg-purple-600 hover:bg-purple-500 py-3 rounded-xl font-black text-xs uppercase tracking-widest transition-all">
+                    <div class="p-4 bg-purple-500/5 rounded-2xl border border-purple-500/10">
+                        <p class="text-[10px] text-purple-300 font-bold uppercase mb-2 italic">Base del Análisis:</p>
+                        <div class="flex justify-between text-xs">
+                            <span class="text-slate-400">Hit Rate Real:</span>
+                            <span id="base-hit" class="text-white font-mono">0%</span>
+                        </div>
+                        <div class="flex justify-between text-xs mt-1">
+                            <span class="text-slate-400">Cuota Media:</span>
+                            <span id="base-odd" class="text-white font-mono">0.00</span>
+                        </div>
+                    </div>
+                    <button onclick="runMonteCarlo()" class="w-full bg-purple-600 hover:bg-purple-500 py-3 rounded-xl font-black text-xs uppercase tracking-widest transition-all shadow-lg shadow-purple-900/20">
                         Lanzar Simulación
                     </button>
                 </div>
@@ -69,22 +90,55 @@
 
     <script>
         let mcChart;
-        const savedBets = JSON.parse(localStorage.getItem('betags_v3_miner')) || [];
+        // Priorizar datos enviados por el botón del minero
+        let simulationData = JSON.parse(localStorage.getItem('backtesting_data')) || 
+                         JSON.parse(localStorage.getItem('betags_v3_miner'))?.filter(b => b.status !== 'pending') || [];
+
+        function updateDataStatus() {
+            const statusEl = document.getElementById('data-status');
+            const isManual = localStorage.getItem('backtesting_data') !== null;
+            
+            statusEl.innerHTML = `
+                <span class="px-2 py-1 rounded data-badge">
+                    <i class="fa-solid fa-database mr-1"></i> ${simulationData.length} Picks Cargados
+                </span>
+                <span class="px-2 py-1 rounded ${isManual ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-blue-500/10 text-blue-400 border border-blue-500/20'}">
+                    Origen: ${isManual ? 'Envío Directo (ROI)' : 'Historial General'}
+                </span>
+            `;
+
+            if (simulationData.length > 0) {
+                const hits = simulationData.filter(b => b.status === 'win' || b.resultado === 'win').length;
+                const hitRate = (hits / simulationData.length) * 100;
+                const avgOdd = simulationData.reduce((a, b) => a + (parseFloat(b.odd) || parseFloat(b.cuota) || 0), 0) / simulationData.length;
+                
+                document.getElementById('base-hit').innerText = hitRate.toFixed(1) + "%";
+                document.getElementById('base-odd').innerText = avgOdd.toFixed(2);
+            }
+        }
+
+        function clearBacktestingData() {
+            if(confirm("¿Deseas limpiar los datos de backtesting? Esto no borrará tu historial principal.")) {
+                localStorage.removeItem('backtesting_data');
+                location.reload();
+            }
+        }
 
         function runMonteCarlo() {
-            const resolved = savedBets.filter(b => b.status !== 'pending');
-            if (resolved.length < 5) return alert("Necesitas al menos 5 picks resueltos para simular.");
+            if (simulationData.length < 5) {
+                return alert("Necesitas al menos 5 picks resueltos para una simulación estadística válida.");
+            }
 
             const runs = parseInt(document.getElementById('sim_runs').value);
             const picks = parseInt(document.getElementById('sim_picks').value);
-            const ctx = document.getElementById('mcChart').getContext('2d');
             
-            // Extraer métricas reales de los datos del usuario
-            const hitRate = resolved.filter(b => b.status === 'win').length / resolved.length;
-            const avgOdd = resolved.reduce((a, b) => a + b.odd, 0) / resolved.length;
-            const avgStake = resolved.reduce((a, b) => a + b.stake, 0) / resolved.length;
+            // Métricas base de los datos cargados
+            const hits = simulationData.filter(b => b.status === 'win' || b.resultado === 'win').length;
+            const hitRate = hits / simulationData.length;
+            const avgOdd = simulationData.reduce((a, b) => a + (parseFloat(b.odd) || parseFloat(b.cuota) || 0), 0) / simulationData.length;
+            const avgStake = simulationData.reduce((a, b) => a + (parseFloat(b.stake) || 0), 0) / simulationData.length;
+            
             const initialBank = 100;
-
             let allPaths = [];
             let ruinCount = 0;
             let positiveRuns = 0;
@@ -110,7 +164,6 @@
 
                     path.push(currentBank);
                     
-                    // Cálculo Drawdown
                     if (currentBank > maxBank) maxBank = currentBank;
                     let dd = (maxBank - currentBank) / maxBank;
                     if (dd > maxDD) maxDD = dd;
@@ -121,7 +174,7 @@
                 allPaths.push(path);
             }
 
-            // Estadísticas
+            // Actualizar Interfaz
             document.getElementById('stat-ruin').innerText = ((ruinCount / runs) * 100).toFixed(1) + "%";
             document.getElementById('stat-win-prob').innerText = ((positiveRuns / runs) * 100).toFixed(1) + "%";
             const avgMaxDD = (drawdowns.reduce((a, b) => a + b, 0) / runs) * 100;
@@ -131,41 +184,54 @@
             const median = lastValues[Math.floor(runs / 2)];
             document.getElementById('stat-median').innerText = "$" + median.toFixed(0);
 
-            renderChart(allPaths);
+            renderChart(allPaths, picks);
         }
 
-        function renderChart(paths) {
+        function renderChart(paths, picks) {
             if (mcChart) mcChart.destroy();
             
             const datasets = paths.map((p, i) => ({
                 label: 'Sim ' + i,
                 data: p,
-                borderColor: i === 0 ? '#a855f7' : 'rgba(168, 85, 247, 0.1)',
+                borderColor: i === 0 ? '#a855f7' : 'rgba(168, 85, 247, 0.08)',
                 borderWidth: i === 0 ? 3 : 1,
                 pointRadius: 0,
-                fill: false
+                fill: false,
+                tension: 0.1
             }));
 
             mcChart = new Chart(document.getElementById('mcChart'), {
                 type: 'line',
                 data: {
-                    labels: Array.from({length: parseInt(document.getElementById('sim_picks').value) + 1}, (_, i) => i),
+                    labels: Array.from({length: picks + 1}, (_, i) => i),
                     datasets: datasets
                 },
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
-                    plugins: { legend: { display: false } },
+                    plugins: { 
+                        legend: { display: false },
+                        tooltip: { enabled: false }
+                    },
                     scales: {
-                        y: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#94a3b8' } },
-                        x: { display: false }
+                        y: { 
+                            grid: { color: 'rgba(255,255,255,0.05)' }, 
+                            ticks: { color: '#94a3b8', font: { size: 10 } } 
+                        },
+                        x: { 
+                            grid: { display: false },
+                            ticks: { color: '#64748b', font: { size: 9 } },
+                            title: { display: true, text: 'NÚMERO DE PICKS PROYECTADOS', color: '#475569', font: { size: 10, weight: 'bold' } }
+                        }
                     }
                 }
             });
         }
 
-        // Ejecutar por defecto al cargar si hay datos
-        window.onload = () => { if(savedBets.length >= 5) runMonteCarlo(); };
+        window.onload = () => { 
+            updateDataStatus();
+            if(simulationData.length >= 5) runMonteCarlo(); 
+        };
     </script>
 </body>
 </html>
