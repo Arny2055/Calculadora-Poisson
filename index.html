@@ -36,7 +36,6 @@
         input:focus { border-color: var(--bet-yellow) !important; outline: none; }
         .glass-card { background: rgba(17, 24, 39, 0.7); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.05); }
 
-        /* Estilos específicos para la nueva tarjeta */
         .bet-card-custom {
             background-color: #0d1117;
             border-radius: 16px;
@@ -137,9 +136,15 @@
                 <div class="glass-card p-6 rounded-2xl">
                     <h2 class="text-lg font-bold text-bet-yellow uppercase tracking-tighter mb-4 italic underline decoration-emerald-500">Configuración de Motor</h2>
 
-                    <div class="mb-4">
-                        <label class="text-[10px] font-bold text-slate-400 uppercase block mb-1">Nombre del Evento</label>
-                        <input type="text" id="event_name" class="w-full p-2 text-xs" placeholder="Ej: Real Madrid - Barcelona">
+                    <div class="grid grid-cols-2 gap-2 mb-4">
+                        <div>
+                            <label class="text-[10px] font-bold text-slate-400 uppercase block mb-1">Liga</label>
+                            <input type="text" id="league_name" class="w-full p-2 text-xs" placeholder="Ej: LaLiga">
+                        </div>
+                        <div>
+                            <label class="text-[10px] font-bold text-slate-400 uppercase block mb-1">Evento</label>
+                            <input type="text" id="event_name" class="w-full p-2 text-xs" placeholder="Ej: RMA - FCB">
+                        </div>
                     </div>
 
                     <div class="mb-6">
@@ -203,6 +208,7 @@
                                 <th class="p-4">Cuota Justa</th>
                                 <th class="p-4">Cuota Mercado</th>
                                 <th class="p-4">Edge %</th>
+                                <th class="p-4 text-orange-400">Overround</th>
                                 <th class="p-4">Stake (Kelly 0.25)</th>
                                 <th class="p-4 text-center">Acción</th>
                             </tr>
@@ -375,10 +381,10 @@
             const p_btts_y = (1 - poissonProb(0, h_lambda)) * (1 - poissonProb(0, a_lambda));
 
             renderMarketTable([
-                { id: 'o25', name: 'OVER 2.5', prob: 1 - p_u25 },
-                { id: 'u25', name: 'UNDER 2.5', prob: p_u25 },
-                { id: 'bttsy', name: 'BTTS SÍ', prob: p_btts_y },
-                { id: 'bttsn', name: 'BTTS NO', prob: 1 - p_btts_y }
+                { id: 'o25', name: 'OVER 2.5', prob: 1 - p_u25, partner: 'u25' },
+                { id: 'u25', name: 'UNDER 2.5', prob: p_u25, partner: 'o25' },
+                { id: 'bttsy', name: 'BTTS SÍ', prob: p_btts_y, partner: 'bttsn' },
+                { id: 'bttsn', name: 'BTTS NO', prob: 1 - p_btts_y, partner: 'bttsy' }
             ]);
         }
 
@@ -392,8 +398,9 @@
                         <td class="p-4 font-bold text-slate-200">${m.name}</td>
                         <td class="p-4 text-emerald-400 font-mono">${(m.prob * 100).toFixed(1)}%</td>
                         <td class="p-4 text-slate-500 font-mono">${fairOdd}</td>
-                        <td class="p-4"><input type="number" step="0.01" class="w-20 p-1 text-xs" oninput="updateEdge('${m.id}', ${m.prob})" id="odd_${m.id}"></td>
+                        <td class="p-4"><input type="number" step="0.01" class="w-20 p-1 text-xs" oninput="updateEdge('${m.id}', ${m.prob}, '${m.partner}')" id="odd_${m.id}"></td>
                         <td class="p-4 font-bold" id="edge_${m.id}">--</td>
+                        <td class="p-4 text-orange-400 font-mono" id="overround_${m.id}">--</td>
                         <td class="p-4 text-bet-yellow font-black" id="stake_${m.id}">--</td>
                         <td class="p-4 text-center">
                             <button onclick="registerBet('${m.id}', '${m.name}', ${m.prob})" class="bg-emerald-600/20 text-emerald-400 px-3 py-1 rounded-lg text-[10px] font-black hover:bg-emerald-600 hover:text-white">FIJAR</button>
@@ -403,8 +410,10 @@
             });
         }
 
-        function updateEdge(id, prob) {
+        function updateEdge(id, prob, partnerId) {
             const odd = parseFloat(document.getElementById('odd_' + id).value) || 0;
+            const partnerOdd = parseFloat(document.getElementById('odd_' + partnerId).value) || 0;
+
             if(odd > 1) {
                 const edge = (odd * prob) - 1;
                 const kelly = Math.max(0, (edge / (odd - 1)) * KELLY_FRAC);
@@ -413,22 +422,31 @@
                 edgeEl.innerText = (edge * 100).toFixed(1) + "%";
                 edgeEl.className = edge > 0 ? "p-4 text-emerald-400 font-bold" : "p-4 text-red-500";
                 document.getElementById('stake_' + id).innerText = stake > 0 ? "$" + stake.toFixed(2) : "--";
+
+                // Cálculo de Overround
+                if(partnerOdd > 1) {
+                    const overround = ((1/odd) + (1/partnerOdd) - 1) * 100;
+                    document.getElementById('overround_' + id).innerText = overround.toFixed(1) + "%";
+                    document.getElementById('overround_' + partnerId).innerText = overround.toFixed(1) + "%";
+                }
             }
         }
 
         function registerBet(id, market, prob) {
             const odd = parseFloat(document.getElementById('odd_' + id).value);
             const eventName = document.getElementById('event_name').value || "Evento Desconocido";
+            const leagueName = document.getElementById('league_name').value || "INTERNACIONAL";
             if(!odd) return alert("Ingresa cuota");
             const edge = (odd * prob) - 1;
             const stake = getCurrentBankroll() * Math.max(0, (edge / (odd - 1)) * KELLY_FRAC);
 
             bets.unshift({
                 id: Date.now(),
+                league: leagueName,
                 teams: eventName,
                 market, odd, prob,
                 edge: (edge * 100).toFixed(2),
-                ov: (Math.random() * 8 + 2).toFixed(2), // Simulación de OV para la vista
+                ov: (Math.random() * 8 + 2).toFixed(2),
                 stake: parseFloat(stake.toFixed(2)), status: 'pending', profit: 0,
                 engine: document.getElementById('poisson_version').value,
                 closingOdd: null
@@ -456,7 +474,6 @@
             const filtered = bets.filter(b => (fEng === "" || b.engine === fEng) && (fMar === "" || b.market === fMar));
             const resolved = filtered.filter(b => b.status !== 'pending');
 
-            // Global Metrics
             const totalProfit = resolved.reduce((a, b) => a + b.profit, 0);
             const totalStaked = resolved.reduce((a, b) => a + b.stake, 0);
             const wins = resolved.filter(b => b.status === 'win').length;
@@ -472,7 +489,6 @@
             const v1 = calcEngineStats('v1');
             const v2 = calcEngineStats('v2');
 
-            // UI Update
             document.getElementById('v1-yield').innerText = v1.yield + "%";
             document.getElementById('v1-profit').innerText = "$" + v1.profit.toFixed(2);
             document.getElementById('v1-count').innerText = v1.count;
@@ -483,7 +499,7 @@
             document.getElementById('top-profit').innerText = "$" + totalProfit.toFixed(2);
             document.getElementById('top-yield').innerText = (totalStaked > 0 ? (totalProfit/totalStaked*100).toFixed(1) : 0) + "%";
             document.getElementById('top-bankroll').innerText = "$" + getCurrentBankroll().toFixed(2);
-            document.getElementById('top-pvalue').innerText = "CALC...";
+            document.getElementById('top-pvalue').innerText = "--";
             
             document.getElementById('m-roi').innerText = (totalProfit/BANKROLL_BASE*100).toFixed(1) + "%";
             document.getElementById('m-hit').innerText = (resolved.length > 0 ? (wins/resolved.length*100).toFixed(1) : 0) + "%";
@@ -494,26 +510,23 @@
             renderBankrollChart(resolved);
         }
 
-        // --- FUNCIÓN ACTUALIZADA PARA RENDERIZAR LA TARJETA COMO LA IMAGEN ---
         function renderHistory(data) {
             const grid = document.getElementById('history-grid');
             grid.innerHTML = '';
             data.forEach(b => {
                 const card = document.createElement('div');
                 card.className = "bet-card-custom";
-                
-                // Determinamos el color de fondo si ya está resuelta (opcional para feedback visual)
                 if(b.status === 'win') card.style.boxShadow = "inset 0 0 20px rgba(74, 222, 128, 0.1)";
                 if(b.status === 'loss') card.style.boxShadow = "inset 0 0 20px rgba(248, 113, 113, 0.1)";
 
                 card.innerHTML = `
-                    <div class="status-indicator">P</div>
+                    <div class="status-indicator">${b.status === 'pending' ? 'P' : (b.status === 'win' ? 'W' : 'L')}</div>
                     
                     <h2 class="text-2xl font-bold text-white mb-1">${b.teams}</h2>
                     <h3 class="text-xl font-bold text-white mb-4">${b.market}</h3>
                     
                     <p class="text-[11px] text-slate-500 font-bold uppercase tracking-wide mb-6">
-                        LIGA: INTERNACIONAL | CUOTA: ${b.odd} | STAKE: ${b.stake}$
+                        LIGA: ${b.league} | CUOTA: ${b.odd} | STAKE: ${b.stake}$
                     </p>
 
                     <div class="flex flex-wrap gap-3 mb-6">
