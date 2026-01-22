@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>BetAGS Pro - High Performance Edition v3.5</title>
+    <title>BetAGS Pro - High Performance Edition v4.0</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -92,6 +92,13 @@
             text-align: center;
             border: 1px solid rgba(255,255,255,0.05);
         }
+
+        .matrix-cell {
+            padding: 8px;
+            text-align: center;
+            border: 1px solid rgba(255,255,255,0.05);
+            font-size: 10px;
+        }
     </style>
 </head>
 <body>
@@ -126,7 +133,7 @@
                 <p id="top-bankroll" class="text-xl font-bold">$100.00</p>
             </div>
             <div class="glass-card p-4 rounded-2xl border-l-4 border-purple-500">
-                <p class="text-[10px] uppercase font-black text-slate-500 tracking-widest">Eficiencia p-Value</p>
+                <p class="text-[10px] uppercase font-black text-slate-500 tracking-widest">p-Value (Significancia)</p>
                 <p id="top-pvalue" class="text-xl font-bold">--</p>
             </div>
         </div>
@@ -194,6 +201,10 @@
                     <h2 class="text-lg font-bold mb-4 text-slate-400 uppercase tracking-tighter">Probabilidades de Poisson</h2>
                     <div class="h-[300px]">
                         <canvas id="poissonChart"></canvas>
+                    </div>
+                    <div class="mt-4 overflow-x-auto">
+                        <p class="text-[10px] font-bold text-slate-500 uppercase mb-2">Mapa de Probabilidad de Resultados</p>
+                        <div id="score-matrix" class="grid grid-cols-6 gap-1 min-w-[500px]"></div>
                     </div>
                 </div>
             </div>
@@ -280,8 +291,8 @@
                     <p id="m-avg-profit" class="text-lg font-bold text-emerald-400">$0</p>
                 </div>
                 <div class="metric-badge">
-                    <p class="text-[9px] text-slate-500 font-bold uppercase">Avg Edge</p>
-                    <p id="m-edge" class="text-lg font-bold text-emerald-400">0%</p>
+                    <p class="text-[9px] text-slate-500 font-bold uppercase">Avg CLV</p>
+                    <p id="m-avg-clv" class="text-lg font-bold text-purple-400">0%</p>
                 </div>
             </div>
 
@@ -301,6 +312,9 @@
                             <label class="text-[9px] text-slate-500 uppercase block mb-1">Mercado</label>
                             <select id="f_market" class="w-full p-2 text-xs" onchange="applyFilters()">
                                 <option value="">TODOS</option>
+                                <option value="1">GANADOR LOCAL (1)</option>
+                                <option value="X">EMPATE (X)</option>
+                                <option value="2">GANADOR VISITANTE (2)</option>
                                 <option value="OVER 2.5">OVER 2.5</option>
                                 <option value="UNDER 2.5">UNDER 2.5</option>
                                 <option value="BTTS SÍ">BTTS SÍ</option>
@@ -372,15 +386,34 @@
             }
             renderPoissonChart(labels, h_p, a_p);
 
-            let p_u25 = 0;
+            // Matriz de resultados y mercados 1X2
+            let p_win = 0, p_draw = 0, p_loss = 0, p_u25 = 0;
+            const matrixContainer = document.getElementById('score-matrix');
+            matrixContainer.innerHTML = '';
+            
             for(let h=0; h<=5; h++) {
                 for(let a=0; a<=5; a++) {
-                    if(h + a < 2.5) p_u25 += (poissonProb(h, h_lambda) * poissonProb(a, a_lambda));
+                    const prob = poissonProb(h, h_lambda) * poissonProb(a, a_lambda);
+                    if(h > a) p_win += prob;
+                    else if(h === a) p_draw += prob;
+                    else p_loss += prob;
+                    if(h + a < 2.5) p_u25 += prob;
+
+                    const cell = document.createElement('div');
+                    cell.className = 'matrix-cell';
+                    cell.style.backgroundColor = `rgba(0, 255, 136, ${prob * 2})`;
+                    cell.innerHTML = `<b>${h}-${a}</b><br>${(prob * 100).toFixed(1)}%`;
+                    matrixContainer.appendChild(cell);
                 }
             }
             const p_btts_y = (1 - poissonProb(0, h_lambda)) * (1 - poissonProb(0, a_lambda));
 
             renderMarketTable([
+                { id: 'win', name: 'GANADOR LOCAL (1)', prob: p_win, partner: 'loss' },
+                { id: 'draw', name: 'EMPATE (X)', prob: p_draw, partner: 'win' },
+                { id: 'loss', name: 'GANADOR VISITANTE (2)', prob: p_loss, partner: 'win' },
+                { id: '1X', name: 'DC 1X', prob: p_win + p_draw, partner: 'loss' },
+                { id: 'X2', name: 'DC X2', prob: p_loss + p_draw, partner: 'win' },
                 { id: 'o25', name: 'OVER 2.5', prob: 1 - p_u25, partner: 'u25' },
                 { id: 'u25', name: 'UNDER 2.5', prob: p_u25, partner: 'o25' },
                 { id: 'bttsy', name: 'BTTS SÍ', prob: p_btts_y, partner: 'bttsn' },
@@ -423,11 +456,9 @@
                 edgeEl.className = edge > 0 ? "p-4 text-emerald-400 font-bold" : "p-4 text-red-500";
                 document.getElementById('stake_' + id).innerText = stake > 0 ? "$" + stake.toFixed(2) : "--";
 
-                // Cálculo de Overround
                 if(partnerOdd > 1) {
                     const overround = ((1/odd) + (1/partnerOdd) - 1) * 100;
                     document.getElementById('overround_' + id).innerText = overround.toFixed(1) + "%";
-                    document.getElementById('overround_' + partnerId).innerText = overround.toFixed(1) + "%";
                 }
             }
         }
@@ -446,7 +477,7 @@
                 teams: eventName,
                 market, odd, prob,
                 edge: (edge * 100).toFixed(2),
-                ov: (Math.random() * 8 + 2).toFixed(2),
+                ov: 0,
                 stake: parseFloat(stake.toFixed(2)), status: 'pending', profit: 0,
                 engine: document.getElementById('poisson_version').value,
                 closingOdd: null
@@ -478,33 +509,32 @@
             const totalStaked = resolved.reduce((a, b) => a + b.stake, 0);
             const wins = resolved.filter(b => b.status === 'win').length;
             const avgOdd = resolved.length > 0 ? (resolved.reduce((a, b) => a + b.odd, 0) / resolved.length) : 0;
+            
+            // Cálculo de CLV promedio
+            const clvBets = resolved.filter(b => b.closingOdd > 0);
+            const avgCLV = clvBets.length > 0 ? 
+                (clvBets.reduce((a, b) => a + ((b.odd / b.closingOdd) - 1), 0) / clvBets.length * 100) : 0;
 
-            const calcEngineStats = (ver) => {
-                const bts = bets.filter(b => b.engine === ver && b.status !== 'pending');
-                const p = bts.reduce((a, b) => a + b.profit, 0);
-                const s = bts.reduce((a, b) => a + b.stake, 0);
-                return { profit: p, yield: s > 0 ? (p / s * 100).toFixed(1) : 0, count: bts.length };
-            };
-
-            const v1 = calcEngineStats('v1');
-            const v2 = calcEngineStats('v2');
-
-            document.getElementById('v1-yield').innerText = v1.yield + "%";
-            document.getElementById('v1-profit').innerText = "$" + v1.profit.toFixed(2);
-            document.getElementById('v1-count').innerText = v1.count;
-            document.getElementById('v2-yield').innerText = v2.yield + "%";
-            document.getElementById('v2-profit').innerText = "$" + v2.profit.toFixed(2);
-            document.getElementById('v2-count').innerText = v2.count;
+            // Cálculo simplificado de p-Value (Aproximación de Z-Score para apuestas)
+            // Indica la probabilidad de que los resultados sean por SUERTE. Bajo = Habilidad.
+            let pValue = "--";
+            if(resolved.length > 5) {
+                const expectedWins = resolved.reduce((a,b) => a + (1/b.odd), 0);
+                const stdDev = Math.sqrt(resolved.length * 0.5 * 0.5); // Simplificación
+                const z = (wins - expectedWins) / stdDev;
+                pValue = z > 2 ? "ALTA (Skill)" : (z > 1 ? "MEDIA" : "BAJA (Suerte)");
+            }
 
             document.getElementById('top-profit').innerText = "$" + totalProfit.toFixed(2);
             document.getElementById('top-yield').innerText = (totalStaked > 0 ? (totalProfit/totalStaked*100).toFixed(1) : 0) + "%";
             document.getElementById('top-bankroll').innerText = "$" + getCurrentBankroll().toFixed(2);
-            document.getElementById('top-pvalue').innerText = "--";
+            document.getElementById('top-pvalue').innerText = pValue;
             
             document.getElementById('m-roi').innerText = (totalProfit/BANKROLL_BASE*100).toFixed(1) + "%";
             document.getElementById('m-hit').innerText = (resolved.length > 0 ? (wins/resolved.length*100).toFixed(1) : 0) + "%";
             document.getElementById('m-avg-profit').innerText = "$" + (resolved.length > 0 ? (totalProfit/resolved.length).toFixed(2) : 0);
             document.getElementById('m-avg-odd').innerText = avgOdd.toFixed(2);
+            document.getElementById('m-avg-clv').innerText = avgCLV.toFixed(1) + "%";
 
             renderHistory(filtered);
             renderBankrollChart(resolved);
@@ -516,39 +546,33 @@
             data.forEach(b => {
                 const card = document.createElement('div');
                 card.className = "bet-card-custom";
-                if(b.status === 'win') card.style.boxShadow = "inset 0 0 20px rgba(74, 222, 128, 0.1)";
-                if(b.status === 'loss') card.style.boxShadow = "inset 0 0 20px rgba(248, 113, 113, 0.1)";
+                
+                let clvText = "N/A%";
+                let clvClass = "badge-clv";
+                if(b.closingOdd > 0) {
+                    const clvVal = ((b.odd / b.closingOdd) - 1) * 100;
+                    clvText = clvVal.toFixed(1) + "%";
+                    clvClass = clvVal > 0 ? "pill-badge border-emerald-500 text-emerald-400" : "pill-badge border-red-500 text-red-400";
+                }
 
                 card.innerHTML = `
                     <div class="status-indicator">${b.status === 'pending' ? 'P' : (b.status === 'win' ? 'W' : 'L')}</div>
-                    
                     <h2 class="text-2xl font-bold text-white mb-1">${b.teams}</h2>
-                    <h3 class="text-xl font-bold text-white mb-4">${b.market}</h3>
-                    
-                    <p class="text-[11px] text-slate-500 font-bold uppercase tracking-wide mb-6">
-                        LIGA: ${b.league} | CUOTA: ${b.odd} | STAKE: ${b.stake}$
-                    </p>
-
+                    <h3 class="text-xl font-bold text-emerald-400 mb-4">${b.market}</h3>
+                    <p class="text-[11px] text-slate-500 font-bold uppercase mb-6">LIGA: ${b.league} | CUOTA: ${b.odd} | STAKE: ${b.stake}$</p>
                     <div class="flex flex-wrap gap-3 mb-6">
                         <div class="pill-badge badge-edge">EDGE: ${b.edge}%</div>
-                        <div class="pill-badge badge-ov">OV: ${b.ov || '0.00'}%</div>
-                        <div class="pill-badge badge-clv">CLV: N/A%</div>
+                        <div class="${clvClass}">CLV: ${clvText}</div>
                     </div>
-
                     <div class="flex items-center gap-2 mb-6">
-                        <span class="text-slate-400 text-lg">Cuota Cierre:</span>
-                        <input type="number" step="0.01" placeholder="Cierre" 
-                            class="bg-black border border-slate-800 rounded-lg px-4 py-2 w-32 text-center text-white"
-                            value="${b.closingOdd || ''}" 
-                            onchange="updateClosingOdd(${b.id}, this.value)">
+                        <span class="text-slate-400 text-xs uppercase font-bold">Cuota Cierre:</span>
+                        <input type="number" step="0.01" class="bg-black border border-slate-800 rounded-lg px-2 py-1 w-20 text-center text-white"
+                            value="${b.closingOdd || ''}" onchange="updateClosingOdd(${b.id}, this.value)">
                     </div>
-
                     <div class="flex gap-3">
                         <button onclick="resolve(${b.id}, 'win')" class="btn-status btn-win">W</button>
                         <button onclick="resolve(${b.id}, 'loss')" class="btn-status btn-loss">L</button>
-                        <button onclick="deleteBet(${b.id})" class="btn-status btn-delete">
-                            <i class="fa-solid fa-trash"></i>
-                        </button>
+                        <button onclick="deleteBet(${b.id})" class="btn-status btn-delete"><i class="fa-solid fa-trash"></i></button>
                     </div>
                 `;
                 grid.appendChild(card);
@@ -557,7 +581,7 @@
 
         function updateClosingOdd(id, val) {
             const b = bets.find(x => x.id === id);
-            b.closingOdd = val;
+            b.closingOdd = parseFloat(val);
             save();
         }
 
