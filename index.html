@@ -515,12 +515,11 @@
             const avgCLV = clvBets.length > 0 ? 
                 (clvBets.reduce((a, b) => a + ((b.odd / b.closingOdd) - 1), 0) / clvBets.length * 100) : 0;
 
-            // Cálculo simplificado de p-Value (Aproximación de Z-Score para apuestas)
-            // Indica la probabilidad de que los resultados sean por SUERTE. Bajo = Habilidad.
+            // Cálculo simplificado de p-Value
             let pValue = "--";
             if(resolved.length > 5) {
                 const expectedWins = resolved.reduce((a,b) => a + (1/b.odd), 0);
-                const stdDev = Math.sqrt(resolved.length * 0.5 * 0.5); // Simplificación
+                const stdDev = Math.sqrt(resolved.length * 0.5 * 0.5);
                 const z = (wins - expectedWins) / stdDev;
                 pValue = z > 2 ? "ALTA (Skill)" : (z > 1 ? "MEDIA" : "BAJA (Suerte)");
             }
@@ -603,12 +602,74 @@
         function renderBankrollChart(resolved) {
             const ctx = document.getElementById('bankrollChart').getContext('2d');
             if(bChart) bChart.destroy();
-            let data = [BANKROLL_BASE], current = BANKROLL_BASE;
-            [...resolved].reverse().forEach(b => { current += b.profit; data.push(current); });
+            
+            let bankData = [BANKROLL_BASE];
+            let clvData = [0];
+            let currentBank = BANKROLL_BASE;
+            let cumClv = 0;
+            let clvCount = 0;
+
+            [...resolved].reverse().forEach(b => { 
+                currentBank += b.profit; 
+                bankData.push(currentBank); 
+
+                if(b.closingOdd > 0) {
+                    cumClv += ((b.odd / b.closingOdd) - 1) * 100;
+                    clvCount++;
+                }
+                clvData.push(clvCount > 0 ? cumClv / clvCount : 0);
+            });
+
             bChart = new Chart(ctx, { 
                 type: 'line', 
-                data: { labels: data.map((_, i) => i), datasets: [ { label: 'Banca ($)', data: data, borderColor: '#00ff88', borderWidth: 2, pointRadius: 0, fill: true, backgroundColor: 'rgba(0, 255, 136, 0.05)' } ] }, 
-                options: { responsive: true, maintainAspectRatio: false, scales: { x: { display: false }, y: { grid: { color: 'rgba(255,255,255,0.05)' } } } } 
+                data: { 
+                    labels: bankData.map((_, i) => i), 
+                    datasets: [ 
+                        { 
+                            label: 'Banca ($)', 
+                            data: bankData, 
+                            borderColor: '#00ff88', 
+                            borderWidth: 3, 
+                            pointRadius: 0, 
+                            fill: true, 
+                            backgroundColor: 'rgba(0, 255, 136, 0.05)',
+                            yAxisID: 'y'
+                        },
+                        {
+                            label: 'CLV Promedio (%)',
+                            data: clvData,
+                            borderColor: '#a855f7',
+                            borderWidth: 2,
+                            borderDash: [5, 5],
+                            pointRadius: 0,
+                            fill: false,
+                            yAxisID: 'y1'
+                        }
+                    ] 
+                }, 
+                options: { 
+                    responsive: true, 
+                    maintainAspectRatio: false, 
+                    scales: { 
+                        x: { display: false }, 
+                        y: { 
+                            position: 'left',
+                            grid: { color: 'rgba(255,255,255,0.05)' },
+                            ticks: { color: '#00ff88' }
+                        },
+                        y1: {
+                            position: 'right',
+                            grid: { display: false },
+                            ticks: { 
+                                color: '#a855f7',
+                                callback: function(value) { return value.toFixed(1) + '%'; }
+                            }
+                        }
+                    },
+                    plugins: {
+                        legend: { labels: { color: '#94a3b8', boxWidth: 12 } }
+                    }
+                } 
             });
         }
 
