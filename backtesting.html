@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>BetAGS - Quantum & Market Analytics</title>
+    <title>BetAGS - Quantum Analytics & Filter</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -13,8 +13,8 @@
         .glass-card { background: rgba(30, 41, 59, 0.5); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.05); }
         .font-mono { font-family: 'JetBrains Mono', monospace; }
         .stats-grid > div { transition: all 0.3s ease; }
-        .stats-grid > div:hover { transform: translateY(-2px); border-color: rgba(168, 85, 247, 0.4); }
         .market-row:nth-child(even) { background: rgba(255,255,255,0.02); }
+        input[type="checkbox"] { accent-color: #3b82f6; width: 16px; height: 16px; cursor: pointer; }
     </style>
 </head>
 <body class="p-4 md:p-8">
@@ -38,7 +38,6 @@
         </div>
 
         <div class="grid grid-cols-1 lg:grid-cols-4 gap-6 mb-8">
-            
             <div class="space-y-6">
                 <div class="glass-card p-6 rounded-3xl shadow-2xl border-t-4 border-t-purple-500">
                     <h2 class="text-xs font-black text-purple-400 uppercase mb-4 tracking-widest flex items-center">
@@ -54,13 +53,13 @@
                             <input type="number" id="sim_picks" class="w-full bg-black/40 p-2 rounded-lg border border-white/10 text-sm font-mono text-white" value="1000">
                         </div>
                         <button onclick="runMonteCarlo()" class="w-full bg-blue-600 hover:bg-blue-500 py-3 rounded-xl font-black text-xs uppercase tracking-widest transition-all">
-                            EJECUTAR MONTE CARLO
+                            RE-CALCULAR TODO
                         </button>
                     </div>
                 </div>
 
                 <div class="glass-card p-5 rounded-3xl">
-                    <h2 class="text-xs font-black text-blue-400 uppercase mb-3 tracking-widest">Riesgo & Capital</h2>
+                    <h2 class="text-xs font-black text-blue-400 uppercase mb-3 tracking-widest">Riesgo & Capital <span class="text-[8px] text-slate-500">(FILTRADO)</span></h2>
                     <div class="space-y-2">
                         <div class="flex justify-between text-[11px]"><span class="text-slate-400">Edge Real:</span> <span id="base-edge" class="text-emerald-400 font-bold">--</span></div>
                         <div class="flex justify-between text-[11px]"><span class="text-slate-400">Kelly (Full):</span> <span id="base-kelly" class="text-blue-400 font-bold">--</span></div>
@@ -72,25 +71,24 @@
             <div class="lg:col-span-3 glass-card p-6 rounded-3xl overflow-hidden">
                 <div class="flex justify-between items-center mb-6">
                     <h2 class="text-xs font-black text-emerald-400 uppercase tracking-widest flex items-center">
-                        <i class="fa-solid fa-chart-pie mr-2"></i> Desglose por Liga / Mercado
+                        <i class="fa-solid fa-filter mr-2"></i> Filtro de Mercados Activos
                     </h2>
-                    <span class="text-[10px] text-slate-500 italic font-mono">*Basado en picks resueltos</span>
+                    <span class="text-[10px] text-slate-500 italic font-mono">Desmarca para excluir del análisis</span>
                 </div>
                 
-                <div class="overflow-x-auto">
+                <div class="overflow-x-auto h-[280px]">
                     <table class="w-full text-left text-xs">
-                        <thead>
+                        <thead class="sticky top-0 bg-[#0c1425] z-10">
                             <tr class="text-slate-500 border-b border-white/5">
+                                <th class="pb-3 px-2">Activo</th>
                                 <th class="pb-3 font-black uppercase tracking-tighter">Categoría</th>
-                                <th class="pb-3 font-black uppercase tracking-tighter">Volumen</th>
-                                <th class="pb-3 font-black uppercase tracking-tighter">W/L</th>
-                                <th class="pb-3 font-black uppercase tracking-tighter">Cuota Med.</th>
+                                <th class="pb-3 font-black uppercase tracking-tighter text-center">Vol.</th>
+                                <th class="pb-3 font-black uppercase tracking-tighter">Win Rate</th>
                                 <th class="pb-3 font-black uppercase tracking-tighter">Yield %</th>
                                 <th class="pb-3 font-black uppercase tracking-tighter text-right">Profit</th>
                             </tr>
                         </thead>
-                        <tbody id="market-analysis-body" class="font-mono text-slate-300">
-                            </tbody>
+                        <tbody id="market-analysis-body" class="font-mono text-slate-300"></tbody>
                     </table>
                 </div>
             </div>
@@ -116,55 +114,41 @@
         </div>
 
         <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <div class="lg:col-span-2 glass-card p-6 rounded-3xl h-[400px]">
-                <canvas id="mcChart"></canvas>
-            </div>
-            <div class="glass-card p-6 rounded-3xl h-[400px]">
-                <canvas id="distChart"></canvas>
-            </div>
+            <div class="lg:col-span-2 glass-card p-6 rounded-3xl h-[400px]"><canvas id="mcChart"></canvas></div>
+            <div class="glass-card p-6 rounded-3xl h-[400px]"><canvas id="distChart"></canvas></div>
         </div>
     </div>
 
     <script>
         let mcChart, distChart;
+        let excludedMarkets = new Set();
         let simulationData = JSON.parse(localStorage.getItem('backtesting_data')) || 
                          JSON.parse(localStorage.getItem('betags_v3_miner'))?.filter(b => b.status !== 'pending') || [];
 
         function updateDataStatus() {
             const statusEl = document.getElementById('data-status');
             if (simulationData.length === 0) {
-                statusEl.innerHTML = `<span class="text-red-400 text-[10px] font-bold italic">NO HAY DATOS RESUELTOS</span>`;
+                statusEl.innerHTML = `<span class="text-red-400 text-[10px] font-bold italic">NO DATA</span>`;
                 return;
             }
-
-            statusEl.innerHTML = `
-                <span class="px-3 py-1 rounded-full bg-blue-500/20 text-blue-400 text-[10px] font-bold border border-blue-500/30">
-                    <i class="fa-solid fa-bolt mr-1"></i> ${simulationData.length} PICKS ANALIZADOS
-                </span>
-            `;
-
-            analyzeMarkets();
+            statusEl.innerHTML = `<span class="px-3 py-1 rounded-full bg-blue-500/20 text-blue-400 text-[10px] font-bold border border-blue-500/30">MUESTRA GLOBAL: ${simulationData.length} PICKS</span>`;
+            
+            // Primera carga: Generar tabla de mercados
+            renderMarketTable();
+            analyzeAndSimulate();
         }
 
-        function analyzeMarkets() {
+        function renderMarketTable() {
             const groups = {};
-            
             simulationData.forEach(pick => {
-                // Intentamos agrupar por liga o mercado (usando campos comunes del minero)
                 const category = pick.league || pick.liga || pick.market || pick.mercado || 'Otros';
-                if (!groups[category]) {
-                    groups[category] = { count: 0, wins: 0, losses: 0, totalOdd: 0, totalProfit: 0, investment: 0 };
-                }
-                
+                if (!groups[category]) groups[category] = { count: 0, wins: 0, losses: 0, totalProfit: 0, investment: 0, totalOdd: 0 };
                 const stake = parseFloat(pick.stake) || 1;
                 const odd = parseFloat(pick.odd) || parseFloat(pick.cuota) || 0;
-                const isWin = (pick.status === 'win' || pick.resultado === 'win');
-
                 groups[category].count++;
                 groups[category].investment += stake;
                 groups[category].totalOdd += odd;
-
-                if (isWin) {
+                if (pick.status === 'win' || pick.resultado === 'win') {
                     groups[category].wins++;
                     groups[category].totalProfit += (stake * (odd - 1));
                 } else {
@@ -175,67 +159,64 @@
 
             const tbody = document.getElementById('market-analysis-body');
             tbody.innerHTML = '';
-
-            // Ordenar por profit de mayor a menor
-            const sortedKeys = Object.keys(groups).sort((a,b) => groups[b].totalProfit - groups[a].totalProfit);
-
-            sortedKeys.forEach(key => {
+            Object.keys(groups).sort((a,b) => groups[b].totalProfit - groups[a].totalProfit).forEach(key => {
                 const g = groups[key];
                 const yieldPct = (g.totalProfit / g.investment) * 100;
-                const avgOdd = g.totalOdd / g.count;
                 const winRate = (g.wins / g.count) * 100;
+                const isChecked = !excludedMarkets.has(key);
 
                 tbody.innerHTML += `
-                    <tr class="market-row border-b border-white/5 hover:bg-white/5 transition-all">
-                        <td class="py-3 font-bold text-white">${key.substring(0,20)}</td>
-                        <td class="py-3">${g.count}</td>
-                        <td class="py-3 text-[10px]">${g.wins}W / ${g.losses}L <span class="text-slate-500">(${winRate.toFixed(0)}%)</span></td>
-                        <td class="py-3">${avgOdd.toFixed(2)}</td>
+                    <tr class="market-row border-b border-white/5 hover:bg-white/5 transition-all ${!isChecked ? 'opacity-30' : ''}">
+                        <td class="py-3 px-2"><input type="checkbox" ${isChecked ? 'checked' : ''} onchange="toggleMarket('${key.replace(/'/g, "\\'")}')"></td>
+                        <td class="py-3 font-bold text-white">${key.substring(0,25)}</td>
+                        <td class="py-3 text-center">${g.count}</td>
+                        <td class="py-3">${winRate.toFixed(0)}%</td>
                         <td class="py-3 ${yieldPct >= 0 ? 'text-emerald-400' : 'text-red-400'}">${yieldPct.toFixed(1)}%</td>
-                        <td class="py-3 text-right font-bold ${g.totalProfit >= 0 ? 'text-emerald-400' : 'text-red-400'}">
-                            ${g.totalProfit >= 0 ? '+' : ''}${g.totalProfit.toFixed(2)}u
-                        </td>
+                        <td class="py-3 text-right font-bold ${g.totalProfit >= 0 ? 'text-emerald-400' : 'text-red-400'}">${g.totalProfit.toFixed(1)}u</td>
                     </tr>
                 `;
             });
+        }
 
-            // Actualizar métricas generales
-            const totalWins = simulationData.filter(b => b.status === 'win' || b.resultado === 'win').length;
-            const globalHitRate = totalWins / simulationData.length;
-            const globalAvgOdd = simulationData.reduce((a, b) => a + (parseFloat(b.odd) || parseFloat(b.cuota) || 0), 0) / simulationData.length;
-            const edge = (globalHitRate * globalAvgOdd) - 1;
-            
+        function toggleMarket(marketName) {
+            if (excludedMarkets.has(marketName)) excludedMarkets.delete(marketName);
+            else excludedMarkets.add(marketName);
+            renderMarketTable();
+            analyzeAndSimulate();
+        }
+
+        function analyzeAndSimulate() {
+            const filteredData = simulationData.filter(p => !excludedMarkets.has(p.league || p.liga || p.market || p.mercado || 'Otros'));
+            if (filteredData.length < 3) return;
+
+            const totalWins = filteredData.filter(b => b.status === 'win' || b.resultado === 'win').length;
+            const hr = totalWins / filteredData.length;
+            const avgOdd = filteredData.reduce((a, b) => a + (parseFloat(b.odd) || parseFloat(b.cuota) || 0), 0) / filteredData.length;
+            const edge = (hr * avgOdd) - 1;
+
             document.getElementById('base-edge').innerText = (edge * 100).toFixed(2) + "%";
-            document.getElementById('base-kelly').innerText = (Math.max(0, edge / (globalAvgOdd - 1)) * 100).toFixed(1) + "%";
+            document.getElementById('base-kelly').innerText = (Math.max(0, edge / (avgOdd - 1)) * 100).toFixed(1) + "%";
             
-            // P-Value (Aproximación para saber si es suerte)
-            const n = simulationData.length;
-            const expectedWins = n * (1/globalAvgOdd);
-            const z = (totalWins - expectedWins) / Math.sqrt(n * (1/globalAvgOdd) * (1 - 1/globalAvgOdd));
+            const n = filteredData.length;
+            const z = (totalWins - (n * (1/avgOdd))) / Math.sqrt(n * (1/avgOdd) * (1 - 1/avgOdd));
             document.getElementById('base-pvalue').innerText = z.toFixed(2);
+
+            runMonteCarlo(filteredData);
         }
 
-        function clearBacktestingData() {
-            if(confirm("¿Limpiar historial?")) {
-                localStorage.removeItem('backtesting_data');
-                location.reload();
-            }
-        }
-
-        function runMonteCarlo() {
-            if (simulationData.length < 5) return alert("Pocos datos.");
+        function runMonteCarlo(dataInput) {
+            const data = dataInput || simulationData.filter(p => !excludedMarkets.has(p.league || p.liga || p.market || p.mercado || 'Otros'));
             const runs = parseInt(document.getElementById('sim_runs').value);
             const picks = parseInt(document.getElementById('sim_picks').value);
-            const totalWins = simulationData.filter(b => b.status === 'win' || b.resultado === 'win').length;
-            const hitRate = totalWins / simulationData.length;
-            const oddArray = simulationData.map(b => parseFloat(b.odd) || parseFloat(b.cuota) || 2.0);
+            const hr = data.filter(b => b.status === 'win' || b.resultado === 'win').length / data.length;
+            const oddArray = data.map(b => parseFloat(b.odd) || parseFloat(b.cuota) || 2.0);
             
             let allPaths = [], endValues = [], ruinCount = 0, positiveRuns = 0, drawdowns = [];
 
             for (let r = 0; r < runs; r++) {
                 let path = [100], currentBank = 100, maxBank = 100, maxDD = 0;
                 for (let p = 0; p < picks; p++) {
-                    const win = Math.random() < hitRate;
+                    const win = Math.random() < hr;
                     const randomOdd = oddArray[Math.floor(Math.random() * oddArray.length)];
                     currentBank += win ? (randomOdd - 1) : -1;
                     if (currentBank <= 0) { currentBank = 0; ruinCount++; break; }
@@ -250,8 +231,8 @@
                 allPaths.push(path);
             }
 
-            document.getElementById('stat-ruin').innerText = ((ruinCount / runs) * 100).toFixed(1) + "%";
-            document.getElementById('stat-win-prob').innerText = ((positiveRuns / runs) * 100).toFixed(1) + "%";
+            document.getElementById('stat-ruin').innerText = ((ruinCount/runs)*100).toFixed(1) + "%";
+            document.getElementById('stat-win-prob').innerText = ((positiveRuns/runs)*100).toFixed(1) + "%";
             document.getElementById('stat-mdd').innerText = ((drawdowns.reduce((a,b)=>a+b,0)/runs)*100).toFixed(1) + "%";
             document.getElementById('stat-median').innerText = endValues.sort((a,b)=>a-b)[Math.floor(runs/2)].toFixed(1) + "u";
 
@@ -261,7 +242,6 @@
         function renderCharts(paths, picks, endValues) {
             if (mcChart) mcChart.destroy();
             if (distChart) distChart.destroy();
-            
             mcChart = new Chart(document.getElementById('mcChart'), {
                 type: 'line',
                 data: {
@@ -281,7 +261,6 @@
                 labels.push((min + (i*(max-min)/bins)).toFixed(0) + "u");
                 endValues.forEach(v => { if(v >= (min + (i*(max-min)/bins)) && v < (min + ((i+1)*(max-min)/bins))) histData[i]++; });
             }
-
             distChart = new Chart(document.getElementById('distChart'), {
                 type: 'bar',
                 data: { labels: labels, datasets: [{ data: histData, backgroundColor: '#3b82f6' }] },
@@ -289,7 +268,11 @@
             });
         }
 
-        window.onload = () => { updateDataStatus(); if(simulationData.length >= 5) runMonteCarlo(); };
+        function clearBacktestingData() {
+            if(confirm("¿Borrar historial?")) { localStorage.removeItem('backtesting_data'); location.reload(); }
+        }
+
+        window.onload = updateDataStatus;
     </script>
 </body>
 </html>
