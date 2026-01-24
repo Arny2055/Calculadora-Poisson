@@ -17,8 +17,9 @@
         .insight-value { font-weight: 800; color: #10b981; }
         th { text-transform: uppercase; font-size: 0.7rem; letter-spacing: 0.05em; color: #94a3b8; }
         select, input { background-color: #1f2937 !important; color: white !important; border: 1px solid #374151 !important; border-radius: 0.5rem; font-size: 12px; padding: 5px 10px; }
-        #insights-modal, #strategy-modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.8); z-index: 100; align-items: center; justify-content: center; backdrop-filter: blur(5px); }
+        #insights-modal, #strategy-scanner-modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.8); z-index: 100; align-items: center; justify-content: center; backdrop-filter: blur(5px); }
         .modal-content { background: #0f172a; width: 90%; max-width: 800px; max-height: 85vh; overflow-y: auto; border-radius: 20px; border: 1px solid #3b82f6; }
+        .strategy-rank { background: linear-gradient(90deg, rgba(16, 185, 129, 0.1) 0%, transparent 100%); border-left: 3px solid #10b981; }
     </style>
 </head>
 <body class="min-h-screen">
@@ -51,16 +52,17 @@
         </div>
     </div>
 
-    <div id="strategy-modal">
+    <div id="strategy-scanner-modal">
         <div class="modal-content p-6">
             <div class="flex justify-between items-center mb-6 border-b border-white/10 pb-4">
-                <h2 class="text-xl font-black italic text-white"><i class="fa-solid fa-magnifying-glass mr-2 text-blue-500"></i>BUSCADOR DE ESTRATEGIAS</h2>
-                <button onclick="toggleStrategyModal()" class="text-slate-400 hover:text-white text-2xl">&times;</button>
+                <div>
+                    <h2 class="text-xl font-black italic text-white"><i class="fa-solid fa-microscope mr-2 text-emerald-500"></i>SCANNER DE RENTABILIDAD</h2>
+                    <p class="text-[10px] text-slate-400 uppercase tracking-tighter">Sugerencias basadas en profit acumulado y yield</p>
+                </div>
+                <button onclick="toggleScannerModal()" class="text-slate-400 hover:text-white text-2xl">&times;</button>
             </div>
-            <div class="mb-4">
-                <input type="text" id="strategy-search-input" placeholder="Escribe el nombre de la estrategia..." class="w-full p-3 rounded-xl border border-slate-700 bg-slate-800 text-white" onkeyup="filterStrategiesList()">
-            </div>
-            <div id="strategy-list" class="space-y-2 max-h-[50vh] overflow-y-auto">
+            
+            <div id="scanner-results" class="grid grid-cols-1 gap-3">
                 </div>
         </div>
     </div>
@@ -69,8 +71,8 @@
         <div class="container mx-auto flex flex-col md:flex-row justify-between items-center gap-4">
             <h1 class="text-xl font-black italic text-white">BET<span class="text-purple-500">AGS</span> <span class="text-[10px] uppercase tracking-widest text-slate-400 ml-2">Backtesting Lab</span></h1>
             <div class="flex gap-3">
-                <button onclick="openStrategySearch()" class="text-xs bg-blue-600 text-white px-4 py-2 rounded-lg font-black border border-blue-400 hover:bg-blue-500 transition-all shadow-lg shadow-blue-900/40">
-                    <i class="fa-solid fa-search mr-2"></i>BUSCAR ESTRATEGIA
+                <button onclick="scanForWinningStrategies()" class="text-xs bg-emerald-600 text-white px-4 py-2 rounded-lg font-black border border-emerald-400 hover:bg-emerald-500 transition-all shadow-lg shadow-emerald-900/40">
+                    <i class="fa-solid fa-wand-magic-sparkles mr-2"></i>SUGERIR ESTRATEGIAS
                 </button>
                 <button onclick="generateInsights()" class="text-xs bg-purple-600 text-white px-4 py-2 rounded-lg font-black border border-purple-400 hover:bg-purple-500 transition-all shadow-lg shadow-purple-900/40">
                     <i class="fa-solid fa-bolt mr-2"></i>VER INSIGHTS TOP 10
@@ -93,9 +95,10 @@
                 <div><label class="text-[10px] font-black text-slate-500 uppercase block mb-1">Cuota Máx.</label><input type="number" id="filter-max-odd" step="0.1" placeholder="10.0" class="w-full" oninput="applyFilters()"></div>
                 <button onclick="clearBacktest()" class="text-[10px] bg-red-600/20 text-red-400 border border-red-500/30 p-2 rounded uppercase font-black">Limpiar Historial</button>
             </div>
-            <div id="active-strategy-filter" class="hidden mt-3 p-2 bg-blue-500/20 rounded-lg flex justify-between items-center">
-                <span class="text-[10px] text-blue-300 font-bold uppercase">Estrategia Activa: <span id="current-strategy-name" class="text-white">Ninguna</span></span>
-                <button onclick="clearStrategyFilter()" class="text-[10px] text-white font-bold underline">QUITAR FILTRO</button>
+            
+            <div id="strategy-info-bar" class="hidden mt-4 p-2 bg-emerald-500/10 border border-emerald-500/20 rounded-lg flex justify-between items-center">
+                <span class="text-[10px] font-bold text-emerald-400">FILTRANDO POR ESTRATEGIA: <span id="active-strat-name" class="text-white"></span></span>
+                <button onclick="resetStrategyFilter()" class="text-[10px] bg-emerald-500 text-white px-2 py-1 rounded">QUITAR FILTRO</button>
             </div>
         </div>
 
@@ -116,7 +119,7 @@
         let fullData = JSON.parse(localStorage.getItem('backtesting_data')) || [];
         let filteredData = [];
         let equityChart;
-        let activeStrategyName = "all";
+        let activeStrategy = 'all';
 
         function applyFilters() {
             const motor = document.getElementById('filter-motor').value;
@@ -128,7 +131,7 @@
                 const matchMotor = motor === 'all' || b.motor === motor;
                 const matchMarket = market === 'all' || b.mercado === market;
                 const matchOdd = b.cuota >= minOdd && b.cuota <= maxOdd;
-                const matchStrategy = activeStrategyName === 'all' || b.nombre_estrategia === activeStrategyName;
+                const matchStrategy = activeStrategy === 'all' || b.nombre_estrategia === activeStrategy;
                 return matchMotor && matchMarket && matchOdd && matchStrategy;
             });
             updateUI();
@@ -143,10 +146,10 @@
         function renderStats() {
             const totalProfit = filteredData.reduce((acc, curr) => acc + curr.profit, 0);
             const totalStaked = filteredData.reduce((acc, curr) => acc + curr.stake, 0);
-            const totalWins = filteredData.filter(b => b.profit > 0).length;
+            const wins = filteredData.filter(b => b.profit > 0).length;
             const yieldVal = totalStaked > 0 ? (totalProfit / totalStaked) * 100 : 0;
-            const winRate = filteredData.length > 0 ? (totalWins / filteredData.length) * 100 : 0;
-            
+            const winRate = filteredData.length > 0 ? (wins / filteredData.length) * 100 : 0;
+
             document.getElementById('stat-profit').innerText = `$${totalProfit.toFixed(2)}`;
             document.getElementById('stat-yield').innerText = `${yieldVal.toFixed(1)}%`;
             document.getElementById('stat-winrate').innerText = `${winRate.toFixed(1)}%`;
@@ -178,7 +181,77 @@
             });
         }
 
-        // LOGICA DE INSIGHTS TOP 10
+        // --- LÓGICA DE SUGERENCIA INTELIGENTE ---
+        function scanForWinningStrategies() {
+            if(fullData.length === 0) return alert("No hay datos cargados para analizar.");
+            
+            const strategyMap = {};
+            fullData.forEach(b => {
+                const name = b.nombre_estrategia || "Estrategia Sin Nombre";
+                if(!strategyMap[name]) strategyMap[name] = { profit: 0, stake: 0, count: 0, wins: 0 };
+                strategyMap[name].profit += b.profit;
+                strategyMap[name].stake += b.stake;
+                strategyMap[name].count++;
+                if(b.profit > 0) strategyMap[name].wins++;
+            });
+
+            const winners = Object.entries(strategyMap)
+                .map(([name, s]) => ({
+                    name,
+                    profit: s.profit,
+                    yield: (s.profit / s.stake) * 100,
+                    winrate: (s.wins / s.count) * 100,
+                    picks: s.count
+                }))
+                .filter(s => s.profit > 0) // Solo mostrar las que ganan dinero
+                .sort((a, b) => b.profit - a.profit);
+
+            const container = document.getElementById('scanner-results');
+            container.innerHTML = '';
+
+            if(winners.length === 0) {
+                container.innerHTML = '<p class="text-center text-slate-500 py-10 font-bold uppercase text-xs">No se encontraron estrategias rentables en el historial actual.</p>';
+            } else {
+                winners.forEach(s => {
+                    container.innerHTML += `
+                        <div onclick="selectWinner('${s.name}')" class="strategy-rank p-4 rounded-xl cursor-pointer hover:bg-white/5 transition-all group">
+                            <div class="flex justify-between items-center">
+                                <div>
+                                    <h4 class="text-white font-black text-sm uppercase group-hover:text-emerald-400">${s.name}</h4>
+                                    <p class="text-[10px] text-slate-500 font-bold">${s.picks} PICKS ANALIZADOS</p>
+                                </div>
+                                <div class="text-right">
+                                    <div class="text-emerald-400 font-black text-lg">$${s.profit.toFixed(2)}</div>
+                                    <div class="text-[10px] text-slate-400 font-bold">YIELD: ${s.yield.toFixed(1)}% | WR: ${s.winrate.toFixed(1)}%</div>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                });
+            }
+            toggleScannerModal();
+        }
+
+        function selectWinner(name) {
+            activeStrategy = name;
+            document.getElementById('active-strat-name').innerText = name;
+            document.getElementById('strategy-info-bar').classList.remove('hidden');
+            toggleScannerModal();
+            applyFilters();
+        }
+
+        function resetStrategyFilter() {
+            activeStrategy = 'all';
+            document.getElementById('strategy-info-bar').classList.add('hidden');
+            applyFilters();
+        }
+
+        function toggleScannerModal() {
+            const m = document.getElementById('strategy-scanner-modal');
+            m.style.display = m.style.display === 'flex' ? 'none' : 'flex';
+        }
+
+        // --- LÓGICA DE INSIGHTS TOP 10 ---
         function generateInsights() {
             if(fullData.length === 0) return alert("No hay datos suficientes.");
             
@@ -238,52 +311,6 @@
         }
 
         function clearBacktest() { if(confirm('¿Borrar?')) { localStorage.removeItem('backtesting_data'); location.reload(); } }
-
-        // FUNCIONES NUEVAS PARA BÚSQUEDA DE ESTRATEGIA
-        function openStrategySearch() {
-            const container = document.getElementById('strategy-list');
-            const strategies = [...new Set(fullData.map(b => b.nombre_estrategia))];
-            
-            container.innerHTML = '';
-            strategies.forEach(name => {
-                const profit = fullData.filter(b => b.nombre_estrategia === name).reduce((acc, curr) => acc + curr.profit, 0);
-                container.innerHTML += `
-                    <button onclick="selectStrategy('${name}')" class="strategy-item w-full text-left p-3 glass-card hover:bg-slate-700 transition-colors flex justify-between items-center rounded-xl">
-                        <span class="text-xs font-bold text-slate-200 uppercase">${name || 'Sin Nombre'}</span>
-                        <span class="text-xs font-black ${profit >= 0 ? 'text-emerald-400' : 'text-red-400'}">$${profit.toFixed(2)}</span>
-                    </button>
-                `;
-            });
-            toggleStrategyModal();
-        }
-
-        function filterStrategiesList() {
-            const query = document.getElementById('strategy-search-input').value.toLowerCase();
-            const items = document.querySelectorAll('.strategy-item');
-            items.forEach(item => {
-                const text = item.innerText.toLowerCase();
-                item.style.display = text.includes(query) ? 'flex' : 'none';
-            });
-        }
-
-        function selectStrategy(name) {
-            activeStrategyName = name;
-            document.getElementById('current-strategy-name').innerText = name;
-            document.getElementById('active-strategy-filter').classList.remove('hidden');
-            toggleStrategyModal();
-            applyFilters();
-        }
-
-        function clearStrategyFilter() {
-            activeStrategyName = "all";
-            document.getElementById('active-strategy-filter').classList.add('hidden');
-            applyFilters();
-        }
-
-        function toggleStrategyModal() {
-            const m = document.getElementById('strategy-modal');
-            m.style.display = m.style.display === 'flex' ? 'none' : 'flex';
-        }
 
         applyFilters();
     </script>
