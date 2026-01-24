@@ -21,6 +21,8 @@
         .modal-content { background: #0f172a; width: 95%; max-width: 1200px; max-height: 90vh; overflow-y: auto; border-radius: 20px; border: 1px solid #3b82f6; }
         .engine-header { padding: 10px; border-radius: 8px; margin-bottom: 15px; text-align: center; font-weight: 900; letter-spacing: 1px; }
         .winner-badge { background: linear-gradient(45deg, #f59e0b, #d97706); color: white; padding: 2px 8px; border-radius: 4px; font-size: 9px; display: inline-flex; align-items: center; gap: 4px; box-shadow: 0 0 10px rgba(245, 158, 11, 0.3); }
+        .recommendation-box { background: linear-gradient(90deg, #1e1b4b, #312e81); border: 1px solid #4338ca; padding: 15px; border-radius: 12px; margin-bottom: 20px; position: relative; overflow: hidden; }
+        .recommendation-box::after { content: '\f0eb'; family: 'Font Awesome 6 Free'; position: absolute; right: 20px; top: 50%; transform: translateY(-50%); font-size: 40px; opacity: 0.1; font-weight: 900; }
     </style>
 </head>
 <body class="min-h-screen">
@@ -30,6 +32,11 @@
             <div class="flex justify-between items-center mb-6 border-b border-white/10 pb-4">
                 <h2 class="text-xl font-black italic text-white"><i class="fa-solid fa-chart-line mr-2 text-purple-500"></i>TOP 10 COMPARATIVO POR MOTOR</h2>
                 <button onclick="toggleModal()" class="text-slate-400 hover:text-white text-2xl">&times;</button>
+            </div>
+
+            <div id="ai-recommendation" class="recommendation-box hidden">
+                <h3 class="text-xs font-black text-blue-300 uppercase mb-2"><i class="fa-solid fa-robot mr-2"></i>Asistente Estratégico BetAGS</h3>
+                <p id="rec-text" class="text-sm font-medium text-white italic">Analizando patrones óptimos...</p>
             </div>
 
             <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
@@ -80,7 +87,7 @@
             <h1 class="text-xl font-black italic text-white">BET<span class="text-purple-500">AGS</span> <span class="text-[10px] uppercase tracking-widest text-slate-400 ml-2">Backtesting Lab</span></h1>
             <div class="flex gap-3">
                 <button onclick="generateInsights()" class="text-xs bg-purple-600 text-white px-4 py-2 rounded-lg font-black border border-purple-400 hover:bg-purple-500 transition-all shadow-lg shadow-purple-900/40">
-                    <i class="fa-solid fa-bolt mr-2"></i>ANALIZAR TOP 10 MOTORES
+                    <i class="fa-solid fa-wand-magic-sparkles mr-2"></i>RECOMENDACIÓN ESTRATÉGICA
                 </button>
                 <a href="index.html" class="text-xs bg-slate-800 text-white px-4 py-2 rounded-lg font-bold border border-slate-700">VOLVER AL MINERO</a>
             </div>
@@ -222,14 +229,15 @@
             if(fullData.length === 0) return alert("Sin datos.");
 
             const analysis = {
-                v1: { leagues: {}, markets: {}, odds: {}, edge: {}, total: 0 },
-                v2: { leagues: {}, markets: {}, odds: {}, edge: {}, total: 0 }
+                v1: { leagues: {}, markets: {}, odds: {}, edge: {}, totalProfit: 0, totalStake: 0 },
+                v2: { leagues: {}, markets: {}, odds: {}, edge: {}, totalProfit: 0, totalStake: 0 }
             };
 
             fullData.forEach(b => {
                 const m = b.motor;
                 if(!analysis[m]) return;
-                analysis[m].total += b.profit;
+                analysis[m].totalProfit += b.profit;
+                analysis[m].totalStake += b.stake;
                 analysis[m].leagues[b.liga] = (analysis[m].leagues[b.liga] || 0) + b.profit;
                 analysis[m].markets[b.mercado] = (analysis[m].markets[b.mercado] || 0) + b.profit;
                 const range = (Math.floor(b.cuota * 2) / 2).toFixed(1);
@@ -254,10 +262,26 @@
             document.getElementById('winner-odds').innerHTML = fillAndGetBest('v1-top-odds', 'v2-top-odds', analysis.v1.odds, analysis.v2.odds, 'Cuota');
             document.getElementById('winner-edge').innerHTML = fillAndGetBest('v1-top-edge', 'v2-top-edge', analysis.v1.edge, analysis.v2.edge);
 
-            // Estilos dinámicos para el header ganador
+            // Mejora: Lógica del Asistente de Recomendación
+            const yieldV1 = analysis.v1.totalStake > 0 ? (analysis.v1.totalProfit / analysis.v1.totalStake) * 100 : -999;
+            const yieldV2 = analysis.v2.totalStake > 0 ? (analysis.v2.totalProfit / analysis.v2.totalStake) * 100 : -999;
+            
+            const bestMotor = yieldV1 > yieldV2 ? 'V1' : 'V2';
+            const bestData = analysis[bestMotor.toLowerCase()];
+            const bestMarket = Object.entries(bestData.markets).sort((a,b) => b[1]-a[1])[0]?.[0] || 'N/A';
+            const bestRange = Object.entries(bestData.odds).sort((a,b) => b[1]-a[1])[0]?.[0] || 'N/A';
+
+            document.getElementById('ai-recommendation').classList.remove('hidden');
+            document.getElementById('rec-text').innerHTML = `
+                Tu estrategia ganadora actual es usar el <span class="text-yellow-400 font-black">MOTOR ${bestMotor}</span> 
+                en el mercado <span class="text-emerald-400 font-black">${bestMarket}</span> 
+                con cuotas en el rango <span class="text-blue-400 font-black">${bestRange}</span>. 
+                Este patrón tiene el Yield más alto de tu historial.`;
+
+            // Estilos dinámicos para el header líder
             const v1H = document.getElementById('v1-header');
             const v2H = document.getElementById('v2-header');
-            if(analysis.v1.total > analysis.v2.total) {
+            if(analysis.v1.totalProfit > analysis.v2.totalProfit) {
                 v1H.innerHTML = 'Motor V1 <span class="winner-badge"><i class="fa-solid fa-trophy"></i>LÍDER GLOBAL</span>';
                 v2H.innerHTML = 'Motor V2';
             } else {
@@ -272,11 +296,7 @@
             const container = document.getElementById(id);
             container.innerHTML = '';
             Object.entries(data).sort((a,b)=>b[1]-a[1]).slice(0, 10).forEach(([label, profit]) => {
-                container.innerHTML += `
-                    <div class="insight-row">
-                        <span class="insight-label">${prefix} ${label}</span>
-                        <span class="${profit >= 0 ? 'text-emerald-400' : 'text-red-400'} font-black">$${profit.toFixed(2)}</span>
-                    </div>`;
+                container.innerHTML += `<div class="insight-row"><span class="insight-label">${prefix} ${label}</span><span class="${profit >= 0 ? 'text-emerald-400' : 'text-red-400'} font-black">$${profit.toFixed(2)}</span></div>`;
             });
         }
 
