@@ -135,6 +135,25 @@
             border-radius: 12px;
             margin: 15px 0;
         }
+
+        /* --- ESTILOS ASISTENTE ESTRATÉGICO --- */
+        .recommendation-box {
+            background: linear-gradient(90deg, #1e1b4b, #312e81);
+            border: 1px solid #4338ca;
+            padding: 15px;
+            border-radius: 12px;
+            position: relative;
+            overflow: hidden;
+            animation: pulse-glow 2s infinite alternate;
+        }
+        @keyframes pulse-glow {
+            from { box-shadow: 0 0 5px rgba(67, 56, 202, 0.2); }
+            to { box-shadow: 0 0 15px rgba(67, 56, 202, 0.6); }
+        }
+        .strategy-match {
+            background: rgba(16, 185, 129, 0.2) !important;
+            border: 2px solid #10b981 !important;
+        }
     </style>
 </head>
 <body>
@@ -178,6 +197,16 @@
         </div>
 
         <div id="calc" class="tab-content active space-y-6">
+            <div id="strategy-assistant-box" class="recommendation-box hidden mb-6">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <h3 class="text-xs font-black text-blue-300 uppercase mb-1"><i class="fa-solid fa-robot mr-2"></i>ASISTENTE ESTRATÉGICO</h3>
+                        <p id="strategy-text" class="text-sm text-white font-medium italic">Esperando datos de mercado...</p>
+                    </div>
+                    <div id="strategy-signal" class="text-2xl animate-bounce"></div>
+                </div>
+            </div>
+
             <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 <div class="glass-card p-6 rounded-2xl">
                     <h2 class="text-lg font-bold text-bet-yellow uppercase tracking-tighter mb-4 italic underline decoration-emerald-500">Configuración de Motor</h2>
@@ -355,9 +384,9 @@
                             <label class="text-[9px] text-slate-500 uppercase block mb-1">Mercado</label>
                             <select id="f_market" class="w-full p-2 text-xs" onchange="applyFilters()">
                                 <option value="">TODOS</option>
-                                <option value="1">GANADOR LOCAL (1)</option>
-                                <option value="X">EMPATE (X)</option>
-                                <option value="2">GANADOR VISITANTE (2)</option>
+                                <option value="GANADOR LOCAL (1)">GANADOR LOCAL (1)</option>
+                                <option value="EMPATE (X)">EMPATE (X)</option>
+                                <option value="GANADOR VISITANTE (2)">GANADOR VISITANTE (2)</option>
                                 <option value="OVER 2.5">OVER 2.5</option>
                                 <option value="UNDER 2.5">UNDER 2.5</option>
                                 <option value="BTTS SÍ">BTTS SÍ</option>
@@ -477,11 +506,11 @@
             data.forEach(m => {
                 const fairOdd = (1/m.prob).toFixed(2);
                 table.innerHTML += `
-                    <tr class="hover:bg-slate-800/30 transition-colors">
+                    <tr class="hover:bg-slate-800/30 transition-colors" id="row_${m.id}">
                         <td class="p-4 font-bold text-slate-200">${m.name}</td>
                         <td class="p-4 text-emerald-400 font-mono">${(m.prob * 100).toFixed(1)}%</td>
                         <td class="p-4 text-slate-500 font-mono">${fairOdd}</td>
-                        <td class="p-4"><input type="number" step="0.01" class="w-20 p-1 text-xs" oninput="updateEdge('${m.id}', ${m.prob}, '${m.partner}')" id="odd_${m.id}"></td>
+                        <td class="p-4"><input type="number" step="0.01" class="w-20 p-1 text-xs" oninput="updateEdge('${m.id}', ${m.prob}, '${m.partner}', '${m.name}')" id="odd_${m.id}"></td>
                         <td class="p-4 font-bold" id="edge_${m.id}">--</td>
                         <td class="p-4 text-orange-400 font-mono" id="overround_${m.id}">--</td>
                         <td class="p-4 text-bet-yellow font-black" id="stake_${m.id}">--</td>
@@ -493,14 +522,53 @@
             });
         }
 
-        function updateEdge(id, prob, partnerId) {
+        // --- MEJORA: LÓGICA DEL ASISTENTE ESTRATÉGICO DESDE BACKTESTING ---
+        function getStrategicAdvice(currentMotor, currentMarket, currentOdd) {
+            const history = JSON.parse(localStorage.getItem('backtesting_data')) || [];
+            if (history.length < 5) return { match: false, text: "Faltan datos en Backtesting para asesorar." };
+
+            const motorHistory = history.filter(b => b.motor === currentMotor);
+            const marketHistory = motorHistory.filter(b => b.mercado === currentMarket);
+            
+            // Calculamos Yield del mercado específico en este motor
+            const profit = marketHistory.reduce((acc, b) => acc + b.profit, 0);
+            const staked = marketHistory.reduce((acc, b) => acc + b.stake, 0);
+            const marketYield = staked > 0 ? (profit / staked) * 100 : -999;
+
+            // Rango de cuota (pasos de 0.5)
+            const range = (Math.floor(currentOdd * 2) / 2).toFixed(1);
+            const oddRangeHistory = marketHistory.filter(b => {
+                const bRange = (Math.floor(b.cuota * 2) / 2).toFixed(1);
+                return bRange === range;
+            });
+            const rangeProfit = oddRangeHistory.reduce((acc, b) => acc + b.profit, 0);
+
+            if (marketYield > 5 && rangeProfit > 0) {
+                return { 
+                    match: true, 
+                    text: `¡PATRÓN GANADOR! El Motor ${currentMotor.toUpperCase()} en ${currentMarket} con cuota ${currentOdd} tiene un Yield histórico del ${marketYield.toFixed(1)}%. HAZ LA APUESTA REAL.` 
+                };
+            } else if (marketYield < 0 && marketHistory.length > 3) {
+                return { 
+                    match: false, 
+                    isNegative: true,
+                    text: `CUIDADO: Este mercado tiene Yield NEGATIVO (${marketYield.toFixed(1)}%) en tus pruebas. Evita apuesta real.` 
+                };
+            }
+            
+            return { match: false, text: "Sin tendencia clara para este mercado todavía." };
+        }
+
+        function updateEdge(id, prob, partnerId, marketName) {
             const odd = parseFloat(document.getElementById('odd_' + id).value) || 0;
             const partnerOdd = parseFloat(document.getElementById('odd_' + partnerId).value) || 0;
+            const currentMotor = document.getElementById('poisson_version').value;
 
             if(odd > 1) {
                 const edge = (odd * prob) - 1;
                 const kelly = Math.max(0, (edge / (odd - 1)) * KELLY_FRAC);
                 const stake = getCurrentBankroll() * kelly;
+                
                 const edgeEl = document.getElementById('edge_' + id);
                 edgeEl.innerText = (edge * 100).toFixed(1) + "%";
                 edgeEl.className = edge > 0 ? "p-4 text-emerald-400 font-bold" : "p-4 text-red-500";
@@ -509,6 +577,32 @@
                 if(partnerOdd > 1) {
                     const overround = ((1/odd) + (1/partnerOdd) - 1) * 100;
                     document.getElementById('overround_' + id).innerText = overround.toFixed(1) + "%";
+                }
+
+                // Disparar Asistente si hay Edge
+                if(edge > 0.02) { // Solo si hay al menos 2% de ventaja
+                    const advice = getStrategicAdvice(currentMotor, marketName, odd);
+                    const assistantBox = document.getElementById('strategy-assistant-box');
+                    const strategyText = document.getElementById('strategy-text');
+                    const strategySignal = document.getElementById('strategy-signal');
+                    const row = document.getElementById('row_' + id);
+
+                    assistantBox.classList.remove('hidden');
+                    strategyText.innerHTML = advice.text;
+                    
+                    if(advice.match) {
+                        strategySignal.innerHTML = "✅💰";
+                        assistantBox.style.border = "2px solid #10b981";
+                        row.classList.add('strategy-match');
+                    } else if(advice.isNegative) {
+                        strategySignal.innerHTML = "⚠️❌";
+                        assistantBox.style.border = "2px solid #ef4444";
+                        row.classList.remove('strategy-match');
+                    } else {
+                        strategySignal.innerHTML = "🔍";
+                        assistantBox.style.border = "1px solid #4338ca";
+                        row.classList.remove('strategy-match');
+                    }
                 }
             }
         }
@@ -548,15 +642,10 @@
             updateStats();
         }
 
-        // --- NUEVA FUNCIÓN PARA ENVIAR A BACKTESTING ---
         function sendResolvedToBacktesting() {
             const resolvedBets = bets.filter(b => b.status === 'win' || b.status === 'loss');
-            
-            if(resolvedBets.length === 0) {
-                return alert("No hay apuestas resueltas para enviar.");
-            }
+            if(resolvedBets.length === 0) return alert("No hay apuestas resueltas para enviar.");
 
-            // Mapeamos al formato que suele usar el backtesting
             const dataToBacktest = resolvedBets.map(b => ({
                 id: b.id,
                 fecha: new Date(b.id).toLocaleDateString(),
