@@ -78,6 +78,33 @@
             </div>
         </div>
 
+        <div class="glass-card p-4 rounded-2xl border-l-4 border-blue-500">
+            <h2 class="text-[10px] font-black text-blue-400 uppercase mb-3 tracking-widest">Resumen de Rendimiento por Motor</h2>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div class="bg-slate-800/50 p-3 rounded-lg border border-white/5">
+                    <p class="text-[9px] font-bold text-slate-400 uppercase">Global</p>
+                    <div class="flex justify-between items-center">
+                        <span id="global-perf-profit" class="text-lg font-black text-white">$0.00</span>
+                        <span id="global-perf-yield" class="text-xs font-bold text-slate-400">0% Yield</span>
+                    </div>
+                </div>
+                <div class="bg-slate-800/50 p-3 rounded-lg border border-white/5">
+                    <p class="text-[9px] font-bold text-purple-400 uppercase">Motor V1</p>
+                    <div class="flex justify-between items-center">
+                        <span id="v1-perf-profit" class="text-lg font-black text-white">$0.00</span>
+                        <span id="v1-perf-yield" class="text-xs font-bold text-slate-400">0% Yield</span>
+                    </div>
+                </div>
+                <div class="bg-slate-800/50 p-3 rounded-lg border border-white/5">
+                    <p class="text-[9px] font-bold text-emerald-400 uppercase">Motor V2</p>
+                    <div class="flex justify-between items-center">
+                        <span id="v2-perf-profit" class="text-lg font-black text-white">$0.00</span>
+                        <span id="v2-perf-yield" class="text-xs font-bold text-slate-400">0% Yield</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
             <div class="glass-card metric-card"><p class="text-[10px] font-black text-slate-500 uppercase">Profit Filtrado</p><h3 id="stat-profit" class="text-2xl font-black text-white">$0.00</h3></div>
             <div class="glass-card metric-card border-emerald-500"><p class="text-[10px] font-black text-slate-500 uppercase">Yield</p><h3 id="stat-yield" class="text-2xl font-black text-emerald-400">0%</h3></div>
@@ -113,6 +140,7 @@
 
         function updateUI() {
             renderStats();
+            renderEngineReport(); // Llamada a la nueva mejora
             renderEquityChart();
             renderLeagueStats();
         }
@@ -120,10 +148,51 @@
         function renderStats() {
             const totalProfit = filteredData.reduce((acc, curr) => acc + curr.profit, 0);
             const totalStaked = filteredData.reduce((acc, curr) => acc + curr.stake, 0);
+            const totalWins = filteredData.filter(b => b.profit > 0).length;
+            
             const yieldVal = totalStaked > 0 ? (totalProfit / totalStaked) * 100 : 0;
+            const winRate = filteredData.length > 0 ? (totalWins / filteredData.length) * 100 : 0;
+
             document.getElementById('stat-profit').innerText = `$${totalProfit.toFixed(2)}`;
             document.getElementById('stat-yield').innerText = `${yieldVal.toFixed(1)}%`;
+            document.getElementById('stat-winrate').innerText = `${winRate.toFixed(1)}%`;
             document.getElementById('stat-count').innerText = filteredData.length;
+        }
+
+        // FUNCION PARA LA MEJORA DEL REPORTE POR MOTOR
+        function renderEngineReport() {
+            const engines = {
+                global: { profit: 0, stake: 0 },
+                v1: { profit: 0, stake: 0 },
+                v2: { profit: 0, stake: 0 }
+            };
+
+            fullData.forEach(b => {
+                engines.global.profit += b.profit;
+                engines.global.stake += b.stake;
+
+                if (b.motor === 'v1') {
+                    engines.v1.profit += b.profit;
+                    engines.v1.stake += b.stake;
+                } else if (b.motor === 'v2') {
+                    engines.v2.profit += b.profit;
+                    engines.v2.stake += b.stake;
+                }
+            });
+
+            const updateFields = (idPrefix, data) => {
+                const yieldVal = data.stake > 0 ? (data.profit / data.stake) * 100 : 0;
+                const profitEl = document.getElementById(`${idPrefix}-perf-profit`);
+                const yieldEl = document.getElementById(`${idPrefix}-perf-yield`);
+                
+                profitEl.innerText = `$${data.profit.toFixed(2)}`;
+                profitEl.className = `text-lg font-black ${data.profit >= 0 ? 'text-white' : 'text-red-500'}`;
+                yieldEl.innerText = `${yieldVal.toFixed(1)}% Yield`;
+            };
+
+            updateFields('global', engines.global);
+            updateFields('v1', engines.v1);
+            updateFields('v2', engines.v2);
         }
 
         function renderEquityChart() {
@@ -151,11 +220,9 @@
             });
         }
 
-        // LOGICA DE INSIGHTS TOP 10
         function generateInsights() {
             if(fullData.length === 0) return alert("No hay datos suficientes.");
             
-            // 1. TOP CUOTAS (Rangos de 0.5)
             const oddRanges = {};
             fullData.forEach(b => {
                 const range = (Math.floor(b.cuota * 2) / 2).toFixed(1);
@@ -165,7 +232,6 @@
             });
             fillList('top-odds-list', oddRanges, 'Cuota');
 
-            // 2. TOP MERCADOS
             const markets = {};
             fullData.forEach(b => {
                 if(!markets[b.mercado]) markets[b.mercado] = 0;
@@ -173,7 +239,6 @@
             });
             fillList('top-markets-list', markets, '');
 
-            // 3. TOP LIGAS
             const leagues = {};
             fullData.forEach(b => {
                 if(!leagues[b.liga]) leagues[b.liga] = 0;
@@ -181,7 +246,6 @@
             });
             fillList('top-leagues-list', leagues, '');
 
-            // 4. TOP EDGE
             const edges = {};
             fullData.forEach(b => {
                 const eRange = Math.floor(parseFloat(b.edge) / 5) * 5;
