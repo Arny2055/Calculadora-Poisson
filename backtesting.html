@@ -20,6 +20,8 @@
         #insights-modal, #strategy-scanner-modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.8); z-index: 100; align-items: center; justify-content: center; backdrop-filter: blur(5px); }
         .modal-content { background: #0f172a; width: 90%; max-width: 800px; max-height: 85vh; overflow-y: auto; border-radius: 20px; border: 1px solid #3b82f6; }
         .strategy-rank { background: linear-gradient(90deg, rgba(16, 185, 129, 0.1) 0%, transparent 100%); border-left: 3px solid #10b981; }
+        .top-strat-card { border: 1px solid rgba(16, 185, 129, 0.2); transition: all 0.3s ease; }
+        .top-strat-card:hover { border-color: #10b981; transform: translateY(-2px); }
     </style>
 </head>
 <body class="min-h-screen">
@@ -83,6 +85,14 @@
     </nav>
 
     <div class="container mx-auto p-4 lg:p-6 space-y-6">
+        <div id="top-suggestions-container" class="space-y-2">
+            <h3 class="text-[10px] font-black text-emerald-500 uppercase flex items-center gap-2">
+                <i class="fa-solid fa-star"></i> Top Estrategias Detectadas
+            </h3>
+            <div id="top-3-quick-list" class="grid grid-cols-1 md:grid-cols-3 gap-3">
+                </div>
+        </div>
+
         <div class="glass-card p-4 rounded-2xl border-b-2 border-purple-500">
             <div class="grid grid-cols-2 md:grid-cols-5 gap-4 items-end">
                 <div><label class="text-[10px] font-black text-slate-500 uppercase block mb-1">Motor</label>
@@ -141,6 +151,47 @@
             renderStats();
             renderEquityChart();
             renderLeagueStats();
+            renderTopQuickSuggestions(); // Actualizar el Top 3 cada vez
+        }
+
+        // --- TOP 3 RAPIDO ---
+        function renderTopQuickSuggestions() {
+            const container = document.getElementById('top-3-quick-list');
+            if(fullData.length === 0) {
+                container.innerHTML = '<div class="col-span-3 text-[10px] text-slate-600 font-bold uppercase italic p-4 glass-card rounded-xl">Esperando datos para sugerir...</div>';
+                return;
+            }
+
+            const strategyMap = {};
+            fullData.forEach(b => {
+                const name = b.nombre_estrategia || "Sin Nombre";
+                if(!strategyMap[name]) strategyMap[name] = { profit: 0, stake: 0, count: 0 };
+                strategyMap[name].profit += b.profit;
+                strategyMap[name].stake += b.stake;
+                strategyMap[name].count++;
+            });
+
+            const top3 = Object.entries(strategyMap)
+                .map(([name, s]) => ({ name, profit: s.profit, yield: (s.profit / s.stake) * 100, picks: s.count }))
+                .filter(s => s.profit > 0)
+                .sort((a, b) => b.profit - a.profit)
+                .slice(0, 3);
+
+            container.innerHTML = '';
+            top3.forEach((s, index) => {
+                container.innerHTML += `
+                    <div onclick="selectWinner('${s.name}')" class="top-strat-card glass-card p-3 rounded-xl cursor-pointer flex justify-between items-center">
+                        <div>
+                            <span class="text-[8px] font-black text-emerald-500 uppercase">#${index+1} SUGERIDA</span>
+                            <h4 class="text-[11px] font-black text-white uppercase truncate max-w-[120px]">${s.name}</h4>
+                        </div>
+                        <div class="text-right">
+                            <span class="text-xs font-black text-emerald-400 block">$${s.profit.toFixed(2)}</span>
+                            <span class="text-[9px] text-slate-500 font-bold">${s.yield.toFixed(1)}% YIELD</span>
+                        </div>
+                    </div>
+                `;
+            });
         }
 
         function renderStats() {
@@ -181,54 +232,26 @@
             });
         }
 
-        // --- LÓGICA DE SUGERENCIA INTELIGENTE ---
+        // SCANNER COMPLETO
         function scanForWinningStrategies() {
-            if(fullData.length === 0) return alert("No hay datos cargados para analizar.");
-            
+            if(fullData.length === 0) return alert("No hay datos cargados.");
             const strategyMap = {};
             fullData.forEach(b => {
-                const name = b.nombre_estrategia || "Estrategia Sin Nombre";
+                const name = b.nombre_estrategia || "Sin Nombre";
                 if(!strategyMap[name]) strategyMap[name] = { profit: 0, stake: 0, count: 0, wins: 0 };
                 strategyMap[name].profit += b.profit;
                 strategyMap[name].stake += b.stake;
                 strategyMap[name].count++;
                 if(b.profit > 0) strategyMap[name].wins++;
             });
-
             const winners = Object.entries(strategyMap)
-                .map(([name, s]) => ({
-                    name,
-                    profit: s.profit,
-                    yield: (s.profit / s.stake) * 100,
-                    winrate: (s.wins / s.count) * 100,
-                    picks: s.count
-                }))
-                .filter(s => s.profit > 0) // Solo mostrar las que ganan dinero
-                .sort((a, b) => b.profit - a.profit);
-
+                .map(([name, s]) => ({ name, profit: s.profit, yield: (s.profit / s.stake) * 100, winrate: (s.wins / s.count) * 100, picks: s.count }))
+                .filter(s => s.profit > 0).sort((a, b) => b.profit - a.profit);
             const container = document.getElementById('scanner-results');
-            container.innerHTML = '';
-
-            if(winners.length === 0) {
-                container.innerHTML = '<p class="text-center text-slate-500 py-10 font-bold uppercase text-xs">No se encontraron estrategias rentables en el historial actual.</p>';
-            } else {
-                winners.forEach(s => {
-                    container.innerHTML += `
-                        <div onclick="selectWinner('${s.name}')" class="strategy-rank p-4 rounded-xl cursor-pointer hover:bg-white/5 transition-all group">
-                            <div class="flex justify-between items-center">
-                                <div>
-                                    <h4 class="text-white font-black text-sm uppercase group-hover:text-emerald-400">${s.name}</h4>
-                                    <p class="text-[10px] text-slate-500 font-bold">${s.picks} PICKS ANALIZADOS</p>
-                                </div>
-                                <div class="text-right">
-                                    <div class="text-emerald-400 font-black text-lg">$${s.profit.toFixed(2)}</div>
-                                    <div class="text-[10px] text-slate-400 font-bold">YIELD: ${s.yield.toFixed(1)}% | WR: ${s.winrate.toFixed(1)}%</div>
-                                </div>
-                            </div>
-                        </div>
-                    `;
-                });
-            }
+            container.innerHTML = winners.length === 0 ? '<p class="text-center py-10 text-xs">No hay estrategias rentables.</p>' : '';
+            winners.forEach(s => {
+                container.innerHTML += `<div onclick="selectWinner('${s.name}')" class="strategy-rank p-4 rounded-xl cursor-pointer hover:bg-white/5 transition-all group flex justify-between items-center"><div><h4 class="text-white font-black text-sm uppercase group-hover:text-emerald-400">${s.name}</h4><p class="text-[10px] text-slate-500 font-bold">${s.picks} PICKS</p></div><div class="text-right"><div class="text-emerald-400 font-black text-lg">$${s.profit.toFixed(2)}</div><div class="text-[10px] text-slate-400 font-bold">WR: ${s.winrate.toFixed(1)}%</div></div></div>`;
+            });
             toggleScannerModal();
         }
 
@@ -236,25 +259,16 @@
             activeStrategy = name;
             document.getElementById('active-strat-name').innerText = name;
             document.getElementById('strategy-info-bar').classList.remove('hidden');
-            toggleScannerModal();
+            if(document.getElementById('strategy-scanner-modal').style.display === 'flex') toggleScannerModal();
             applyFilters();
         }
 
-        function resetStrategyFilter() {
-            activeStrategy = 'all';
-            document.getElementById('strategy-info-bar').classList.add('hidden');
-            applyFilters();
-        }
+        function resetStrategyFilter() { activeStrategy = 'all'; document.getElementById('strategy-info-bar').classList.add('hidden'); applyFilters(); }
+        function toggleScannerModal() { const m = document.getElementById('strategy-scanner-modal'); m.style.display = m.style.display === 'flex' ? 'none' : 'flex'; }
 
-        function toggleScannerModal() {
-            const m = document.getElementById('strategy-scanner-modal');
-            m.style.display = m.style.display === 'flex' ? 'none' : 'flex';
-        }
-
-        // --- LÓGICA DE INSIGHTS TOP 10 ---
+        // INSIGHTS ORIGINALES
         function generateInsights() {
-            if(fullData.length === 0) return alert("No hay datos suficientes.");
-            
+            if(fullData.length === 0) return alert("No hay datos.");
             const oddRanges = {};
             fullData.forEach(b => {
                 const range = (Math.floor(b.cuota * 2) / 2).toFixed(1);
@@ -263,21 +277,12 @@
                 oddRanges[key] += b.profit;
             });
             fillList('top-odds-list', oddRanges, 'Cuota');
-
             const markets = {};
-            fullData.forEach(b => {
-                if(!markets[b.mercado]) markets[b.mercado] = 0;
-                markets[b.mercado] += b.profit;
-            });
+            fullData.forEach(b => { if(!markets[b.mercado]) markets[b.mercado] = 0; markets[b.mercado] += b.profit; });
             fillList('top-markets-list', markets, '');
-
             const leagues = {};
-            fullData.forEach(b => {
-                if(!leagues[b.liga]) leagues[b.liga] = 0;
-                leagues[b.liga] += b.profit;
-            });
+            fullData.forEach(b => { if(!leagues[b.liga]) leagues[b.liga] = 0; leagues[b.liga] += b.profit; });
             fillList('top-leagues-list', leagues, '');
-
             const edges = {};
             fullData.forEach(b => {
                 const eRange = Math.floor(parseFloat(b.edge) / 5) * 5;
@@ -286,30 +291,18 @@
                 edges[key] += b.profit;
             });
             fillList('top-edge-list', edges, '');
-
             toggleModal();
         }
 
         function fillList(elementId, dataObj, prefix) {
             const container = document.getElementById(elementId);
             container.innerHTML = '';
-            Object.entries(dataObj)
-                .sort((a, b) => b[1] - a[1])
-                .slice(0, 10)
-                .forEach(([label, profit]) => {
-                    container.innerHTML += `
-                        <div class="insight-row">
-                            <span class="insight-label">${prefix} ${label}</span>
-                            <span class="${profit >= 0 ? 'text-emerald-400' : 'text-red-400'} font-black">$${profit.toFixed(2)}</span>
-                        </div>`;
-                });
+            Object.entries(dataObj).sort((a, b) => b[1] - a[1]).slice(0, 10).forEach(([label, profit]) => {
+                container.innerHTML += `<div class="insight-row"><span class="insight-label">${prefix} ${label}</span><span class="${profit >= 0 ? 'text-emerald-400' : 'text-red-400'} font-black">$${profit.toFixed(2)}</span></div>`;
+            });
         }
 
-        function toggleModal() {
-            const m = document.getElementById('insights-modal');
-            m.style.display = m.style.display === 'flex' ? 'none' : 'flex';
-        }
-
+        function toggleModal() { const m = document.getElementById('insights-modal'); m.style.display = m.style.display === 'flex' ? 'none' : 'flex'; }
         function clearBacktest() { if(confirm('¿Borrar?')) { localStorage.removeItem('backtesting_data'); location.reload(); } }
 
         applyFilters();
