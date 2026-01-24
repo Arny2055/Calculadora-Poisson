@@ -19,6 +19,8 @@
         .stress-active { border-color: #ef4444 !important; box-shadow: 0 0 25px rgba(239, 68, 68, 0.25); }
         .stress-text { color: #ef4444; font-weight: 900; animation: pulse 2s infinite; }
         @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }
+        ::-webkit-scrollbar { width: 4px; }
+        ::-webkit-scrollbar-thumb { background: #334155; border-radius: 10px; }
     </style>
 </head>
 <body class="p-4 md:p-8">
@@ -31,7 +33,13 @@
                 </h1>
                 <div id="data-status" class="mt-2 flex gap-2 text-[10px]"></div>
             </div>
-            <div class="flex gap-2 text-xs font-bold">
+            <div class="flex flex-wrap gap-2 text-xs font-bold">
+                <select id="filter-dimension" onchange="renderMarketTable()" class="bg-slate-800 text-white px-4 py-2 rounded-xl border border-white/10 outline-none">
+                    <option value="league">Ligas</option>
+                    <option value="market">Mercados</option>
+                    <option value="teams">Equipos</option>
+                    <option value="odds">Rangos de Cuota</option>
+                </select>
                 <button id="stress-toggle" onclick="toggleStressMode()" class="bg-slate-800 text-slate-400 px-6 py-2 rounded-xl border border-white/10 hover:border-red-500 transition-all uppercase tracking-widest">
                     <i class="fa-solid fa-skull-crossbones mr-2"></i> Estrés: OFF
                 </button>
@@ -85,7 +93,7 @@
 
             <div class="lg:col-span-3 glass-card p-6 rounded-3xl border border-white/5 overflow-hidden">
                 <h2 class="text-xs font-black text-white uppercase tracking-widest mb-4 flex items-center">
-                    <i class="fa-solid fa-magnifying-glass-chart mr-2 text-purple-500"></i> Auditoría de Mercados
+                    <i class="fa-solid fa-magnifying-glass-chart mr-2 text-purple-500"></i> Auditoría de Rentabilidad
                 </h2>
                 <div class="overflow-y-auto max-h-[350px] pr-2">
                     <table class="w-full text-left text-[11px]">
@@ -136,9 +144,11 @@
 
     <script>
         let mcChart, distChart;
-        let excludedMarkets = new Set();
+        let excludedCategories = new Set();
         let marketStats = {};
         let isStressMode = false;
+
+        // Carga de datos desde múltiples fuentes posibles
         let simulationData = JSON.parse(localStorage.getItem('backtesting_data')) || 
                          JSON.parse(localStorage.getItem('betags_v3_miner'))?.filter(b => b.status !== 'pending') || [];
 
@@ -169,20 +179,40 @@
             analyzeAndSimulate();
         }
 
+        function getCategoryValue(pick, dimension) {
+            const odd = parseFloat(pick.odd) || parseFloat(pick.cuota) || 0;
+            switch(dimension) {
+                case 'league': return pick.league || pick.liga || 'Otros';
+                case 'market': return pick.market || pick.mercado || 'Otros';
+                case 'teams': return pick.teams || (pick.home && pick.away ? `${pick.home} vs ${pick.away}` : 'Otros');
+                case 'odds': 
+                    if (odd < 1.5) return '1.20 - 1.50';
+                    if (odd < 2.0) return '1.51 - 2.00';
+                    if (odd < 3.0) return '2.01 - 3.00';
+                    return '3.00+';
+                default: return 'Otros';
+            }
+        }
+
         function renderMarketTable() {
+            const dimension = document.getElementById('filter-dimension').value;
             const groups = {};
+            
             simulationData.forEach(pick => {
-                const cat = pick.league || pick.liga || pick.market || pick.mercado || 'Otros';
+                const cat = getCategoryValue(pick, dimension);
                 if (!groups[cat]) groups[cat] = { count: 0, wins: 0, totalProfit: 0, investment: 0, totalOdd: 0 };
+                
                 const stake = parseFloat(pick.stake) || 1;
                 const odd = parseFloat(pick.odd) || parseFloat(pick.cuota) || 1.90;
+                
                 groups[cat].count++;
                 groups[cat].investment += stake;
                 groups[cat].totalOdd += odd;
+                
                 if (pick.status === 'win' || pick.resultado === 'win') {
                     groups[cat].wins++;
                     groups[cat].totalProfit += (stake * (odd - 1));
-                } else {
+                } else if (pick.status === 'loss' || pick.resultado === 'loss') {
                     groups[cat].totalProfit -= stake;
                 }
             });
@@ -197,7 +227,7 @@
                 const avgOdd = g.totalOdd / g.count;
                 const p = 1/avgOdd;
                 const zScore = (g.wins - (g.count * p)) / Math.sqrt(g.count * p * (1 - p));
-                const isChecked = !excludedMarkets.has(key);
+                const isChecked = !excludedCategories.has(key);
                 marketStats[key] = { yield: yieldPct, z: zScore };
 
                 let alertClass = '';
@@ -206,11 +236,11 @@
 
                 tbody.innerHTML += `
                     <tr class="market-row border-b border-white/5 transition-all ${alertClass} ${!isChecked ? 'opacity-20' : ''}">
-                        <td class="py-3 px-1 text-center"><input type="checkbox" ${isChecked ? 'checked' : ''} onchange="toggleMarket('${key.replace(/'/g, "\\'")}')"></td>
-                        <td class="py-3 font-bold text-slate-200 truncate max-w-[150px]">${key}</td>
+                        <td class="py-3 px-1 text-center"><input type="checkbox" ${isChecked ? 'checked' : ''} onchange="toggleCategory('${key.replace(/'/g, "\\'")}')"></td>
+                        <td class="py-3 font-bold text-slate-200 truncate max-w-[200px]">${key}</td>
                         <td class="py-3 text-center text-slate-400">${g.count}</td>
                         <td class="py-3 text-center ${yieldPct >= 0 ? 'text-emerald-400' : 'text-red-400'} font-bold">${yieldPct.toFixed(1)}%</td>
-                        <td class="py-3 text-center font-bold ${zScore < 0 ? 'text-red-400' : 'text-emerald-500'}">${zScore.toFixed(2)}</td>
+                        <td class="py-3 text-center font-bold ${zScore < 0 ? 'text-red-400' : 'text-emerald-500'}">${isNaN(zScore) ? '0.00' : zScore.toFixed(2)}</td>
                         <td class="py-3 text-right font-bold ${g.totalProfit >= 0 ? 'text-emerald-400' : 'text-red-400'}">${g.totalProfit.toFixed(1)}u</td>
                     </tr>
                 `;
@@ -219,21 +249,23 @@
 
         function autoOptimize() {
             Object.keys(marketStats).forEach(key => {
-                if (marketStats[key].yield < 0 || marketStats[key].z < -1.65) excludedMarkets.add(key);
+                if (marketStats[key].yield < 0 || marketStats[key].z < -1.65) excludedCategories.add(key);
             });
             renderMarketTable();
             analyzeAndSimulate();
         }
 
-        function toggleMarket(marketName) {
-            if (excludedMarkets.has(marketName)) excludedMarkets.delete(marketName);
-            else excludedMarkets.add(marketName);
+        function toggleCategory(name) {
+            if (excludedCategories.has(name)) excludedCategories.delete(name);
+            else excludedCategories.add(name);
             renderMarketTable();
             analyzeAndSimulate();
         }
 
         function analyzeAndSimulate() {
-            const data = simulationData.filter(p => !excludedMarkets.has(p.league || p.liga || p.market || p.mercado || 'Otros'));
+            const dimension = document.getElementById('filter-dimension').value;
+            const data = simulationData.filter(p => !excludedCategories.has(getCategoryValue(p, dimension)));
+            
             if (data.length < 2) return;
 
             const totalWins = data.filter(b => b.status === 'win' || b.resultado === 'win').length;
@@ -247,13 +279,12 @@
             edgeEl.innerText = (edge * 100).toFixed(2) + "%";
             edgeEl.className = edge >= 0 ? "text-emerald-400 font-bold" : "text-red-400 font-bold stress-text";
             
-            // Kelly sugerido (Full)
             const fullKelly = Math.max(0, edge / (avgOdd - 1));
             document.getElementById('base-kelly').innerText = (fullKelly * 100).toFixed(1) + "%";
             
             const p = 1/avgOdd;
             const zGlobal = (totalWins - (data.length * p)) / Math.sqrt(data.length * p * (1 - p));
-            document.getElementById('base-pvalue').innerText = zGlobal.toFixed(2);
+            document.getElementById('base-pvalue').innerText = isNaN(zGlobal) ? "0.00" : zGlobal.toFixed(2);
 
             runMonteCarlo(data, hr, fullKelly);
         }
@@ -273,7 +304,6 @@
                 for (let p = 0; p < picks; p++) {
                     const win = Math.random() < currentHR;
                     const randomOdd = oddArray[Math.floor(Math.random() * oddArray.length)];
-                    
                     const stakePct = fullKelly * kellyFraction;
                     const currentStake = currentBank * stakePct;
                     
@@ -307,11 +337,10 @@
                 allRecoveries.push(maxRecovery);
             }
 
-            const avgRecovery = allRecoveries.reduce((a,b)=>a+b,0) / runs;
             document.getElementById('stat-ruin').innerText = ((ruinCount/runs)*100).toFixed(1) + "%";
             document.getElementById('stat-win-prob').innerText = ((positiveRuns/runs)*100).toFixed(1) + "%";
             document.getElementById('stat-mdd').innerText = ((drawdowns.reduce((a,b)=>a+b,0)/runs)*100).toFixed(1) + "%";
-            document.getElementById('stat-recovery').innerText = Math.round(avgRecovery) + " picks";
+            document.getElementById('stat-recovery').innerText = Math.round(allRecoveries.reduce((a,b)=>a+b,0)/runs) + " picks";
             
             const sortedEnd = [...endValues].sort((a,b)=>a-b);
             document.getElementById('stat-median').innerText = sortedEnd[Math.floor(runs/2)].toFixed(1) + "u";
@@ -323,6 +352,7 @@
             if (mcChart) mcChart.destroy();
             if (distChart) distChart.destroy();
             const mainColor = isStressMode ? 'rgba(239, 68, 68, 0.2)' : 'rgba(168, 85, 247, 0.2)';
+            
             mcChart = new Chart(document.getElementById('mcChart'), {
                 type: 'line',
                 data: {
@@ -350,9 +380,13 @@
             const min = Math.min(...endValues), max = Math.max(...endValues);
             let histData = new Array(bins).fill(0), labels = [];
             for(let i=0; i<bins; i++) {
-                labels.push((min + (i*(max-min)/bins)).toFixed(0) + "u");
-                endValues.forEach(v => { if(v >= (min + (i*(max-min)/bins)) && v < (min + ((i+1)*(max-min)/bins))) histData[i]++; });
+                const step = (max - min) / bins;
+                labels.push((min + (i * step)).toFixed(0) + "u");
+                endValues.forEach(v => { 
+                    if(v >= (min + (i * step)) && v < (min + ((i + 1) * step))) histData[i]++; 
+                });
             }
+            
             distChart = new Chart(document.getElementById('distChart'), {
                 type: 'bar',
                 data: { labels: labels, datasets: [{ data: histData, backgroundColor: isStressMode ? '#ef4444' : '#a855f7' }] },
@@ -361,7 +395,10 @@
         }
 
         function clearBacktestingData() {
-            if(confirm("¿RESET?")) { localStorage.removeItem('backtesting_data'); location.reload(); }
+            if(confirm("¿RESET? Esto borrará los datos cargados.")) { 
+                localStorage.removeItem('backtesting_data'); 
+                location.reload(); 
+            }
         }
 
         window.onload = updateDataStatus;
