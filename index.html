@@ -174,6 +174,7 @@
                 <div class="flex bg-slate-800 p-1 rounded-xl gap-1">
                     <button onclick="showTab('calc')" class="tab-btn px-4 py-2 rounded-lg text-sm font-bold transition-all active bg-slate-700 text-bet-yellow" id="btn-calc">CALCULADORA</button>
                     <button onclick="showTab('bank')" class="tab-btn px-4 py-2 rounded-lg text-sm font-bold transition-all text-slate-400" id="btn-bank">ANÁLISIS DE ROI</button>
+                    <button onclick="showTab('config')" class="tab-btn px-4 py-2 rounded-lg text-sm font-bold transition-all text-slate-400" id="btn-config"><i class="fa-solid fa-robot"></i></button>
                     <a href="backtesting.html" class="px-4 py-2 rounded-lg text-sm font-bold bg-purple-600/20 text-purple-400 border border-purple-500/30 hover:bg-purple-600 hover:text-white transition-all">
                         <i class="fa-solid fa-flask-vial mr-2"></i>BACKTESTING
                     </a>
@@ -305,8 +306,39 @@
             </div>
         </div>
 
+        <div id="config" class="tab-content space-y-6">
+            <div class="max-w-xl mx-auto glass-card p-8 rounded-3xl border-t-2 border-blue-500">
+                <h2 class="text-xl font-black text-white mb-6 uppercase tracking-tighter italic">
+                    <i class="fa-brands fa-telegram text-blue-400 mr-2"></i> Configuración de Bot de Telegram
+                </h2>
+                <div class="space-y-4">
+                    <div>
+                        <label class="text-[10px] font-bold text-slate-500 uppercase block mb-1">Bot API Key</label>
+                        <input type="text" id="tg_token" class="w-full p-3 text-sm font-mono" value="8389950970:AAEdYvy2mcmo5ydUMrR_tOIGR8QCYO1STuU" readonly>
+                    </div>
+                    <div>
+                        <label class="text-[10px] font-bold text-slate-500 uppercase block mb-1">Chat ID del Grupo</label>
+                        <input type="text" id="tg_chat_id" class="w-full p-3 text-sm font-mono" placeholder="Ej: -100XXXXXXXXX">
+                        <p class="text-[9px] text-slate-400 mt-1 italic">Ingresa el ID del grupo donde el bot es administrador.</p>
+                    </div>
+                    <div class="flex items-center justify-between p-4 bg-slate-800/50 rounded-xl">
+                        <div>
+                            <p class="text-xs font-bold text-white uppercase">Auto-Envío de Alertas</p>
+                            <p class="text-[10px] text-slate-500">Enviar a Telegram al hacer click en "FIJAR"</p>
+                        </div>
+                        <label class="relative inline-flex items-center cursor-pointer">
+                            <input type="checkbox" id="tg_auto_send" class="sr-only peer">
+                            <div class="w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
+                        </label>
+                    </div>
+                    <button onclick="saveTelegramConfig()" class="w-full bg-blue-600 hover:bg-blue-500 py-3 rounded-xl font-black text-sm transition-all uppercase tracking-widest">
+                        Guardar Configuración
+                    </button>
+                </div>
+            </div>
+        </div>
+
         <div id="bank" class="tab-content space-y-6">
-            
             <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div class="glass-card p-6 rounded-2xl border-t-2 border-slate-500">
                     <h3 class="text-center font-black text-slate-400 mb-4">RENDIMIENTO MOTOR V1 (Goles)</h3>
@@ -435,6 +467,7 @@
         const KELLY_FRAC = 0.25;
         
         let bets = JSON.parse(localStorage.getItem('betags_v3_miner')) || [];
+        let tg_config = JSON.parse(localStorage.getItem('betags_tg_config')) || { token: "8389950970:AAEdYvy2mcmo5ydUMrR_tOIGR8QCYO1STuU", chatId: "", auto: false };
         let pChart, bChart;
 
         function showTab(tabId) {
@@ -443,6 +476,41 @@
             document.getElementById(tabId).classList.add('active');
             document.getElementById('btn-' + tabId).classList.add('bg-slate-700', 'text-bet-yellow');
             if(tabId === 'bank') updateStats(); 
+            if(tabId === 'config') {
+                document.getElementById('tg_chat_id').value = tg_config.chatId;
+                document.getElementById('tg_auto_send').checked = tg_config.auto;
+            }
+        }
+
+        function saveTelegramConfig() {
+            tg_config.chatId = document.getElementById('tg_chat_id').value;
+            tg_config.auto = document.getElementById('tg_auto_send').checked;
+            localStorage.setItem('betags_tg_config', JSON.stringify(tg_config));
+            alert("Configuración de Telegram guardada.");
+        }
+
+        async function sendToTelegramAuto(bet) {
+            if(!tg_config.chatId || !tg_config.auto) return;
+            
+            const star = bet.isStrategic ? "⭐ ESTRATÉGICA ⭐" : "📊 ANÁLISIS POISSON";
+            const text = `🚀 *BETAGS PRO ALERT* 🚀\n` +
+                         `${star}\n\n` +
+                         `🏆 *Liga:* ${bet.league}\n` +
+                         `⚽ *Evento:* ${bet.teams}\n` +
+                         `🎯 *Mercado:* ${bet.market}\n` +
+                         `💰 *Cuota:* ${bet.odd.toFixed(2)}\n` +
+                         `🔥 *Stake:* $${bet.stake.toFixed(2)}\n` +
+                         `📈 *Edge:* ${bet.edge}%\n` +
+                         `🤖 _Algoritmo: ${bet.engine.toUpperCase()}_`;
+
+            const url = `https://api.telegram.org/bot${tg_config.token}/sendMessage?chat_id=${tg_config.chatId}&text=${encodeURIComponent(text)}&parse_mode=Markdown`;
+            
+            try {
+                await fetch(url);
+                console.log("Notificación enviada a Telegram");
+            } catch (e) {
+                console.error("Error enviando a Telegram", e);
+            }
         }
 
         function updateUIForVersion() {
@@ -458,7 +526,6 @@
         function factorial(n) { return n <= 1 ? 1 : n * factorial(n - 1); }
         function poissonProb(k, lambda) { return (Math.pow(lambda, k) * Math.exp(-lambda)) / factorial(k); }
 
-        // --- REVOLUCIONARIO: CHAOS ENGINE (MONTE CARLO 10K) ---
         function runMonteCarlo(h_lambda, a_lambda) {
             const sims = 10000;
             let results = { win: 0, draw: 0, loss: 0, o25: 0, u25: 0, bttsy: 0, bttsn: 0 };
@@ -538,11 +605,8 @@
                 }
             }
             const p_btts_y = (1 - poissonProb(0, h_lambda)) * (1 - poissonProb(0, a_lambda));
-
-            // EJECUCIÓN CHAOS ENGINE
             const chaos = runMonteCarlo(h_lambda, a_lambda);
 
-            // VERIFICACIÓN: TODOS LOS MERCADOS MAPERADOS CON CHAOS
             renderMarketTable([
                 { id: 'win', name: 'GANADOR LOCAL (1)', prob: p_win, partner: 'loss', chaos: chaos.win },
                 { id: 'draw', name: 'EMPATE (X)', prob: p_draw, partner: 'win', chaos: chaos.draw },
@@ -552,7 +616,7 @@
                 { id: 'o25', name: 'OVER 2.5', prob: 1 - p_u25, partner: 'u25', chaos: chaos.o25 },
                 { id: 'u25', name: 'UNDER 2.5', prob: p_u25, partner: 'o25', chaos: chaos.u25 },
                 { id: 'bttsy', name: 'BTTS SÍ', prob: p_btts_y, partner: 'bttsn', chaos: chaos.bttsy },
-                { id: 'bttsy', name: 'BTTS NO', prob: 1 - p_btts_y, partner: 'bttsy', chaos: chaos.bttsn }
+                { id: 'bttsn', name: 'BTTS NO', prob: 1 - p_btts_y, partner: 'bttsy', chaos: chaos.bttsn }
             ]);
         }
 
@@ -578,7 +642,6 @@
             });
         }
 
-        // --- MEJORA: ASISTENTE ESTRATÉGICO CON CHAOS-ADJUSTED KELLY ---
         function getStrategicAdvice(currentMotor, currentLeague, currentMarket, currentOdd, currentEdge, chaosProb) {
             const history = JSON.parse(localStorage.getItem('backtesting_data')) || [];
             if (history.length < 5) return { match: false, text: "Faltan datos en Backtesting para asesorar." };
@@ -599,7 +662,6 @@
                 if (s >= 3) scoreBets.push(b);
             });
 
-            // Pilares de rentabilidad
             const leaguePool = motorHistory.filter(b => b.liga.toLowerCase() === currentLeague.toLowerCase());
             if (leaguePool.length >= 2 && (leaguePool.reduce((a, b) => a + b.profit, 0)) > 0) { score++; positivePillars.push("Liga"); }
             const marketPool = motorHistory.filter(b => b.mercado === currentMarket);
@@ -633,7 +695,6 @@
             return { match: false, text: "Escaneando rentabilidad y simulando caos..." };
         }
 
-        // --- MEJORA: SENSIBILIDAD TOTAL DE PROTECCIÓN CHAOS ---
         function updateEdge(id, prob, partnerId, marketName, chaosProb) {
             const odd = parseFloat(document.getElementById('odd_' + id).value) || 0;
             const partnerOdd = parseFloat(document.getElementById('odd_' + partnerId).value) || 0;
@@ -643,8 +704,6 @@
             if(odd > 1) {
                 const edge = (odd * prob) - 1;
                 const standardKelly = Math.max(0, (edge / (odd - 1)) * KELLY_FRAC);
-                
-                // SENSIBILIDAD EXTREMA: Comparamos directamente contra la probabilidad teórica
                 const chaosPenalty = Math.min(1, (chaosProb / prob)); 
                 const adjustedKelly = standardKelly * chaosPenalty;
                 const stake = getCurrentBankroll() * adjustedKelly;
@@ -653,7 +712,6 @@
                 edgeEl.innerText = (edge * 100).toFixed(1) + "%";
                 edgeEl.className = edge > 0 ? "p-4 text-emerald-400 font-bold" : "p-4 text-red-500";
                 
-                // UI: RENDERIZADO DEL STAKE CON ETIQUETA SENSIBLE
                 const stakeCell = document.getElementById('stake_' + id);
                 if (stake > 0) {
                     let protectionLabel = (chaosPenalty < 0.999) ? 
@@ -712,7 +770,7 @@
             const row = document.getElementById('row_' + id);
             const isStrategic = row ? row.classList.contains('strategy-match') : false;
 
-            bets.unshift({
+            const newBet = {
                 id: Date.now(),
                 league: leagueName,
                 teams: eventName,
@@ -724,12 +782,14 @@
                 engine: document.getElementById('poisson_version').value,
                 closingOdd: null,
                 isStrategic: isStrategic
-            });
+            };
+
+            bets.unshift(newBet);
             save();
-            alert(isStrategic ? "¡APUESTA ESTRATÉGICA REGISTRADA CON STAKE PROTEGIDO POR CAOS!" : "Pick registrado.");
+            sendToTelegramAuto(newBet); // Mejora: Auto Hado
+            alert(isStrategic ? "¡APUESTA ESTRATÉGICA REGISTRADA CON STAKE PROTEGIDO Y ENVIADA A TG!" : "Pick registrado.");
         }
 
-        // --- MEJORA: COMPARTIR ---
         function shareBet(id, platform) {
             const b = bets.find(x => x.id === id);
             if(!b) return;
