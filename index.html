@@ -571,7 +571,7 @@
             });
         }
 
-        // --- MEJORA: ASISTENTE ESTRATÉGICO CON CHAOS ENGINE INTEGRADO ---
+        // --- MEJORA: ASISTENTE ESTRATÉGICO CON CHAOS-ADJUSTED KELLY ---
         function getStrategicAdvice(currentMotor, currentLeague, currentMarket, currentOdd, currentEdge, chaosProb) {
             const history = JSON.parse(localStorage.getItem('backtesting_data')) || [];
             if (history.length < 5) return { match: false, text: "Faltan datos en Backtesting para asesorar." };
@@ -626,6 +626,7 @@
             return { match: false, text: "Escaneando rentabilidad y simulando caos..." };
         }
 
+        // --- MEJORA: INTEGRACIÓN DE CHAOS EN KELLY STAKE ---
         function updateEdge(id, prob, partnerId, marketName, chaosProb) {
             const odd = parseFloat(document.getElementById('odd_' + id).value) || 0;
             const partnerOdd = parseFloat(document.getElementById('odd_' + partnerId).value) || 0;
@@ -634,13 +635,29 @@
 
             if(odd > 1) {
                 const edge = (odd * prob) - 1;
-                const kelly = Math.max(0, (edge / (odd - 1)) * KELLY_FRAC);
-                const stake = getCurrentBankroll() * kelly;
+                
+                // --- LÓGICA DE STAKE INTELIGENTE (CHAOS-ADJUSTED KELLY) ---
+                const standardKelly = Math.max(0, (edge / (odd - 1)) * KELLY_FRAC);
+                
+                // Penalización: Si la simulación es menos probable que la teoría, reducimos stake.
+                // Si la supervivencia en el Caos es alta (>70%), Kelly se mantiene estable.
+                const chaosPenalty = Math.min(1, chaosProb / prob); 
+                const adjustedKelly = standardKelly * chaosPenalty;
+                
+                const stake = getCurrentBankroll() * adjustedKelly;
                 
                 const edgeEl = document.getElementById('edge_' + id);
                 edgeEl.innerText = (edge * 100).toFixed(1) + "%";
                 edgeEl.className = edge > 0 ? "p-4 text-emerald-400 font-bold" : "p-4 text-red-500";
-                document.getElementById('stake_' + id).innerText = stake > 0 ? "$" + stake.toFixed(2) : "--";
+                
+                // UI: Mostramos el stake con etiqueta de protección si se aplicó penalización
+                const stakeCell = document.getElementById('stake_' + id);
+                if (stake > 0) {
+                    let protectionLabel = chaosPenalty < 0.95 ? ` <span class="text-[8px] text-orange-400 block tracking-tighter">[PROTECCIÓN CHAOS -${((1-chaosPenalty)*100).toFixed(0)}%]</span>` : '';
+                    stakeCell.innerHTML = `$${stake.toFixed(2)}${protectionLabel}`;
+                } else {
+                    stakeCell.innerText = "--";
+                }
 
                 if(partnerOdd > 1) {
                     const overround = ((1/odd) + (1/partnerOdd) - 1) * 100;
@@ -658,6 +675,7 @@
                     strategyText.innerHTML = advice.text;
                     
                     if(advice.match) {
+                        // Si sobrevive mucho al caos (>70%) y es rentable: Pick de Diamante
                         strategySignal.innerHTML = advice.chaos > 0.70 ? "🌀💎" : "🎯⚡";
                         assistantBox.style.border = "2px solid #10b981";
                         row.classList.add('strategy-match');
@@ -679,9 +697,12 @@
             const eventName = document.getElementById('event_name').value || "Evento Desconocido";
             const leagueName = document.getElementById('league_name').value || "INTERNACIONAL";
             if(!odd) return alert("Ingresa cuota");
-            const edge = (odd * prob) - 1;
-            const stake = getCurrentBankroll() * Math.max(0, (edge / (odd - 1)) * KELLY_FRAC);
+            
+            // Extraer el valor numérico del stake mostrado (que ya está ajustado por Chaos)
+            const stakeText = document.getElementById('stake_' + id).innerText;
+            const stakeVal = parseFloat(stakeText.split('[')[0].replace('$', '').trim()) || 0;
 
+            const edge = (odd * prob) - 1;
             const row = document.getElementById('row_' + id);
             const isStrategic = row ? row.classList.contains('strategy-match') : false;
 
@@ -692,13 +713,14 @@
                 market, odd, prob,
                 edge: (edge * 100).toFixed(2),
                 ov: 0,
-                stake: parseFloat(stake.toFixed(2)), status: 'pending', profit: 0,
+                stake: stakeVal, 
+                status: 'pending', profit: 0,
                 engine: document.getElementById('poisson_version').value,
                 closingOdd: null,
                 isStrategic: isStrategic
             });
             save();
-            alert(isStrategic ? "¡APUESTA ESTRATÉGICA REGISTRADA!" : "Pick registrado en el minero.");
+            alert(isStrategic ? "¡APUESTA ESTRATÉGICA REGISTRADA CON STAKE AJUSTADO POR CAOS!" : "Pick registrado.");
         }
 
         function resolve(id, status) {
