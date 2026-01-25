@@ -506,10 +506,41 @@
             const url = `https://api.telegram.org/bot${tg_config.token}/sendMessage?chat_id=${tg_config.chatId}&text=${encodeURIComponent(text)}&parse_mode=Markdown`;
             
             try {
-                await fetch(url);
+                const response = await fetch(url);
+                const data = await response.json();
+                if(data.ok) {
+                    bet.tgMessageId = data.result.message_id;
+                    localStorage.setItem('betags_v3_miner', JSON.stringify(bets));
+                }
                 console.log("Notificación enviada a Telegram");
             } catch (e) {
                 console.error("Error enviando a Telegram", e);
+            }
+        }
+
+        async function updateTelegramStatus(bet) {
+            if(!tg_config.chatId || !tg_config.token || !bet.tgMessageId) return;
+
+            const statusIcon = bet.status === 'win' ? '✅' : '❌';
+            const statusText = bet.status === 'win' ? 'GANADA' : 'PERDIDA';
+            const profitText = bet.profit >= 0 ? `+$${bet.profit.toFixed(2)}` : `-$${Math.abs(bet.profit).toFixed(2)}`;
+            
+            const star = bet.isStrategic ? "⭐ ESTRATÉGICA ⭐" : "📊 ANÁLISIS POISSON";
+            const text = `🏁 *PICK RESUELTO* 🏁\n` +
+                         `${statusIcon} *${statusText}* (${profitText})\n\n` +
+                         `${star}\n` +
+                         `🏆 *Liga:* ${bet.league}\n` +
+                         `⚽ *Evento:* ${bet.teams}\n` +
+                         `🎯 *Mercado:* ${bet.market}\n` +
+                         `💰 *Cuota:* ${bet.odd.toFixed(2)}\n` +
+                         `🤖 _Algoritmo: ${bet.engine.toUpperCase()}_`;
+
+            const url = `https://api.telegram.org/bot${tg_config.token}/editMessageText?chat_id=${tg_config.chatId}&message_id=${bet.tgMessageId}&text=${encodeURIComponent(text)}&parse_mode=Markdown`;
+
+            try {
+                await fetch(url);
+            } catch (e) {
+                console.error("Error actualizando Telegram", e);
             }
         }
 
@@ -786,7 +817,7 @@
 
             bets.unshift(newBet);
             save();
-            sendToTelegramAuto(newBet); // Mejora: Auto Hado
+            sendToTelegramAuto(newBet);
             alert(isStrategic ? "¡APUESTA ESTRATÉGICA REGISTRADA CON STAKE PROTEGIDO Y ENVIADA A TG!" : "Pick registrado.");
         }
 
@@ -817,6 +848,7 @@
             b.status = status;
             b.profit = status === 'win' ? b.stake * (b.odd - 1) : (status === 'loss' ? -b.stake : 0);
             save();
+            updateTelegramStatus(b);
         }
 
         function save() {
