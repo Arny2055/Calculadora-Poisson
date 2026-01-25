@@ -531,47 +531,53 @@
             });
         }
 
-        // --- MEJORA: ASISTENTE ESTRATÉGICO CON FILTRO DE LIGA, MERCADO, CUOTA Y EDGE ---
+        // --- MEJORA: ASISTENTE CON LÓGICA DE CONSISTENCIA 3/4 (LIGA, CUOTA, MERCADO, EDGE) ---
         function getStrategicAdvice(currentMotor, currentLeague, currentMarket, currentOdd, currentEdge) {
             const history = JSON.parse(localStorage.getItem('backtesting_data')) || [];
             if (history.length < 5) return { match: false, text: "Faltan datos en Backtesting para asesorar." };
 
-            // 1. Filtrar por Motor
-            let pool = history.filter(b => b.motor === currentMotor);
-            
-            // 2. Filtrar por Liga (si existe coincidencia previa)
-            const leagueHistory = pool.filter(b => b.liga.toLowerCase() === currentLeague.toLowerCase());
-            if(leagueHistory.length >= 3) { pool = leagueHistory; }
+            const motorHistory = history.filter(b => b.motor === currentMotor);
+            if (motorHistory.length === 0) return { match: false, text: "Sin historial para este motor." };
 
-            // 3. Filtrar por Mercado
-            const marketHistory = pool.filter(b => b.mercado === currentMarket);
-            
-            // 4. Filtrar por Rango de Cuota (+/- 0.3)
-            const oddHistory = marketHistory.filter(b => Math.abs(b.cuota - currentOdd) <= 0.3);
+            let score = 0;
+            let positivePillars = [];
 
-            // 5. Análisis de Edge (Buscamos si Edges similares han sido rentables)
-            const edgeHistory = oddHistory.filter(b => Math.abs(parseFloat(b.edge) - (currentEdge * 100)) <= 5);
+            // Pillar 1: Liga
+            const leaguePool = motorHistory.filter(b => b.liga.toLowerCase() === currentLeague.toLowerCase());
+            const leagueYield = leaguePool.length >= 2 ? (leaguePool.reduce((a, b) => a + b.profit, 0) / leaguePool.reduce((a, b) => a + b.stake, 0)) : -99;
+            if (leagueYield > 0) { score++; positivePillars.push("Liga"); }
 
-            const finalHistory = edgeHistory.length >= 2 ? edgeHistory : oddHistory;
+            // Pillar 2: Mercado
+            const marketPool = motorHistory.filter(b => b.mercado === currentMarket);
+            const marketYield = marketPool.length >= 2 ? (marketPool.reduce((a, b) => a + b.profit, 0) / marketPool.reduce((a, b) => a + b.stake, 0)) : -99;
+            if (marketYield > 0) { score++; positivePillars.push("Mercado"); }
 
-            const profit = finalHistory.reduce((acc, b) => acc + b.profit, 0);
-            const staked = finalHistory.reduce((acc, b) => acc + b.stake, 0);
-            const currentYield = staked > 0 ? (profit / staked) * 100 : -999;
+            // Pillar 3: Cuota (+/- 0.3)
+            const oddPool = motorHistory.filter(b => Math.abs(b.cuota - currentOdd) <= 0.3);
+            const oddYield = oddPool.length >= 2 ? (oddPool.reduce((a, b) => a + b.profit, 0) / oddPool.reduce((a, b) => a + b.stake, 0)) : -99;
+            if (oddYield > 0) { score++; positivePillars.push("Cuota"); }
 
-            if (currentYield > 8 && finalHistory.length >= 2) {
+            // Pillar 4: Edge (+/- 5%)
+            const edgePool = motorHistory.filter(b => Math.abs(parseFloat(b.edge) - (currentEdge * 100)) <= 5);
+            const edgeYield = edgePool.length >= 2 ? (edgePool.reduce((a, b) => a + b.profit, 0) / edgePool.reduce((a, b) => a + b.stake, 0)) : -99;
+            if (edgeYield > 0) { score++; positivePillars.push("Edge"); }
+
+            // Lógica de Alerta (3 de 4)
+            if (score >= 3) {
                 return { 
                     match: true, 
-                    text: `¡EXCELENTE SEÑAL! En ${currentLeague || 'esta liga'}, el mercado ${currentMarket} con cuota ${currentOdd} y Edge similar tiene un Yield del ${currentYield.toFixed(1)}%. APUESTA REAL RECOMENDADA.` 
+                    score: score,
+                    text: `⚠️ ALERTA DE CONSISTENCIA (${score}/4): Historial positivo en ${positivePillars.join(', ')}. Escenario altamente rentable.` 
                 };
-            } else if (currentYield < 0 && finalHistory.length >= 3) {
+            } else if (score === 0 && motorHistory.length > 10) {
                 return { 
                     match: false, 
                     isNegative: true,
-                    text: `EVITAR: Históricamente pierdes dinero en este escenario (Yield: ${currentYield.toFixed(1)}%).` 
+                    text: `EVITAR: Los 4 pilares históricos están en negativo para este escenario.` 
                 };
             }
             
-            return { match: false, text: "Datos insuficientes para validar esta combinación específica." };
+            return { match: false, text: "Buscando coincidencias de rentabilidad..." };
         }
 
         function updateEdge(id, prob, partnerId, marketName) {
@@ -595,7 +601,7 @@
                     document.getElementById('overround_' + id).innerText = overround.toFixed(1) + "%";
                 }
 
-                // Disparar Asistente Mejorado
+                // Disparar Asistente con la nueva mejora de Score 3/4
                 if(edge > 0.01) { 
                     const advice = getStrategicAdvice(currentMotor, currentLeague, marketName, odd, edge);
                     const assistantBox = document.getElementById('strategy-assistant-box');
@@ -607,7 +613,7 @@
                     strategyText.innerHTML = advice.text;
                     
                     if(advice.match) {
-                        strategySignal.innerHTML = "🎯💰";
+                        strategySignal.innerHTML = advice.score === 4 ? "👑💰" : "🎯⚡";
                         assistantBox.style.border = "2px solid #10b981";
                         row.classList.add('strategy-match');
                     } else if(advice.isNegative) {
@@ -647,7 +653,7 @@
                 isStrategic: isStrategic
             });
             save();
-            alert(isStrategic ? "¡APUESTA ESTRATÉGICA REGISTRADA!" : "Pick registrado en el minero.");
+            alert(isStrategic ? "¡APUESTA POR CONSISTENCIA REGISTRADA!" : "Pick registrado en el minero.");
         }
 
         function resolve(id, status) {
