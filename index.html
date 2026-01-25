@@ -500,6 +500,11 @@
         async function sendToTelegramAuto(bet) {
             if(!tg_config.auto) return;
             
+            // --- NUEVA MEJORA: FILTRO MOTOR V1 Y 3 PILARES ---
+            if (bet.engine !== 'v1') return; // Solo motor v1
+            if ((bet.score || 0) < 3) return; // Al menos 3 de 4 pilares
+            // -------------------------------------------------
+
             const star = bet.isStrategic ? "⭐ ESTRATÉGICA ⭐" : "📊 ANÁLISIS POISSON";
             const text = `🚀 *BETAGS PRO ALERT* 🚀\n` +
                          `${star}\n\n` +
@@ -694,7 +699,7 @@
                         <td class="p-4 text-orange-400 font-mono" id="overround_${m.id}">--</td>
                         <td class="p-4 text-bet-yellow font-black" id="stake_${m.id}">--</td>
                         <td class="p-4 text-center">
-                            <button onclick="registerBet('${m.id}', '${m.name}', ${m.prob})" class="bg-emerald-600/20 text-emerald-400 px-3 py-1 rounded-lg text-[10px] font-black hover:bg-emerald-600 hover:text-white">FIJAR</button>
+                            <button onclick="registerBet('${m.id}', '${m.name}', ${m.prob}, ${m.chaos})" class="bg-emerald-600/20 text-emerald-400 px-3 py-1 rounded-lg text-[10px] font-black hover:bg-emerald-600 hover:text-white">FIJAR</button>
                         </td>
                     </tr>
                 `;
@@ -703,10 +708,10 @@
 
         function getStrategicAdvice(currentMotor, currentLeague, currentMarket, currentOdd, currentEdge, chaosProb) {
             const history = JSON.parse(localStorage.getItem('backtesting_data')) || [];
-            if (history.length < 5) return { match: false, text: "Faltan datos en Backtesting para asesorar." };
+            if (history.length < 5) return { match: false, score: 0, text: "Faltan datos en Backtesting para asesorar." };
 
             const motorHistory = history.filter(b => b.motor === currentMotor);
-            if (motorHistory.length === 0) return { match: false, text: "Sin historial para este motor." };
+            if (motorHistory.length === 0) return { match: false, score: 0, text: "Sin historial para este motor." };
 
             let score = 0;
             let positivePillars = [];
@@ -747,11 +752,12 @@
                 return { 
                     match: false,
                     isNegative: true,
+                    score: score,
                     text: `<span class="text-red-400">RIESGO OCULTO:</span> Aunque cumples ${score} pilares, este conjunto tiene <span class="font-black text-red-500">PROFIT NEGATIVO ($${totalProfit.toFixed(2)})</span>.` 
                 };
             }
             
-            return { match: false, text: "Escaneando rentabilidad y simulando caos..." };
+            return { match: false, score: score, text: "Escaneando rentabilidad y simulando caos..." };
         }
 
         function updateEdge(id, prob, partnerId, marketName, chaosProb) {
@@ -815,10 +821,12 @@
             }
         }
 
-        function registerBet(id, market, prob) {
+        function registerBet(id, market, prob, chaosProb) {
             const odd = parseFloat(document.getElementById('odd_' + id).value);
             const eventName = document.getElementById('event_name').value || "Evento Desconocido";
             const leagueName = document.getElementById('league_name').value || "INTERNACIONAL";
+            const currentMotor = document.getElementById('poisson_version').value;
+            
             if(!odd) return alert("Ingresa cuota");
             
             const stakeCell = document.getElementById('stake_' + id);
@@ -827,7 +835,10 @@
 
             const edge = (odd * prob) - 1;
             const row = document.getElementById('row_' + id);
-            const isStrategic = row ? row.classList.contains('strategy-match') : false;
+            
+            // Calculamos el score antes de guardar para validar el envío a TG
+            const advice = getStrategicAdvice(currentMotor, leagueName, market, odd, edge, chaosProb);
+            const isStrategic = advice.match;
 
             const newBet = {
                 id: Date.now(),
@@ -838,15 +849,21 @@
                 ov: 0,
                 stake: stakeVal, 
                 status: 'pending', profit: 0,
-                engine: document.getElementById('poisson_version').value,
+                engine: currentMotor,
                 closingOdd: null,
-                isStrategic: isStrategic
+                isStrategic: isStrategic,
+                score: advice.score || 0 // Guardamos los pilares cumplidos
             };
 
             bets.unshift(newBet);
             save();
             sendToTelegramAuto(newBet);
-            alert(isStrategic ? "¡APUESTA ESTRATÉGICA REGISTRADA CON STAKE PROTEGIDO Y ENVIADA A TG!" : "Pick registrado.");
+            
+            if (isStrategic) {
+                alert("¡APUESTA ESTRATÉGICA REGISTRADA CON STAKE PROTEGIDO Y ENVIADA A TG!");
+            } else {
+                alert("Pick registrado.");
+            }
         }
 
         function shareBet(id, platform) {
