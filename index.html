@@ -496,50 +496,17 @@
             }
             const p_btts_y = (1 - poissonProb(0, h_lambda)) * (1 - poissonProb(0, a_lambda));
 
-            // EXCLUSIVO: CHAOS ENGINE - SIMULACIÓN MONTE CARLO (10k PARTIDOS)
-            const chaosStability = runMonteCarlo(h_lambda, a_lambda);
-
             renderMarketTable([
-                { id: 'win', name: 'GANADOR LOCAL (1)', prob: p_win, partner: 'loss', chaos: chaosStability.win },
-                { id: 'draw', name: 'EMPATE (X)', prob: p_draw, partner: 'win', chaos: chaosStability.draw },
-                { id: 'loss', name: 'GANADOR VISITANTE (2)', prob: p_loss, partner: 'win', chaos: chaosStability.loss },
-                { id: 'o25', name: 'OVER 2.5', prob: 1 - p_u25, partner: 'u25', chaos: chaosStability.o25 },
-                { id: 'u25', name: 'UNDER 2.5', prob: p_u25, partner: 'o25', chaos: chaosStability.u25 }
+                { id: 'win', name: 'GANADOR LOCAL (1)', prob: p_win, partner: 'loss' },
+                { id: 'draw', name: 'EMPATE (X)', prob: p_draw, partner: 'win' },
+                { id: 'loss', name: 'GANADOR VISITANTE (2)', prob: p_loss, partner: 'win' },
+                { id: '1X', name: 'DC 1X', prob: p_win + p_draw, partner: 'loss' },
+                { id: 'X2', name: 'DC X2', prob: p_loss + p_draw, partner: 'win' },
+                { id: 'o25', name: 'OVER 2.5', prob: 1 - p_u25, partner: 'u25' },
+                { id: 'u25', name: 'UNDER 2.5', prob: p_u25, partner: 'o25' },
+                { id: 'bttsy', name: 'BTTS SÍ', prob: p_btts_y, partner: 'bttsn' },
+                { id: 'bttsn', name: 'BTTS NO', prob: 1 - p_btts_y, partner: 'bttsy' }
             ]);
-        }
-
-        // --- REVOLUCIONARIO: CHAOS ENGINE (MONTE CARLO) ---
-        function runMonteCarlo(h_lambda, a_lambda) {
-            const sims = 10000;
-            let results = { win: 0, draw: 0, loss: 0, o25: 0, u25: 0 };
-            
-            for(let i=0; i<sims; i++) {
-                // Generar goles aleatorios basados en la media de Poisson
-                const h_goals = poissonRandom(h_lambda);
-                const a_goals = poissonRandom(a_lambda);
-                
-                if(h_goals > a_goals) results.win++;
-                else if(h_goals === a_goals) results.draw++;
-                else results.loss++;
-
-                if(h_goals + a_goals > 2.5) results.o25++;
-                else results.u25++;
-            }
-            
-            // Retornamos el porcentaje de "supervivencia" del pick en 10k universos
-            return {
-                win: (results.win / sims),
-                draw: (results.draw / sims),
-                loss: (results.loss / sims),
-                o25: (results.o25 / sims),
-                u25: (results.u25 / sims)
-            };
-        }
-
-        function poissonRandom(lambda) {
-            let L = Math.exp(-lambda), k = 0, p = 1;
-            do { k++; p *= Math.random(); } while (p > L);
-            return k - 1;
         }
 
         function renderMarketTable(data) {
@@ -552,7 +519,7 @@
                         <td class="p-4 font-bold text-slate-200">${m.name}</td>
                         <td class="p-4 text-emerald-400 font-mono">${(m.prob * 100).toFixed(1)}%</td>
                         <td class="p-4 text-slate-500 font-mono">${fairOdd}</td>
-                        <td class="p-4"><input type="number" step="0.01" class="w-20 p-1 text-xs" oninput="updateEdge('${m.id}', ${m.prob}, '${m.partner}', '${m.name}', ${m.chaos})" id="odd_${m.id}"></td>
+                        <td class="p-4"><input type="number" step="0.01" class="w-20 p-1 text-xs" oninput="updateEdge('${m.id}', ${m.prob}, '${m.partner}', '${m.name}')" id="odd_${m.id}"></td>
                         <td class="p-4 font-bold" id="edge_${m.id}">--</td>
                         <td class="p-4 text-orange-400 font-mono" id="overround_${m.id}">--</td>
                         <td class="p-4 text-bet-yellow font-black" id="stake_${m.id}">--</td>
@@ -564,7 +531,8 @@
             });
         }
 
-        function getStrategicAdvice(currentMotor, currentLeague, currentMarket, currentOdd, currentEdge, chaosProb) {
+        // --- MEJORA: ASISTENTE CON FILTRO DE BENEFICIO REAL ---
+        function getStrategicAdvice(currentMotor, currentLeague, currentMarket, currentOdd, currentEdge) {
             const history = JSON.parse(localStorage.getItem('backtesting_data')) || [];
             if (history.length < 5) return { match: false, text: "Faltan datos en Backtesting para asesorar." };
 
@@ -575,52 +543,61 @@
             let positivePillars = [];
             let scoreBets = [];
 
+            // Evaluamos la consistencia de los pilares
             motorHistory.forEach(b => {
                 let s = 0;
                 if (b.liga.toLowerCase() === currentLeague.toLowerCase()) s++;
                 if (b.mercado === currentMarket) s++;
                 if (Math.abs(b.cuota - currentOdd) <= 0.3) s++;
                 if (Math.abs(parseFloat(b.edge) - (currentEdge * 100)) <= 5) s++;
+                
                 if (s >= 3) scoreBets.push(b);
             });
 
-            // Pilares de rendimiento
+            // Pilares individuales
             const leaguePool = motorHistory.filter(b => b.liga.toLowerCase() === currentLeague.toLowerCase());
             if (leaguePool.length >= 2 && (leaguePool.reduce((a, b) => a + b.profit, 0)) > 0) { score++; positivePillars.push("Liga"); }
+
             const marketPool = motorHistory.filter(b => b.mercado === currentMarket);
             if (marketPool.length >= 2 && (marketPool.reduce((a, b) => a + b.profit, 0)) > 0) { score++; positivePillars.push("Mercado"); }
+
             const oddPool = motorHistory.filter(b => Math.abs(b.cuota - currentOdd) <= 0.3);
             if (oddPool.length >= 2 && (oddPool.reduce((a, b) => a + b.profit, 0)) > 0) { score++; positivePillars.push("Cuota"); }
+
             const edgePool = motorHistory.filter(b => Math.abs(parseFloat(b.edge) - (currentEdge * 100)) <= 5);
             if (edgePool.length >= 2 && (edgePool.reduce((a, b) => a + b.profit, 0)) > 0) { score++; positivePillars.push("Edge"); }
 
+            // CALCULO DE RENTABILIDAD DEL CONJUNTO
             const totalStaked = scoreBets.reduce((a, b) => a + b.stake, 0);
             const totalProfit = scoreBets.reduce((a, b) => a + b.profit, 0);
             const avgYield = totalStaked > 0 ? (totalProfit / totalStaked) * 100 : 0;
 
-            // MÉTRICA CHAOS: Estabilidad entre teoría y simulación
-            const stabilityIdx = (1 - Math.abs(chaosProb - (totalProfit > 0 ? 0.6 : 0.4))) * 100;
-
+            // FILTRO DE SEGURIDAD: Solo avisar si el Profit Total del escenario es > 0
             if (score >= 3 && totalProfit > 0) {
                 return { 
                     match: true, 
                     score: score,
-                    text: `⚠️ ALERTA (${score}/4): Escenario Ganador. <br> 
-                           <span class="text-emerald-400 font-black">Rendimiento Real: Yield ${avgYield.toFixed(1)}% | Profit: $${totalProfit.toFixed(2)}</span><br>
-                           <span class="text-blue-400 font-bold italic">Chaos Stress Test: El pick sobrevivió al ${(chaosProb*100).toFixed(1)}% de las simulaciones Monte Carlo.</span>` 
+                    text: `⚠️ ALERTA (${score}/4): Escenario Ganador en ${positivePillars.join(', ')}. <br> 
+                           <span class="text-emerald-400 font-black">Rendimiento Real: Yield ${avgYield.toFixed(1)}% | Profit: $${totalProfit.toFixed(2)}</span>` 
                 };
             } else if (score >= 3 && totalProfit <= 0) {
                 return { 
                     match: false,
                     isNegative: true,
-                    text: `<span class="text-red-400">RIESGO OCULTO:</span> Aunque cumples ${score} pilares, este conjunto de datos tiene <span class="font-black text-red-500">PROFIT NEGATIVO ($${totalProfit.toFixed(2)})</span>.` 
+                    text: `<span class="text-red-400">RIESGO OCULTO:</span> Aunque cumples ${score} pilares, este conjunto de datos tiene <span class="font-black text-red-500">PROFIT NEGATIVO ($${totalProfit.toFixed(2)})</span>. Mejor evitar.` 
+                };
+            } else if (score === 0 && motorHistory.length > 10) {
+                return { 
+                    match: false, 
+                    isNegative: true,
+                    text: `EVITAR: Escenario históricamente perdedor en todos los pilares.` 
                 };
             }
             
-            return { match: false, text: "Analizando rentabilidad y simulando universos paralelos..." };
+            return { match: false, text: "Escaneando rentabilidad histórica..." };
         }
 
-        function updateEdge(id, prob, partnerId, marketName, chaosProb) {
+        function updateEdge(id, prob, partnerId, marketName) {
             const odd = parseFloat(document.getElementById('odd_' + id).value) || 0;
             const partnerOdd = parseFloat(document.getElementById('odd_' + partnerId).value) || 0;
             const currentMotor = document.getElementById('poisson_version').value;
@@ -642,7 +619,7 @@
                 }
 
                 if(edge > 0.01) { 
-                    const advice = getStrategicAdvice(currentMotor, currentLeague, marketName, odd, edge, chaosProb);
+                    const advice = getStrategicAdvice(currentMotor, currentLeague, marketName, odd, edge);
                     const assistantBox = document.getElementById('strategy-assistant-box');
                     const strategyText = document.getElementById('strategy-text');
                     const strategySignal = document.getElementById('strategy-signal');
@@ -652,7 +629,7 @@
                     strategyText.innerHTML = advice.text;
                     
                     if(advice.match) {
-                        strategySignal.innerHTML = chaosProb > 0.65 ? "🌀💎" : "🎯⚡";
+                        strategySignal.innerHTML = advice.score === 4 ? "👑💰" : "🎯⚡";
                         assistantBox.style.border = "2px solid #10b981";
                         row.classList.add('strategy-match');
                     } else if(advice.isNegative) {
@@ -692,7 +669,7 @@
                 isStrategic: isStrategic
             });
             save();
-            alert(isStrategic ? "¡APUESTA DE ALTA ESTABILIDAD REGISTRADA!" : "Pick registrado.");
+            alert(isStrategic ? "¡APUESTA ESTRATÉGICA REGISTRADA!" : "Pick registrado en el minero.");
         }
 
         function resolve(id, status) {
