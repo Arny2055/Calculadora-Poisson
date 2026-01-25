@@ -206,7 +206,7 @@
                 <div class="flex items-center justify-between">
                     <div>
                         <h3 class="text-xs font-black text-blue-300 uppercase mb-1"><i class="fa-solid fa-robot mr-2"></i>ASISTENTE ESTRATÉGICO</h3>
-                        <p id="strategy-text" class="text-sm text-white font-medium italic">Esperando datos de mercado...</p>
+                        <div id="strategy-text" class="text-sm text-white font-medium italic">Esperando datos de mercado...</div>
                     </div>
                     <div id="strategy-signal" class="text-2xl animate-bounce"></div>
                 </div>
@@ -592,7 +592,7 @@
 
         function getStrategicAdvice(currentLeague, currentMarket, currentOdd, currentEdge, chaosProb) {
             const history = JSON.parse(localStorage.getItem('backtesting_data')) || [];
-            if (history.length < 5) return { match: false, score: 0, text: "Analizando... Se necesitan 5 picks históricos." };
+            if (history.length < 5) return { isStrategic: false, evaluations: [], text: "Analizando... Se necesitan 5 picks históricos." };
 
             const getOddRange = (o) => {
                 const lower = Math.floor(o * 2) / 2;
@@ -601,9 +601,9 @@
             const currentOddRange = getOddRange(currentOdd);
 
             const insights = {
-                liga: { profit: 0, staked: 0, count: 0, name: currentLeague },
-                mercado: { profit: 0, staked: 0, count: 0, name: currentMarket },
-                rangoCuota: { profit: 0, staked: 0, count: 0, name: currentOddRange }
+                liga: { profit: 0, staked: 0, count: 0, name: currentLeague, label: "LIGA" },
+                mercado: { profit: 0, staked: 0, count: 0, name: currentMarket, label: "MERCADO" },
+                rangoCuota: { profit: 0, staked: 0, count: 0, name: currentOddRange, label: "RANGO CUOTA" }
             };
 
             history.forEach(b => {
@@ -613,18 +613,20 @@
             });
 
             const calcYield = (obj) => obj.staked > 0 ? (obj.profit / obj.staked) * 100 : -999;
-            const validInsights = Object.keys(insights).filter(key => {
+            
+            let evaluations = [];
+            Object.keys(insights).forEach(key => {
                 const item = insights[key];
-                return item.count >= MIN_CONFIDENCE_SAMPLE && calcYield(item) >= MIN_YIELD_THRESHOLD;
+                const yieldVal = calcYield(item);
+                if (item.count >= MIN_CONFIDENCE_SAMPLE && yieldVal >= MIN_YIELD_THRESHOLD) {
+                    evaluations.push({ category: item.label, name: item.name, yield: yieldVal, count: item.count });
+                }
             });
 
-            if (validInsights.length > 0) {
-                let bestKey = validInsights.reduce((a, b) => calcYield(insights[a]) > calcYield(insights[b]) ? a : b);
-                const best = insights[bestKey];
-                const yieldVal = calcYield(best);
-                return { match: true, score: yieldVal, text: `<span class="text-bet-yellow">ALTA EFICIENCIA:</span> El grupo <b>${bestKey.toUpperCase()} (${best.name})</b> tiene Yield de <span class="text-emerald-400">${yieldVal.toFixed(1)}%</span>.` };
+            if (evaluations.length > 0) {
+                return { isStrategic: true, evaluations: evaluations };
             }
-            return { match: false, score: 0, text: "Pick estándar. No hay datos de alta eficiencia aún." };
+            return { isStrategic: false, evaluations: [], text: "Pick estándar. No hay datos de alta eficiencia aún." };
         }
 
         function updateEdge(id, prob, partnerId, marketName, chaosProb) {
@@ -655,11 +657,20 @@
                     const advice = getStrategicAdvice(currentLeague, marketName, odd, edge, chaosProb);
                     const assistantBox = document.getElementById('strategy-assistant-box');
                     assistantBox.classList.remove('hidden');
-                    document.getElementById('strategy-text').innerHTML = advice.text;
-                    document.getElementById('strategy-signal').innerHTML = advice.match ? "💎" : "🔍";
-                    if(document.getElementById('row_' + id)) {
-                        if(advice.match) document.getElementById('row_' + id).classList.add('strategy-match');
-                        else document.getElementById('row_' + id).classList.remove('strategy-match');
+                    
+                    if (advice.isStrategic) {
+                        let html = `<div class="flex flex-col gap-1">`;
+                        advice.evaluations.forEach(ev => {
+                            html += `<div class="text-[11px]"><span class="text-bet-yellow font-black">${ev.category}:</span> <span class="text-white">${ev.name}</span> <span class="text-emerald-400 font-bold">(${ev.yield.toFixed(1)}% Yield)</span></div>`;
+                        });
+                        html += `</div>`;
+                        document.getElementById('strategy-text').innerHTML = html;
+                        document.getElementById('strategy-signal').innerHTML = "💎";
+                        if(document.getElementById('row_' + id)) document.getElementById('row_' + id).classList.add('strategy-match');
+                    } else {
+                        document.getElementById('strategy-text').innerHTML = `<span class="text-slate-400">${advice.text || "Pick estándar."}</span>`;
+                        document.getElementById('strategy-signal').innerHTML = "🔍";
+                        if(document.getElementById('row_' + id)) document.getElementById('row_' + id).classList.remove('strategy-match');
                     }
                 }
             }
@@ -684,7 +695,7 @@
                 league: leagueName, teams: eventName, date: eventDate,
                 market, odd, prob, edge: (edge * 100).toFixed(2),
                 stake: stakeVal, status: 'pending', profit: 0,
-                engine: 'v1', isStrategic: advice.match
+                engine: 'v1', isStrategic: advice.isStrategic
             };
 
             bets.unshift(newBet);
@@ -725,14 +736,12 @@
             const totalStaked = resolved.reduce((a, b) => a + b.stake, 0);
             const wins = resolved.filter(b => b.status === 'win').length;
 
-            // --- NUEVOS CALCULOS ---
             const avgOdd = resolved.length > 0 ? (resolved.reduce((a, b) => a + b.odd, 0) / resolved.length).toFixed(2) : "0.00";
             const avgProfit = resolved.length > 0 ? (totalProfit / resolved.length).toFixed(2) : "0";
 
             let peak = BANKROLL_BASE;
             let current = BANKROLL_BASE;
             let maxDD = 0;
-            // Recorremos cronológicamente (reverse porque bets están de más reciente a antiguo)
             [...resolved].reverse().forEach(b => {
                 current += b.profit;
                 if (current > peak) peak = current;
@@ -740,7 +749,6 @@
                 if (dd > maxDD) maxDD = dd;
             });
 
-            // Actualización de UI Global
             const profAll = allResolved.reduce((a, b) => a + b.profit, 0), stkAll = allResolved.reduce((a, b) => a + b.stake, 0);
             document.getElementById('v1-yield').innerText = (stkAll > 0 ? (profAll/stkAll*100).toFixed(1) : 0) + "%";
             document.getElementById('v1-profit').innerText = "$" + profAll.toFixed(2);
@@ -750,13 +758,11 @@
             document.getElementById('top-yield').innerText = (totalStaked > 0 ? (totalProfit/totalStaked*100).toFixed(1) : 0) + "%";
             document.getElementById('top-bankroll').innerText = "$" + getCurrentBankroll().toFixed(2);
             
-            // Actualización de Métricas Específicas
             document.getElementById('m-roi').innerText = (totalProfit/BANKROLL_BASE*100).toFixed(1) + "%";
             document.getElementById('m-hit').innerText = (resolved.length > 0 ? (wins/resolved.length*100).toFixed(1) : 0) + "%";
             document.getElementById('m-dd').innerText = (maxDD * 100).toFixed(1) + "%";
             document.getElementById('m-avg-odd').innerText = avgOdd;
             document.getElementById('m-avg-profit').innerText = "$" + avgProfit;
-            // ------------------------
 
             renderHistory(filtered); 
             renderBankrollChart(resolved);
