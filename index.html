@@ -531,47 +531,54 @@
             });
         }
 
-        // --- MEJORA: LÓGICA DEL ASISTENTE ESTRATÉGICO DESDE BACKTESTING ---
-        function getStrategicAdvice(currentMotor, currentMarket, currentOdd) {
+        // --- MEJORA: ASISTENTE ESTRATÉGICO CON FILTRO DE LIGA, MERCADO, CUOTA Y EDGE ---
+        function getStrategicAdvice(currentMotor, currentLeague, currentMarket, currentOdd, currentEdge) {
             const history = JSON.parse(localStorage.getItem('backtesting_data')) || [];
             if (history.length < 5) return { match: false, text: "Faltan datos en Backtesting para asesorar." };
 
-            const motorHistory = history.filter(b => b.motor === currentMotor);
-            const marketHistory = motorHistory.filter(b => b.mercado === currentMarket);
+            // 1. Filtrar por Motor
+            let pool = history.filter(b => b.motor === currentMotor);
             
-            // Calculamos Yield del mercado específico en este motor
-            const profit = marketHistory.reduce((acc, b) => acc + b.profit, 0);
-            const staked = marketHistory.reduce((acc, b) => acc + b.stake, 0);
-            const marketYield = staked > 0 ? (profit / staked) * 100 : -999;
+            // 2. Filtrar por Liga (si existe coincidencia previa)
+            const leagueHistory = pool.filter(b => b.liga.toLowerCase() === currentLeague.toLowerCase());
+            if(leagueHistory.length >= 3) { pool = leagueHistory; }
 
-            // Rango de cuota (pasos de 0.5)
-            const range = (Math.floor(currentOdd * 2) / 2).toFixed(1);
-            const oddRangeHistory = marketHistory.filter(b => {
-                const bRange = (Math.floor(b.cuota * 2) / 2).toFixed(1);
-                return bRange === range;
-            });
-            const rangeProfit = oddRangeHistory.reduce((acc, b) => acc + b.profit, 0);
+            // 3. Filtrar por Mercado
+            const marketHistory = pool.filter(b => b.mercado === currentMarket);
+            
+            // 4. Filtrar por Rango de Cuota (+/- 0.3)
+            const oddHistory = marketHistory.filter(b => Math.abs(b.cuota - currentOdd) <= 0.3);
 
-            if (marketYield > 5 && rangeProfit > 0) {
+            // 5. Análisis de Edge (Buscamos si Edges similares han sido rentables)
+            const edgeHistory = oddHistory.filter(b => Math.abs(parseFloat(b.edge) - (currentEdge * 100)) <= 5);
+
+            const finalHistory = edgeHistory.length >= 2 ? edgeHistory : oddHistory;
+
+            const profit = finalHistory.reduce((acc, b) => acc + b.profit, 0);
+            const staked = finalHistory.reduce((acc, b) => acc + b.stake, 0);
+            const currentYield = staked > 0 ? (profit / staked) * 100 : -999;
+
+            if (currentYield > 8 && finalHistory.length >= 2) {
                 return { 
                     match: true, 
-                    text: `¡PATRÓN GANADOR! El Motor ${currentMotor.toUpperCase()} en ${currentMarket} con cuota ${currentOdd} tiene un Yield histórico del ${marketYield.toFixed(1)}%. HAZ LA APUESTA REAL.` 
+                    text: `¡EXCELENTE SEÑAL! En ${currentLeague || 'esta liga'}, el mercado ${currentMarket} con cuota ${currentOdd} y Edge similar tiene un Yield del ${currentYield.toFixed(1)}%. APUESTA REAL RECOMENDADA.` 
                 };
-            } else if (marketYield < 0 && marketHistory.length > 3) {
+            } else if (currentYield < 0 && finalHistory.length >= 3) {
                 return { 
                     match: false, 
                     isNegative: true,
-                    text: `CUIDADO: Este mercado tiene Yield NEGATIVO (${marketYield.toFixed(1)}%) en tus pruebas. Evita apuesta real.` 
+                    text: `EVITAR: Históricamente pierdes dinero en este escenario (Yield: ${currentYield.toFixed(1)}%).` 
                 };
             }
             
-            return { match: false, text: "Sin tendencia clara para este mercado todavía." };
+            return { match: false, text: "Datos insuficientes para validar esta combinación específica." };
         }
 
         function updateEdge(id, prob, partnerId, marketName) {
             const odd = parseFloat(document.getElementById('odd_' + id).value) || 0;
             const partnerOdd = parseFloat(document.getElementById('odd_' + partnerId).value) || 0;
             const currentMotor = document.getElementById('poisson_version').value;
+            const currentLeague = document.getElementById('league_name').value || "Desconocida";
 
             if(odd > 1) {
                 const edge = (odd * prob) - 1;
@@ -588,9 +595,9 @@
                     document.getElementById('overround_' + id).innerText = overround.toFixed(1) + "%";
                 }
 
-                // Disparar Asistente si hay Edge
-                if(edge > 0.02) { // Solo si hay al menos 2% de ventaja
-                    const advice = getStrategicAdvice(currentMotor, marketName, odd);
+                // Disparar Asistente Mejorado
+                if(edge > 0.01) { 
+                    const advice = getStrategicAdvice(currentMotor, currentLeague, marketName, odd, edge);
                     const assistantBox = document.getElementById('strategy-assistant-box');
                     const strategyText = document.getElementById('strategy-text');
                     const strategySignal = document.getElementById('strategy-signal');
@@ -600,11 +607,11 @@
                     strategyText.innerHTML = advice.text;
                     
                     if(advice.match) {
-                        strategySignal.innerHTML = "✅💰";
+                        strategySignal.innerHTML = "🎯💰";
                         assistantBox.style.border = "2px solid #10b981";
                         row.classList.add('strategy-match');
                     } else if(advice.isNegative) {
-                        strategySignal.innerHTML = "⚠️❌";
+                        strategySignal.innerHTML = "🚫";
                         assistantBox.style.border = "2px solid #ef4444";
                         row.classList.remove('strategy-match');
                     } else {
@@ -624,7 +631,6 @@
             const edge = (odd * prob) - 1;
             const stake = getCurrentBankroll() * Math.max(0, (edge / (odd - 1)) * KELLY_FRAC);
 
-            // COMPROBAR SI ES MARCA DEL ASISTENTE AL REGISTRAR
             const row = document.getElementById('row_' + id);
             const isStrategic = row ? row.classList.contains('strategy-match') : false;
 
@@ -638,10 +644,10 @@
                 stake: parseFloat(stake.toFixed(2)), status: 'pending', profit: 0,
                 engine: document.getElementById('poisson_version').value,
                 closingOdd: null,
-                isStrategic: isStrategic // Nueva propiedad para filtro
+                isStrategic: isStrategic
             });
             save();
-            alert(isStrategic ? "¡APUESTA REAL ASISTIDA registrada!" : "Pick registrado en el Minero.");
+            alert(isStrategic ? "¡APUESTA ESTRATÉGICA REGISTRADA!" : "Pick registrado en el minero.");
         }
 
         function resolve(id, status) {
@@ -764,7 +770,6 @@
                     clvBadgeClass = clvVal > 0 ? "pill-badge border-emerald-500/30 text-emerald-400" : "pill-badge border-red-500/30 text-red-400";
                 }
 
-                // ETIQUETA DE APUESTA REAL
                 const realBadge = b.isStrategic ? `<div class="pill-badge badge-real"><i class="fa-solid fa-crown"></i> APUESTA REAL</div>` : '';
 
                 card.innerHTML = `
