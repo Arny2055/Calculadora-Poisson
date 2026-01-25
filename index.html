@@ -721,18 +721,45 @@
             const filtered = bets.filter(b => (fMar === "" || b.market === fMar) && (fAst === "" || (fAst === "real" && b.isStrategic) || (fAst === "manual" && !b.isStrategic)) && (b.odd >= fMinOdd) && (parseFloat(b.edge) >= fMinEdge));
             const resolved = filtered.filter(b => b.status !== 'pending'), allResolved = bets.filter(b => b.status !== 'pending');
             
-            const prof = allResolved.reduce((a, b) => a + b.profit, 0), stk = allResolved.reduce((a, b) => a + b.stake, 0);
-            document.getElementById('v1-yield').innerText = (stk > 0 ? (prof/stk*100).toFixed(1) : 0) + "%";
-            document.getElementById('v1-profit').innerText = "$" + prof.toFixed(2);
+            const totalProfit = resolved.reduce((a, b) => a + b.profit, 0);
+            const totalStaked = resolved.reduce((a, b) => a + b.stake, 0);
+            const wins = resolved.filter(b => b.status === 'win').length;
+
+            // --- NUEVOS CALCULOS ---
+            const avgOdd = resolved.length > 0 ? (resolved.reduce((a, b) => a + b.odd, 0) / resolved.length).toFixed(2) : "0.00";
+            const avgProfit = resolved.length > 0 ? (totalProfit / resolved.length).toFixed(2) : "0";
+
+            let peak = BANKROLL_BASE;
+            let current = BANKROLL_BASE;
+            let maxDD = 0;
+            // Recorremos cronológicamente (reverse porque bets están de más reciente a antiguo)
+            [...resolved].reverse().forEach(b => {
+                current += b.profit;
+                if (current > peak) peak = current;
+                let dd = peak > 0 ? (peak - current) / peak : 0;
+                if (dd > maxDD) maxDD = dd;
+            });
+
+            // Actualización de UI Global
+            const profAll = allResolved.reduce((a, b) => a + b.profit, 0), stkAll = allResolved.reduce((a, b) => a + b.stake, 0);
+            document.getElementById('v1-yield').innerText = (stkAll > 0 ? (profAll/stkAll*100).toFixed(1) : 0) + "%";
+            document.getElementById('v1-profit').innerText = "$" + profAll.toFixed(2);
             document.getElementById('v1-count').innerText = allResolved.length;
 
-            const totalProfit = resolved.reduce((a, b) => a + b.profit, 0), totalStaked = resolved.reduce((a, b) => a + b.stake, 0), wins = resolved.filter(b => b.status === 'win').length;
             document.getElementById('top-profit').innerText = "$" + totalProfit.toFixed(2);
             document.getElementById('top-yield').innerText = (totalStaked > 0 ? (totalProfit/totalStaked*100).toFixed(1) : 0) + "%";
             document.getElementById('top-bankroll').innerText = "$" + getCurrentBankroll().toFixed(2);
+            
+            // Actualización de Métricas Específicas
             document.getElementById('m-roi').innerText = (totalProfit/BANKROLL_BASE*100).toFixed(1) + "%";
             document.getElementById('m-hit').innerText = (resolved.length > 0 ? (wins/resolved.length*100).toFixed(1) : 0) + "%";
-            renderHistory(filtered); renderBankrollChart(resolved);
+            document.getElementById('m-dd').innerText = (maxDD * 100).toFixed(1) + "%";
+            document.getElementById('m-avg-odd').innerText = avgOdd;
+            document.getElementById('m-avg-profit').innerText = "$" + avgProfit;
+            // ------------------------
+
+            renderHistory(filtered); 
+            renderBankrollChart(resolved);
         }
 
         function renderHistory(data) {
