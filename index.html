@@ -196,7 +196,7 @@
                 <p id="top-bankroll" class="text-xl font-bold">$100.00</p>
             </div>
             <div class="glass-card p-4 rounded-2xl border-l-4 border-purple-500">
-                <p class="text-[10px] uppercase font-black text-slate-500 tracking-widest">p-Value (Significancia)</p>
+                <p class="text-[10px] uppercase font-black text-slate-500 tracking-widest">p-Value (Suerte)</p>
                 <p id="top-pvalue" class="text-xl font-bold">--</p>
             </div>
         </div>
@@ -534,6 +534,21 @@
             return k - 1;
         }
 
+        // --- Mejora: Función de Cálculo de p-Value ---
+        function calculatePValue(n, yieldDec, avgOdd) {
+            if (n < 5) return null;
+            const stdDev = Math.sqrt(avgOdd - 1);
+            const zScore = (yieldDec * Math.sqrt(n)) / stdDev;
+            
+            // Aproximación de la función de distribución normal acumulada
+            const t = 1 / (1 + 0.2316419 * Math.abs(zScore));
+            const d = 0.3989423 * Math.exp(-zScore * zScore / 2);
+            const p = d * t * (0.3193815 + t * (-0.3565638 + t * (1.781478 + t * (-1.821256 + t * 1.330274))));
+            
+            if (zScore > 0) return 1 - p;
+            return p;
+        }
+
         function calculate() {
             const h_lambda = parseFloat(document.getElementById('h_gf').value) || 0;
             const a_lambda = parseFloat(document.getElementById('a_gf').value) || 0;
@@ -736,8 +751,19 @@
             const totalStaked = resolved.reduce((a, b) => a + b.stake, 0);
             const wins = resolved.filter(b => b.status === 'win').length;
 
-            const avgOdd = resolved.length > 0 ? (resolved.reduce((a, b) => a + b.odd, 0) / resolved.length).toFixed(2) : "0.00";
+            const avgOdd = resolved.length > 0 ? (resolved.reduce((a, b) => a + b.odd, 0) / resolved.length) : 0;
             const avgProfit = resolved.length > 0 ? (totalProfit / resolved.length).toFixed(2) : "0";
+            const yieldGlobal = totalStaked > 0 ? (totalProfit / totalStaked) : 0;
+
+            // --- Mejora: Actualización de p-Value ---
+            const pVal = calculatePValue(resolved.length, yieldGlobal, avgOdd);
+            const pValDisplay = document.getElementById('top-pvalue');
+            if (pVal !== null) {
+                pValDisplay.innerText = (pVal * 100).toFixed(2) + "%";
+                pValDisplay.className = pVal < 0.05 ? "text-xl font-bold text-emerald-400" : "text-xl font-bold text-red-400";
+            } else {
+                pValDisplay.innerText = "--";
+            }
 
             let peak = BANKROLL_BASE;
             let current = BANKROLL_BASE;
@@ -755,13 +781,13 @@
             document.getElementById('v1-count').innerText = allResolved.length;
 
             document.getElementById('top-profit').innerText = "$" + totalProfit.toFixed(2);
-            document.getElementById('top-yield').innerText = (totalStaked > 0 ? (totalProfit/totalStaked*100).toFixed(1) : 0) + "%";
+            document.getElementById('top-yield').innerText = (yieldGlobal * 100).toFixed(1) + "%";
             document.getElementById('top-bankroll').innerText = "$" + getCurrentBankroll().toFixed(2);
             
             document.getElementById('m-roi').innerText = (totalProfit/BANKROLL_BASE*100).toFixed(1) + "%";
             document.getElementById('m-hit').innerText = (resolved.length > 0 ? (wins/resolved.length*100).toFixed(1) : 0) + "%";
             document.getElementById('m-dd').innerText = (maxDD * 100).toFixed(1) + "%";
-            document.getElementById('m-avg-odd').innerText = avgOdd;
+            document.getElementById('m-avg-odd').innerText = avgOdd.toFixed(2);
             document.getElementById('m-avg-profit').innerText = "$" + avgProfit;
 
             renderHistory(filtered); 
