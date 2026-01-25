@@ -317,14 +317,19 @@
                         <input type="text" id="tg_token" class="w-full p-3 text-sm font-mono" value="8389950970:AAEdYvy2mcmo5ydUMrR_tOIGR8QCYO1STuU" readonly>
                     </div>
                     <div>
-                        <label class="text-[10px] font-bold text-slate-500 uppercase block mb-1">Chat ID del Grupo</label>
+                        <label class="text-[10px] font-bold text-slate-500 uppercase block mb-1">Chat ID del Grupo (Sugerencias)</label>
                         <input type="text" id="tg_chat_id" class="w-full p-3 text-sm font-mono" placeholder="Ej: -100XXXXXXXXX">
-                        <p class="text-[9px] text-slate-400 mt-1 italic">Ingresa el ID del grupo donde el bot es administrador.</p>
                     </div>
+                    <div>
+                        <label class="text-[10px] font-bold text-blue-400 uppercase block mb-1">Chat ID del Canal (Broadcast)</label>
+                        <input type="text" id="tg_channel_id" class="w-full p-3 text-sm font-mono" placeholder="Ej: @nombre_canal o -100XXXXXXXXX">
+                        <p class="text-[9px] text-slate-400 mt-1 italic">Ingresa el ID del canal donde el bot es administrador.</p>
+                    </div>
+                    
                     <div class="flex items-center justify-between p-4 bg-slate-800/50 rounded-xl">
                         <div>
                             <p class="text-xs font-bold text-white uppercase">Auto-Envío de Alertas</p>
-                            <p class="text-[10px] text-slate-500">Enviar a Telegram al hacer click en "FIJAR"</p>
+                            <p class="text-[10px] text-slate-500">Enviar a Grupo y Canal al "FIJAR"</p>
                         </div>
                         <label class="relative inline-flex items-center cursor-pointer">
                             <input type="checkbox" id="tg_auto_send" class="sr-only peer">
@@ -467,7 +472,8 @@
         const KELLY_FRAC = 0.25;
         
         let bets = JSON.parse(localStorage.getItem('betags_v3_miner')) || [];
-        let tg_config = JSON.parse(localStorage.getItem('betags_tg_config')) || { token: "8389950970:AAEdYvy2mcmo5ydUMrR_tOIGR8QCYO1STuU", chatId: "", auto: false };
+        // SE AÑADE channelId A LA CONFIGURACIÓN
+        let tg_config = JSON.parse(localStorage.getItem('betags_tg_config')) || { token: "8389950970:AAEdYvy2mcmo5ydUMrR_tOIGR8QCYO1STuU", chatId: "", channelId: "", auto: false };
         let pChart, bChart;
 
         function showTab(tabId) {
@@ -478,19 +484,21 @@
             if(tabId === 'bank') updateStats(); 
             if(tabId === 'config') {
                 document.getElementById('tg_chat_id').value = tg_config.chatId;
+                document.getElementById('tg_channel_id').value = tg_config.channelId || "";
                 document.getElementById('tg_auto_send').checked = tg_config.auto;
             }
         }
 
         function saveTelegramConfig() {
             tg_config.chatId = document.getElementById('tg_chat_id').value;
+            tg_config.channelId = document.getElementById('tg_channel_id').value;
             tg_config.auto = document.getElementById('tg_auto_send').checked;
             localStorage.setItem('betags_tg_config', JSON.stringify(tg_config));
-            alert("Configuración de Telegram guardada.");
+            alert("Configuración de Telegram guardada correctamente.");
         }
 
         async function sendToTelegramAuto(bet) {
-            if(!tg_config.chatId || !tg_config.auto) return;
+            if(!tg_config.auto) return;
             
             const star = bet.isStrategic ? "⭐ ESTRATÉGICA ⭐" : "📊 ANÁLISIS POISSON";
             const text = `🚀 *BETAGS PRO ALERT* 🚀\n` +
@@ -503,23 +511,35 @@
                          `📈 *Edge:* ${bet.edge}%\n` +
                          `🤖 _Algoritmo: ${bet.engine.toUpperCase()}_`;
 
-            const url = `https://api.telegram.org/bot${tg_config.token}/sendMessage?chat_id=${tg_config.chatId}&text=${encodeURIComponent(text)}&parse_mode=Markdown`;
-            
-            try {
-                const response = await fetch(url);
-                const data = await response.json();
-                if(data.ok) {
-                    bet.tgMessageId = data.result.message_id;
-                    localStorage.setItem('betags_v3_miner', JSON.stringify(bets));
-                }
-                console.log("Notificación enviada a Telegram");
-            } catch (e) {
-                console.error("Error enviando a Telegram", e);
+            // ENVÍO AL GRUPO
+            if(tg_config.chatId) {
+                try {
+                    const url = `https://api.telegram.org/bot${tg_config.token}/sendMessage?chat_id=${tg_config.chatId}&text=${encodeURIComponent(text)}&parse_mode=Markdown`;
+                    const response = await fetch(url);
+                    const data = await response.json();
+                    if(data.ok) {
+                        bet.tgMessageId = data.result.message_id;
+                    }
+                } catch (e) { console.error("Error Grupo", e); }
             }
+
+            // ENVÍO AL CANAL (SIMULTÁNEO)
+            if(tg_config.channelId) {
+                try {
+                    const url = `https://api.telegram.org/bot${tg_config.token}/sendMessage?chat_id=${tg_config.channelId}&text=${encodeURIComponent(text)}&parse_mode=Markdown`;
+                    const response = await fetch(url);
+                    const data = await response.json();
+                    if(data.ok) {
+                        bet.tgChannelId = data.result.message_id; // Se guarda ID separado para el canal
+                    }
+                } catch (e) { console.error("Error Canal", e); }
+            }
+            
+            localStorage.setItem('betags_v3_miner', JSON.stringify(bets));
         }
 
         async function updateTelegramStatus(bet) {
-            if(!tg_config.chatId || !tg_config.token || !bet.tgMessageId) return;
+            if(!tg_config.token) return;
 
             const statusIcon = bet.status === 'win' ? '✅' : '❌';
             const statusText = bet.status === 'win' ? 'GANADA' : 'PERDIDA';
@@ -535,12 +555,20 @@
                          `💰 *Cuota:* ${bet.odd.toFixed(2)}\n` +
                          `🤖 _Algoritmo: ${bet.engine.toUpperCase()}_`;
 
-            const url = `https://api.telegram.org/bot${tg_config.token}/editMessageText?chat_id=${tg_config.chatId}&message_id=${bet.tgMessageId}&text=${encodeURIComponent(text)}&parse_mode=Markdown`;
+            // Actualizar en el Grupo
+            if(tg_config.chatId && bet.tgMessageId) {
+                try {
+                    const url = `https://api.telegram.org/bot${tg_config.token}/editMessageText?chat_id=${tg_config.chatId}&message_id=${bet.tgMessageId}&text=${encodeURIComponent(text)}&parse_mode=Markdown`;
+                    await fetch(url);
+                } catch (e) { console.error("Error Update Grupo", e); }
+            }
 
-            try {
-                await fetch(url);
-            } catch (e) {
-                console.error("Error actualizando Telegram", e);
+            // Actualizar en el Canal
+            if(tg_config.channelId && bet.tgChannelId) {
+                try {
+                    const url = `https://api.telegram.org/bot${tg_config.token}/editMessageText?chat_id=${tg_config.channelId}&message_id=${bet.tgChannelId}&text=${encodeURIComponent(text)}&parse_mode=Markdown`;
+                    await fetch(url);
+                } catch (e) { console.error("Error Update Canal", e); }
             }
         }
 
