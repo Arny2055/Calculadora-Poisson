@@ -545,20 +545,10 @@
             return k - 1;
         }
 
-        /**
-         * CORRECCIÓN P-VALUE: Cálculo robusto basado en Función de Error (ERF)
-         */
         function calculatePValue(n, yieldDec, avgOdd) {
             if (n < 5 || avgOdd <= 1) return null;
-            
-            // Desviación estándar aproximada para el beneficio de una apuesta unitaria
-            // Sigma ≈ sqrt(Cuota - 1). Para cuotas decimales esto estima la varianza del retorno.
             const sigma = Math.sqrt(avgOdd - 1);
-            
-            // P-value para la media de n muestras (Z-Score)
             const zScore = (yieldDec * Math.sqrt(n)) / sigma;
-            
-            // Función ERF (Aproximación precisa para Normal CDF)
             const erf = (z) => {
                 const t = 1.0 / (1.0 + 0.5 * Math.abs(z));
                 const ans = 1.0 - t * Math.exp(-z * z - 1.26551223 +
@@ -567,12 +557,7 @@
                     t * (1.48851587 + t * (-0.82215223 + t * 0.17087277)))))))));
                 return z >= 0 ? ans : -ans;
             };
-
-            // CDF (Probabilidad acumulada de la Normal Estándar)
             const cumulativeProb = 0.5 * (1 + erf(zScore / Math.sqrt(2)));
-            
-            // Queremos la probabilidad de obtener este resultado o superior por AZAR
-            // P = 1 - CDF(Z)
             return 1 - cumulativeProb;
         }
 
@@ -635,27 +620,22 @@
         function getStrategicAdvice(currentLeague, currentMarket, currentOdd, currentEdge, chaosProb) {
             const history = JSON.parse(localStorage.getItem('backtesting_data')) || [];
             if (history.length < 5) return { isStrategic: false, evaluations: [], text: "Analizando... Se necesitan 5 picks históricos." };
-
             const getOddRange = (o) => {
                 const lower = Math.floor(o * 2) / 2;
                 return `${lower.toFixed(1)} - ${(lower + 0.5).toFixed(1)}`;
             };
             const currentOddRange = getOddRange(currentOdd);
-
             const insights = {
                 liga: { profit: 0, staked: 0, count: 0, name: currentLeague, label: "LIGA" },
                 mercado: { profit: 0, staked: 0, count: 0, name: currentMarket, label: "MERCADO" },
                 rangoCuota: { profit: 0, staked: 0, count: 0, name: currentOddRange, label: "RANGO CUOTA" }
             };
-
             history.forEach(b => {
                 if (b.liga.toLowerCase() === currentLeague.toLowerCase()) { insights.liga.profit += b.profit; insights.liga.staked += b.stake; insights.liga.count++; }
                 if (b.mercado === currentMarket) { insights.mercado.profit += b.profit; insights.mercado.staked += b.stake; insights.mercado.count++; }
                 if (getOddRange(b.cuota) === currentOddRange) { insights.rangoCuota.profit += b.profit; insights.rangoCuota.staked += b.stake; insights.rangoCuota.count++; }
             });
-
             const calcYield = (obj) => obj.staked > 0 ? (obj.profit / obj.staked) * 100 : -999;
-            
             let evaluations = [];
             Object.keys(insights).forEach(key => {
                 const item = insights[key];
@@ -664,10 +644,7 @@
                     evaluations.push({ category: item.label, name: item.name, yield: yieldVal, count: item.count });
                 }
             });
-
-            if (evaluations.length > 0) {
-                return { isStrategic: true, evaluations: evaluations };
-            }
+            if (evaluations.length > 0) return { isStrategic: true, evaluations: evaluations };
             return { isStrategic: false, evaluations: [], text: "Pick estándar. No hay datos de alta eficiencia aún." };
         }
 
@@ -675,29 +652,18 @@
             const odd = parseFloat(document.getElementById('odd_' + id).value) || 0;
             const partnerOdd = parseFloat(document.getElementById('odd_' + partnerId).value) || 0;
             const currentLeague = document.getElementById('league_name').value || "Desconocida";
-
             if(odd > 1) {
                 const edge = (odd * prob) - 1;
                 const standardKelly = Math.max(0, (edge / (odd - 1)) * KELLY_FRAC);
-                
-                // MEJORA P-VALUE PARA GESTIÓN DE STAKE
-                // Extraemos el P-Value actual de la interfaz (calculado en applyFilters)
                 const currentPValueText = document.getElementById('top-pvalue').innerText;
                 const currentPValue = currentPValueText !== "--" ? parseFloat(currentPValueText) / 100 : 1.0;
-                
-                // Calculamos el multiplicador de confianza: Confidence = 1 - P_Value
-                // Si P es 0.01 (habilidad), multiplicas por 0.99. Si P es 0.90 (suerte), multiplicas por 0.10.
                 const pConfidenceMultiplier = Math.max(0.05, 1 - currentPValue); 
-                
                 const chaosPenalty = Math.min(1, (chaosProb / prob)); 
-                // Stake final = Kelly * Penalización Caos * Confianza Estadística (P-Value)
                 const adjustedKelly = standardKelly * chaosPenalty * pConfidenceMultiplier;
                 const stake = getCurrentBankroll() * adjustedKelly;
-                
                 const edgeEl = document.getElementById('edge_' + id);
                 edgeEl.innerText = (edge * 100).toFixed(1) + "%";
                 edgeEl.className = edge > 0 ? "p-4 text-emerald-400 font-bold" : "p-4 text-red-500";
-                
                 const stakeCell = document.getElementById('stake_' + id);
                 if (stake > 0) {
                     let labelsHtml = `<span class="stake-main">$${stake.toFixed(2)}</span>`;
@@ -705,19 +671,14 @@
                     if (currentPValue > 0.10) labelsHtml += `<div class="mt-1 text-[8px] text-red-400 font-black uppercase">P-REDUCED -${(currentPValue*100).toFixed(0)}%</div>`;
                     stakeCell.innerHTML = labelsHtml;
                 } else { stakeCell.innerText = "--"; }
-
                 if(partnerOdd > 1) document.getElementById('overround_' + id).innerText = (((1/odd) + (1/partnerOdd) - 1) * 100).toFixed(1) + "%";
-
                 if(edge > 0.01) { 
                     const advice = getStrategicAdvice(currentLeague, marketName, odd, edge, chaosProb);
                     const assistantBox = document.getElementById('strategy-assistant-box');
                     assistantBox.classList.remove('hidden');
-                    
                     if (advice.isStrategic) {
                         let html = `<div class="flex flex-col gap-1">`;
-                        advice.evaluations.forEach(ev => {
-                            html += `<div class="text-[11px]"><span class="text-bet-yellow font-black">${ev.category}:</span> <span class="text-white">${ev.name}</span> <span class="text-emerald-400 font-bold">(${ev.yield.toFixed(1)}% Yield)</span></div>`;
-                        });
+                        advice.evaluations.forEach(ev => { html += `<div class="text-[11px]"><span class="text-bet-yellow font-black">${ev.category}:</span> <span class="text-white">${ev.name}</span> <span class="text-emerald-400 font-bold">(${ev.yield.toFixed(1)}% Yield)</span></div>`; });
                         html += `</div>`;
                         document.getElementById('strategy-text').innerHTML = html;
                         document.getElementById('strategy-signal').innerHTML = "💎";
@@ -736,23 +697,13 @@
             const eventName = document.getElementById('event_name').value || "Evento Desconocido";
             const leagueName = document.getElementById('league_name').value || "INTERNACIONAL";
             const eventDate = document.getElementById('event_date').value;
-            
             if(!odd) return alert("Ingresa cuota");
             const stakeCell = document.getElementById('stake_' + id);
             const mainStake = stakeCell.querySelector('.stake-main');
             const stakeVal = mainStake ? parseFloat(mainStake.innerText.replace('$', '')) : 0;
             const edge = (odd * prob) - 1;
-            
             const advice = getStrategicAdvice(leagueName, market, odd, edge, chaosProb);
-
-            const newBet = {
-                id: Date.now(),
-                league: leagueName, teams: eventName, date: eventDate,
-                market, odd, prob, edge: (edge * 100).toFixed(2),
-                stake: stakeVal, status: 'pending', profit: 0,
-                engine: 'v1', isStrategic: advice.isStrategic
-            };
-
+            const newBet = { id: Date.now(), league: leagueName, teams: eventName, date: eventDate, market, odd, prob, edge: (edge * 100).toFixed(2), stake: stakeVal, status: 'pending', profit: 0, engine: 'v1', isStrategic: advice.isStrategic };
             bets.unshift(newBet);
             save();
             sendToTelegramAuto(newBet);
@@ -787,30 +738,23 @@
             const fMinOdd = parseFloat(document.getElementById('f_min_odd').value) || 0, fMinEdge = parseFloat(document.getElementById('f_min_edge').value) || -999;
             
             const filtered = bets.filter(b => (fMar === "" || b.market === fMar) && (fAst === "" || (fAst === "real" && b.isStrategic) || (fAst === "manual" && !b.isStrategic)) && (b.odd >= fMinOdd) && (parseFloat(b.edge) >= fMinEdge));
-            const resolved = filtered.filter(b => b.status !== 'pending'), allResolved = bets.filter(b => b.status !== 'pending');
+            const resolved = filtered.filter(b => b.status !== 'pending');
             
             const totalProfit = resolved.reduce((a, b) => a + b.profit, 0);
             const totalStaked = resolved.reduce((a, b) => a + b.stake, 0);
             const wins = resolved.filter(b => b.status === 'win').length;
-
             const avgOdd = resolved.length > 0 ? (resolved.reduce((a, b) => a + b.odd, 0) / resolved.length) : 0;
             const avgProfit = resolved.length > 0 ? (totalProfit / resolved.length).toFixed(2) : "0";
             const yieldDec = totalStaked > 0 ? (totalProfit / totalStaked) : 0;
 
-            // ACTUALIZACIÓN DE P-VALUE CORREGIDO
             const pVal = calculatePValue(resolved.length, yieldDec, avgOdd);
             const pValDisplay = document.getElementById('top-pvalue');
             if (pVal !== null) {
                 pValDisplay.innerText = (pVal * 100).toFixed(2) + "%";
-                // Colorización: Verde si P < 0.05 (Estadísticamente significativo / Habilidad)
                 pValDisplay.className = pVal < 0.05 ? "text-xl font-bold text-emerald-400" : "text-xl font-bold text-red-400";
-            } else {
-                pValDisplay.innerText = "--";
-            }
+            } else { pValDisplay.innerText = "--"; }
 
-            let peak = BANKROLL_BASE;
-            let current = BANKROLL_BASE;
-            let maxDD = 0;
+            let peak = BANKROLL_BASE, current = BANKROLL_BASE, maxDD = 0;
             [...resolved].reverse().forEach(b => {
                 current += b.profit;
                 if (current > peak) peak = current;
@@ -818,11 +762,12 @@
                 if (dd > maxDD) maxDD = dd;
             });
 
-            const profAll = allResolved.reduce((a, b) => a + b.profit, 0), stkAll = allResolved.reduce((a, b) => a + b.stake, 0);
-            document.getElementById('v1-yield').innerText = (stkAll > 0 ? (profAll/stkAll*100).toFixed(1) : 0) + "%";
-            document.getElementById('v1-profit').innerText = "$" + profAll.toFixed(2);
-            document.getElementById('v1-count').innerText = allResolved.length;
+            // MÉTRICAS DEL FILTRO PARA EL CUADRO DE RENDIMIENTO HISTÓRICO (MOTOR V1)
+            document.getElementById('v1-yield').innerText = (totalStaked > 0 ? (yieldDec * 100).toFixed(1) : 0) + "%";
+            document.getElementById('v1-profit').innerText = "$" + totalProfit.toFixed(2);
+            document.getElementById('v1-count').innerText = resolved.length;
 
+            // MÉTRICAS TOP
             document.getElementById('top-profit').innerText = "$" + totalProfit.toFixed(2);
             document.getElementById('top-yield').innerText = (yieldDec * 100).toFixed(1) + "%";
             document.getElementById('top-bankroll').innerText = "$" + getCurrentBankroll().toFixed(2);
