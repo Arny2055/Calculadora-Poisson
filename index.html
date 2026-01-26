@@ -479,12 +479,22 @@
                          `📈 *Edge:* ${bet.edge}%\n` +
                          `🤖 _Algoritmo: V1 GOLES_`;
 
+            // Enviar a Grupo
             if(tg_config.chatId) {
                 try {
                     const url = `https://api.telegram.org/bot${tg_config.token}/sendMessage?chat_id=${tg_config.chatId}&text=${encodeURIComponent(text)}&parse_mode=Markdown`;
                     const response = await fetch(url);
                     const data = await response.json();
                     if(data.ok) bet.tgMessageId = data.result.message_id;
+                } catch (e) {}
+            }
+            // Enviar a Canal
+            if(tg_config.channelId) {
+                try {
+                    const url = `https://api.telegram.org/bot${tg_config.token}/sendMessage?chat_id=${tg_config.channelId}&text=${encodeURIComponent(text)}&parse_mode=Markdown`;
+                    const response = await fetch(url);
+                    const data = await response.json();
+                    if(data.ok) bet.tgChannelMsgId = data.result.message_id;
                 } catch (e) {}
             }
             localStorage.setItem('betags_v3_miner', JSON.stringify(bets));
@@ -506,8 +516,13 @@
                          `💰 *Cuota:* ${bet.odd.toFixed(2)}\n` +
                          `🤖 _Algoritmo: V1 GOLES_`;
 
+            // Actualizar en Grupo
             if(tg_config.chatId && bet.tgMessageId) {
                 try { await fetch(`https://api.telegram.org/bot${tg_config.token}/editMessageText?chat_id=${tg_config.chatId}&message_id=${bet.tgMessageId}&text=${encodeURIComponent(text)}&parse_mode=Markdown`); } catch (e) {}
+            }
+            // Actualizar en Canal
+            if(tg_config.channelId && bet.tgChannelMsgId) {
+                try { await fetch(`https://api.telegram.org/bot${tg_config.token}/editMessageText?chat_id=${tg_config.channelId}&message_id=${bet.tgChannelMsgId}&text=${encodeURIComponent(text)}&parse_mode=Markdown`); } catch (e) {}
             }
         }
 
@@ -534,13 +549,11 @@
             return k - 1;
         }
 
-        // --- Mejora: Función de Cálculo de p-Value ---
         function calculatePValue(n, yieldDec, avgOdd) {
             if (n < 5) return null;
             const stdDev = Math.sqrt(avgOdd - 1);
             const zScore = (yieldDec * Math.sqrt(n)) / stdDev;
             
-            // Aproximación de la función de distribución normal acumulada
             const t = 1 / (1 + 0.2316419 * Math.abs(zScore));
             const d = 0.3989423 * Math.exp(-zScore * zScore / 2);
             const p = d * t * (0.3193815 + t * (-0.3565638 + t * (1.781478 + t * (-1.821256 + t * 1.330274))));
@@ -728,7 +741,9 @@
         function resolve(id, status) {
             const b = bets.find(x => x.id === id); b.status = status;
             b.profit = status === 'win' ? b.stake * (b.odd - 1) : (status === 'loss' ? -b.stake : 0);
-            save(); updateTelegramStatus(b); sendResolvedToBacktesting(true); 
+            save(); 
+            updateTelegramStatus(b); // Esta función ahora actualiza en Grupo y Canal
+            sendResolvedToBacktesting(true); 
         }
 
         function save() { localStorage.setItem('betags_v3_miner', JSON.stringify(bets)); updateStats(); }
@@ -755,7 +770,6 @@
             const avgProfit = resolved.length > 0 ? (totalProfit / resolved.length).toFixed(2) : "0";
             const yieldGlobal = totalStaked > 0 ? (totalProfit / totalStaked) : 0;
 
-            // --- Mejora: Actualización de p-Value ---
             const pVal = calculatePValue(resolved.length, yieldGlobal, avgOdd);
             const pValDisplay = document.getElementById('top-pvalue');
             if (pVal !== null) {
