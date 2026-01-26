@@ -380,6 +380,20 @@
                             <i class="fa-solid fa-paper-plane mr-2"></i> Enviar Resueltas a Backtesting
                         </button>
                         
+                        <div class="p-3 bg-slate-900/40 rounded-xl border border-white/5">
+                            <label class="text-[9px] text-blue-400 uppercase font-black block mb-2 tracking-widest">Rango de Fechas (Filtrado)</label>
+                            <div class="grid grid-cols-2 gap-2">
+                                <div>
+                                    <p class="text-[8px] text-slate-500 uppercase mb-1">Desde</p>
+                                    <input type="date" id="f_date_start" class="w-full p-2 text-[10px]" onchange="applyFilters()">
+                                </div>
+                                <div>
+                                    <p class="text-[8px] text-slate-500 uppercase mb-1">Hasta</p>
+                                    <input type="date" id="f_date_end" class="w-full p-2 text-[10px]" onchange="applyFilters()">
+                                </div>
+                            </div>
+                        </div>
+
                         <div>
                             <label class="text-[9px] text-slate-500 uppercase block mb-1">Filtro de Asistente</label>
                             <select id="f_assistant" class="w-full p-2 text-xs" onchange="applyFilters()">
@@ -742,7 +756,7 @@
             const b = bets.find(x => x.id === id); b.status = status;
             b.profit = status === 'win' ? b.stake * (b.odd - 1) : (status === 'loss' ? -b.stake : 0);
             save(); 
-            updateTelegramStatus(b); // Esta función ahora actualiza en Grupo y Canal
+            updateTelegramStatus(b);
             sendResolvedToBacktesting(true); 
         }
 
@@ -755,11 +769,57 @@
             if(!silent) alert("Datos sincronizados con Backtesting.");
         }
 
+        // FUNCIÓN AUXILIAR PARA PARSEAR TU FORMATO DE FECHA PERSONALIZADO
+        function parseSpanishDate(dateStr) {
+            if (!dateStr) return null;
+            const months = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
+            try {
+                const parts = dateStr.toLowerCase().split(' ');
+                // Formato esperado: [ "lun.", "26", "ene.", "2026", "09:31" ]
+                const day = parseInt(parts[1]);
+                const monthName = parts[2].replace('.', '');
+                const monthIndex = months.indexOf(monthName);
+                const year = parseInt(parts[3]);
+                if (isNaN(day) || monthIndex === -1 || isNaN(year)) return null;
+                return new Date(year, monthIndex, day);
+            } catch (e) { return null; }
+        }
+
         function applyFilters() {
             const fMar = document.getElementById('f_market').value, fAst = document.getElementById('f_assistant').value;
             const fMinOdd = parseFloat(document.getElementById('f_min_odd').value) || 0, fMinEdge = parseFloat(document.getElementById('f_min_edge').value) || -999;
             
-            const filtered = bets.filter(b => (fMar === "" || b.market === fMar) && (fAst === "" || (fAst === "real" && b.isStrategic) || (fAst === "manual" && !b.isStrategic)) && (b.odd >= fMinOdd) && (parseFloat(b.edge) >= fMinEdge));
+            // NUEVOS VALORES DE FECHA
+            const fDateStart = document.getElementById('f_date_start').value;
+            const fDateEnd = document.getElementById('f_date_end').value;
+
+            const filtered = bets.filter(b => {
+                const marketMatch = (fMar === "" || b.market === fMar);
+                const assistantMatch = (fAst === "" || (fAst === "real" && b.isStrategic) || (fAst === "manual" && !b.isStrategic));
+                const oddMatch = (b.odd >= fMinOdd);
+                const edgeMatch = (parseFloat(b.edge) >= fMinEdge);
+                
+                // LÓGICA DE FILTRADO POR FECHA
+                let dateMatch = true;
+                if (fDateStart || fDateEnd) {
+                    const bDate = parseSpanishDate(b.date);
+                    if (bDate) {
+                        if (fDateStart) {
+                            const start = new Date(fDateStart);
+                            start.setHours(0,0,0,0);
+                            if (bDate < start) dateMatch = false;
+                        }
+                        if (fDateEnd) {
+                            const end = new Date(fDateEnd);
+                            end.setHours(23,59,59,999);
+                            if (bDate > end) dateMatch = false;
+                        }
+                    }
+                }
+
+                return marketMatch && assistantMatch && oddMatch && edgeMatch && dateMatch;
+            });
+
             const resolved = filtered.filter(b => b.status !== 'pending'), allResolved = bets.filter(b => b.status !== 'pending');
             
             const totalProfit = resolved.reduce((a, b) => a + b.profit, 0);
@@ -775,13 +835,9 @@
             if (pVal !== null) {
                 pValDisplay.innerText = (pVal * 100).toFixed(2) + "%";
                 pValDisplay.className = pVal < 0.05 ? "text-xl font-bold text-emerald-400" : "text-xl font-bold text-red-400";
-            } else {
-                pValDisplay.innerText = "--";
-            }
+            } else { pValDisplay.innerText = "--"; }
 
-            let peak = BANKROLL_BASE;
-            let current = BANKROLL_BASE;
-            let maxDD = 0;
+            let peak = BANKROLL_BASE, current = BANKROLL_BASE, maxDD = 0;
             [...resolved].reverse().forEach(b => {
                 current += b.profit;
                 if (current > peak) peak = current;
