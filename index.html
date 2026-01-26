@@ -380,17 +380,6 @@
                             <i class="fa-solid fa-paper-plane mr-2"></i> Enviar Resueltas a Backtesting
                         </button>
                         
-                        <div class="grid grid-cols-2 gap-2">
-                            <div>
-                                <label class="text-[9px] text-slate-500 uppercase block mb-1">Desde</label>
-                                <input type="date" id="f_start_date" class="w-full p-2 text-xs" onchange="applyFilters()">
-                            </div>
-                            <div>
-                                <label class="text-[9px] text-slate-500 uppercase block mb-1">Hasta</label>
-                                <input type="date" id="f_end_date" class="w-full p-2 text-xs" onchange="applyFilters()">
-                            </div>
-                        </div>
-
                         <div>
                             <label class="text-[9px] text-slate-500 uppercase block mb-1">Filtro de Asistente</label>
                             <select id="f_assistant" class="w-full p-2 text-xs" onchange="applyFilters()">
@@ -707,35 +696,14 @@
             const odd = parseFloat(document.getElementById('odd_' + id).value);
             const eventName = document.getElementById('event_name').value || "Evento Desconocido";
             const leagueName = document.getElementById('league_name').value || "INTERNACIONAL";
-            const eventDateStr = document.getElementById('event_date').value;
-            
+            const eventDate = document.getElementById('event_date').value;
             if(!odd) return alert("Ingresa cuota");
             const stakeCell = document.getElementById('stake_' + id);
             const mainStake = stakeCell.querySelector('.stake-main');
             const stakeVal = mainStake ? parseFloat(mainStake.innerText.replace('$', '')) : 0;
             const edge = (odd * prob) - 1;
             const advice = getStrategicAdvice(leagueName, market, odd, edge, chaosProb);
-            
-            // Creamos un timestamp para filtrar por fecha real
-            const timestamp = Date.now(); 
-
-            const newBet = { 
-                id: Date.now(), 
-                league: leagueName, 
-                teams: eventName, 
-                date: eventDateStr, 
-                timestamp: timestamp, // Para filtros precisos
-                market, 
-                odd, 
-                prob, 
-                edge: (edge * 100).toFixed(2), 
-                stake: stakeVal, 
-                status: 'pending', 
-                profit: 0, 
-                engine: 'v1', 
-                isStrategic: advice.isStrategic 
-            };
-            
+            const newBet = { id: Date.now(), league: leagueName, teams: eventName, date: eventDate, market, odd, prob, edge: (edge * 100).toFixed(2), stake: stakeVal, status: 'pending', profit: 0, engine: 'v1', isStrategic: advice.isStrategic };
             bets.unshift(newBet);
             save();
             sendToTelegramAuto(newBet);
@@ -766,39 +734,12 @@
         }
 
         function applyFilters() {
-            const fMar = document.getElementById('f_market').value;
-            const fAst = document.getElementById('f_assistant').value;
-            const fMinOdd = parseFloat(document.getElementById('f_min_odd').value) || 0;
-            const fMinEdge = parseFloat(document.getElementById('f_min_edge').value) || -999;
+            const fMar = document.getElementById('f_market').value, fAst = document.getElementById('f_assistant').value;
+            const fMinOdd = parseFloat(document.getElementById('f_min_odd').value) || 0, fMinEdge = parseFloat(document.getElementById('f_min_edge').value) || -999;
             
-            // Obtención de valores de fecha
-            const fStart = document.getElementById('f_start_date').value;
-            const fEnd = document.getElementById('f_end_date').value;
-
-            const filtered = bets.filter(b => {
-                const matchMarket = (fMar === "" || b.market === fMar);
-                const matchAssistant = (fAst === "" || (fAst === "real" && b.isStrategic) || (fAst === "manual" && !b.isStrategic));
-                const matchOdd = (b.odd >= fMinOdd);
-                const matchEdge = (parseFloat(b.edge) >= fMinEdge);
-                
-                // Lógica de filtro por fecha
-                let matchDate = true;
-                if(fStart || fEnd) {
-                    const bDate = b.timestamp ? new Date(b.timestamp) : new Date(); // Fallback si no hay timestamp
-                    if(fStart) {
-                        const startDate = new Date(fStart + "T00:00:00");
-                        if(bDate < startDate) matchDate = false;
-                    }
-                    if(fEnd) {
-                        const endDate = new Date(fEnd + "T23:59:59");
-                        if(bDate > endDate) matchDate = false;
-                    }
-                }
-
-                return matchMarket && matchAssistant && matchOdd && matchEdge && matchDate;
-            });
-
+            const filtered = bets.filter(b => (fMar === "" || b.market === fMar) && (fAst === "" || (fAst === "real" && b.isStrategic) || (fAst === "manual" && !b.isStrategic)) && (b.odd >= fMinOdd) && (parseFloat(b.edge) >= fMinEdge));
             const resolved = filtered.filter(b => b.status !== 'pending');
+            
             const totalProfit = resolved.reduce((a, b) => a + b.profit, 0);
             const totalStaked = resolved.reduce((a, b) => a + b.stake, 0);
             const wins = resolved.filter(b => b.status === 'win').length;
@@ -821,10 +762,12 @@
                 if (dd > maxDD) maxDD = dd;
             });
 
+            // MÉTRICAS DEL FILTRO PARA EL CUADRO DE RENDIMIENTO HISTÓRICO (MOTOR V1)
             document.getElementById('v1-yield').innerText = (totalStaked > 0 ? (yieldDec * 100).toFixed(1) : 0) + "%";
             document.getElementById('v1-profit').innerText = "$" + totalProfit.toFixed(2);
             document.getElementById('v1-count').innerText = resolved.length;
 
+            // MÉTRICAS TOP
             document.getElementById('top-profit').innerText = "$" + totalProfit.toFixed(2);
             document.getElementById('top-yield').innerText = (yieldDec * 100).toFixed(1) + "%";
             document.getElementById('top-bankroll').innerText = "$" + getCurrentBankroll().toFixed(2);
