@@ -479,7 +479,6 @@
                          `📈 *Edge:* ${bet.edge}%\n` +
                          `🤖 _Algoritmo: V1 GOLES_`;
 
-            // Enviar a Grupo
             if(tg_config.chatId) {
                 try {
                     const url = `https://api.telegram.org/bot${tg_config.token}/sendMessage?chat_id=${tg_config.chatId}&text=${encodeURIComponent(text)}&parse_mode=Markdown`;
@@ -488,7 +487,6 @@
                     if(data.ok) bet.tgMessageId = data.result.message_id;
                 } catch (e) {}
             }
-            // Enviar a Canal
             if(tg_config.channelId) {
                 try {
                     const url = `https://api.telegram.org/bot${tg_config.token}/sendMessage?chat_id=${tg_config.channelId}&text=${encodeURIComponent(text)}&parse_mode=Markdown`;
@@ -516,11 +514,9 @@
                          `💰 *Cuota:* ${bet.odd.toFixed(2)}\n` +
                          `🤖 _Algoritmo: V1 GOLES_`;
 
-            // Actualizar en Grupo
             if(tg_config.chatId && bet.tgMessageId) {
                 try { await fetch(`https://api.telegram.org/bot${tg_config.token}/editMessageText?chat_id=${tg_config.chatId}&message_id=${bet.tgMessageId}&text=${encodeURIComponent(text)}&parse_mode=Markdown`); } catch (e) {}
             }
-            // Actualizar en Canal
             if(tg_config.channelId && bet.tgChannelMsgId) {
                 try { await fetch(`https://api.telegram.org/bot${tg_config.token}/editMessageText?chat_id=${tg_config.channelId}&message_id=${bet.tgChannelMsgId}&text=${encodeURIComponent(text)}&parse_mode=Markdown`); } catch (e) {}
             }
@@ -549,17 +545,35 @@
             return k - 1;
         }
 
+        /**
+         * CORRECCIÓN P-VALUE: Cálculo robusto basado en Función de Error (ERF)
+         */
         function calculatePValue(n, yieldDec, avgOdd) {
-            if (n < 5) return null;
-            const stdDev = Math.sqrt(avgOdd - 1);
-            const zScore = (yieldDec * Math.sqrt(n)) / stdDev;
+            if (n < 5 || avgOdd <= 1) return null;
             
-            const t = 1 / (1 + 0.2316419 * Math.abs(zScore));
-            const d = 0.3989423 * Math.exp(-zScore * zScore / 2);
-            const p = d * t * (0.3193815 + t * (-0.3565638 + t * (1.781478 + t * (-1.821256 + t * 1.330274))));
+            // Desviación estándar aproximada para el beneficio de una apuesta unitaria
+            // Sigma ≈ sqrt(Cuota - 1). Para cuotas decimales esto estima la varianza del retorno.
+            const sigma = Math.sqrt(avgOdd - 1);
             
-            if (zScore > 0) return 1 - p;
-            return p;
+            // P-value para la media de n muestras (Z-Score)
+            const zScore = (yieldDec * Math.sqrt(n)) / sigma;
+            
+            // Función ERF (Aproximación precisa para Normal CDF)
+            const erf = (z) => {
+                const t = 1.0 / (1.0 + 0.5 * Math.abs(z));
+                const ans = 1.0 - t * Math.exp(-z * z - 1.26551223 +
+                    t * (1.00002368 + t * (0.37409196 + t * (0.09678418 +
+                    t * (-0.18628806 + t * (0.27886807 + t * (-1.13520398 +
+                    t * (1.48851587 + t * (-0.82215223 + t * 0.17087277)))))))));
+                return z >= 0 ? ans : -ans;
+            };
+
+            // CDF (Probabilidad acumulada de la Normal Estándar)
+            const cumulativeProb = 0.5 * (1 + erf(zScore / Math.sqrt(2)));
+            
+            // Queremos la probabilidad de obtener este resultado o superior por AZAR
+            // P = 1 - CDF(Z)
+            return 1 - cumulativeProb;
         }
 
         function calculate() {
@@ -742,7 +756,7 @@
             const b = bets.find(x => x.id === id); b.status = status;
             b.profit = status === 'win' ? b.stake * (b.odd - 1) : (status === 'loss' ? -b.stake : 0);
             save(); 
-            updateTelegramStatus(b); // Esta función ahora actualiza en Grupo y Canal
+            updateTelegramStatus(b);
             sendResolvedToBacktesting(true); 
         }
 
@@ -768,12 +782,14 @@
 
             const avgOdd = resolved.length > 0 ? (resolved.reduce((a, b) => a + b.odd, 0) / resolved.length) : 0;
             const avgProfit = resolved.length > 0 ? (totalProfit / resolved.length).toFixed(2) : "0";
-            const yieldGlobal = totalStaked > 0 ? (totalProfit / totalStaked) : 0;
+            const yieldDec = totalStaked > 0 ? (totalProfit / totalStaked) : 0;
 
-            const pVal = calculatePValue(resolved.length, yieldGlobal, avgOdd);
+            // ACTUALIZACIÓN DE P-VALUE CORREGIDO
+            const pVal = calculatePValue(resolved.length, yieldDec, avgOdd);
             const pValDisplay = document.getElementById('top-pvalue');
             if (pVal !== null) {
                 pValDisplay.innerText = (pVal * 100).toFixed(2) + "%";
+                // Colorización: Verde si P < 0.05 (Estadísticamente significativo / Habilidad)
                 pValDisplay.className = pVal < 0.05 ? "text-xl font-bold text-emerald-400" : "text-xl font-bold text-red-400";
             } else {
                 pValDisplay.innerText = "--";
@@ -795,7 +811,7 @@
             document.getElementById('v1-count').innerText = allResolved.length;
 
             document.getElementById('top-profit').innerText = "$" + totalProfit.toFixed(2);
-            document.getElementById('top-yield').innerText = (yieldGlobal * 100).toFixed(1) + "%";
+            document.getElementById('top-yield').innerText = (yieldDec * 100).toFixed(1) + "%";
             document.getElementById('top-bankroll').innerText = "$" + getCurrentBankroll().toFixed(2);
             
             document.getElementById('m-roi').innerText = (totalProfit/BANKROLL_BASE*100).toFixed(1) + "%";
