@@ -158,7 +158,13 @@
             background: rgba(16, 185, 129, 0.2) !important;
             border: 2px solid #10b981 !important;
         }
-        .gold-mine-text { color: #facc15; font-weight: 900; font-size: 0.75rem; }
+
+        /* ESTILO NUEVO ASISTENTE MONITOR */
+        .monitor-master-box {
+            background: linear-gradient(135deg, #0f172a, #1e293b);
+            border: 1px solid #00ff8855;
+            box-shadow: 0 0 20px rgba(0, 255, 136, 0.1);
+        }
     </style>
 </head>
 <body>
@@ -183,6 +189,31 @@
 
     <div class="container mx-auto p-4 max-w-7xl">
         
+        <div id="monitor-maestro" class="monitor-master-box p-4 rounded-2xl mb-6 flex flex-col md:flex-row items-center justify-between gap-4 border-l-8 border-emerald-500">
+            <div class="flex items-center gap-4">
+                <div class="bg-emerald-500/20 p-3 rounded-full animate-pulse">
+                    <i class="fa-solid fa-brain text-emerald-400 text-xl"></i>
+                </div>
+                <div>
+                    <h4 class="text-[10px] font-black text-emerald-400 tracking-[0.2em] uppercase">Estrategia Dominante de Backtesting</h4>
+                    <div id="best-strategy-summary" class="text-white text-sm font-bold italic">Analizando histórico de unidades...</div>
+                </div>
+            </div>
+            <div class="flex gap-6 items-center">
+                <div class="text-center">
+                    <p class="text-[9px] text-slate-500 uppercase font-black">Eficiencia (P-Value)</p>
+                    <p id="best-strategy-pvalue" class="text-lg font-black text-white">--</p>
+                </div>
+                <div class="text-center">
+                    <p class="text-[9px] text-slate-500 uppercase font-black">Net Profit</p>
+                    <p id="best-strategy-profit" class="text-lg font-black text-emerald-400">$0</p>
+                </div>
+                <div class="bg-blue-600/10 border border-blue-500/30 px-3 py-1 rounded text-[10px] font-black text-blue-400">
+                    BOT LISTO PARA TELEGRAM
+                </div>
+            </div>
+        </div>
+
         <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
             <div class="glass-card p-4 rounded-2xl border-l-4 border-bet-yellow">
                 <p class="text-[10px] uppercase font-black text-slate-500 tracking-widest">Profit Total</p>
@@ -203,21 +234,13 @@
         </div>
 
         <div id="calc" class="tab-content active space-y-6">
-            <div id="strategy-assistant-box" class="recommendation-box mb-6 border-l-8 border-l-emerald-500">
+            <div id="strategy-assistant-box" class="recommendation-box hidden mb-6">
                 <div class="flex items-center justify-between">
-                    <div class="w-full">
-                        <div class="flex items-center gap-2 mb-2">
-                            <i class="fa-solid fa-brain text-emerald-400 animate-pulse"></i>
-                            <h3 class="text-xs font-black text-emerald-400 uppercase tracking-widest">Monitor de Estrategia Backtesting</h3>
-                        </div>
-                        <div id="strategy-global-insights" class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-3 border-b border-white/10 pb-3">
-                            <div class="text-[10px] text-slate-400">Escaneando historial...</div>
-                        </div>
-                        <div id="strategy-text" class="text-sm text-white font-medium italic">
-                            Ingresa datos del evento para ver si coincide con tus zonas de mayor ganancia.
-                        </div>
+                    <div>
+                        <h3 class="text-xs font-black text-blue-300 uppercase mb-1"><i class="fa-solid fa-robot mr-2"></i>ASISTENTE ESTRATÉGICO</h3>
+                        <div id="strategy-text" class="text-sm text-white font-medium italic">Esperando datos de mercado...</div>
                     </div>
-                    <div id="strategy-signal" class="text-3xl ml-4">🔍</div>
+                    <div id="strategy-signal" class="text-2xl animate-bounce"></div>
                 </div>
             </div>
 
@@ -228,7 +251,7 @@
                     <div class="grid grid-cols-2 gap-2 mb-4">
                         <div>
                             <label class="text-[10px] font-bold text-slate-400 uppercase block mb-1">Liga</label>
-                            <input type="text" id="league_name" class="w-full p-2 text-xs" placeholder="Ej: LaLiga" oninput="runContinuousAssistant()">
+                            <input type="text" id="league_name" class="w-full p-2 text-xs" placeholder="Ej: LaLiga">
                         </div>
                         <div>
                             <label class="text-[10px] font-bold text-slate-400 uppercase block mb-1">Evento</label>
@@ -447,7 +470,7 @@
         let bets = JSON.parse(localStorage.getItem('betags_v3_miner')) || [];
         let tg_config = JSON.parse(localStorage.getItem('betags_tg_config')) || { token: "8389950970:AAEdYvy2mcmo5ydUMrR_tOIGR8QCYO1STuU", chatId: "", channelId: "", auto: false };
         let pChart, bChart;
-        let bestStrategyGlobal = { type: null, name: null, pValue: null };
+        let globalBestStrategy = null; // Guardará la estrategia ganadora actual
 
         function setDefaultDate() {
             const now = new Date();
@@ -458,8 +481,59 @@
 
         window.onload = () => {
             setDefaultDate();
-            runContinuousAssistant(); 
+            monitorBacktesting();
         };
+
+        // --- NUEVA FUNCIÓN: MONITOREO CONSTANTE DE BACKTESTING ---
+        function monitorBacktesting() {
+            const history = JSON.parse(localStorage.getItem('backtesting_data')) || [];
+            if (history.length < 5) {
+                document.getElementById('best-strategy-summary').innerText = "Recolectando datos de backtesting (mín. 5)...";
+                return;
+            }
+
+            const getOddRange = (o) => {
+                const lower = Math.floor(o * 2) / 2;
+                return `${lower.toFixed(1)} - ${(lower + 0.5).toFixed(1)}`;
+            };
+
+            let stats = { liga: {}, mercado: {}, rango: {} };
+
+            history.forEach(b => {
+                const range = getOddRange(b.cuota);
+                [ {k:'liga', v:b.liga}, {k:'mercado', v:b.mercado}, {k:'rango', v:range} ].forEach(item => {
+                    if(!stats[item.k][item.v]) stats[item.k][item.v] = { profit: 0, count: 0, staked: 0, odds: [] };
+                    stats[item.k][item.v].profit += b.profit;
+                    stats[item.k][item.v].staked += b.stake;
+                    stats[item.k][item.v].count++;
+                    stats[item.k][item.v].odds.push(b.cuota);
+                });
+            });
+
+            // Encontrar la categoría con más unidades ganadas
+            let best = { units: -999, label: "", type: "" };
+            Object.keys(stats).forEach(type => {
+                Object.keys(stats[type]).forEach(label => {
+                    if(stats[type][label].profit > best.units) {
+                        best = { units: stats[type][label].profit, label: label, type: type, data: stats[type][label] };
+                    }
+                });
+            });
+
+            if(best.units > 0) {
+                const yieldVal = (best.data.profit / best.data.staked);
+                const avgOdd = best.data.odds.reduce((a,b) => a+b, 0) / best.data.count;
+                const pVal = calculatePValue(best.data.count, yieldVal, avgOdd);
+                
+                globalBestStrategy = { type: best.type, label: best.label, pValue: pVal };
+
+                document.getElementById('best-strategy-summary').innerHTML = 
+                    `<span class="text-bet-yellow">${best.type.toUpperCase()}:</span> ${best.label} 🚀`;
+                document.getElementById('best-strategy-pvalue').innerText = (pVal * 100).toFixed(2) + "%";
+                document.getElementById('best-strategy-pvalue').className = pVal < 0.05 ? "text-lg font-black text-emerald-400" : "text-lg font-black text-red-400";
+                document.getElementById('best-strategy-profit').innerText = "+" + best.units.toFixed(1) + " Unidades";
+            }
+        }
 
         function showTab(tabId) {
             document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
@@ -580,73 +654,6 @@
             return Math.max(0.0001, 1 - cumulativeProb);
         }
 
-        // --- MEJORA: ASISTENTE CONSTANTE, MONITOREO Y RESTRICCIÓN ---
-        function runContinuousAssistant() {
-            const history = JSON.parse(localStorage.getItem('backtesting_data')) || [];
-            const insightsContainer = document.getElementById('strategy-global-insights');
-            
-            if (history.length < 5) {
-                insightsContainer.innerHTML = `<div class="text-[10px] text-slate-500 uppercase">Faltan datos en Backtesting para análisis profundo...</div>`;
-                return;
-            }
-
-            const stats = { leagues: {}, markets: {}, odds: {} };
-            const getRange = (o) => `${(Math.floor(o * 2) / 2).toFixed(1)}-${(Math.floor(o * 2) / 2 + 0.5).toFixed(1)}`;
-
-            history.forEach(b => {
-                if(b.resultado === 'pending') return;
-                const r = getRange(b.cuota);
-                [ [stats.leagues, b.liga, 'liga'], [stats.markets, b.mercado, 'mercado'], [stats.odds, r, 'odd'] ].forEach(([obj, val, type]) => {
-                    if (!obj[val]) obj[val] = { profit: 0, count: 0, staked: 0, oddsSum: 0 };
-                    obj[val].profit += b.profit;
-                    obj[val].staked += b.stake;
-                    obj[val].count++;
-                    obj[val].oddsSum += b.cuota;
-                });
-            });
-
-            // Encontrar el ABSOLUTO mejor (Mina de Oro)
-            const getBest = (obj) => Object.entries(obj).sort((a,b) => b[1].profit - a[1].profit)[0];
-            const bestLeague = getBest(stats.leagues);
-            const bestMarket = getBest(stats.markets);
-            const bestOdd = getBest(stats.odds);
-
-            // Determinar cuál de los 3 es el mejor global para restringir apuestas
-            const candidates = [
-                { type: 'liga', name: bestLeague[0], data: bestLeague[1] },
-                { type: 'mercado', name: bestMarket[0], data: bestMarket[1] },
-                { type: 'rango', name: bestOdd[0], data: bestOdd[1] }
-            ];
-            const absoluteBest = candidates.sort((a,b) => b.data.profit - a.data.profit)[0];
-            
-            // Calcular P-Value específico de la estrategia ganadora
-            const yieldDec = absoluteBest.data.profit / absoluteBest.data.staked;
-            const avgOdd = absoluteBest.data.oddsSum / absoluteBest.data.count;
-            const stratPValue = calculatePValue(absoluteBest.data.count, yieldDec, avgOdd);
-            
-            bestStrategyGlobal = { type: absoluteBest.type, name: absoluteBest.name, pValue: stratPValue };
-
-            insightsContainer.innerHTML = `
-                <div><p class="text-[9px] text-slate-500 uppercase">Mina de Oro (Liga)</p><p class="gold-mine-text">${bestLeague[0]} (+$${bestLeague[1].profit.toFixed(1)})</p></div>
-                <div><p class="text-[9px] text-slate-500 uppercase">Mejor Mercado</p><p class="gold-mine-text">${bestMarket[0]} (+$${bestMarket[1].profit.toFixed(1)})</p></div>
-                <div><p class="text-[9px] text-slate-500 uppercase">Rango Ganador</p><p class="gold-mine-text">@${bestOdd[0]} (+$${bestOdd[1].profit.toFixed(1)})</p></div>
-                <div class="border-l border-white/10 pl-4">
-                    <p class="text-[9px] text-emerald-500 uppercase font-black">P-Value Estrategia</p>
-                    <p class="text-xs font-bold text-white">${(stratPValue * 100).toFixed(3)}%</p>
-                </div>
-            `;
-
-            const currentLeague = document.getElementById('league_name').value;
-            if (currentLeague && bestLeague[0].toLowerCase() === currentLeague.toLowerCase()) {
-                document.getElementById('strategy-text').innerHTML = `<span class="text-emerald-400 font-black">🔥 ESTRATEGIA ACTIVADA: Solo esta liga permite el minado real. P-Value: ${(stratPValue*100).toFixed(2)}%</span>`;
-                document.getElementById('strategy-signal').innerHTML = "💰";
-            } else {
-                document.getElementById('strategy-text').innerHTML = `<span class="text-slate-500 italic">Esperando evento que coincida con la Mina de Oro: ${absoluteBest.name}</span>`;
-                document.getElementById('strategy-signal').innerHTML = "🔍";
-            }
-        }
-        // -----------------------------------------------------------
-
         function calculate() {
             const h_lambda = parseFloat(document.getElementById('h_gf').value) || 0;
             const a_lambda = parseFloat(document.getElementById('a_gf').value) || 0;
@@ -704,74 +711,111 @@
         }
 
         function getStrategicAdvice(currentLeague, currentMarket, currentOdd, currentEdge, chaosProb) {
-            // MEJORA: Solo es estratégico si coincide con el MEJOR absoluto
-            const getOddRange = (o) => `${(Math.floor(o * 2) / 2).toFixed(1)}-${(Math.floor(o * 2) / 2 + 0.5).toFixed(1)}`;
+            const history = JSON.parse(localStorage.getItem('backtesting_data')) || [];
+            if (history.length < 5) return { isStrategic: false, evaluations: [], text: "Analizando... Se necesitan 5 picks históricos." };
+            
+            const getOddRange = (o) => {
+                const lower = Math.floor(o * 2) / 2;
+                return `${lower.toFixed(1)} - ${(lower + 0.5).toFixed(1)}`;
+            };
             const currentOddRange = getOddRange(currentOdd);
-
-            let match = false;
-            if (bestStrategyGlobal.type === 'liga' && bestStrategyGlobal.name.toLowerCase() === currentLeague.toLowerCase()) match = true;
-            if (bestStrategyGlobal.type === 'mercado' && bestStrategyGlobal.name === currentMarket) match = true;
-            if (bestStrategyGlobal.type === 'rango' && bestStrategyGlobal.name === currentOddRange) match = true;
-
-            if (match && currentEdge > 0.01) {
-                return { isStrategic: true, evaluations: [{ category: 'MINA DE ORO', name: bestStrategyGlobal.name, pValue: bestStrategyGlobal.pValue }] };
+            
+            // PRIORIDAD: Comparar con la Estrategia Dominante del Monitor Global
+            let isGoldenStrategy = false;
+            if(globalBestStrategy) {
+                if(globalBestStrategy.type === 'liga' && globalBestStrategy.label.toLowerCase() === currentLeague.toLowerCase()) isGoldenStrategy = true;
+                if(globalBestStrategy.type === 'mercado' && globalBestStrategy.label === currentMarket) isGoldenStrategy = true;
+                if(globalBestStrategy.type === 'rango' && globalBestStrategy.label === currentOddRange) isGoldenStrategy = true;
             }
-            return { isStrategic: false, evaluations: [], text: "No cumple la estrategia maestra." };
+
+            const insights = {
+                liga: { profit: 0, staked: 0, count: 0, name: currentLeague, label: "LIGA" },
+                mercado: { profit: 0, staked: 0, count: 0, name: currentMarket, label: "MERCADO" },
+                rangoCuota: { profit: 0, staked: 0, count: 0, name: currentOddRange, label: "RANGO CUOTA" }
+            };
+
+            history.forEach(b => {
+                if (b.liga.toLowerCase() === currentLeague.toLowerCase()) { insights.liga.profit += b.profit; insights.liga.staked += b.stake; insights.liga.count++; }
+                if (b.mercado === currentMarket) { insights.mercado.profit += b.profit; insights.mercado.staked += b.stake; insights.mercado.count++; }
+                if (getOddRange(b.cuota) === currentOddRange) { insights.rangoCuota.profit += b.profit; insights.rangoCuota.staked += b.stake; insights.rangoCuota.count++; }
+            });
+
+            const calcYield = (obj) => obj.staked > 0 ? (obj.profit / obj.staked) * 100 : -999;
+            let evaluations = [];
+            Object.keys(insights).forEach(key => {
+                const item = insights[key];
+                const yieldVal = calcYield(item);
+                if (item.count >= MIN_CONFIDENCE_SAMPLE && yieldVal >= MIN_YIELD_THRESHOLD) {
+                    evaluations.push({ category: item.label, name: item.name, yield: yieldVal, count: item.count });
+                }
+            });
+
+            if (isGoldenStrategy || evaluations.length > 0) return { isStrategic: true, evaluations: evaluations, isGolden: isGoldenStrategy };
+            return { isStrategic: false, evaluations: [], text: "Pick estándar. No hay datos de alta eficiencia aún." };
         }
 
         function updateEdge(id, prob, partnerId, marketName, chaosProb) {
             const odd = parseFloat(document.getElementById('odd_' + id).value) || 0;
+            const partnerOdd = parseFloat(document.getElementById('odd_' + partnerId).value) || 0;
             const currentLeague = document.getElementById('league_name').value || "Desconocida";
-            const edge = (odd * prob) - 1;
-            const advice = getStrategicAdvice(currentLeague, marketName, odd, edge, chaosProb);
-            
-            const stakeCell = document.getElementById('stake_' + id);
-            const edgeEl = document.getElementById('edge_' + id);
-            const row = document.getElementById('row_' + id);
-
             if(odd > 1) {
+                const edge = (odd * prob) - 1;
+                const standardKelly = Math.max(0, (edge / (odd - 1)) * KELLY_FRAC);
+                const currentPValueText = document.getElementById('top-pvalue').innerText;
+                const currentPValue = currentPValueText !== "--" ? parseFloat(currentPValueText) / 100 : 1.0;
+                const pConfidenceMultiplier = Math.max(0.05, 1 - currentPValue); 
+                const chaosPenalty = Math.min(1, (chaosProb / prob)); 
+                const adjustedKelly = standardKelly * chaosPenalty * pConfidenceMultiplier;
+                const stake = getCurrentBankroll() * adjustedKelly;
+                const edgeEl = document.getElementById('edge_' + id);
                 edgeEl.innerText = (edge * 100).toFixed(1) + "%";
                 edgeEl.className = edge > 0 ? "p-4 text-emerald-400 font-bold" : "p-4 text-red-500";
-
-                // RESTRICCIÓN: Solo calcular stake si es estratégico
-                if (advice.isStrategic) {
-                    const standardKelly = Math.max(0, (edge / (odd - 1)) * KELLY_FRAC);
-                    const pConfidenceMultiplier = Math.max(0.05, 1 - bestStrategyGlobal.pValue); 
-                    const adjustedKelly = standardKelly * pConfidenceMultiplier;
-                    const stake = getCurrentBankroll() * adjustedKelly;
-
-                    stakeCell.innerHTML = `<span class="stake-main">$${stake.toFixed(2)}</span><div class="text-[7px] text-emerald-400 font-black">VALIDADO</div>`;
-                    row.classList.add('strategy-match');
-                    document.getElementById('strategy-signal').innerHTML = "💎";
-                } else {
-                    stakeCell.innerHTML = `<span class="text-slate-600">--</span><div class="text-[7px] text-red-500 uppercase">Bloqueado</div>`;
-                    row.classList.remove('strategy-match');
+                const stakeCell = document.getElementById('stake_' + id);
+                if (stake > 0) {
+                    let labelsHtml = `<span class="stake-main">$${stake.toFixed(2)}</span>`;
+                    if (chaosPenalty < 0.99) labelsHtml += `<div class="mt-1 text-[8px] text-orange-400 font-black uppercase">CHAOS -${((1-chaosPenalty)*100).toFixed(0)}%</div>`;
+                    if (currentPValue > 0.10) labelsHtml += `<div class="mt-1 text-[8px] text-red-400 font-black uppercase">P-REDUCED -${(currentPValue*100).toFixed(0)}%</div>`;
+                    stakeCell.innerHTML = labelsHtml;
+                } else { stakeCell.innerText = "--"; }
+                
+                if(edge > 0.01) { 
+                    const advice = getStrategicAdvice(currentLeague, marketName, odd, edge, chaosProb);
+                    const assistantBox = document.getElementById('strategy-assistant-box');
+                    assistantBox.classList.remove('hidden');
+                    
+                    if (advice.isStrategic) {
+                        let html = `<div class="flex flex-col gap-1">`;
+                        if(advice.isGolden) html += `<div class="text-[12px] text-bet-yellow font-black uppercase mb-1 underline">💎 DETECTADA ESTRATEGIA MAESTRA 💎</div>`;
+                        advice.evaluations.forEach(ev => { html += `<div class="text-[11px]"><span class="text-blue-300 font-black">${ev.category}:</span> <span class="text-white">${ev.name}</span> <span class="text-emerald-400 font-bold">(${ev.yield.toFixed(1)}% Yield)</span></div>`; });
+                        html += `</div>`;
+                        document.getElementById('strategy-text').innerHTML = html;
+                        document.getElementById('strategy-signal').innerHTML = "💎";
+                        if(document.getElementById('row_' + id)) document.getElementById('row_' + id).classList.add('strategy-match');
+                    } else {
+                        document.getElementById('strategy-text').innerHTML = `<span class="text-slate-400">${advice.text || "Pick estándar."}</span>`;
+                        document.getElementById('strategy-signal').innerHTML = "🔍";
+                        if(document.getElementById('row_' + id)) document.getElementById('row_' + id).classList.remove('strategy-match');
+                    }
                 }
             }
         }
 
         function registerBet(id, market, prob, chaosProb) {
             const odd = parseFloat(document.getElementById('odd_' + id).value);
+            const eventName = document.getElementById('event_name').value || "Evento Desconocido";
             const leagueName = document.getElementById('league_name').value || "INTERNACIONAL";
+            const eventDate = document.getElementById('event_date').value;
+            if(!odd) return alert("Ingresa cuota");
+            const stakeCell = document.getElementById('stake_' + id);
+            const mainStake = stakeCell.querySelector('.stake-main');
+            const stakeVal = mainStake ? parseFloat(mainStake.innerText.replace('$', '')) : 0;
             const edge = (odd * prob) - 1;
             const advice = getStrategicAdvice(leagueName, market, odd, edge, chaosProb);
-
-            // RESTRICCIÓN: No permitir apostar si no es la mejor estrategia
-            if (!advice.isStrategic) {
-                alert("⛔ RESTRICCIÓN DE ASISTENTE: Solo se permite apostar en la estrategia con mayor número de unidades ganadas (" + bestStrategyGlobal.name + ").");
-                return;
-            }
-
-            const eventName = document.getElementById('event_name').value || "Evento Desconocido";
-            const eventDate = document.getElementById('event_date').value;
-            const mainStake = document.getElementById('stake_' + id).querySelector('.stake-main');
-            const stakeVal = mainStake ? parseFloat(mainStake.innerText.replace('$', '')) : 0;
-
-            const newBet = { id: Date.now(), league: leagueName, teams: eventName, date: eventDate, market, odd, prob, edge: (edge * 100).toFixed(2), stake: stakeVal, status: 'pending', profit: 0, engine: 'v1', isStrategic: true };
+            const newBet = { id: Date.now(), league: leagueName, teams: eventName, date: eventDate, market, odd, prob, edge: (edge * 100).toFixed(2), stake: stakeVal, status: 'pending', profit: 0, engine: 'v1', isStrategic: advice.isStrategic };
             bets.unshift(newBet);
             save();
             sendToTelegramAuto(newBet);
-            alert("Pick estratégico registrado.");
+            alert("Pick registrado correctamente.");
         }
 
         function shareBet(id, platform) {
@@ -786,7 +830,7 @@
             save(); 
             updateTelegramStatus(b);
             sendResolvedToBacktesting(true); 
-            runContinuousAssistant();
+            monitorBacktesting(); // Recalcular estrategia dominante al resolver
         }
 
         function save() { localStorage.setItem('betags_v3_miner', JSON.stringify(bets)); updateStats(); }
@@ -817,6 +861,7 @@
             const totalStaked = resolved.reduce((a, b) => a + b.stake, 0);
             const wins = resolved.filter(b => b.status === 'win').length;
             const avgOdd = resolved.length > 0 ? (resolved.reduce((a, b) => a + b.odd, 0) / resolved.length) : 0;
+            const avgProfit = resolved.length > 0 ? (totalProfit / resolved.length).toFixed(2) : "0";
             const yieldDec = totalStaked > 0 ? (totalProfit / totalStaked) : 0;
 
             const pVal = calculatePValue(resolved.length, yieldDec, avgOdd);
@@ -837,13 +882,16 @@
             document.getElementById('v1-yield').innerText = (totalStaked > 0 ? (yieldDec * 100).toFixed(1) : 0) + "%";
             document.getElementById('v1-profit').innerText = "$" + totalProfit.toFixed(2);
             document.getElementById('v1-count').innerText = resolved.length;
+
             document.getElementById('top-profit').innerText = "$" + totalProfit.toFixed(2);
             document.getElementById('top-yield').innerText = (yieldDec * 100).toFixed(1) + "%";
             document.getElementById('top-bankroll').innerText = "$" + getCurrentBankroll().toFixed(2);
+            
             document.getElementById('m-roi').innerText = (totalProfit/BANKROLL_BASE*100).toFixed(1) + "%";
             document.getElementById('m-hit').innerText = (resolved.length > 0 ? (wins/resolved.length*100).toFixed(1) : 0) + "%";
             document.getElementById('m-dd').innerText = (maxDD * 100).toFixed(1) + "%";
             document.getElementById('m-avg-odd').innerText = avgOdd.toFixed(2);
+            document.getElementById('m-avg-profit').innerText = "$" + avgProfit;
 
             renderHistory(filtered); 
             renderBankrollChart(resolved);
@@ -879,7 +927,7 @@
             });
         }
 
-        function deleteBet(id) { if(confirm('¿Eliminar registro?')) { bets = bets.filter(x => x.id !== id); save(); } }
+        function deleteBet(id) { if(confirm('¿Eliminar registro?')) { bets = bets.filter(x => x.id !== id); save(); monitorBacktesting(); } }
 
         function renderPoissonChart(labels, home, away) {
             const ctx = document.getElementById('poissonChart').getContext('2d'); if(pChart) pChart.destroy();
