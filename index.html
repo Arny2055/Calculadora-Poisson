@@ -182,7 +182,7 @@
 
     <div class="container mx-auto p-4 max-w-7xl">
         
-        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+        <div class="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
             <div class="glass-card p-4 rounded-2xl border-l-4 border-bet-yellow">
                 <p class="text-[10px] uppercase font-black text-slate-500 tracking-widest">Profit Total</p>
                 <p id="top-profit" class="text-xl font-bold">$0.00</p>
@@ -194,6 +194,10 @@
             <div class="glass-card p-4 rounded-2xl border-l-4 border-emerald-500">
                 <p class="text-[10px] uppercase font-black text-slate-500 tracking-widest">Bankroll</p>
                 <p id="top-bankroll" class="text-xl font-bold">$100.00</p>
+            </div>
+            <div class="glass-card p-4 rounded-2xl border-l-4 border-orange-500">
+                <p class="text-[10px] uppercase font-black text-slate-500 tracking-widest">Beneficios</p>
+                <p id="top-withdrawals" class="text-xl font-bold text-orange-400">$0.00</p>
             </div>
             <div class="glass-card p-4 rounded-2xl border-l-4 border-purple-500">
                 <p class="text-[10px] uppercase font-black text-slate-500 tracking-widest">p-Value (Habilidad)</p>
@@ -336,7 +340,7 @@
         </div>
 
         <div id="bank" class="tab-content space-y-6">
-            <div class="grid grid-cols-1 gap-6">
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 <div class="glass-card p-6 rounded-2xl border-t-2 border-slate-500">
                     <h3 class="text-center font-black text-slate-400 mb-4 uppercase">RENDIMIENTO HISTÓRICO (Motor V1)</h3>
                     <div class="grid grid-cols-3 gap-2">
@@ -352,6 +356,17 @@
                             <p class="text-[9px] text-slate-500 uppercase">Muestra</p>
                             <p id="v1-count" class="font-bold text-white text-xl">0</p>
                         </div>
+                    </div>
+                </div>
+
+                <div class="glass-card p-6 rounded-2xl border-t-2 border-orange-500">
+                    <h3 class="text-center font-black text-orange-400 mb-4 uppercase italic">Apartado de Beneficios</h3>
+                    <div class="flex flex-col items-center justify-center space-y-3">
+                        <p class="text-[10px] text-slate-400 uppercase text-center">Solo disponible al ganar +30% del Bank Inicial ($100)</p>
+                        <div class="text-2xl font-black text-white">$ <span id="withdrawable-amount">0.00</span></div>
+                        <button id="btn-withdraw" onclick="makeWithdrawal()" class="w-full bg-orange-600 disabled:bg-slate-800 disabled:text-slate-600 py-3 rounded-xl font-black text-xs uppercase tracking-widest transition-all">
+                            Retirar Beneficios a Apartado
+                        </button>
                     </div>
                 </div>
             </div>
@@ -453,6 +468,7 @@
         let bets = JSON.parse(localStorage.getItem('betags_v3_miner')) || [];
         let tg_config = JSON.parse(localStorage.getItem('betags_tg_config')) || { token: "8389950970:AAEdYvy2mcmo5ydUMrR_tOIGR8QCYO1STuU", chatId: "", channelId: "", auto: false };
         let bankrollOffset = parseFloat(localStorage.getItem('betags_bank_offset')) || 0;
+        let totalWithdrawals = parseFloat(localStorage.getItem('betags_withdrawals')) || 0; // NUEVO: Acumulado de beneficios
         let pChart, bChart;
 
         function setDefaultDate() {
@@ -471,6 +487,29 @@
                 localStorage.setItem('betags_bank_offset', bankrollOffset);
                 updateStats();
                 alert("Banca reiniciada a 100 unidades.");
+            }
+        }
+
+        // NUEVA FUNCIÓN: Lógica de retiros
+        function makeWithdrawal() {
+            const currentBank = getCurrentBankroll();
+            const excess = currentBank - BANKROLL_BASE;
+            
+            if (excess >= (BANKROLL_BASE * 0.30)) {
+                if (confirm(`¿Retirar $${excess.toFixed(2)} a tu apartado de beneficios? Esto reseteará tu bank a $100.`)) {
+                    totalWithdrawals += excess;
+                    localStorage.setItem('betags_withdrawals', totalWithdrawals);
+                    
+                    // Ajustamos el offset para que el bankroll regrese a 100
+                    const totalCurrentProfit = bets.reduce((acc, b) => acc + (b.profit || 0), 0);
+                    bankrollOffset = -totalCurrentProfit;
+                    localStorage.setItem('betags_bank_offset', bankrollOffset);
+                    
+                    updateStats();
+                    alert("¡Beneficios guardados con éxito!");
+                }
+            } else {
+                alert("No has alcanzado el 30% de ganancia mínima ($30).");
             }
         }
 
@@ -593,14 +632,12 @@
             return 1 - cumulativeProb;
         }
 
-        // MEJORA: Función para refrescar cálculos de edge al cambiar el selector p-Value
         function updateAllEdges() {
             const tableRows = document.querySelectorAll('#market-table tr');
             tableRows.forEach(row => {
                 const id = row.id.replace('row_', '');
                 const inputs = row.querySelectorAll('input');
                 if(inputs.length > 0) {
-                    // Disparamos el input event de las cuotas existentes para refrescar stakes
                     inputs[0].dispatchEvent(new Event('input'));
                 }
             });
@@ -636,6 +673,7 @@
                 { id: 'X2', name: 'DC X2', prob: p_loss + p_draw, partner: 'win', chaos: chaos.loss + chaos.draw },
                 { id: 'o25', name: 'OVER 2.5', prob: 1 - p_u25, partner: 'u25', chaos: chaos.o25 },
                 { id: 'u25', name: 'UNDER 2.5', prob: p_u25, partner: 'o25', chaos: chaos.u25 },
+                { id: 'bttsy', name: 'BTTS SÍ', prob: p_btts_y, partner: 'bttsn', chaos: chaos.bttsy },
                 { id: 'bttsy', name: 'BTTS SÍ', prob: p_btts_y, partner: 'bttsn', chaos: chaos.bttsy },
                 { id: 'bttsn', name: 'BTTS NO', prob: 1 - p_btts_y, partner: 'bttsy', chaos: chaos.bttsn }
             ]);
@@ -705,7 +743,6 @@
                 const currentPValueText = document.getElementById('top-pvalue').innerText;
                 const currentPValue = currentPValueText !== "--" ? parseFloat(currentPValueText) / 100 : 1.0;
                 
-                // MEJORA: Lógica condicional según el selector de p-Value
                 let pConfidenceMultiplier = 1.0;
                 if (usePValue) {
                     pConfidenceMultiplier = Math.max(0.05, 1 - currentPValue); 
@@ -722,7 +759,6 @@
                 if (stake > 0) {
                     let labelsHtml = `<span class="stake-main">$${stake.toFixed(2)}</span>`;
                     if (chaosPenalty < 0.99) labelsHtml += `<div class="mt-1 text-[8px] text-orange-400 font-black uppercase">CHAOS -${((1-chaosPenalty)*100).toFixed(0)}%</div>`;
-                    // Solo mostrar reducción de p-Value si el selector está activo
                     if (usePValue && currentPValue > 0.10) labelsHtml += `<div class="mt-1 text-[8px] text-red-400 font-black uppercase">P-REDUCED -${(currentPValue*100).toFixed(0)}%</div>`;
                     stakeCell.innerHTML = labelsHtml;
                 } else { stakeCell.innerText = "--"; }
@@ -831,7 +867,23 @@
 
             document.getElementById('top-profit').innerText = "$" + totalProfit.toFixed(2);
             document.getElementById('top-yield').innerText = (yieldDec * 100).toFixed(1) + "%";
-            document.getElementById('top-bankroll').innerText = "$" + getCurrentBankroll().toFixed(2);
+            
+            const finalBank = getCurrentBankroll();
+            document.getElementById('top-bankroll').innerText = "$" + finalBank.toFixed(2);
+            
+            // NUEVO: Lógica de actualización de retiros en UI
+            const withdrawable = Math.max(0, finalBank - BANKROLL_BASE);
+            document.getElementById('withdrawable-amount').innerText = withdrawable.toFixed(2);
+            document.getElementById('top-withdrawals').innerText = "$" + totalWithdrawals.toFixed(2);
+            
+            const btnWithdraw = document.getElementById('btn-withdraw');
+            if (withdrawable >= (BANKROLL_BASE * 0.30)) {
+                btnWithdraw.disabled = false;
+                btnWithdraw.classList.add('hover:bg-orange-500', 'shadow-lg', 'shadow-orange-900/40');
+            } else {
+                btnWithdraw.disabled = true;
+                btnWithdraw.classList.remove('hover:bg-orange-500', 'shadow-lg', 'shadow-orange-900/40');
+            }
             
             document.getElementById('m-roi').innerText = (totalProfit/BANKROLL_BASE*100).toFixed(1) + "%";
             document.getElementById('m-hit').innerText = (resolved.length > 0 ? (wins/resolved.length*100).toFixed(1) : 0) + "%";
