@@ -209,8 +209,8 @@
                         <div id="strategy-text" class="text-sm text-white font-medium italic">Esperando datos de mercado...</div>
                     </div>
                     <div class="flex gap-2 items-center">
-                        <button onclick="askAssistantBest()" class="bg-blue-600/40 hover:bg-blue-500 text-white text-[10px] font-black px-3 py-2 rounded-lg border border-blue-400/50 transition-all uppercase tracking-tighter">
-                            <i class="fa-solid fa-magnifying-glass-chart mr-1"></i> Consultar Rentabilidad Actual
+                        <button onclick="askAssistantBest()" class="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-[10px] font-black px-4 py-2.5 rounded-xl border border-white/20 transition-all uppercase tracking-tighter flex items-center shadow-lg shadow-blue-900/40">
+                            <i class="fa-solid fa-wand-magic-sparkles mr-2"></i> Minar Profit más Alto
                         </button>
                         <div id="strategy-signal" class="text-2xl animate-bounce"></div>
                     </div>
@@ -660,51 +660,71 @@
         }
 
         /**
-         * FUNCIÓN MEJORADA: CONSULTA AL ASISTENTE SOBRE RENTABILIDAD
+         * MEJORA SOLICITADA: ANALIZADOR MULTI-DIMENSIONAL DE PROFIT
          */
         function askAssistantBest() {
             const history = JSON.parse(localStorage.getItem('backtesting_data')) || [];
             if (history.length < 5) {
-                alert("Asistente: Aún no tengo suficientes datos en Backtesting para darte un reporte de rentabilidad confiable. (Mínimo 5 picks)");
+                alert("Asistente: Necesito al menos 5 picks en Backtesting para realizar un minado de datos serio.");
                 return;
             }
 
-            const stats = {};
+            const getOddRange = (o) => `${(Math.floor(o * 2) / 2).toFixed(1)} - ${(Math.floor(o * 2) / 2 + 0.5).toFixed(1)}`;
+            const getEdgeRange = (e) => {
+                const val = parseFloat(e);
+                const lower = Math.floor(val / 5) * 5;
+                return `${lower}% - ${lower + 5}%`;
+            };
+
+            const dimensions = {};
+
             history.forEach(b => {
-                const key = `${b.liga} | ${b.mercado}`;
-                if (!stats[key]) stats[key] = { profit: 0, staked: 0, count: 0, sumOdds: 0 };
-                stats[key].profit += b.profit;
-                stats[key].staked += b.stake;
-                stats[key].count++;
-                stats[key].sumOdds += b.cuota;
+                const dList = [
+                    { type: 'LIGA', val: b.liga },
+                    { type: 'MERCADO', val: b.mercado },
+                    { type: 'RANGO DE CUOTA', val: getOddRange(b.cuota) },
+                    { type: 'RANGO DE EDGE', val: getEdgeRange(b.edge) }
+                ];
+
+                dList.forEach(d => {
+                    const key = `${d.type}: ${d.val}`;
+                    if (!dimensions[key]) dimensions[key] = { type: d.type, name: d.val, profit: 0, staked: 0, count: 0, sumOdds: 0 };
+                    dimensions[key].profit += b.profit;
+                    dimensions[key].staked += b.stake;
+                    dimensions[key].count++;
+                    dimensions[key].sumOdds += b.cuota;
+                });
             });
 
-            let best = null;
+            let bestSegment = null;
             let maxYield = -Infinity;
 
-            Object.keys(stats).forEach(key => {
-                const s = stats[key];
-                const yieldVal = (s.profit / s.staked) * 100;
-                const avgOdd = s.sumOdds / s.count;
-                const pVal = calculatePValue(s.count, yieldVal / 100, avgOdd);
-
-                if (yieldVal > maxYield && s.count >= 3) {
-                    maxYield = yieldVal;
-                    best = { key, yieldVal, profit: s.profit, count: s.count, pVal };
+            Object.keys(dimensions).forEach(k => {
+                const seg = dimensions[k];
+                if (seg.count >= 3) { // Muestra mínima para considerar
+                    const yieldVal = (seg.profit / seg.staked) * 100;
+                    if (yieldVal > maxYield) {
+                        maxYield = yieldVal;
+                        bestSegment = seg;
+                    }
                 }
             });
 
-            if (best) {
-                const pValStatus = best.pVal < 0.05 ? "ALTA (Ventaja Real)" : "BAJA (Posible Suerte)";
-                alert(`🤖 REPORTE DE RENTABILIDAD ACTUAL 🤖\n\n` +
-                      `🏆 Lo más rentable: ${best.key}\n` +
-                      `📈 Yield: ${best.yieldVal.toFixed(2)}%\n` +
-                      `💰 Profit Acumulado: $${best.profit.toFixed(2)}\n` +
-                      `📊 Muestra: ${best.count} picks\n` +
-                      `🎯 Prob. Estadística (p-Value): ${(best.pVal * 100).toFixed(2)}%\n` +
-                      `✅ Confianza de Estrategia: ${pValStatus}`);
+            if (bestSegment && maxYield > 0) {
+                const avgOdd = bestSegment.sumOdds / bestSegment.count;
+                const pVal = calculatePValue(bestSegment.count, maxYield / 100, avgOdd);
+                const confidence = pVal < 0.05 ? "ALTA (Ventaja Matemática)" : "MEDIA/BAJA (Muestra pequeña)";
+
+                alert(`🎯 MINADO DE MÁXIMA RENTABILIDAD 🎯\n\n` +
+                      `💎 SEGMENTO ORO: ${bestSegment.type}\n` +
+                      `📍 Valor: ${bestSegment.name}\n\n` +
+                      `📈 Yield: ${maxYield.toFixed(2)}%\n` +
+                      `💰 Profit: $${bestSegment.profit.toFixed(2)}\n` +
+                      `📊 Muestra: ${bestSegment.count} picks\n` +
+                      `🎯 p-Value: ${(pVal * 100).toFixed(2)}%\n\n` +
+                      `✅ CONCLUSIÓN: Tu mayor profit actual se encuentra aquí. Confianza: ${confidence}.`);
             } else {
-                alert("Asistente: No encontré segmentos con Yield positivo en la muestra actual.");
+                alert("Asistente: He analizado todas las dimensiones (Ligas, Cuotas, Edges, Mercados) y no hay ningún segmento con Profit positivo todavía. ¡Sigue minando datos!");
             }
         }
 
