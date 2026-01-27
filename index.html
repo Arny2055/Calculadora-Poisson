@@ -158,14 +158,27 @@
             background: rgba(16, 185, 129, 0.2) !important;
             border: 2px solid #10b981 !important;
         }
+
+        /* Badge Modo Entrenamiento */
+        .training-badge {
+            background: #f59e0b;
+            color: #000;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 10px;
+            font-weight: 900;
+            text-transform: uppercase;
+            margin-left: 8px;
+        }
     </style>
 </head>
 <body>
 
     <nav class="sticky top-0 z-50 bg-slate-900/90 backdrop-blur border-b border-emerald-500/20 p-4">
         <div class="container mx-auto flex flex-col md:flex-row justify-between items-center gap-4">
-            <h1 class="text-2xl font-black italic text-white tracking-tighter">
+            <h1 class="text-2xl font-black italic text-white tracking-tighter flex items-center">
                 BET<span class="text-bet-yellow">AGS</span> <span class="text-[10px] uppercase tracking-widest text-emerald-400 not-italic ml-1">ULTIMATE MINER</span>
+                <span id="training-mode-indicator" class="hidden training-badge">Modo Entrenamiento</span>
             </h1>
             <div class="flex items-center gap-4">
                 <div class="flex bg-slate-800 p-1 rounded-xl gap-1">
@@ -192,7 +205,7 @@
                 <p id="top-yield" class="text-xl font-bold">0%</p>
             </div>
             <div class="glass-card p-4 rounded-2xl border-l-4 border-emerald-500">
-                <p class="text-[10px] uppercase font-black text-slate-500 tracking-widest">Bankroll</p>
+                <p class="text-[10px] uppercase font-black text-slate-500 tracking-widest" id="bank-label">Bankroll</p>
                 <p id="top-bankroll" class="text-xl font-bold">$100.00</p>
             </div>
             <div class="glass-card p-4 rounded-2xl border-l-4 border-purple-500">
@@ -434,9 +447,11 @@
 
     <script>
         const BANKROLL_BASE = 100;
+        const BANKROLL_TRAINING = 1000; // Bankroll virtual para modo entrenamiento
         const KELLY_FRAC = 0.25;
         const MIN_CONFIDENCE_SAMPLE = 10; 
         const MIN_YIELD_THRESHOLD = 5.0; 
+        const TRAINING_THRESHOLD = 100; // Primeras 100 apuestas en modo entrenamiento
         
         let bets = JSON.parse(localStorage.getItem('betags_v3_miner')) || [];
         let tg_config = JSON.parse(localStorage.getItem('betags_tg_config')) || { token: "8389950970:AAEdYvy2mcmo5ydUMrR_tOIGR8QCYO1STuU", chatId: "", channelId: "", auto: false };
@@ -531,7 +546,23 @@
             }
         }
 
-        function getCurrentBankroll() { return BANKROLL_BASE + bets.reduce((acc, b) => acc + (b.profit || 0), 0); }
+        // NUEVA FUNCIÓN: Gestión de Bankroll Híbrido
+        function getCurrentBankroll() { 
+            const resolvedCount = bets.filter(b => b.status !== 'pending').length;
+            const isTraining = resolvedCount < TRAINING_THRESHOLD;
+            
+            // Si estamos en entrenamiento, calculamos el profit sobre el bankroll virtual
+            // Si no, sobre el bankroll base real
+            const currentBase = isTraining ? BANKROLL_TRAINING : BANKROLL_BASE;
+            
+            // Calculamos profit solo de las apuestas que corresponden al periodo actual
+            // Pero para simplificar y que el usuario vea su avance real, el profit acumulado 
+            // se suma a la base que esté activa.
+            const totalProfit = bets.reduce((acc, b) => acc + (b.profit || 0), 0);
+            
+            return currentBase + totalProfit; 
+        }
+
         function factorial(n) { return n <= 1 ? 1 : n * factorial(n - 1); }
         function poissonProb(k, lambda) { return (Math.pow(lambda, k) * Math.exp(-lambda)) / factorial(k); }
 
@@ -666,10 +697,15 @@
                 const standardKelly = Math.max(0, (edge / (odd - 1)) * KELLY_FRAC);
                 const currentPValueText = document.getElementById('top-pvalue').innerText;
                 const currentPValue = currentPValueText !== "--" ? parseFloat(currentPValueText) / 100 : 1.0;
+                
+                // Aplicamos el p-Value entrenado para ajustar la confianza del Kelly
                 const pConfidenceMultiplier = Math.max(0.05, 1 - currentPValue); 
                 const chaosPenalty = Math.min(1, (chaosProb / prob)); 
                 const adjustedKelly = standardKelly * chaosPenalty * pConfidenceMultiplier;
+                
+                // Obtenemos bankroll actual (sea entrenamiento o real)
                 const stake = getCurrentBankroll() * adjustedKelly;
+                
                 const edgeEl = document.getElementById('edge_' + id);
                 edgeEl.innerText = (edge * 100).toFixed(1) + "%";
                 edgeEl.className = edge > 0 ? "p-4 text-emerald-400 font-bold" : "p-4 text-red-500";
@@ -756,7 +792,21 @@
                 (parseFloat(b.edge) >= fMinEdge)
             );
             const resolved = filtered.filter(b => b.status !== 'pending');
+            const totalResolvedGlobal = bets.filter(b => b.status !== 'pending').length;
             
+            // UI Modo Entrenamiento
+            const isTraining = totalResolvedGlobal < TRAINING_THRESHOLD;
+            const indicator = document.getElementById('training-mode-indicator');
+            const bankLabel = document.getElementById('bank-label');
+            if(isTraining) {
+                indicator.classList.remove('hidden');
+                indicator.innerText = `ENTRENAMIENTO (${totalResolvedGlobal}/${TRAINING_THRESHOLD})`;
+                bankLabel.innerText = "Bankroll (Virtual)";
+            } else {
+                indicator.classList.add('hidden');
+                bankLabel.innerText = "Bankroll (Real)";
+            }
+
             const totalProfit = resolved.reduce((a, b) => a + b.profit, 0);
             const totalStaked = resolved.reduce((a, b) => a + b.stake, 0);
             const wins = resolved.filter(b => b.status === 'win').length;
@@ -771,11 +821,14 @@
                 pValDisplay.className = pVal < 0.05 ? "text-xl font-bold text-emerald-400" : "text-xl font-bold text-red-400";
             } else { pValDisplay.innerText = "--"; }
 
-            let peak = BANKROLL_BASE, current = BANKROLL_BASE, maxDD = 0;
+            let currentBankroll = getCurrentBankroll();
+            let peak = isTraining ? BANKROLL_TRAINING : BANKROLL_BASE;
+            let currentTemp = peak, maxDD = 0;
+            
             [...resolved].reverse().forEach(b => {
-                current += b.profit;
-                if (current > peak) peak = current;
-                let dd = peak > 0 ? (peak - current) / peak : 0;
+                currentTemp += b.profit;
+                if (currentTemp > peak) peak = currentTemp;
+                let dd = peak > 0 ? (peak - currentTemp) / peak : 0;
                 if (dd > maxDD) maxDD = dd;
             });
 
@@ -785,16 +838,17 @@
 
             document.getElementById('top-profit').innerText = "$" + totalProfit.toFixed(2);
             document.getElementById('top-yield').innerText = (yieldDec * 100).toFixed(1) + "%";
-            document.getElementById('top-bankroll').innerText = "$" + getCurrentBankroll().toFixed(2);
+            document.getElementById('top-bankroll').innerText = "$" + currentBankroll.toFixed(2);
             
-            document.getElementById('m-roi').innerText = (totalProfit/BANKROLL_BASE*100).toFixed(1) + "%";
+            const initialCapital = isTraining ? BANKROLL_TRAINING : BANKROLL_BASE;
+            document.getElementById('m-roi').innerText = (totalProfit/initialCapital*100).toFixed(1) + "%";
             document.getElementById('m-hit').innerText = (resolved.length > 0 ? (wins/resolved.length*100).toFixed(1) : 0) + "%";
             document.getElementById('m-dd').innerText = (maxDD * 100).toFixed(1) + "%";
             document.getElementById('m-avg-odd').innerText = avgOdd.toFixed(2);
             document.getElementById('m-avg-profit').innerText = "$" + avgProfit;
 
             renderHistory(filtered); 
-            renderBankrollChart(resolved);
+            renderBankrollChart(resolved, initialCapital);
         }
 
         function renderHistory(data) {
@@ -811,7 +865,7 @@
                     <div class="flex gap-2 mb-4"><div class="px-2 py-1 rounded bg-slate-800 text-xs font-bold text-emerald-400">${b.market}</div>${realBadge}</div>
                     <div class="card-data-grid">
                         <div><p class="text-[9px] text-slate-500 uppercase">Cuota</p><p class="font-bold">${b.odd}</p></div>
-                        <div><p class="text-[9px] text-slate-500 uppercase">Stake</p><p class="font-bold">$${b.stake}</p></div>
+                        <div><p class="text-[9px] text-slate-500 uppercase">Stake</p><p class="font-bold">$${b.stake.toFixed(2)}</p></div>
                         <div><p class="text-[9px] text-slate-500 uppercase">Edge</p><p class="font-bold text-emerald-400">${b.edge}%</p></div>
                         <div><p class="text-[9px] text-slate-500 uppercase">Profit</p><p class="font-bold ${b.profit >= 0 ? 'text-emerald-400' : 'text-red-400'}">${b.profit.toFixed(2)}</p></div>
                     </div>
@@ -829,7 +883,6 @@
 
         function deleteBet(id) { if(confirm('¿Eliminar registro?')) { bets = bets.filter(x => x.id !== id); save(); } }
         
-        // FUNCIÓN MEJORADA: ELIMINAR TODAS LAS APUESTAS
         function deleteAllBets() {
             if(confirm('🚨 ATENCIÓN: Se eliminarán todas las apuestas del historial de forma permanente. ¿Continuar?')) {
                 bets = [];
@@ -844,9 +897,9 @@
             pChart = new Chart(ctx, { type: 'line', data: { labels, datasets: [ { label: 'Local', data: home, borderColor: '#3b82f6', tension: 0.4, fill: true, backgroundColor: 'rgba(59, 130, 246, 0.1)' }, { label: 'Visitante', data: away, borderColor: '#f97316', tension: 0.4, fill: true, backgroundColor: 'rgba(249, 115, 22, 0.1)' } ]}, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { labels: { color: '#94a3b8' } } }, scales: { y: { grid: { color: 'rgba(255,255,255,0.05)' } } } } });
         }
 
-        function renderBankrollChart(resolved) {
+        function renderBankrollChart(resolved, initialCapital) {
             const ctx = document.getElementById('bankrollChart').getContext('2d'); if(bChart) bChart.destroy();
-            let bankData = [BANKROLL_BASE], currentBank = BANKROLL_BASE;
+            let bankData = [initialCapital], currentBank = initialCapital;
             [...resolved].reverse().forEach(b => { currentBank += b.profit; bankData.push(currentBank); });
             bChart = new Chart(ctx, { type: 'line', data: { labels: bankData.map((_, i) => i), datasets: [ { label: 'Banca ($)', data: bankData, borderColor: '#00ff88', borderWidth: 3, pointRadius: 0, fill: true, backgroundColor: 'rgba(0, 255, 136, 0.05)' } ] }, options: { responsive: true, maintainAspectRatio: false, scales: { x: { display: false }, y: { grid: { color: 'rgba(255,255,255,0.05)' } } }, plugins: { legend: { display: false } } } });
         }
