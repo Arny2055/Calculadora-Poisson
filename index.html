@@ -216,6 +216,17 @@
                 <div class="glass-card p-6 rounded-2xl">
                     <h2 class="text-lg font-bold text-bet-yellow uppercase tracking-tighter mb-4 italic underline decoration-emerald-500">Configuración de Motor</h2>
 
+                    <div class="mb-4 p-3 bg-slate-800/60 rounded-xl border border-blue-500/30 flex items-center justify-between">
+                        <div>
+                            <p class="text-[10px] font-black text-blue-400 uppercase tracking-widest">Gestión p-Value</p>
+                            <p class="text-[8px] text-slate-400">¿Ajustar Stake por Habilidad?</p>
+                        </div>
+                        <label class="relative inline-flex items-center cursor-pointer">
+                            <input type="checkbox" id="use_pvalue_mgmt" class="sr-only peer" checked onchange="updateAllEdges()">
+                            <div class="w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                        </label>
+                    </div>
+
                     <div class="grid grid-cols-2 gap-2 mb-4">
                         <div>
                             <label class="text-[10px] font-bold text-slate-400 uppercase block mb-1">Liga</label>
@@ -441,7 +452,6 @@
         
         let bets = JSON.parse(localStorage.getItem('betags_v3_miner')) || [];
         let tg_config = JSON.parse(localStorage.getItem('betags_tg_config')) || { token: "8389950970:AAEdYvy2mcmo5ydUMrR_tOIGR8QCYO1STuU", chatId: "", channelId: "", auto: false };
-        // MEJORA: Variable para manejar el reinicio visual del bank sin perder apuestas
         let bankrollOffset = parseFloat(localStorage.getItem('betags_bank_offset')) || 0;
         let pChart, bChart;
 
@@ -454,11 +464,9 @@
 
         window.onload = setDefaultDate;
 
-        // MEJORA: Función para reiniciar el bank
         function resetBankroll() {
             if(confirm('¿Quieres reiniciar tu banca actual a 100 unidades? Las apuestas y el P-Value se conservarán.')) {
                 const totalCurrentProfit = bets.reduce((acc, b) => acc + (b.profit || 0), 0);
-                // Calculamos el offset necesario para que (100 + totalProfit + offset) sea 100
                 bankrollOffset = -totalCurrentProfit;
                 localStorage.setItem('betags_bank_offset', bankrollOffset);
                 updateStats();
@@ -546,7 +554,6 @@
             }
         }
 
-        // MEJORA: El bankroll ahora suma el offset de reinicio
         function getCurrentBankroll() { return BANKROLL_BASE + bets.reduce((acc, b) => acc + (b.profit || 0), 0) + bankrollOffset; }
         function factorial(n) { return n <= 1 ? 1 : n * factorial(n - 1); }
         function poissonProb(k, lambda) { return (Math.pow(lambda, k) * Math.exp(-lambda)) / factorial(k); }
@@ -584,6 +591,19 @@
             };
             const cumulativeProb = 0.5 * (1 + erf(zScore / Math.sqrt(2)));
             return 1 - cumulativeProb;
+        }
+
+        // MEJORA: Función para refrescar cálculos de edge al cambiar el selector p-Value
+        function updateAllEdges() {
+            const tableRows = document.querySelectorAll('#market-table tr');
+            tableRows.forEach(row => {
+                const id = row.id.replace('row_', '');
+                const inputs = row.querySelectorAll('input');
+                if(inputs.length > 0) {
+                    // Disparamos el input event de las cuotas existentes para refrescar stakes
+                    inputs[0].dispatchEvent(new Event('input'));
+                }
+            });
         }
 
         function calculate() {
@@ -677,12 +697,20 @@
             const odd = parseFloat(document.getElementById('odd_' + id).value) || 0;
             const partnerOdd = parseFloat(document.getElementById('odd_' + partnerId).value) || 0;
             const currentLeague = document.getElementById('league_name').value || "Desconocida";
+            const usePValue = document.getElementById('use_pvalue_mgmt').checked;
+
             if(odd > 1) {
                 const edge = (odd * prob) - 1;
                 const standardKelly = Math.max(0, (edge / (odd - 1)) * KELLY_FRAC);
                 const currentPValueText = document.getElementById('top-pvalue').innerText;
                 const currentPValue = currentPValueText !== "--" ? parseFloat(currentPValueText) / 100 : 1.0;
-                const pConfidenceMultiplier = Math.max(0.05, 1 - currentPValue); 
+                
+                // MEJORA: Lógica condicional según el selector de p-Value
+                let pConfidenceMultiplier = 1.0;
+                if (usePValue) {
+                    pConfidenceMultiplier = Math.max(0.05, 1 - currentPValue); 
+                }
+
                 const chaosPenalty = Math.min(1, (chaosProb / prob)); 
                 const adjustedKelly = standardKelly * chaosPenalty * pConfidenceMultiplier;
                 const stake = getCurrentBankroll() * adjustedKelly;
@@ -690,10 +718,12 @@
                 edgeEl.innerText = (edge * 100).toFixed(1) + "%";
                 edgeEl.className = edge > 0 ? "p-4 text-emerald-400 font-bold" : "p-4 text-red-500";
                 const stakeCell = document.getElementById('stake_' + id);
+                
                 if (stake > 0) {
                     let labelsHtml = `<span class="stake-main">$${stake.toFixed(2)}</span>`;
                     if (chaosPenalty < 0.99) labelsHtml += `<div class="mt-1 text-[8px] text-orange-400 font-black uppercase">CHAOS -${((1-chaosPenalty)*100).toFixed(0)}%</div>`;
-                    if (currentPValue > 0.10) labelsHtml += `<div class="mt-1 text-[8px] text-red-400 font-black uppercase">P-REDUCED -${(currentPValue*100).toFixed(0)}%</div>`;
+                    // Solo mostrar reducción de p-Value si el selector está activo
+                    if (usePValue && currentPValue > 0.10) labelsHtml += `<div class="mt-1 text-[8px] text-red-400 font-black uppercase">P-REDUCED -${(currentPValue*100).toFixed(0)}%</div>`;
                     stakeCell.innerHTML = labelsHtml;
                 } else { stakeCell.innerText = "--"; }
                 if(partnerOdd > 1) document.getElementById('overround_' + id).innerText = (((1/odd) + (1/partnerOdd) - 1) * 100).toFixed(1) + "%";
@@ -801,10 +831,8 @@
 
             document.getElementById('top-profit').innerText = "$" + totalProfit.toFixed(2);
             document.getElementById('top-yield').innerText = (yieldDec * 100).toFixed(1) + "%";
-            // MEJORA: El bankroll del top bar también usa el offset
             document.getElementById('top-bankroll').innerText = "$" + getCurrentBankroll().toFixed(2);
             
-            // MEJORA: ROI de banca basado en BANKROLL_BASE (100)
             document.getElementById('m-roi').innerText = (totalProfit/BANKROLL_BASE*100).toFixed(1) + "%";
             document.getElementById('m-hit').innerText = (resolved.length > 0 ? (wins/resolved.length*100).toFixed(1) : 0) + "%";
             document.getElementById('m-dd').innerText = (maxDD * 100).toFixed(1) + "%";
@@ -854,7 +882,6 @@
 
         function renderBankrollChart(resolved) {
             const ctx = document.getElementById('bankrollChart').getContext('2d'); if(bChart) bChart.destroy();
-            // MEJORA: El gráfico de banca también refleja el reinicio (offset)
             let currentBank = BANKROLL_BASE + bankrollOffset;
             let bankData = [currentBank];
             [...resolved].reverse().forEach(b => { currentBank += b.profit; bankData.push(currentBank); });
