@@ -208,7 +208,12 @@
                         <h3 class="text-xs font-black text-blue-300 uppercase mb-1"><i class="fa-solid fa-robot mr-2"></i>ASISTENTE ESTRATÉGICO</h3>
                         <div id="strategy-text" class="text-sm text-white font-medium italic">Esperando datos de mercado...</div>
                     </div>
-                    <div id="strategy-signal" class="text-2xl animate-bounce"></div>
+                    <div class="flex gap-2 items-center">
+                        <button onclick="askAssistantBest()" class="bg-blue-600/40 hover:bg-blue-500 text-white text-[10px] font-black px-3 py-2 rounded-lg border border-blue-400/50 transition-all uppercase tracking-tighter">
+                            <i class="fa-solid fa-magnifying-glass-chart mr-1"></i> Consultar Rentabilidad Actual
+                        </button>
+                        <div id="strategy-signal" class="text-2xl animate-bounce"></div>
+                    </div>
                 </div>
             </div>
 
@@ -654,6 +659,55 @@
             return { isStrategic: false, evaluations: [], text: "Pick estándar. No hay datos de alta eficiencia aún." };
         }
 
+        /**
+         * FUNCIÓN MEJORADA: CONSULTA AL ASISTENTE SOBRE RENTABILIDAD
+         */
+        function askAssistantBest() {
+            const history = JSON.parse(localStorage.getItem('backtesting_data')) || [];
+            if (history.length < 5) {
+                alert("Asistente: Aún no tengo suficientes datos en Backtesting para darte un reporte de rentabilidad confiable. (Mínimo 5 picks)");
+                return;
+            }
+
+            const stats = {};
+            history.forEach(b => {
+                const key = `${b.liga} | ${b.mercado}`;
+                if (!stats[key]) stats[key] = { profit: 0, staked: 0, count: 0, sumOdds: 0 };
+                stats[key].profit += b.profit;
+                stats[key].staked += b.stake;
+                stats[key].count++;
+                stats[key].sumOdds += b.cuota;
+            });
+
+            let best = null;
+            let maxYield = -Infinity;
+
+            Object.keys(stats).forEach(key => {
+                const s = stats[key];
+                const yieldVal = (s.profit / s.staked) * 100;
+                const avgOdd = s.sumOdds / s.count;
+                const pVal = calculatePValue(s.count, yieldVal / 100, avgOdd);
+
+                if (yieldVal > maxYield && s.count >= 3) {
+                    maxYield = yieldVal;
+                    best = { key, yieldVal, profit: s.profit, count: s.count, pVal };
+                }
+            });
+
+            if (best) {
+                const pValStatus = best.pVal < 0.05 ? "ALTA (Ventaja Real)" : "BAJA (Posible Suerte)";
+                alert(`🤖 REPORTE DE RENTABILIDAD ACTUAL 🤖\n\n` +
+                      `🏆 Lo más rentable: ${best.key}\n` +
+                      `📈 Yield: ${best.yieldVal.toFixed(2)}%\n` +
+                      `💰 Profit Acumulado: $${best.profit.toFixed(2)}\n` +
+                      `📊 Muestra: ${best.count} picks\n` +
+                      `🎯 Prob. Estadística (p-Value): ${(best.pVal * 100).toFixed(2)}%\n` +
+                      `✅ Confianza de Estrategia: ${pValStatus}`);
+            } else {
+                alert("Asistente: No encontré segmentos con Yield positivo en la muestra actual.");
+            }
+        }
+
         function updateEdge(id, prob, partnerId, marketName, chaosProb) {
             const odd = parseFloat(document.getElementById('odd_' + id).value) || 0;
             const partnerOdd = parseFloat(document.getElementById('odd_' + partnerId).value) || 0;
@@ -776,12 +830,10 @@
                 if (dd > maxDD) maxDD = dd;
             });
 
-            // MÉTRICAS DEL FILTRO PARA EL CUADRO DE RENDIMIENTO HISTÓRICO (MOTOR V1)
             document.getElementById('v1-yield').innerText = (totalStaked > 0 ? (yieldDec * 100).toFixed(1) : 0) + "%";
             document.getElementById('v1-profit').innerText = "$" + totalProfit.toFixed(2);
             document.getElementById('v1-count').innerText = resolved.length;
 
-            // MÉTRICAS TOP
             document.getElementById('top-profit').innerText = "$" + totalProfit.toFixed(2);
             document.getElementById('top-yield').innerText = (yieldDec * 100).toFixed(1) + "%";
             document.getElementById('top-bankroll').innerText = "$" + getCurrentBankroll().toFixed(2);
