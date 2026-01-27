@@ -190,7 +190,7 @@
         
         <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
             <div class="glass-card p-4 rounded-2xl border-l-4 border-bet-yellow">
-                <p class="text-[10px] uppercase font-black text-slate-500 tracking-widest">Profit Total</p>
+                <p class="text-[10px] uppercase font-black text-slate-500 tracking-widest">Profit Total (Retirado)</p>
                 <p id="top-profit" class="text-xl font-bold">$0.00</p>
             </div>
             <div class="glass-card p-4 rounded-2xl border-l-4 border-blue-500">
@@ -198,7 +198,7 @@
                 <p id="top-yield" class="text-xl font-bold">0%</p>
             </div>
             <div class="glass-card p-4 rounded-2xl border-l-4 border-emerald-500">
-                <p class="text-[10px] uppercase font-black text-slate-500 tracking-widest">Bankroll</p>
+                <p class="text-[10px] uppercase font-black text-slate-500 tracking-widest">Bankroll Actual</p>
                 <p id="top-bankroll" class="text-xl font-bold">$100.00</p>
             </div>
             <div class="glass-card p-4 rounded-2xl border-l-4 border-purple-500">
@@ -340,7 +340,7 @@
                             <p id="v1-yield" class="font-bold text-white text-xl">0%</p>
                         </div>
                         <div class="text-center">
-                            <p class="text-[9px] text-slate-500 uppercase">Profit</p>
+                            <p class="text-[9px] text-slate-500 uppercase">Profit Neto</p>
                             <p id="v1-profit" class="font-bold text-white text-xl">$0</p>
                         </div>
                         <div class="text-center">
@@ -352,7 +352,12 @@
 
                 <div class="withdraw-card p-6 rounded-2xl flex flex-col justify-between">
                     <div>
-                        <h3 class="font-black text-emerald-400 text-xs uppercase mb-1 tracking-widest"><i class="fa-solid fa-money-bill-transfer mr-2"></i>Asistente de Retiros Profesionales</h3>
+                        <div class="flex justify-between items-start">
+                            <h3 class="font-black text-emerald-400 text-xs uppercase mb-1 tracking-widest"><i class="fa-solid fa-money-bill-transfer mr-2"></i>Asistente de Retiros Profesionales</h3>
+                            <button onclick="processWithdrawal()" id="btn-withdraw-action" class="bg-white/10 hover:bg-emerald-500 text-white px-3 py-1 rounded-lg text-[10px] font-black uppercase transition-all hidden">
+                                Confirmar Retiro y Reiniciar Bank
+                            </button>
+                        </div>
                         <p class="text-[10px] text-slate-400 mb-4">Recomendación basada en el 30% del capital inicial ($100)</p>
                     </div>
                     <div class="flex items-center justify-between">
@@ -388,8 +393,8 @@
                     <p id="m-avg-profit" class="text-lg font-bold text-emerald-400">$0</p>
                 </div>
                 <div class="metric-badge">
-                    <p class="text-[9px] text-slate-500 font-bold uppercase">Avg CLV</p>
-                    <p id="m-avg-clv" class="text-lg font-bold text-purple-400">0%</p>
+                    <p class="text-[9px] text-slate-500 font-bold uppercase">Beneficio Retirado</p>
+                    <p id="m-withdrawn" class="text-lg font-bold text-bet-yellow">$0</p>
                 </div>
             </div>
 
@@ -458,6 +463,7 @@
         const WITHDRAW_THRESHOLD_PERCENT = 30; // Recomendamos retirar cada 30% de profit
         
         let bets = JSON.parse(localStorage.getItem('betags_v3_miner')) || [];
+        let withdrawals = JSON.parse(localStorage.getItem('betags_withdrawals')) || [];
         let tg_config = JSON.parse(localStorage.getItem('betags_tg_config')) || { token: "8389950970:AAEdYvy2mcmo5ydUMrR_tOIGR8QCYO1STuU", chatId: "", channelId: "", auto: false };
         let pChart, bChart;
 
@@ -550,7 +556,34 @@
             }
         }
 
-        function getCurrentBankroll() { return BANKROLL_BASE + bets.reduce((acc, b) => acc + (b.profit || 0), 0); }
+        // Función corregida para el bankroll dinámico (Profit actual menos retiros previos)
+        function getCurrentBankroll() { 
+            const totalProfitInSession = bets.reduce((acc, b) => acc + (b.profit || 0), 0);
+            return BANKROLL_BASE + totalProfitInSession; 
+        }
+
+        function processWithdrawal() {
+            const currentSessionProfit = bets.reduce((acc, b) => acc + (b.profit || 0), 0);
+            if (currentSessionProfit <= 0) return alert("No hay beneficios acumulados en esta sesión.");
+
+            if (confirm(`¿Confirmas el retiro de $${currentSessionProfit.toFixed(2)}? Esto reiniciará tu Bankroll actual a $${BANKROLL_BASE}.`)) {
+                // Registrar retiro histórico
+                withdrawals.push({
+                    date: new Date().toLocaleString(),
+                    amount: currentSessionProfit
+                });
+                
+                // Reiniciar apuestas activas (se consideran "cerradas" para el bankroll actual)
+                bets = []; 
+                
+                localStorage.setItem('betags_withdrawals', JSON.stringify(withdrawals));
+                localStorage.setItem('betags_v3_miner', JSON.stringify(bets));
+                
+                alert("Retiro completado. El Bankroll ha sido reiniciado.");
+                updateStats();
+            }
+        }
+
         function factorial(n) { return n <= 1 ? 1 : n * factorial(n - 1); }
         function poissonProb(k, lambda) { return (Math.pow(lambda, k) * Math.exp(-lambda)) / factorial(k); }
 
@@ -752,7 +785,10 @@
             sendResolvedToBacktesting(true); 
         }
 
-        function save() { localStorage.setItem('betags_v3_miner', JSON.stringify(bets)); updateStats(); }
+        function save() { 
+            localStorage.setItem('betags_v3_miner', JSON.stringify(bets)); 
+            updateStats(); 
+        }
 
         function sendResolvedToBacktesting(silent = false) {
             const resolvedBets = bets.filter(b => b.status === 'win' || b.status === 'loss');
@@ -776,12 +812,12 @@
             );
             const resolved = filtered.filter(b => b.status !== 'pending');
             
-            const totalProfit = resolved.reduce((a, b) => a + b.profit, 0);
+            const totalProfitInSession = resolved.reduce((a, b) => a + b.profit, 0);
             const totalStaked = resolved.reduce((a, b) => a + b.stake, 0);
             const wins = resolved.filter(b => b.status === 'win').length;
             const avgOdd = resolved.length > 0 ? (resolved.reduce((a, b) => a + b.odd, 0) / resolved.length) : 0;
-            const avgProfit = resolved.length > 0 ? (totalProfit / resolved.length).toFixed(2) : "0";
-            const yieldDec = totalStaked > 0 ? (totalProfit / totalStaked) : 0;
+            const avgProfit = resolved.length > 0 ? (totalProfitInSession / resolved.length).toFixed(2) : "0";
+            const yieldDec = totalStaked > 0 ? (totalProfitInSession / totalStaked) : 0;
 
             const pVal = calculatePValue(resolved.length, yieldDec, avgOdd);
             const pValDisplay = document.getElementById('top-pvalue');
@@ -798,39 +834,46 @@
                 if (dd > maxDD) maxDD = dd;
             });
 
+            // Actualizar Interfaz
+            const totalWithdrawn = withdrawals.reduce((acc, w) => acc + w.amount, 0);
+            document.getElementById('m-withdrawn').innerText = "$" + totalWithdrawn.toFixed(2);
             document.getElementById('v1-yield').innerText = (totalStaked > 0 ? (yieldDec * 100).toFixed(1) : 0) + "%";
-            document.getElementById('v1-profit').innerText = "$" + totalProfit.toFixed(2);
+            document.getElementById('v1-profit').innerText = "$" + totalProfitInSession.toFixed(2);
             document.getElementById('v1-count').innerText = resolved.length;
 
-            document.getElementById('top-profit').innerText = "$" + totalProfit.toFixed(2);
+            document.getElementById('top-profit').innerText = "$" + totalWithdrawn.toFixed(2);
             document.getElementById('top-yield').innerText = (yieldDec * 100).toFixed(1) + "%";
             document.getElementById('top-bankroll').innerText = "$" + getCurrentBankroll().toFixed(2);
             
-            document.getElementById('m-roi').innerText = (totalProfit/BANKROLL_BASE*100).toFixed(1) + "%";
+            document.getElementById('m-roi').innerText = (totalProfitInSession/BANKROLL_BASE*100).toFixed(1) + "%";
             document.getElementById('m-hit').innerText = (resolved.length > 0 ? (wins/resolved.length*100).toFixed(1) : 0) + "%";
             document.getElementById('m-dd').innerText = (maxDD * 100).toFixed(1) + "%";
             document.getElementById('m-avg-odd').innerText = avgOdd.toFixed(2);
             document.getElementById('m-avg-profit').innerText = "$" + avgProfit;
 
             // Lógica de Retiros
-            const withdrawAmount = totalProfit > 0 ? totalProfit : 0;
+            const withdrawAmount = totalProfitInSession > 0 ? totalProfitInSession : 0;
             const withdrawPercent = (withdrawAmount / BANKROLL_BASE) * 100;
             const withdrawEl = document.getElementById('withdraw-available');
             const withdrawAdvice = document.getElementById('withdraw-advice');
             const withdrawIcon = document.getElementById('withdraw-status-icon');
+            const withdrawBtn = document.getElementById('btn-withdraw-action');
             
             withdrawEl.innerText = "$" + withdrawAmount.toFixed(2);
             
             if (withdrawPercent >= WITHDRAW_THRESHOLD_PERCENT) {
                 withdrawAdvice.innerHTML = `<span class="text-emerald-400 font-black">RECOMENDADO:</span> Has superado el ${WITHDRAW_THRESHOLD_PERCENT}% de beneficio. Retira tu profit para asegurar ganancias.`;
                 withdrawIcon.innerHTML = "💰✅";
+                withdrawBtn.classList.remove('hidden');
             } else if (withdrawPercent > 0) {
                 const missing = WITHDRAW_THRESHOLD_PERCENT - withdrawPercent;
                 withdrawAdvice.innerText = `Llevas un ${withdrawPercent.toFixed(1)}% de profit. Recomendamos retirar al llegar al ${WITHDRAW_THRESHOLD_PERCENT}% (falta un ${missing.toFixed(1)}%).`;
                 withdrawIcon.innerHTML = "⏳";
+                withdrawBtn.classList.add('hidden');
             } else {
                 withdrawAdvice.innerText = "Acumula beneficios para ver recomendaciones de retiro.";
                 withdrawIcon.innerHTML = "📉";
+                withdrawBtn.classList.add('hidden');
             }
 
             renderHistory(filtered); 
@@ -881,7 +924,7 @@
             bChart = new Chart(ctx, { type: 'line', data: { labels: bankData.map((_, i) => i), datasets: [ { label: 'Banca ($)', data: bankData, borderColor: '#00ff88', borderWidth: 3, pointRadius: 0, fill: true, backgroundColor: 'rgba(0, 255, 136, 0.05)' } ] }, options: { responsive: true, maintainAspectRatio: false, scales: { x: { display: false }, y: { grid: { color: 'rgba(255,255,255,0.05)' } } }, plugins: { legend: { display: false } } } });
         }
 
-        function exportData() { window.open("data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(bets))); }
+        function exportData() { window.open("data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify({bets, withdrawals}))); }
         function updateStats() { applyFilters(); }
         updateStats();
     </script>
