@@ -158,6 +158,17 @@
             background: rgba(16, 185, 129, 0.2) !important;
             border: 2px solid #10b981 !important;
         }
+
+        /* ESTILO PARA EL BOTÓN SIEMPRE VISIBLE */
+        .btn-profit-monitor {
+            background: linear-gradient(135deg, #059669 0%, #065f46 100%);
+            border: 1px solid rgba(16, 185, 129, 0.4);
+            transition: all 0.3s ease;
+        }
+        .btn-profit-monitor:hover {
+            box-shadow: 0 0 20px rgba(16, 185, 129, 0.4);
+            transform: scale(1.02);
+        }
     </style>
 </head>
 <body>
@@ -202,15 +213,19 @@
         </div>
 
         <div id="calc" class="tab-content active space-y-6">
-            <div id="strategy-assistant-box" class="recommendation-box hidden mb-6">
-                <div class="flex items-center justify-between">
-                    <div>
-                        <h3 class="text-xs font-black text-blue-300 uppercase mb-1"><i class="fa-solid fa-robot mr-2"></i>ASISTENTE ESTRATÉGICO</h3>
-                        <div id="strategy-text" class="text-sm text-white font-medium italic">Esperando datos de mercado...</div>
+            <div id="strategy-assistant-box" class="recommendation-box mb-6">
+                <div class="flex flex-col md:flex-row items-center justify-between gap-4">
+                    <div class="flex-1">
+                        <h3 class="text-xs font-black text-emerald-400 uppercase mb-1 flex items-center">
+                            <i class="fa-solid fa-microchip mr-2"></i> MONITOR DE MÁXIMA RENTABILIDAD
+                        </h3>
+                        <div id="strategy-text" class="text-sm text-white font-medium italic">
+                            Iniciando escaneo de unidades...
+                        </div>
                     </div>
-                    <div class="flex gap-2 items-center">
-                        <button onclick="askAssistantBest()" class="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-[10px] font-black px-4 py-2.5 rounded-xl border border-white/20 transition-all uppercase tracking-tighter flex items-center shadow-lg shadow-emerald-900/40">
-                            <i class="fa-solid fa-coins mr-2 text-bet-yellow"></i> Minar Profit (Unidades)
+                    <div class="flex gap-2 items-center w-full md:w-auto">
+                        <button onclick="askAssistantBest()" class="btn-profit-monitor w-full md:w-auto text-white text-[10px] font-black px-5 py-3 rounded-xl uppercase tracking-tighter flex items-center justify-center">
+                            <i class="fa-solid fa-magnifying-glass-dollar mr-2 text-bet-yellow"></i> Minar Profit (Unidades)
                         </button>
                         <div id="strategy-signal" class="text-2xl animate-bounce"></div>
                     </div>
@@ -443,6 +458,7 @@
         let bets = JSON.parse(localStorage.getItem('betags_v3_miner')) || [];
         let tg_config = JSON.parse(localStorage.getItem('betags_tg_config')) || { token: "8389950970:AAEdYvy2mcmo5ydUMrR_tOIGR8QCYO1STuU", chatId: "", channelId: "", auto: false };
         let pChart, bChart;
+        let globalBestSegment = null; // Variable para monitoreo constante
 
         function setDefaultDate() {
             const now = new Date();
@@ -451,7 +467,67 @@
             document.getElementById('event_date').value = formatted;
         }
 
-        window.onload = setDefaultDate;
+        window.onload = () => {
+            setDefaultDate();
+            autoMonitorProfit(); // Inicia monitoreo al cargar
+        };
+
+        /**
+         * MEJORA: MONITOREO CONSTANTE DE UNIDADES
+         */
+        function autoMonitorProfit() {
+            const history = JSON.parse(localStorage.getItem('backtesting_data')) || [];
+            if (history.length < 5) {
+                document.getElementById('strategy-text').innerHTML = "<span class='text-slate-400'>Escaneando... Se requieren 5 picks en Backtesting para sugerencias viables.</span>";
+                return;
+            }
+
+            const getOddRange = (o) => `${(Math.floor(o * 2) / 2).toFixed(1)} - ${(Math.floor(o * 2) / 2 + 0.5).toFixed(1)}`;
+            const dimensions = {};
+
+            history.forEach(b => {
+                const dList = [
+                    { type: 'Liga', val: b.liga },
+                    { type: 'Mercado', val: b.market || b.mercado },
+                    { type: 'Rango Cuota', val: getOddRange(b.cuota) }
+                ];
+
+                dList.forEach(d => {
+                    const key = `${d.type}: ${d.val}`;
+                    if (!dimensions[key]) dimensions[key] = { type: d.type, name: d.val, profit: 0, count: 0, sumOdds: 0, staked: 0 };
+                    dimensions[key].profit += b.profit;
+                    dimensions[key].staked += b.stake;
+                    dimensions[key].count++;
+                    dimensions[key].sumOdds += b.cuota;
+                });
+            });
+
+            let best = null;
+            let maxUnits = -Infinity;
+
+            Object.keys(dimensions).forEach(k => {
+                const seg = dimensions[k];
+                if (seg.profit > maxUnits && seg.count >= 3) {
+                    maxUnits = seg.profit;
+                    best = seg;
+                }
+            });
+
+            if (best && maxUnits > 0) {
+                globalBestSegment = best;
+                const yieldVal = (best.profit / best.staked) * 100;
+                document.getElementById('strategy-text').innerHTML = `
+                    <div class="flex items-center gap-2">
+                        <span class="bg-emerald-500 text-black text-[10px] font-black px-2 py-0.5 rounded">FOCO DE PROFIT</span>
+                        <span class="text-white font-bold">${best.type}: ${best.name}</span>
+                        <span class="text-bet-yellow font-black">(+$${maxUnits.toFixed(2)} / ${yieldVal.toFixed(1)}% Yield)</span>
+                    </div>`;
+                document.getElementById('strategy-signal').innerHTML = "🔥";
+            } else {
+                document.getElementById('strategy-text').innerHTML = "<span class='text-slate-400 italic'>Sin tendencias de profit positivo detectadas. Continúa el backtesting manual.</span>";
+                document.getElementById('strategy-signal').innerHTML = "🔍";
+            }
+        }
 
         function showTab(tabId) {
             document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
@@ -629,105 +705,35 @@
         }
 
         function getStrategicAdvice(currentLeague, currentMarket, currentOdd, currentEdge, chaosProb) {
-            const history = JSON.parse(localStorage.getItem('backtesting_data')) || [];
-            if (history.length < 5) return { isStrategic: false, evaluations: [], text: "Analizando... Se necesitan 5 picks históricos." };
-            const getOddRange = (o) => {
-                const lower = Math.floor(o * 2) / 2;
-                return `${lower.toFixed(1)} - ${(lower + 0.5).toFixed(1)}`;
-            };
-            const currentOddRange = getOddRange(currentOdd);
-            const insights = {
-                liga: { profit: 0, staked: 0, count: 0, name: currentLeague, label: "LIGA" },
-                mercado: { profit: 0, staked: 0, count: 0, name: currentMarket, label: "MERCADO" },
-                rangoCuota: { profit: 0, staked: 0, count: 0, name: currentOddRange, label: "RANGO CUOTA" }
-            };
-            history.forEach(b => {
-                if (b.liga.toLowerCase() === currentLeague.toLowerCase()) { insights.liga.profit += b.profit; insights.liga.staked += b.stake; insights.liga.count++; }
-                if (b.mercado === currentMarket) { insights.mercado.profit += b.profit; insights.mercado.staked += b.stake; insights.mercado.count++; }
-                if (getOddRange(b.cuota) === currentOddRange) { insights.rangoCuota.profit += b.profit; insights.rangoCuota.staked += b.stake; insights.rangoCuota.count++; }
-            });
-            const calcYield = (obj) => obj.staked > 0 ? (obj.profit / obj.staked) * 100 : -999;
-            let evaluations = [];
-            Object.keys(insights).forEach(key => {
-                const item = insights[key];
-                const yieldVal = calcYield(item);
-                if (item.count >= MIN_CONFIDENCE_SAMPLE && yieldVal >= MIN_YIELD_THRESHOLD) {
-                    evaluations.push({ category: item.label, name: item.name, yield: yieldVal, count: item.count });
+            const getOddRange = (o) => `${(Math.floor(o * 2) / 2).toFixed(1)} - ${(Math.floor(o * 2) / 2 + 0.5).toFixed(1)}`;
+            
+            // Prioridad absoluta: Monitoreo de Unidades Ganadas
+            if (globalBestSegment) {
+                const matchesLeague = (globalBestSegment.type === 'Liga' && globalBestSegment.name.toLowerCase() === currentLeague.toLowerCase());
+                const matchesMarket = (globalBestSegment.type === 'Mercado' && globalBestSegment.name === currentMarket);
+                const matchesOdd = (globalBestSegment.type === 'Rango Cuota' && globalBestSegment.name === getOddRange(currentOdd));
+
+                if (matchesLeague || matchesMarket || matchesOdd) {
+                    return { isStrategic: true, evaluations: [{ category: globalBestSegment.type, name: globalBestSegment.name, yield: 0, units: 1 }] };
                 }
-            });
-            if (evaluations.length > 0) return { isStrategic: true, evaluations: evaluations };
-            return { isStrategic: false, evaluations: [], text: "Pick estándar. No hay datos de alta eficiencia aún." };
+            }
+            return { isStrategic: false, evaluations: [], text: "Analizando profit..." };
         }
 
         /**
-         * FUNCIÓN MEJORADA: BÚSQUEDA DEL MÁXIMO PROFIT (UNIDADES)
+         * FUNCIÓN DE MINADO DIRECTO (VENTANA EMERGENTE)
          */
         function askAssistantBest() {
-            const history = JSON.parse(localStorage.getItem('backtesting_data')) || [];
-            if (history.length < 5) {
-                alert("Asistente: El volumen de datos es insuficiente para un análisis de rentabilidad real (Mínimo 5 resueltas).");
+            autoMonitorProfit(); // Forzamos actualización antes de mostrar
+            if (!globalBestSegment) {
+                alert("Asistente: Sin picks suficientes para determinar el segmento de máximo profit.");
                 return;
             }
-
-            const getOddRange = (o) => `${(Math.floor(o * 2) / 2).toFixed(1)} - ${(Math.floor(o * 2) / 2 + 0.5).toFixed(1)}`;
-            const getEdgeRange = (e) => {
-                const val = parseFloat(e);
-                const lower = Math.floor(val / 5) * 5;
-                return `${lower}% - ${lower + 5}%`;
-            };
-
-            const dimensions = {};
-
-            history.forEach(b => {
-                const dList = [
-                    { type: '🏆 Liga', val: b.liga },
-                    { type: '🎯 Mercado', val: b.mercado },
-                    { type: '💰 Rango Cuota', val: getOddRange(b.cuota) },
-                    { type: '📈 Rango Edge', val: getEdgeRange(b.edge) }
-                ];
-
-                dList.forEach(d => {
-                    const key = `${d.type}: ${d.val}`;
-                    if (!dimensions[key]) dimensions[key] = { type: d.type, name: d.val, profit: 0, staked: 0, count: 0, sumOdds: 0 };
-                    dimensions[key].profit += b.profit;
-                    dimensions[key].staked += b.stake;
-                    dimensions[key].count++;
-                    dimensions[key].sumOdds += b.cuota;
-                });
-            });
-
-            let bestSegment = null;
-            let maxProfit = -Infinity;
-
-            Object.keys(dimensions).forEach(k => {
-                const seg = dimensions[k];
-                // El asistente prioriza el PROFIT (Unidades ganadas)
-                if (seg.profit > maxProfit && seg.count >= 2) {
-                    maxProfit = seg.profit;
-                    bestSegment = seg;
-                }
-            });
-
-            if (bestSegment && maxProfit > 0) {
-                const yieldVal = (bestSegment.profit / bestSegment.staked) * 100;
-                const avgOdd = bestSegment.sumOdds / bestSegment.count;
-                const pVal = calculatePValue(bestSegment.count, yieldVal / 100, avgOdd);
-                
-                // Viabilidad: Si el p-Value es alto pero el profit es positivo, es "Viable pero Riesgoso"
-                let viability = pVal < 0.10 ? "✅ ALTA (Estrategia Sólida)" : "⚠️ MEDIA (Muestra Pequeña)";
-                if (pVal > 0.50) viability = "🛑 BAJA (Suerte Estadística)";
-
-                alert(`🚀 MINADO DE MÁXIMO PROFIT (UNIDADES) 🚀\n\n` +
-                      `💎 EL SEGMENTO QUE MÁS DINERO TE DA:\n` +
-                      `${bestSegment.type}: ${bestSegment.name}\n\n` +
-                      `💰 Unidades Ganadas: $${maxProfit.toFixed(2)}\n` +
-                      `📈 Yield en este sector: ${yieldVal.toFixed(2)}%\n` +
-                      `📊 Muestra: ${bestSegment.count} picks\n` +
-                      `🎯 Probabilidad de Ventaja (p-Value): ${(pVal * 100).toFixed(2)}%\n\n` +
-                      `🧐 Viabilidad del Asistente: ${viability}`);
-            } else {
-                alert("Asistente: He escaneado todas las dimensiones y actualmente no tienes unidades ganadas netas en ningún segmento con muestra suficiente.");
-            }
+            alert(`💰 REPORTE DE UNIDADES MÁXIMAS 💰\n\n` +
+                  `🏆 SEGMENTO LÍDER: ${globalBestSegment.type} (${globalBestSegment.name})\n` +
+                  `💸 PROFIT ACUMULADO: $${globalBestSegment.profit.toFixed(2)}\n` +
+                  `📊 MUESTRA: ${globalBestSegment.count} picks\n\n` +
+                  `🤖 SUGERENCIA: Solo opera en este segmento para asegurar viabilidad.`);
         }
 
         function updateEdge(id, prob, partnerId, marketName, chaosProb) {
@@ -753,22 +759,13 @@
                     if (currentPValue > 0.10) labelsHtml += `<div class="mt-1 text-[8px] text-red-400 font-black uppercase">P-REDUCED -${(currentPValue*100).toFixed(0)}%</div>`;
                     stakeCell.innerHTML = labelsHtml;
                 } else { stakeCell.innerText = "--"; }
-                if(partnerOdd > 1) document.getElementById('overround_' + id).innerText = (((1/odd) + (1/partnerOdd) - 1) * 100).toFixed(1) + "%";
+                
                 if(edge > 0.01) { 
                     const advice = getStrategicAdvice(currentLeague, marketName, odd, edge, chaosProb);
-                    const assistantBox = document.getElementById('strategy-assistant-box');
-                    assistantBox.classList.remove('hidden');
                     if (advice.isStrategic) {
-                        let html = `<div class="flex flex-col gap-1">`;
-                        advice.evaluations.forEach(ev => { html += `<div class="text-[11px]"><span class="text-bet-yellow font-black">${ev.category}:</span> <span class="text-white">${ev.name}</span> <span class="text-emerald-400 font-bold">(${ev.yield.toFixed(1)}% Yield)</span></div>`; });
-                        html += `</div>`;
-                        document.getElementById('strategy-text').innerHTML = html;
-                        document.getElementById('strategy-signal').innerHTML = "💎";
-                        if(document.getElementById('row_' + id)) document.getElementById('row_' + id).classList.add('strategy-match');
+                        document.getElementById('row_' + id).classList.add('strategy-match');
                     } else {
-                        document.getElementById('strategy-text').innerHTML = `<span class="text-slate-400">${advice.text || "Pick estándar."}</span>`;
-                        document.getElementById('strategy-signal').innerHTML = "🔍";
-                        if(document.getElementById('row_' + id)) document.getElementById('row_' + id).classList.remove('strategy-match');
+                        document.getElementById('row_' + id).classList.remove('strategy-match');
                     }
                 }
             }
@@ -804,6 +801,7 @@
             save(); 
             updateTelegramStatus(b);
             sendResolvedToBacktesting(true); 
+            autoMonitorProfit(); // Re-escaneo después de resolver
         }
 
         function save() { localStorage.setItem('betags_v3_miner', JSON.stringify(bets)); updateStats(); }
@@ -834,37 +832,11 @@
             const totalStaked = resolved.reduce((a, b) => a + b.stake, 0);
             const wins = resolved.filter(b => b.status === 'win').length;
             const avgOdd = resolved.length > 0 ? (resolved.reduce((a, b) => a + b.odd, 0) / resolved.length) : 0;
-            const avgProfit = resolved.length > 0 ? (totalProfit / resolved.length).toFixed(2) : "0";
             const yieldDec = totalStaked > 0 ? (totalProfit / totalStaked) : 0;
-
-            const pVal = calculatePValue(resolved.length, yieldDec, avgOdd);
-            const pValDisplay = document.getElementById('top-pvalue');
-            if (pVal !== null) {
-                pValDisplay.innerText = (pVal * 100).toFixed(2) + "%";
-                pValDisplay.className = pVal < 0.05 ? "text-xl font-bold text-emerald-400" : "text-xl font-bold text-red-400";
-            } else { pValDisplay.innerText = "--"; }
-
-            let peak = BANKROLL_BASE, current = BANKROLL_BASE, maxDD = 0;
-            [...resolved].reverse().forEach(b => {
-                current += b.profit;
-                if (current > peak) peak = current;
-                let dd = peak > 0 ? (peak - current) / peak : 0;
-                if (dd > maxDD) maxDD = dd;
-            });
-
-            document.getElementById('v1-yield').innerText = (totalStaked > 0 ? (yieldDec * 100).toFixed(1) : 0) + "%";
-            document.getElementById('v1-profit').innerText = "$" + totalProfit.toFixed(2);
-            document.getElementById('v1-count').innerText = resolved.length;
 
             document.getElementById('top-profit').innerText = "$" + totalProfit.toFixed(2);
             document.getElementById('top-yield').innerText = (yieldDec * 100).toFixed(1) + "%";
             document.getElementById('top-bankroll').innerText = "$" + getCurrentBankroll().toFixed(2);
-            
-            document.getElementById('m-roi').innerText = (totalProfit/BANKROLL_BASE*100).toFixed(1) + "%";
-            document.getElementById('m-hit').innerText = (resolved.length > 0 ? (wins/resolved.length*100).toFixed(1) : 0) + "%";
-            document.getElementById('m-dd').innerText = (maxDD * 100).toFixed(1) + "%";
-            document.getElementById('m-avg-odd').innerText = avgOdd.toFixed(2);
-            document.getElementById('m-avg-profit').innerText = "$" + avgProfit;
 
             renderHistory(filtered); 
             renderBankrollChart(resolved);
@@ -876,7 +848,7 @@
                 const card = document.createElement('div'); card.className = "bet-card-custom";
                 let sCol = b.status === 'win' ? "#22c55e" : (b.status === 'loss' ? "#ef4444" : "#eab308");
                 let sClass = b.status === 'win' ? "status-win-border" : (b.status === 'loss' ? "status-loss-border" : "status-pending-border");
-                const realBadge = b.isStrategic ? `<div class="pill-badge badge-real">⭐ REAL</div>` : '';
+                const realBadge = b.isStrategic ? `<div class="pill-badge badge-real">⭐ PROFIT LÍDER</div>` : '';
                 card.innerHTML = `
                     <div class="card-status-strip ${sClass}"></div>
                     <div class="status-indicator" style="color: ${sCol}">${b.status === 'pending' ? 'P' : b.status.toUpperCase()}</div>
@@ -892,7 +864,6 @@
                         <div class="flex gap-2">
                             <button onclick="resolve(${b.id}, 'win')" class="btn-status btn-win"><i class="fa-solid fa-check"></i></button>
                             <button onclick="resolve(${b.id}, 'loss')" class="btn-status btn-loss"><i class="fa-solid fa-xmark"></i></button>
-                            <button onclick="shareBet(${b.id}, 'ws')" class="btn-status btn-share-ws"><i class="fa-brands fa-whatsapp"></i></button>
                         </div>
                         <button onclick="deleteBet(${b.id})" class="btn-status btn-delete"><i class="fa-solid fa-trash-can"></i></button>
                     </div>`;
@@ -900,7 +871,7 @@
             });
         }
 
-        function deleteBet(id) { if(confirm('¿Eliminar registro?')) { bets = bets.filter(x => x.id !== id); save(); } }
+        function deleteBet(id) { if(confirm('¿Eliminar registro?')) { bets = bets.filter(x => x.id !== id); save(); autoMonitorProfit(); } }
 
         function renderPoissonChart(labels, home, away) {
             const ctx = document.getElementById('poissonChart').getContext('2d'); if(pChart) pChart.destroy();
