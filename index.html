@@ -738,13 +738,13 @@
                 }
             });
 
-            // MEJORA: Solo es estratégica si evaluations tiene datos Y el botón p-Value está activo
             const usePValue = document.getElementById('use_pvalue_mgmt').checked;
             if (evaluations.length > 0 && usePValue) return { isStrategic: true, evaluations: evaluations };
             
             return { isStrategic: false, evaluations: [], text: evaluations.length > 0 ? "Oportunidad estratégica detectada, pero gestión P-Value desactivada." : "Pick estándar. No hay datos de alta eficiencia aún." };
         }
 
+        // MEJORA: El cálculo del multiplicador de Kelly ahora usa el p-Value global (Mixtos)
         function updateEdge(id, prob, partnerId, marketName, chaosProb) {
             const odd = parseFloat(document.getElementById('odd_' + id).value) || 0;
             const partnerOdd = parseFloat(document.getElementById('odd_' + partnerId).value) || 0;
@@ -754,12 +754,15 @@
             if(odd > 1) {
                 const edge = (odd * prob) - 1;
                 const standardKelly = Math.max(0, (edge / (odd - 1)) * KELLY_FRAC);
-                const currentPValueText = document.getElementById('top-pvalue').innerText;
-                const currentPValue = currentPValueText !== "--" ? parseFloat(currentPValueText) / 100 : 1.0;
+                
+                // EXTRAEMOS SIEMPRE EL P-VALUE GLOBAL DEL ENCABEZADO (MIXTO)
+                const globalPValueRaw = document.getElementById('top-pvalue').innerText;
+                const globalPValue = (globalPValueRaw !== "--" && globalPValueRaw !== "0.00%") ? parseFloat(globalPValueRaw) / 100 : 1.0;
                 
                 let pConfidenceMultiplier = 1.0;
                 if (usePValue) {
-                    pConfidenceMultiplier = Math.max(0.05, 1 - currentPValue); 
+                    // Usamos el globalPValue que corresponde a todos los registros (mixtos)
+                    pConfidenceMultiplier = Math.max(0.05, 1 - globalPValue); 
                 }
 
                 const chaosPenalty = Math.min(1, (chaosProb / prob)); 
@@ -773,7 +776,7 @@
                 if (stake > 0) {
                     let labelsHtml = `<span class="stake-main">$${stake.toFixed(2)}</span>`;
                     if (chaosPenalty < 0.99) labelsHtml += `<div class="mt-1 text-[8px] text-orange-400 font-black uppercase">CHAOS -${((1-chaosPenalty)*100).toFixed(0)}%</div>`;
-                    if (usePValue && currentPValue > 0.10) labelsHtml += `<div class="mt-1 text-[8px] text-red-400 font-black uppercase">P-REDUCED -${(currentPValue*100).toFixed(0)}%</div>`;
+                    if (usePValue && globalPValue > 0.05) labelsHtml += `<div class="mt-1 text-[8px] text-red-400 font-black uppercase">GLOBAL P-REDUCED -${(globalPValue*100).toFixed(0)}%</div>`;
                     stakeCell.innerHTML = labelsHtml;
                 } else { stakeCell.innerText = "--"; }
                 if(partnerOdd > 1) document.getElementById('overround_' + id).innerText = (((1/odd) + (1/partnerOdd) - 1) * 100).toFixed(1) + "%";
@@ -840,12 +843,14 @@
             if(!silent) alert("Datos sincronizados con Backtesting.");
         }
 
+        // FUNCIÓN CLAVE: Aquí es donde se calcula el p-Value Mixto (Todos) para la UI
         function applyFilters() {
             const fMar = document.getElementById('f_market').value, fAst = document.getElementById('f_assistant').value;
             const fMinOdd = parseFloat(document.getElementById('f_min_odd').value) || 0;
             const fMaxOdd = parseFloat(document.getElementById('f_max_odd').value) || 999;
             const fMinEdge = parseFloat(document.getElementById('f_min_edge').value) || -999;
             
+            // Cálculos para la vista filtrada (UI del historial)
             const filtered = bets.filter(b => 
                 (fMar === "" || b.market === fMar) && 
                 (fAst === "" || (fAst === "real" && b.isStrategic) || (fAst === "manual" && !b.isStrategic)) && 
@@ -853,36 +858,43 @@
                 (b.odd <= fMaxOdd) &&
                 (parseFloat(b.edge) >= fMinEdge)
             );
-            const resolved = filtered.filter(b => b.status !== 'pending');
-            
-            const totalProfit = resolved.reduce((a, b) => a + b.profit, 0);
-            const totalStaked = resolved.reduce((a, b) => a + b.stake, 0);
-            const wins = resolved.filter(b => b.status === 'win').length;
-            const avgOdd = resolved.length > 0 ? (resolved.reduce((a, b) => a + b.odd, 0) / resolved.length) : 0;
-            const avgProfit = resolved.length > 0 ? (totalProfit / resolved.length).toFixed(2) : "0";
-            const yieldDec = totalStaked > 0 ? (totalProfit / totalStaked) : 0;
+            const resolvedFiltered = filtered.filter(b => b.status !== 'pending');
 
-            const pVal = calculatePValue(resolved.length, yieldDec, avgOdd);
+            // MEJORA: Cálculo del p-Value MIXTO (Todos los registros reales + manuales)
+            const allResolved = bets.filter(b => b.status === 'win' || b.status === 'loss');
+            const globalProfit = allResolved.reduce((a, b) => a + b.profit, 0);
+            const globalStaked = allResolved.reduce((a, b) => a + b.stake, 0);
+            const globalAvgOdd = allResolved.length > 0 ? (allResolved.reduce((a, b) => a + b.odd, 0) / allResolved.length) : 0;
+            const globalYieldDec = globalStaked > 0 ? (globalProfit / globalStaked) : 0;
+
+            const globalPVal = calculatePValue(allResolved.length, globalYieldDec, globalAvgOdd);
             const pValDisplay = document.getElementById('top-pvalue');
-            if (pVal !== null) {
-                pValDisplay.innerText = (pVal * 100).toFixed(2) + "%";
-                pValDisplay.className = pVal < 0.05 ? "text-xl font-bold text-emerald-400" : "text-xl font-bold text-red-400";
+            
+            if (globalPVal !== null) {
+                pValDisplay.innerText = (globalPVal * 100).toFixed(2) + "%";
+                pValDisplay.className = globalPVal < 0.05 ? "text-xl font-bold text-emerald-400" : "text-xl font-bold text-red-400";
             } else { pValDisplay.innerText = "--"; }
 
+            // Estadísticas para los widgets superiores (basadas en filtrado actual)
+            const totalProfitFiltered = resolvedFiltered.reduce((a, b) => a + b.profit, 0);
+            const totalStakedFiltered = resolvedFiltered.reduce((a, b) => a + b.stake, 0);
+            const winsFiltered = resolvedFiltered.filter(b => b.status === 'win').length;
+            const yieldFiltered = totalStakedFiltered > 0 ? (totalProfitFiltered / totalStakedFiltered) : 0;
+
             let peak = BANKROLL_BASE, current = BANKROLL_BASE, maxDD = 0;
-            [...resolved].reverse().forEach(b => {
+            [...resolvedFiltered].reverse().forEach(b => {
                 current += b.profit;
                 if (current > peak) peak = current;
                 let dd = peak > 0 ? (peak - current) / peak : 0;
                 if (dd > maxDD) maxDD = dd;
             });
 
-            document.getElementById('v1-yield').innerText = (totalStaked > 0 ? (yieldDec * 100).toFixed(1) : 0) + "%";
-            document.getElementById('v1-profit').innerText = "$" + totalProfit.toFixed(2);
-            document.getElementById('v1-count').innerText = resolved.length;
+            document.getElementById('v1-yield').innerText = (yieldFiltered * 100).toFixed(1) + "%";
+            document.getElementById('v1-profit').innerText = "$" + totalProfitFiltered.toFixed(2);
+            document.getElementById('v1-count').innerText = resolvedFiltered.length;
 
-            document.getElementById('top-profit').innerText = "$" + totalProfit.toFixed(2);
-            document.getElementById('top-yield').innerText = (yieldDec * 100).toFixed(1) + "%";
+            document.getElementById('top-profit').innerText = "$" + totalProfitFiltered.toFixed(2);
+            document.getElementById('top-yield').innerText = (yieldFiltered * 100).toFixed(1) + "%";
             
             const finalBank = getCurrentBankroll();
             document.getElementById('top-bankroll').innerText = "$" + finalBank.toFixed(2);
@@ -900,14 +912,14 @@
                 btnWithdraw.classList.remove('hover:bg-orange-500', 'shadow-lg', 'shadow-orange-900/40');
             }
             
-            document.getElementById('m-roi').innerText = (totalProfit/BANKROLL_BASE*100).toFixed(1) + "%";
-            document.getElementById('m-hit').innerText = (resolved.length > 0 ? (wins/resolved.length*100).toFixed(1) : 0) + "%";
+            document.getElementById('m-roi').innerText = (totalProfitFiltered/BANKROLL_BASE*100).toFixed(1) + "%";
+            document.getElementById('m-hit').innerText = (resolvedFiltered.length > 0 ? (winsFiltered/resolvedFiltered.length*100).toFixed(1) : 0) + "%";
             document.getElementById('m-dd').innerText = (maxDD * 100).toFixed(1) + "%";
-            document.getElementById('m-avg-odd').innerText = avgOdd.toFixed(2);
-            document.getElementById('m-avg-profit').innerText = "$" + avgProfit;
+            document.getElementById('m-avg-odd').innerText = globalAvgOdd.toFixed(2); // Usamos global para consistencia
+            document.getElementById('m-avg-profit').innerText = "$" + (resolvedFiltered.length > 0 ? (totalProfitFiltered / resolvedFiltered.length).toFixed(2) : "0");
 
             renderHistory(filtered); 
-            renderBankrollChart(resolved);
+            renderBankrollChart(resolvedFiltered);
         }
 
         function renderHistory(data) {
