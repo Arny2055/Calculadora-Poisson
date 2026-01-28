@@ -462,6 +462,7 @@
     <script>
         const BANKROLL_BASE = 100;
         const KELLY_FRAC = 0.25;
+        const MAX_BANK_PERCENT = 0.05; // TOPE DEL 5% AGREGADO
         const MIN_CONFIDENCE_SAMPLE = 10; 
         const MIN_YIELD_THRESHOLD = 5.0; 
         
@@ -684,7 +685,6 @@
                 { id: 'o25', name: 'OVER 2.5', prob: 1 - p_u25, partner: 'u25', chaos: chaos.o25 },
                 { id: 'u25', name: 'UNDER 2.5', prob: p_u25, partner: 'o25', chaos: chaos.u25 },
                 { id: 'bttsy', name: 'BTTS SÍ', prob: p_btts_y, partner: 'bttsn', chaos: chaos.bttsy },
-                { id: 'bttsy', name: 'BTTS SÍ', prob: p_btts_y, partner: 'bttsn', chaos: chaos.bttsy },
                 { id: 'bttsn', name: 'BTTS NO', prob: 1 - p_btts_y, partner: 'bttsy', chaos: chaos.bttsn }
             ]);
         }
@@ -744,7 +744,6 @@
             return { isStrategic: false, evaluations: [], text: evaluations.length > 0 ? "Oportunidad estratégica detectada, pero gestión P-Value desactivada." : "Pick estándar. No hay datos de alta eficiencia aún." };
         }
 
-        // MEJORA: El cálculo del multiplicador de Kelly ahora usa el p-Value global (Mixtos)
         function updateEdge(id, prob, partnerId, marketName, chaosProb) {
             const odd = parseFloat(document.getElementById('odd_' + id).value) || 0;
             const partnerOdd = parseFloat(document.getElementById('odd_' + partnerId).value) || 0;
@@ -753,21 +752,28 @@
 
             if(odd > 1) {
                 const edge = (odd * prob) - 1;
+                const currentBank = getCurrentBankroll();
+                
+                // CÁLCULO DE KELLY CON TOPE DEL 5%
                 const standardKelly = Math.max(0, (edge / (odd - 1)) * KELLY_FRAC);
                 
-                // EXTRAEMOS SIEMPRE EL P-VALUE GLOBAL DEL ENCABEZADO (MIXTO)
                 const globalPValueRaw = document.getElementById('top-pvalue').innerText;
                 const globalPValue = (globalPValueRaw !== "--" && globalPValueRaw !== "0.00%") ? parseFloat(globalPValueRaw) / 100 : 1.0;
                 
                 let pConfidenceMultiplier = 1.0;
                 if (usePValue) {
-                    // Usamos el globalPValue que corresponde a todos los registros (mixtos)
                     pConfidenceMultiplier = Math.max(0.05, 1 - globalPValue); 
                 }
 
                 const chaosPenalty = Math.min(1, (chaosProb / prob)); 
-                const adjustedKelly = standardKelly * chaosPenalty * pConfidenceMultiplier;
-                const stake = getCurrentBankroll() * adjustedKelly;
+                let adjustedKelly = standardKelly * chaosPenalty * pConfidenceMultiplier;
+
+                // MEJORA: APLICAR EL TOPE DEL 5% DE LA BANCA
+                if (adjustedKelly > MAX_BANK_PERCENT) {
+                    adjustedKelly = MAX_BANK_PERCENT;
+                }
+
+                const stake = currentBank * adjustedKelly;
                 const edgeEl = document.getElementById('edge_' + id);
                 edgeEl.innerText = (edge * 100).toFixed(1) + "%";
                 edgeEl.className = edge > 0 ? "p-4 text-emerald-400 font-bold" : "p-4 text-red-500";
@@ -775,6 +781,7 @@
                 
                 if (stake > 0) {
                     let labelsHtml = `<span class="stake-main">$${stake.toFixed(2)}</span>`;
+                    if (adjustedKelly >= MAX_BANK_PERCENT) labelsHtml += `<div class="mt-1 text-[8px] text-emerald-400 font-black uppercase">MAX TOPE 5%</div>`;
                     if (chaosPenalty < 0.99) labelsHtml += `<div class="mt-1 text-[8px] text-orange-400 font-black uppercase">CHAOS -${((1-chaosPenalty)*100).toFixed(0)}%</div>`;
                     if (usePValue && globalPValue > 0.05) labelsHtml += `<div class="mt-1 text-[8px] text-red-400 font-black uppercase">GLOBAL P-REDUCED -${(globalPValue*100).toFixed(0)}%</div>`;
                     stakeCell.innerHTML = labelsHtml;
@@ -843,14 +850,12 @@
             if(!silent) alert("Datos sincronizados con Backtesting.");
         }
 
-        // FUNCIÓN CLAVE: Aquí es donde se calcula el p-Value Mixto (Todos) para la UI
         function applyFilters() {
             const fMar = document.getElementById('f_market').value, fAst = document.getElementById('f_assistant').value;
             const fMinOdd = parseFloat(document.getElementById('f_min_odd').value) || 0;
             const fMaxOdd = parseFloat(document.getElementById('f_max_odd').value) || 999;
             const fMinEdge = parseFloat(document.getElementById('f_min_edge').value) || -999;
             
-            // Cálculos para la vista filtrada (UI del historial)
             const filtered = bets.filter(b => 
                 (fMar === "" || b.market === fMar) && 
                 (fAst === "" || (fAst === "real" && b.isStrategic) || (fAst === "manual" && !b.isStrategic)) && 
@@ -860,7 +865,6 @@
             );
             const resolvedFiltered = filtered.filter(b => b.status !== 'pending');
 
-            // MEJORA: Cálculo del p-Value MIXTO (Todos los registros reales + manuales)
             const allResolved = bets.filter(b => b.status === 'win' || b.status === 'loss');
             const globalProfit = allResolved.reduce((a, b) => a + b.profit, 0);
             const globalStaked = allResolved.reduce((a, b) => a + b.stake, 0);
@@ -875,7 +879,6 @@
                 pValDisplay.className = globalPVal < 0.05 ? "text-xl font-bold text-emerald-400" : "text-xl font-bold text-red-400";
             } else { pValDisplay.innerText = "--"; }
 
-            // Estadísticas para los widgets superiores (basadas en filtrado actual)
             const totalProfitFiltered = resolvedFiltered.reduce((a, b) => a + b.profit, 0);
             const totalStakedFiltered = resolvedFiltered.reduce((a, b) => a + b.stake, 0);
             const winsFiltered = resolvedFiltered.filter(b => b.status === 'win').length;
@@ -915,7 +918,7 @@
             document.getElementById('m-roi').innerText = (totalProfitFiltered/BANKROLL_BASE*100).toFixed(1) + "%";
             document.getElementById('m-hit').innerText = (resolvedFiltered.length > 0 ? (winsFiltered/resolvedFiltered.length*100).toFixed(1) : 0) + "%";
             document.getElementById('m-dd').innerText = (maxDD * 100).toFixed(1) + "%";
-            document.getElementById('m-avg-odd').innerText = globalAvgOdd.toFixed(2); // Usamos global para consistencia
+            document.getElementById('m-avg-odd').innerText = globalAvgOdd.toFixed(2); 
             document.getElementById('m-avg-profit').innerText = "$" + (resolvedFiltered.length > 0 ? (totalProfitFiltered / resolvedFiltered.length).toFixed(2) : "0");
 
             renderHistory(filtered); 
