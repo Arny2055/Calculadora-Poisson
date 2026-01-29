@@ -270,7 +270,7 @@
                     </button>
                 </div>
 
-                <div class="lg:col-span-2 glass-card p-6 rounded-2xl" style="display: none;">
+                <div class="lg:col-span-2 glass-card p-6 rounded-2xl">
                     <h2 class="text-lg font-bold mb-4 text-slate-400 uppercase tracking-tighter">Probabilidades de Poisson</h2>
                     <div class="h-[300px]">
                         <canvas id="poissonChart"></canvas>
@@ -282,7 +282,7 @@
                 </div>
             </div>
 
-            <div class="glass-card rounded-2xl overflow-hidden" style="display: none;">
+            <div class="glass-card rounded-2xl overflow-hidden">
                 <div class="overflow-x-auto">
                     <table class="w-full text-left text-sm">
                         <thead class="bg-slate-900 text-slate-500 uppercase text-[10px]">
@@ -459,7 +459,7 @@
     <script>
         const BANKROLL_BASE = 100;
         const KELLY_FRAC = 0.25;
-        const MAX_BANK_PERCENT = 0.05; 
+        const MAX_BANK_PERCENT = 0.05; // TOPE DEL 5% AGREGADO
         const MIN_CONFIDENCE_SAMPLE = 10; 
         const MIN_YIELD_THRESHOLD = 5.0; 
         
@@ -674,6 +674,7 @@
             const p_btts_y = (1 - poissonProb(0, h_lambda)) * (1 - poissonProb(0, a_lambda));
             const chaos = runMonteCarlo(h_lambda, a_lambda);
             
+            // FILTRADO DE MERCADOS: Solo Over/Under y BTTS
             renderMarketTable([
                 { id: 'o25', name: 'OVER 2.5', prob: 1 - p_u25, partner: 'u25', chaos: chaos.o25 },
                 { id: 'u25', name: 'UNDER 2.5', prob: p_u25, partner: 'o25', chaos: chaos.u25 },
@@ -746,7 +747,9 @@
             if(odd > 1) {
                 const edge = (odd * prob) - 1;
                 const currentBank = getCurrentBankroll();
+                
                 const standardKelly = Math.max(0, (edge / (odd - 1)) * KELLY_FRAC);
+                
                 const globalPValueRaw = document.getElementById('top-pvalue').innerText;
                 const globalPValue = (globalPValueRaw !== "--" && globalPValueRaw !== "0.00%") ? parseFloat(globalPValueRaw) / 100 : 1.0;
                 
@@ -758,7 +761,9 @@
                 const chaosPenalty = Math.min(1, (chaosProb / prob)); 
                 let adjustedKelly = standardKelly * chaosPenalty * pConfidenceMultiplier;
 
-                if (adjustedKelly > MAX_BANK_PERCENT) adjustedKelly = MAX_BANK_PERCENT;
+                if (adjustedKelly > MAX_BANK_PERCENT) {
+                    adjustedKelly = MAX_BANK_PERCENT;
+                }
 
                 const stake = currentBank * adjustedKelly;
                 const edgeEl = document.getElementById('edge_' + id);
@@ -846,14 +851,18 @@
             const filtered = bets.filter(b => 
                 (fMar === "" || b.market === fMar) && 
                 (fAst === "" || (fAst === "real" && b.isStrategic) || (fAst === "manual" && !b.isStrategic)) && 
-                (b.odd >= fMinOdd) && (b.odd <= fMaxOdd) && (parseFloat(b.edge) >= fMinEdge)
+                (b.odd >= fMinOdd) && 
+                (b.odd <= fMaxOdd) &&
+                (parseFloat(b.edge) >= fMinEdge)
             );
             const resolvedFiltered = filtered.filter(b => b.status !== 'pending');
+
             const allResolved = bets.filter(b => b.status === 'win' || b.status === 'loss');
             const globalProfit = allResolved.reduce((a, b) => a + b.profit, 0);
             const globalStaked = allResolved.reduce((a, b) => a + b.stake, 0);
             const globalAvgOdd = allResolved.length > 0 ? (allResolved.reduce((a, b) => a + b.odd, 0) / allResolved.length) : 0;
             const globalYieldDec = globalStaked > 0 ? (globalProfit / globalStaked) : 0;
+
             const globalPVal = calculatePValue(allResolved.length, globalYieldDec, globalAvgOdd);
             const pValDisplay = document.getElementById('top-pvalue');
             
@@ -878,11 +887,13 @@
             document.getElementById('v1-yield').innerText = (yieldFiltered * 100).toFixed(1) + "%";
             document.getElementById('v1-profit').innerText = "$" + totalProfitFiltered.toFixed(2);
             document.getElementById('v1-count').innerText = resolvedFiltered.length;
+
             document.getElementById('top-profit').innerText = "$" + totalProfitFiltered.toFixed(2);
             document.getElementById('top-yield').innerText = (yieldFiltered * 100).toFixed(1) + "%";
             
             const finalBank = getCurrentBankroll();
             document.getElementById('top-bankroll').innerText = "$" + finalBank.toFixed(2);
+            
             const withdrawable = Math.max(0, finalBank - BANKROLL_BASE);
             document.getElementById('withdrawable-amount').innerText = withdrawable.toFixed(2);
             document.getElementById('top-withdrawals').innerText = "$" + totalWithdrawals.toFixed(2);
