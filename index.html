@@ -345,6 +345,20 @@
                     <button onclick="saveTelegramConfig()" class="w-full bg-blue-600 hover:bg-blue-500 py-3 rounded-xl font-black text-sm transition-all uppercase tracking-widest">
                         Guardar Configuración
                     </button>
+
+                    <div class="mt-8 pt-6 border-t border-white/10">
+                        <h3 class="text-sm font-black text-bet-yellow mb-4 uppercase tracking-tighter italic">Gestión de Datos (Backup)</h3>
+                        <div class="grid grid-cols-2 gap-4">
+                            <button onclick="exportFullBackup()" class="bg-slate-800 hover:bg-slate-700 text-white text-[10px] py-3 rounded-xl font-bold uppercase transition-all border border-white/5">
+                                <i class="fa-solid fa-download mr-2"></i> Exportar Todo
+                            </button>
+                            <button onclick="document.getElementById('importFile').click()" class="bg-emerald-600/20 hover:bg-emerald-600 text-emerald-400 hover:text-white text-[10px] py-3 rounded-xl font-bold uppercase transition-all border border-emerald-500/30">
+                                <i class="fa-solid fa-upload mr-2"></i> Importar Todo
+                            </button>
+                            <input type="file" id="importFile" class="hidden" accept=".json" onchange="importFullBackup(event)">
+                        </div>
+                        <p class="text-[9px] text-slate-500 mt-2 italic text-center">Usa esto para no perder tus apuestas al actualizar la herramienta.</p>
+                    </div>
                 </div>
             </div>
         </div>
@@ -558,6 +572,53 @@
             alert("Configuración de Telegram guardada.");
         }
 
+        // --- MEJORA: IMPORTAR / EXPORTAR BACKUP ---
+        function exportFullBackup() {
+            const backupData = {
+                bets: JSON.parse(localStorage.getItem('betags_v3_miner')) || [],
+                tg_config: JSON.parse(localStorage.getItem('betags_tg_config')) || {},
+                bankrollOffset: parseFloat(localStorage.getItem('betags_bank_offset')) || 0,
+                totalWithdrawals: parseFloat(localStorage.getItem('betags_withdrawals')) || 0,
+                backtesting: JSON.parse(localStorage.getItem('backtesting_data')) || [],
+                usePValue: localStorage.getItem('betags_use_pvalue')
+            };
+            
+            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(backupData));
+            const downloadAnchorNode = document.createElement('a');
+            downloadAnchorNode.setAttribute("href", dataStr);
+            downloadAnchorNode.setAttribute("download", "betags_pro_backup_" + new Date().toISOString().slice(0,10) + ".json");
+            document.body.appendChild(downloadAnchorNode);
+            downloadAnchorNode.click();
+            downloadAnchorNode.remove();
+        }
+
+        function importFullBackup(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const data = JSON.parse(e.target.result);
+                    
+                    if (confirm('¿Estás seguro de que quieres importar estos datos? Se sobrescribirá tu información actual (apuestas, bankroll y configuración).')) {
+                        if (data.bets) localStorage.setItem('betags_v3_miner', JSON.stringify(data.bets));
+                        if (data.tg_config) localStorage.setItem('betags_tg_config', JSON.stringify(data.tg_config));
+                        if (data.bankrollOffset !== undefined) localStorage.setItem('betags_bank_offset', data.bankrollOffset);
+                        if (data.totalWithdrawals !== undefined) localStorage.setItem('betags_withdrawals', data.totalWithdrawals);
+                        if (data.backtesting) localStorage.setItem('backtesting_data', JSON.stringify(data.backtesting));
+                        if (data.usePValue !== undefined) localStorage.setItem('betags_use_pvalue', data.usePValue);
+                        
+                        alert("¡Importación exitosa! La herramienta se reiniciará ahora.");
+                        location.reload();
+                    }
+                } catch (err) {
+                    alert("Error al procesar el archivo: El formato no es válido.");
+                }
+            };
+            reader.readAsText(file);
+        }
+
         async function sendToTelegramAuto(bet) {
             if(!tg_config.auto) return;
             if (!bet.isStrategic) return; 
@@ -690,7 +751,6 @@
             const p_btts_y = (1 - poissonProb(0, h_lambda)) * (1 - poissonProb(0, a_lambda));
             const chaos = runMonteCarlo(h_lambda, a_lambda);
             
-            // FILTRADO DE MERCADOS: Solo Over/Under y BTTS
             renderMarketTable([
                 { id: 'o25', name: 'OVER 2.5', prob: 1 - p_u25, partner: 'u25', chaos: chaos.o25 },
                 { id: 'u25', name: 'UNDER 2.5', prob: p_u25, partner: 'o25', chaos: chaos.u25 },
