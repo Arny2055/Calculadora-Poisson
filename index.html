@@ -159,12 +159,10 @@
             border: 2px solid #10b981 !important;
         }
 
-        /* Mejora: Clases para ocultar secciones */
         .hidden-analysis {
             display: none !important;
         }
 
-        /* Botón de Sincronización Estilo Nube */
         .btn-sync-cloud {
             background: linear-gradient(135deg, #0ea5e9, #2563eb);
             box-shadow: 0 4px 15px rgba(37, 99, 235, 0.4);
@@ -515,28 +513,27 @@
             try {
                 const response = await fetch(GS_CSV_URL);
                 const csvData = await response.text();
-                const lines = csvData.split("\n").slice(1); // Omitir cabecera
+                const lines = csvData.split("\n").slice(1); 
                 
                 let count = 0;
                 lines.forEach(line => {
                     const col = line.split(",");
                     if (col.length >= 8) {
                         const id = parseInt(col[0]);
-                        // Evitar duplicados comprobando ID
                         if (!bets.some(b => b.id === id)) {
                             const syncedBet = {
                                 id: id,
                                 date: col[1],
                                 teams: col[2],
-                                name: col[3], // Mercado
-                                market: col[3], // Alias para compatibilidad
+                                name: col[3],
+                                market: col[3],
                                 odd: parseFloat(col[4]),
                                 stake: parseFloat(col[5]),
                                 status: col[6].trim().toLowerCase(),
                                 profit: col[6].trim() === 'win' ? parseFloat(col[5]) * (parseFloat(col[4]) - 1) : (col[6].trim() === 'loss' ? -parseFloat(col[5]) : 0),
                                 league: col[7],
                                 engine: 'v1',
-                                isStrategic: true // Asumimos reales si vienen de la base
+                                isStrategic: true 
                             };
                             bets.unshift(syncedBet);
                             count++;
@@ -547,11 +544,11 @@
                 alert(`Sincronización completada. Se añadieron ${count} apuestas nuevas.`);
             } catch (error) {
                 console.error("Error sincronizando:", error);
-                alert("Error al conectar con Google Sheets. Verifica la publicación del CSV.");
+                alert("Error al conectar con Google Sheets.");
             }
         }
 
-        // --- ENVÍO A LA NUBE (WEB APP) ---
+        // --- MEJORA: FUNCIÓN DIAGNÓSTICA PARA GOOGLE SHEETS ---
         async function sendToCloud(bet, action = "INSERT") {
             const payload = {
                 action: action,
@@ -559,13 +556,16 @@
                 date: bet.date,
                 teams: bet.teams,
                 name: bet.market || bet.name,
-                odds: bet.odd,
+                odds: bet.odd, // Usamos 'odds' para coincidir con tu Google Script
                 stake: bet.stake,
                 status: bet.status,
                 league: bet.league
             };
 
+            console.log("Intentando enviar a la nube:", action, bet.id);
+
             try {
+                // Usamos fetch con mode 'no-cors' para Google Scripts
                 await fetch(GS_WEB_APP, {
                     method: 'POST',
                     mode: 'no-cors',
@@ -573,7 +573,10 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(payload)
                 });
-            } catch (e) { console.error("Cloud Error:", e); }
+                console.log("Petición de red enviada a la URL de Google.");
+            } catch (e) { 
+                console.error("Error crítico de red al enviar a la nube:", e); 
+            }
         }
 
         function setDefaultDate() {
@@ -603,31 +606,30 @@
         }
 
         function resetBankroll() {
-            if(confirm('¿Quieres reiniciar tu banca actual a 100 unidades? Las apuestas y el P-Value se conservarán.')) {
+            if(confirm('¿Quieres reiniciar tu banca actual a 100 unidades?')) {
                 const totalCurrentProfit = bets.reduce((acc, b) => acc + (b.profit || 0), 0);
                 bankrollOffset = -totalCurrentProfit;
                 localStorage.setItem('betags_bank_offset', bankrollOffset);
                 updateStats();
-                alert("Banca reiniciada a 100 unidades.");
+                alert("Banca reiniciada.");
             }
         }
 
         function makeWithdrawal() {
             const currentBank = getCurrentBankroll();
             const excess = currentBank - BANKROLL_BASE;
-            
             if (excess >= (BANKROLL_BASE * 0.30)) {
-                if (confirm(`¿Retirar $${excess.toFixed(2)} a tu apartado de beneficios? Esto reseteará tu bank a $100.`)) {
+                if (confirm(`¿Retirar $${excess.toFixed(2)}?`)) {
                     totalWithdrawals += excess;
                     localStorage.setItem('betags_withdrawals', totalWithdrawals);
                     const totalCurrentProfit = bets.reduce((acc, b) => acc + (b.profit || 0), 0);
                     bankrollOffset = -totalCurrentProfit;
                     localStorage.setItem('betags_bank_offset', bankrollOffset);
                     updateStats();
-                    alert("¡Beneficios guardados con éxito!");
+                    alert("Beneficios guardados.");
                 }
             } else {
-                alert("No has alcanzado el 30% de ganancia mínima ($30).");
+                alert("Mínimo $30 de ganancia.");
             }
         }
 
@@ -677,7 +679,7 @@
             reader.onload = function(e) {
                 try {
                     const data = JSON.parse(e.target.result);
-                    if (confirm('¿Importar respaldo? Se sobrescribirá la información actual.')) {
+                    if (confirm('¿Importar respaldo?')) {
                         if (data.bets) localStorage.setItem('betags_v3_miner', JSON.stringify(data.bets));
                         if (data.tg_config) localStorage.setItem('betags_tg_config', JSON.stringify(data.tg_config));
                         if (data.bankrollOffset !== undefined) localStorage.setItem('betags_bank_offset', data.bankrollOffset);
@@ -685,7 +687,7 @@
                         if (data.backtesting) localStorage.setItem('backtesting_data', JSON.stringify(data.backtesting));
                         location.reload();
                     }
-                } catch (err) { alert("Archivo inválido."); }
+                } catch (err) { alert("Error."); }
             };
             reader.readAsText(file);
         }
@@ -821,7 +823,7 @@
             Object.keys(insights).forEach(key => { const item = insights[key]; const yieldVal = calcYield(item); if (item.count >= MIN_CONFIDENCE_SAMPLE && yieldVal >= MIN_YIELD_THRESHOLD) { evaluations.push({ category: item.label, name: item.name, yield: yieldVal, count: item.count }); } });
             const usePValue = document.getElementById('use_pvalue_mgmt').checked;
             if (evaluations.length > 0 && usePValue) return { isStrategic: true, evaluations: evaluations };
-            return { isStrategic: false, evaluations: [], text: evaluations.length > 0 ? "Oportunidad estratégica, pero gestión P-Value desactivada." : "Pick estándar." };
+            return { isStrategic: false, evaluations: [], text: evaluations.length > 0 ? "Oportunidad estratégica." : "Pick estándar." };
         }
 
         function updateEdge(id, prob, partnerId, marketName, chaosProb) {
@@ -875,9 +877,9 @@
             const newBet = { id: Date.now(), league: leagueName, teams: eventName, date: eventDate, market, name: market, odd, prob, edge: (edge * 100).toFixed(2), stake: stakeVal, status: 'pending', profit: 0, engine: 'v1', isStrategic: advice.isStrategic };
             bets.unshift(newBet);
             saveLocally();
-            sendToCloud(newBet, "INSERT"); // Sincronizar con Google Sheets
+            sendToCloud(newBet, "INSERT"); 
             sendToTelegramAuto(newBet);
-            alert("Pick registrado y sincronizado en la nube.");
+            alert("Pick registrado.");
         }
 
         function resolve(id, status) {
@@ -885,7 +887,7 @@
             b.status = status;
             b.profit = status === 'win' ? b.stake * (b.odd - 1) : (status === 'loss' ? -b.stake : 0);
             saveLocally(); 
-            sendToCloud(b, "UPDATE"); // Actualizar estado en Google Sheets
+            sendToCloud(b, "UPDATE"); 
             updateTelegramStatus(b);
             sendResolvedToBacktesting(true); 
         }
@@ -896,7 +898,7 @@
             const resolvedBets = bets.filter(b => b.status === 'win' || b.status === 'loss');
             const dataToBacktest = resolvedBets.map(b => ({ id: b.id, fecha: b.date, liga: b.league, evento: b.teams, mercado: b.market, cuota: b.odd, probabilidad: (b.prob * 100).toFixed(2), edge: b.edge, stake: b.stake, resultado: b.status, profit: b.profit, motor: 'v1' }));
             localStorage.setItem('backtesting_data', JSON.stringify(dataToBacktest));
-            if(!silent) alert("Datos sincronizados con Backtesting.");
+            if(!silent) alert("Sincronizado.");
         }
 
         function applyFilters() {
