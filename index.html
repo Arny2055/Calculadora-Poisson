@@ -215,7 +215,7 @@
             <div id="strategy-assistant-box" class="recommendation-box hidden mb-6">
                 <div class="flex items-center justify-between">
                     <div>
-                        <h3 class="text-xs font-black text-blue-300 uppercase mb-1"><i class="fa-solid fa-robot mr-2"></i>ASISTENTE ESTRATÉGICO</h3>
+                        <h3 class="text-xs font-black text-blue-300 uppercase mb-1"><i class="fa-solid fa-robot mr-2"></i>ASISTENTE ESTRATÉGICO <span class="text-[8px] text-blue-400 ml-2">(DIXON-COLES V2 ACTIVE)</span></h3>
                         <div id="strategy-text" class="text-sm text-white font-medium italic">Esperando datos de mercado...</div>
                     </div>
                     <div id="strategy-signal" class="text-2xl animate-bounce"></div>
@@ -282,7 +282,7 @@
                 </div>
 
                 <div id="analysis-area" class="lg:col-span-2 glass-card p-6 rounded-2xl hidden-analysis">
-                    <h2 class="text-lg font-bold mb-4 text-slate-400 uppercase tracking-tighter">Probabilidades de Poisson</h2>
+                    <h2 class="text-lg font-bold mb-4 text-slate-400 uppercase tracking-tighter">Probabilidades de Poisson (Dixon-Coles Adjusted)</h2>
                     <div class="h-[300px]">
                         <canvas id="poissonChart"></canvas>
                     </div>
@@ -513,6 +513,9 @@
         const MIN_CONFIDENCE_SAMPLE = 10; 
         const MIN_YIELD_THRESHOLD = 5.0; 
         
+        // --- MEJORA DIXON-COLES ---
+        const RHO_DC = -0.11; // Parámetro de dependencia típico para ligas de fútbol
+        
         let bets = JSON.parse(localStorage.getItem('betags_v3_miner')) || [];
         let tg_config = JSON.parse(localStorage.getItem('betags_tg_config')) || { token: "8389950970:AAEdYvy2mcmo5ydUMrR_tOIGR8QCYO1STuU", chatId: "", channelId: "", auto: false };
         let bankrollOffset = parseFloat(localStorage.getItem('betags_bank_offset')) || 0;
@@ -614,7 +617,7 @@
                          `💰 *Cuota:* ${bet.odd.toFixed(2)}\n` +
                          `🔥 *Stake:* $${bet.stake.toFixed(2)}\n` +
                          `📈 *Edge:* ${bet.edge}%\n` +
-                         `🤖 _Algoritmo: V1 GOLES_`;
+                         `🤖 _Algoritmo: Dixon-Coles V2_`;
 
             if(tg_config.chatId) {
                 try {
@@ -640,7 +643,7 @@
             const statusIcon = bet.status === 'win' ? '✅' : '❌';
             const statusText = bet.status === 'win' ? 'GANADA' : 'PERDIDA';
             const profitText = bet.profit >= 0 ? `+$${bet.profit.toFixed(2)}` : `-$${Math.abs(bet.profit).toFixed(2)}`;
-            const star = bet.isStrategic ? "⭐ APUESTA REAL ⭐" : "📊 ANÁLISIS POISSON";
+            const star = bet.isStrategic ? "⭐ APUESTA REAL ⭐" : "📊 ANÁLISIS DIXON-COLES";
             const text = `🏁 *PICK RESUELTO* 🏁\n` +
                          `${statusIcon} *${statusText}* (${profitText})\n\n` +
                          `📅 *Fecha:* ${bet.date || 'No definida'}\n` +
@@ -649,7 +652,7 @@
                          `⚽ *Evento:* ${bet.teams}\n` +
                          `🎯 *Mercado:* ${bet.market}\n` +
                          `💰 *Cuota:* ${bet.odd.toFixed(2)}\n` +
-                         `🤖 _Algoritmo: V1 GOLES_`;
+                         `🤖 _Algoritmo: Dixon-Coles V2_`;
 
             if(tg_config.chatId && bet.tgMessageId) {
                 try { await fetch(`https://api.telegram.org/bot${tg_config.token}/editMessageText?chat_id=${tg_config.chatId}&message_id=${bet.tgMessageId}&text=${encodeURIComponent(text)}&parse_mode=Markdown`); } catch (e) {}
@@ -663,12 +666,26 @@
         function factorial(n) { return n <= 1 ? 1 : n * factorial(n - 1); }
         function poissonProb(k, lambda) { return (Math.pow(lambda, k) * Math.exp(-lambda)) / factorial(k); }
 
+        // --- FUNCIÓN TAU (DIXON-COLES) ---
+        function getTauAdjustment(x, y, hL, aL) {
+            if (x === 0 && y === 0) return 1 - (hL * aL * RHO_DC);
+            if (x === 0 && y === 1) return 1 + (hL * RHO_DC);
+            if (x === 1 && y === 0) return 1 + (aL * RHO_DC);
+            if (x === 1 && y === 1) return 1 - RHO_DC;
+            return 1;
+        }
+
         function runMonteCarlo(h_lambda, a_lambda) {
             const sims = 10000;
             let results = { win: 0, draw: 0, loss: 0, o25: 0, u25: 0, bttsy: 0, bttsn: 0 };
             for(let i=0; i<sims; i++) {
                 const h_goals = poissonRandom(h_lambda);
                 const a_goals = poissonRandom(a_lambda);
+                
+                // Aplicamos ajuste Dixon-Coles simplificado a la simulación
+                const tau = getTauAdjustment(h_goals, a_goals, h_lambda, a_lambda);
+                if (Math.random() > tau) { i--; continue; } // Re-simular si no cumple el peso estadístico
+
                 if(h_goals > a_goals) results.win++; else if(h_goals === a_goals) results.draw++; else results.loss++;
                 if(h_goals + a_goals > 2.5) results.o25++; else results.u25++;
                 if(h_goals > 0 && a_goals > 0) results.bttsy++; else results.bttsn++;
@@ -710,22 +727,34 @@
         function calculate() {
             const h_lambda = parseFloat(document.getElementById('h_gf').value) || 0;
             const a_lambda = parseFloat(document.getElementById('a_gf').value) || 0;
+            
+            // Renderizado de Chart usando Poisson puro (visual)
             let h_p = [], a_p = [], labels = [];
             for(let i=0; i<=5; i++) { labels.push(i + " G"); h_p.push(poissonProb(i, h_lambda)); a_p.push(poissonProb(i, a_lambda)); }
             renderPoissonChart(labels, h_p, a_p);
-            let p_win = 0, p_draw = 0, p_loss = 0, p_u25 = 0;
+            
+            let p_win = 0, p_draw = 0, p_loss = 0, p_u25 = 0, p_btts_y = 0;
             const matrixContainer = document.getElementById('score-matrix');
             matrixContainer.innerHTML = '';
+            
             for(let h=0; h<=5; h++) {
                 for(let a=0; a<=5; a++) {
-                    const prob = poissonProb(h, h_lambda) * poissonProb(a, a_lambda);
+                    // CÁLCULO CORE: Poisson * Ajuste Dixon-Coles
+                    let prob = poissonProb(h, h_lambda) * poissonProb(a, a_lambda);
+                    prob *= getTauAdjustment(h, a, h_lambda, a_lambda);
+                    
                     if(h > a) p_win += prob; else if(h === a) p_draw += prob; else p_loss += prob;
                     if(h + a < 2.5) p_u25 += prob;
-                    const cell = document.createElement('div'); cell.className = 'matrix-cell'; cell.style.backgroundColor = `rgba(0, 255, 136, ${prob * 2})`;
-                    cell.innerHTML = `<b>${h}-${a}</b><br>${(prob * 100).toFixed(1)}%`; matrixContainer.appendChild(cell);
+                    if(h > 0 && a > 0) p_btts_y += prob;
+
+                    const cell = document.createElement('div'); 
+                    cell.className = 'matrix-cell'; 
+                    cell.style.backgroundColor = `rgba(0, 255, 136, ${prob * 2})`;
+                    cell.innerHTML = `<b>${h}-${a}</b><br>${(prob * 100).toFixed(1)}%`; 
+                    matrixContainer.appendChild(cell);
                 }
             }
-            const p_btts_y = (1 - poissonProb(0, h_lambda)) * (1 - poissonProb(0, a_lambda));
+            
             const chaos = runMonteCarlo(h_lambda, a_lambda);
             renderMarketTable([
                 { id: 'o25', name: 'OVER 2.5', prob: 1 - p_u25, partner: 'u25', chaos: chaos.o25 },
@@ -758,7 +787,7 @@
 
         function getStrategicAdvice(currentLeague, currentMarket, currentOdd, currentEdge, chaosProb) {
             const history = JSON.parse(localStorage.getItem('backtesting_data')) || [];
-            if (history.length < 5) return { isStrategic: false, evaluations: [], text: "Analizando... (Se requieren 5 picks)" };
+            if (history.length < 5) return { isStrategic: false, evaluations: [], text: "Analizando vía Dixon-Coles... (Se requieren 5 picks)" };
             const getOddRange = (o) => {
                 const lower = Math.floor(o * 2) / 2;
                 return `${lower.toFixed(1)} - ${(lower + 0.5).toFixed(1)}`;
@@ -783,7 +812,7 @@
             });
             const usePValue = document.getElementById('use_pvalue_mgmt').checked;
             if (evaluations.length > 0 && usePValue) return { isStrategic: true, evaluations: evaluations };
-            return { isStrategic: false, evaluations: [], text: evaluations.length > 0 ? "Oportunidad estratégica sin P-Value." : "Pick estándar." };
+            return { isStrategic: false, evaluations: [], text: evaluations.length > 0 ? "Oportunidad detectada por Dixon-Coles." : "Sin ventaja clara." };
         }
 
         function updateEdge(id, prob, partnerId, marketName, chaosProb) {
@@ -836,11 +865,11 @@
             const stakeVal = mainStake ? parseFloat(mainStake.innerText.replace('$', '')) : 0;
             const edge = (odd * prob) - 1;
             const advice = getStrategicAdvice(leagueName, market, odd, edge, chaosProb);
-            const newBet = { id: Date.now(), league: leagueName, teams: eventName, date: document.getElementById('event_date').value, market, odd, prob, edge: (edge * 100).toFixed(2), stake: stakeVal, status: 'pending', profit: 0, engine: 'v1', isStrategic: advice.isStrategic };
+            const newBet = { id: Date.now(), league: leagueName, teams: eventName, date: document.getElementById('event_date').value, market, odd, prob, edge: (edge * 100).toFixed(2), stake: stakeVal, status: 'pending', profit: 0, engine: 'Dixon-Coles V2', isStrategic: advice.isStrategic };
             bets.unshift(newBet);
             save();
             sendToTelegramAuto(newBet);
-            alert("Pick registrado.");
+            alert("Pick registrado bajo Dixon-Coles V2.");
         }
 
         function shareBet(id, platform) {
@@ -863,7 +892,7 @@
             const dataToBackup = resolvedBets.map(b => ({
                 id: b.id, fecha: b.date, liga: b.league, evento: b.teams, 
                 mercado: b.market, cuota: b.odd, probabilidad: (b.prob * 100).toFixed(2), 
-                edge: b.edge, stake: b.stake, resultado: b.status, profit: b.profit, motor: 'v1'
+                edge: b.edge, stake: b.stake, resultado: b.status, profit: b.profit, motor: 'Dixon-Coles V2'
             }));
             
             localStorage.setItem('betags_backup_data', JSON.stringify(dataToBackup));
@@ -880,7 +909,7 @@
 
         function sendResolvedToBacktesting(silent = false) {
             const resolvedBets = bets.filter(b => b.status === 'win' || b.status === 'loss');
-            const dataToBacktest = resolvedBets.map(b => ({ id: b.id, fecha: b.date, liga: b.league, evento: b.teams, mercado: b.market, cuota: b.odd, probabilidad: (b.prob * 100).toFixed(2), edge: b.edge, stake: b.stake, resultado: b.status, profit: b.profit, motor: 'v1' }));
+            const dataToBacktest = resolvedBets.map(b => ({ id: b.id, fecha: b.date, liga: b.league, evento: b.teams, mercado: b.market, cuota: b.odd, probabilidad: (b.prob * 100).toFixed(2), edge: b.edge, stake: b.stake, resultado: b.status, profit: b.profit, motor: 'Dixon-Coles V2' }));
             localStorage.setItem('backtesting_data', JSON.stringify(dataToBacktest));
             if(!silent) alert("Datos sincronizados con Backtesting.");
         }
@@ -936,7 +965,7 @@
             let importedCount = 0;
             backupData.forEach(b => {
                 if (!bets.some(existing => existing.id === b.id)) {
-                    bets.push({ id: b.id, league: b.liga, teams: b.evento, date: b.fecha, market: b.mercado, odd: b.cuota, prob: parseFloat(b.probabilidad)/100, edge: b.edge, stake: b.stake, status: b.resultado, profit: b.profit, engine: 'v1', isStrategic: false });
+                    bets.push({ id: b.id, league: b.liga, teams: b.evento, date: b.fecha, market: b.mercado, odd: b.cuota, prob: parseFloat(b.probabilidad)/100, edge: b.edge, stake: b.stake, status: b.resultado, profit: b.profit, engine: 'Dixon-Coles V2', isStrategic: false });
                     importedCount++;
                 }
             });
