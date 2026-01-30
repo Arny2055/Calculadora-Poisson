@@ -373,10 +373,10 @@
                 <div class="glass-card p-6 rounded-2xl border-t-2 border-orange-500">
                     <h3 class="text-center font-black text-orange-400 mb-4 uppercase italic">Apartado de Beneficios</h3>
                     <div class="flex flex-col items-center justify-center space-y-3">
-                        <p class="text-[10px] text-slate-400 uppercase text-center">Solo disponible al ganar +30% del Bank Inicial ($100)</p>
+                        <p class="text-[10px] text-slate-400 uppercase text-center">Basado exclusivamente en Apuestas Reales ⭐</p>
                         <div class="text-2xl font-black text-white">$ <span id="withdrawable-amount">0.00</span></div>
                         <button id="btn-withdraw" onclick="makeWithdrawal()" class="w-full bg-orange-600 disabled:bg-slate-800 disabled:text-slate-600 py-3 rounded-xl font-black text-xs uppercase tracking-widest transition-all">
-                            Retirar Beneficios a Apartado
+                            Retirar Profit Real a Apartado
                         </button>
                     </div>
                 </div>
@@ -557,21 +557,24 @@
         }
 
         function makeWithdrawal() {
-            const currentBank = getCurrentBankroll();
-            const excess = currentBank - BANKROLL_BASE;
+            // MEJORA: Solo permitimos retirar el excedente generado por Apuestas Reales
+            const realBetsResolved = bets.filter(b => b.isStrategic && (b.status === 'win' || b.status === 'loss'));
+            const realProfit = realBetsResolved.reduce((a, b) => a + b.profit, 0);
             
-            if (excess >= (BANKROLL_BASE * 0.30)) {
-                if (confirm(`¿Retirar $${excess.toFixed(2)}?`)) {
-                    totalWithdrawals += excess;
+            if (realProfit >= (BANKROLL_BASE * 0.30)) {
+                if (confirm(`¿Retirar $${realProfit.toFixed(2)} generados por estrategia?`)) {
+                    totalWithdrawals += realProfit;
                     localStorage.setItem('betags_withdrawals', totalWithdrawals);
-                    const totalCurrentProfit = bets.reduce((acc, b) => acc + (b.profit || 0), 0);
-                    bankrollOffset = -totalCurrentProfit;
+                    
+                    // Ajustamos el offset para "limpiar" visualmente ese profit del bankroll actual
+                    bankrollOffset -= realProfit;
                     localStorage.setItem('betags_bank_offset', bankrollOffset);
+                    
                     updateStats();
-                    alert("¡Beneficios guardados!");
+                    alert("¡Beneficios reales transferidos al apartado!");
                 }
             } else {
-                alert("No has alcanzado el 30% de ganancia mínima.");
+                alert("Las apuestas estratégicas aún no alcanzan el 30% de ganancia mínima.");
             }
         }
 
@@ -918,7 +921,6 @@
             });
         }
 
-        // --- NUEVA FUNCIÓN: ELIMINAR ELEMENTO DEL BACKUP ---
         function deleteBackupItem(id) {
             if(confirm('¿Eliminar esta apuesta del backup?')) {
                 let backupData = JSON.parse(localStorage.getItem('betags_backup_data')) || [];
@@ -952,39 +954,55 @@
             const filtered = bets.filter(b => (fMar === "" || b.market === fMar) && (fAst === "" || (fAst === "real" && b.isStrategic) || (fAst === "manual" && !b.isStrategic)) && (b.odd >= fMinOdd) && (b.odd <= fMaxOdd) && (parseFloat(b.edge) >= fMinEdge));
             const resolvedFiltered = filtered.filter(b => b.status !== 'pending');
             const allResolved = bets.filter(b => b.status === 'win' || b.status === 'loss');
+            
+            // LÓGICA DE MEJORA: Beneficios basados solo en Apuestas Reales
+            const realResolved = bets.filter(b => b.isStrategic && (b.status === 'win' || b.status === 'loss'));
+            const totalRealProfit = realResolved.reduce((a, b) => a + b.profit, 0);
+
             const globalProfit = allResolved.reduce((a, b) => a + b.profit, 0);
             const globalStaked = allResolved.reduce((a, b) => a + b.stake, 0);
             const globalAvgOdd = allResolved.length > 0 ? (allResolved.reduce((a, b) => a + b.odd, 0) / allResolved.length) : 0;
             const globalYieldDec = globalStaked > 0 ? (globalProfit / globalStaked) : 0;
             const globalPVal = calculatePValue(allResolved.length, globalYieldDec, globalAvgOdd);
+            
             const pValDisplay = document.getElementById('top-pvalue');
             if (globalPVal !== null) {
                 pValDisplay.innerText = (globalPVal * 100).toFixed(2) + "%";
                 pValDisplay.className = globalPVal < 0.05 ? "text-xl font-bold text-emerald-400" : "text-xl font-bold text-red-400";
             } else pValDisplay.innerText = "--";
+            
             const totalProfitFiltered = resolvedFiltered.reduce((a, b) => a + b.profit, 0);
             const totalStakedFiltered = resolvedFiltered.reduce((a, b) => a + b.stake, 0);
             const winsFiltered = resolvedFiltered.filter(b => b.status === 'win').length;
             const yieldFiltered = totalStakedFiltered > 0 ? (totalProfitFiltered / totalStakedFiltered) : 0;
+            
             let peak = BANKROLL_BASE, current = BANKROLL_BASE, maxDD = 0;
             [...resolvedFiltered].reverse().forEach(b => { current += b.profit; if (current > peak) peak = current; let dd = peak > 0 ? (peak - current) / peak : 0; if (dd > maxDD) maxDD = dd; });
+            
             document.getElementById('v1-yield').innerText = (yieldFiltered * 100).toFixed(1) + "%";
             document.getElementById('v1-profit').innerText = "$" + totalProfitFiltered.toFixed(2);
             document.getElementById('v1-count').innerText = resolvedFiltered.length;
             document.getElementById('top-profit').innerText = "$" + totalProfitFiltered.toFixed(2);
             document.getElementById('top-yield').innerText = (yieldFiltered * 100).toFixed(1) + "%";
+            
             const finalBank = getCurrentBankroll();
             document.getElementById('top-bankroll').innerText = "$" + finalBank.toFixed(2);
-            const withdrawable = Math.max(0, finalBank - BANKROLL_BASE);
+            
+            // MEJORA: El monto retirable se basa solo en el Profit Real acumulado
+            const withdrawable = Math.max(0, totalRealProfit);
             document.getElementById('withdrawable-amount').innerText = withdrawable.toFixed(2);
             document.getElementById('top-withdrawals').innerText = "$" + totalWithdrawals.toFixed(2);
+            
             const btnWithdraw = document.getElementById('btn-withdraw');
+            // Activar si el profit real supera el 30% del bankroll inicial
             if (withdrawable >= (BANKROLL_BASE * 0.30)) btnWithdraw.disabled = false; else btnWithdraw.disabled = true;
+            
             document.getElementById('m-roi').innerText = (totalProfitFiltered/BANKROLL_BASE*100).toFixed(1) + "%";
             document.getElementById('m-hit').innerText = (resolvedFiltered.length > 0 ? (winsFiltered/resolvedFiltered.length*100).toFixed(1) : 0) + "%";
             document.getElementById('m-dd').innerText = (maxDD * 100).toFixed(1) + "%";
             document.getElementById('m-avg-odd').innerText = globalAvgOdd.toFixed(2); 
             document.getElementById('m-avg-profit').innerText = "$" + (resolvedFiltered.length > 0 ? (totalProfitFiltered / resolvedFiltered.length).toFixed(2) : "0");
+            
             renderHistory(filtered); 
             renderBankrollChart(resolvedFiltered);
         }
