@@ -3,10 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>BetAGS Pro - High Performance Edition v4.0</title>
+    <title>BetAGS Pro - High Performance Edition v4.0 Cloud</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <script src="https://www.gstatic.com/firebasejs/9.17.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.17.1/firebase-database-compat.js"></script>
+
     <style>
         :root {
             --bet-green: #006341;
@@ -159,10 +163,20 @@
             border: 2px solid #10b981 !important;
         }
 
-        /* Mejora: Clases para ocultar secciones */
         .hidden-analysis {
             display: none !important;
         }
+        
+        /* Indicador de Nube */
+        #cloud-status {
+            font-size: 10px;
+            font-weight: bold;
+            padding: 2px 8px;
+            border-radius: 4px;
+        }
+        .cloud-syncing { color: #eab308; }
+        .cloud-online { color: #22c55e; }
+        .cloud-offline { color: #ef4444; }
     </style>
 </head>
 <body>
@@ -171,6 +185,7 @@
         <div class="container mx-auto flex flex-col md:flex-row justify-between items-center gap-4">
             <h1 class="text-2xl font-black italic text-white tracking-tighter">
                 BET<span class="text-bet-yellow">AGS</span> <span class="text-[10px] uppercase tracking-widest text-emerald-400 not-italic ml-1">ULTIMATE MINER</span>
+                <span id="cloud-status" class="ml-2 cloud-syncing"><i class="fa-solid fa-cloud"></i> CONECTANDO...</span>
             </h1>
             <div class="flex items-center gap-4">
                 <div class="flex bg-slate-800 p-1 rounded-xl gap-1">
@@ -506,6 +521,61 @@
     </div>
 
     <script>
+        // --- MEJORA: INICIALIZACIÓN FIREBASE ---
+        const firebaseConfig = { databaseURL: "https://betags-cloud-default-rtdb.firebaseio.com/" };
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.database();
+        const cloudRef = db.ref('betags_data');
+
+        function updateCloudStatus(status) {
+            const el = document.getElementById('cloud-status');
+            if (status === 'online') {
+                el.innerHTML = '<i class="fa-solid fa-cloud"></i> NUBE SINCRONIZADA';
+                el.className = 'ml-2 cloud-online';
+            } else if (status === 'syncing') {
+                el.innerHTML = '<i class="fa-solid fa-cloud-arrow-up"></i> SUBIENDO...';
+                el.className = 'ml-2 cloud-syncing';
+            } else {
+                el.innerHTML = '<i class="fa-solid fa-cloud-slash"></i> OFFLINE';
+                el.className = 'ml-2 cloud-offline';
+            }
+        }
+
+        async function syncWithCloud() {
+            updateCloudStatus('syncing');
+            try {
+                // Obtenemos datos de la nube
+                const snapshot = await cloudRef.get();
+                if (snapshot.exists()) {
+                    const cloudBets = snapshot.val().bets || [];
+                    const cloudOffset = snapshot.val().bankrollOffset || 0;
+                    const cloudWithdrawals = snapshot.val().totalWithdrawals || 0;
+
+                    // Lógica de fusión: Si la nube tiene más registros, actualizamos local
+                    if (cloudBets.length >= bets.length) {
+                        bets = cloudBets;
+                        bankrollOffset = cloudOffset;
+                        totalWithdrawals = cloudWithdrawals;
+                        localStorage.setItem('betags_v3_miner', JSON.stringify(bets));
+                        localStorage.setItem('betags_bank_offset', bankrollOffset);
+                        localStorage.setItem('betags_withdrawals', totalWithdrawals);
+                    }
+                }
+                // Una vez fusionado, subimos lo que tenemos (por si habia cambios locales)
+                await cloudRef.set({
+                    bets: bets,
+                    bankrollOffset: bankrollOffset,
+                    totalWithdrawals: totalWithdrawals,
+                    lastSync: Date.now()
+                });
+                updateCloudStatus('online');
+            } catch (error) {
+                console.error("Error sincronizando:", error);
+                updateCloudStatus('offline');
+            }
+        }
+        // --- FIN MEJORA FIREBASE ---
+
         const BANKROLL_BASE = 100;
         const KELLY_FRAC = 0.25;
         const MAX_BANK_PERCENT = 0.05; 
@@ -532,6 +602,7 @@
                 document.getElementById('use_pvalue_mgmt').checked = (savedPValueState === 'true');
             }
             renderBackupTable();
+            syncWithCloud(); // Sincronización inicial al cargar
         };
 
         function toggleAnalysis() {
@@ -550,6 +621,7 @@
                 const totalCurrentProfit = bets.reduce((acc, b) => acc + (b.profit || 0), 0);
                 bankrollOffset = -totalCurrentProfit;
                 localStorage.setItem('betags_bank_offset', bankrollOffset);
+                save(); // Actualiza local y nube
                 updateStats();
                 alert("Banca reiniciada a 100 unidades.");
             }
@@ -566,6 +638,7 @@
                     const totalCurrentProfit = bets.reduce((acc, b) => acc + (b.profit || 0), 0);
                     bankrollOffset = -totalCurrentProfit;
                     localStorage.setItem('betags_bank_offset', bankrollOffset);
+                    save(); // Actualiza local y nube
                     updateStats();
                     alert("¡Beneficios guardados!");
                 }
@@ -628,7 +701,7 @@
                     if(data.ok) bet.tgChannelMsgId = data.result.message_id;
                 } catch (e) {}
             }
-            localStorage.setItem('betags_v3_miner', JSON.stringify(bets));
+            save(); // Asegura guardar el Message ID
         }
 
         async function updateTelegramStatus(bet) {
@@ -834,7 +907,7 @@
             const advice = getStrategicAdvice(leagueName, market, odd, edge, chaosProb);
             const newBet = { id: Date.now(), league: leagueName, teams: eventName, date: document.getElementById('event_date').value, market, odd, prob, edge: (edge * 100).toFixed(2), stake: stakeVal, status: 'pending', profit: 0, engine: 'v1', isStrategic: advice.isStrategic };
             bets.unshift(newBet);
-            save();
+            save(); // Guarda local y nube
             sendToTelegramAuto(newBet);
             alert("Pick registrado.");
         }
@@ -848,14 +921,12 @@
         function resolve(id, status) {
             const b = bets.find(x => x.id === id); b.status = status;
             b.profit = status === 'win' ? b.stake * (b.odd - 1) : (status === 'loss' ? -b.stake : 0);
-            save(); 
+            save(); // Guarda local y nube
             updateTelegramStatus(b);
-            // MEJORA: AUTO-BACKUP AL RESOLVER
             triggerAutoBackup(); 
             sendResolvedToBacktesting(true); 
         }
 
-        // --- INICIO MEJORA: MOTOR DE AUTO-BACKUP ---
         function triggerAutoBackup() {
             const resolvedBets = bets.filter(b => b.status === 'win' || b.status === 'loss');
             const dataToBackup = resolvedBets.map(b => ({
@@ -863,20 +934,19 @@
                 mercado: b.market, cuota: b.odd, probabilidad: (b.prob * 100).toFixed(2), 
                 edge: b.edge, stake: b.stake, resultado: b.status, profit: b.profit, motor: 'v1'
             }));
-            
-            // Guardamos en una llave persistente de emergencia
             localStorage.setItem('betags_backup_data', JSON.stringify(dataToBackup));
-            
             const now = new Date();
             const timeStr = now.getHours().toString().padStart(2, '0') + ":" + now.getMinutes().toString().padStart(2, '0') + ":" + now.getSeconds().toString().padStart(2, '0');
             localStorage.setItem('betags_last_backup_timestamp', timeStr);
-            
             renderBackupTable();
-            console.log("Auto Backup Ejecutado: " + timeStr);
         }
-        // --- FIN MEJORA ---
 
-        function save() { localStorage.setItem('betags_v3_miner', JSON.stringify(bets)); updateStats(); }
+        // REEMPLAZO DE LA FUNCIÓN SAVE PARA INCLUIR NUBE
+        function save() { 
+            localStorage.setItem('betags_v3_miner', JSON.stringify(bets)); 
+            syncWithCloud(); // Sincroniza al guardar
+            updateStats(); 
+        }
 
         function sendResolvedToBacktesting(silent = false) {
             const resolvedBets = bets.filter(b => b.status === 'win' || b.status === 'loss');
