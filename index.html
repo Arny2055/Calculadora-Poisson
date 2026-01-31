@@ -677,20 +677,19 @@
 
         function runMonteCarlo(h_lambda, a_lambda) {
             const sims = 10000;
-            let results = { win: 0, draw: 0, loss: 0, o25: 0, u25: 0, bttsy: 0, bttsn: 0 };
+            let results = { win: 0, draw: 0, loss: 0, i_o25: 0, u25: 0, bttsy: 0, bttsn: 0 };
             for(let i=0; i<sims; i++) {
                 const h_goals = poissonRandom(h_lambda);
                 const a_goals = poissonRandom(a_lambda);
                 
-                // Aplicamos ajuste Dixon-Coles simplificado a la simulación
                 const tau = getTauAdjustment(h_goals, a_goals, h_lambda, a_lambda);
-                if (Math.random() > tau) { i--; continue; } // Re-simular si no cumple el peso estadístico
+                if (Math.random() > tau) { i--; continue; } 
 
                 if(h_goals > a_goals) results.win++; else if(h_goals === a_goals) results.draw++; else results.loss++;
-                if(h_goals + a_goals > 2.5) results.o25++; else results.u25++;
+                if(h_goals + a_goals > 2.5) results.i_o25++; else results.u25++;
                 if(h_goals > 0 && a_goals > 0) results.bttsy++; else results.bttsn++;
             }
-            return { win: (results.win / sims), draw: (results.draw / sims), loss: (results.loss / sims), o25: (results.o25 / sims), u25: (results.u25 / sims), bttsy: (results.bttsy / sims), bttsn: (results.bttsn / sims) };
+            return { win: (results.win / sims), draw: (results.draw / sims), loss: (results.loss / sims), o25: (results.i_o25 / sims), u25: (results.u25 / sims), bttsy: (results.bttsy / sims), bttsn: (results.bttsn / sims) };
         }
 
         function poissonRandom(lambda) {
@@ -728,7 +727,6 @@
             const h_lambda = parseFloat(document.getElementById('h_gf').value) || 0;
             const a_lambda = parseFloat(document.getElementById('a_gf').value) || 0;
             
-            // Renderizado de Chart usando Poisson puro (visual)
             let h_p = [], a_p = [], labels = [];
             for(let i=0; i<=5; i++) { labels.push(i + " G"); h_p.push(poissonProb(i, h_lambda)); a_p.push(poissonProb(i, a_lambda)); }
             renderPoissonChart(labels, h_p, a_p);
@@ -739,7 +737,6 @@
             
             for(let h=0; h<=5; h++) {
                 for(let a=0; a<=5; a++) {
-                    // CÁLCULO CORE: Poisson * Ajuste Dixon-Coles
                     let prob = poissonProb(h, h_lambda) * poissonProb(a, a_lambda);
                     prob *= getTauAdjustment(h, a, h_lambda, a_lambda);
                     
@@ -820,26 +817,45 @@
             const partnerOdd = parseFloat(document.getElementById('odd_' + partnerId).value) || 0;
             const currentLeague = document.getElementById('league_name').value || "Desconocida";
             const usePValue = document.getElementById('use_pvalue_mgmt').checked;
+
             if(odd > 1) {
                 const edge = (odd * prob) - 1;
                 const currentBank = getCurrentBankroll();
+                
+                // 1. Gestión Kelly Base
                 const standardKelly = Math.max(0, (edge / (odd - 1)) * KELLY_FRAC);
+                
+                // 2. Aplicar tope de 5% inmediatamente (Si Kelly se pasa del 5%, se baja al 5%)
+                let limitedKelly = Math.min(MAX_BANK_PERCENT, standardKelly);
+                
+                // 3. Obtener Multiplicador P-Value (Habilidad)
                 const globalPValueRaw = document.getElementById('top-pvalue').innerText;
                 const globalPValue = (globalPValueRaw !== "--" && globalPValueRaw !== "0.00%") ? parseFloat(globalPValueRaw) / 100 : 1.0;
+                
+                // P-Confidence: Si p-value es bajo (bueno), el multiplicador es alto. Si es alto (suerte), el multiplicador es bajo.
                 let pConfidenceMultiplier = usePValue ? Math.max(0.05, 1 - globalPValue) : 1.0;
+
+                // 4. Aplicar multiplicador al Kelly ya topeado
                 const chaosPenalty = Math.min(1, (chaosProb / prob)); 
-                let adjustedKelly = Math.min(MAX_BANK_PERCENT, standardKelly * chaosPenalty * pConfidenceMultiplier);
-                const stake = currentBank * adjustedKelly;
+                let finalAdjustedKelly = limitedKelly * chaosPenalty * pConfidenceMultiplier;
+
+                const stake = currentBank * finalAdjustedKelly;
+                
+                // Actualizar Interfaz
                 const edgeEl = document.getElementById('edge_' + id);
                 edgeEl.innerText = (edge * 100).toFixed(1) + "%";
                 edgeEl.className = edge > 0 ? "p-4 text-emerald-400 font-bold" : "p-4 text-red-500";
+                
                 const stakeCell = document.getElementById('stake_' + id);
                 if (stake > 0) {
                     let labelsHtml = `<span class="stake-main">$${stake.toFixed(2)}</span>`;
-                    if (adjustedKelly >= MAX_BANK_PERCENT) labelsHtml += `<div class="mt-1 text-[8px] text-emerald-400 font-black uppercase">TOP 5%</div>`;
+                    // Si el kelly original superaba el 5%, marcamos que está en TOP
+                    if (standardKelly >= MAX_BANK_PERCENT) labelsHtml += `<div class="mt-1 text-[8px] text-emerald-400 font-black uppercase">TOP 5% + P-VAL</div>`;
                     stakeCell.innerHTML = labelsHtml;
                 } else stakeCell.innerText = "--";
+
                 if(partnerOdd > 1) document.getElementById('overround_' + id).innerText = (((1/odd) + (1/partnerOdd) - 1) * 100).toFixed(1) + "%";
+                
                 if(edge > 0.01) { 
                     const advice = getStrategicAdvice(currentLeague, marketName, odd, edge, chaosProb);
                     document.getElementById('strategy-assistant-box').classList.remove('hidden');
@@ -894,15 +910,11 @@
                 mercado: b.market, cuota: b.odd, probabilidad: (b.prob * 100).toFixed(2), 
                 edge: b.edge, stake: b.stake, resultado: b.status, profit: b.profit, motor: 'Dixon-Coles V2'
             }));
-            
             localStorage.setItem('betags_backup_data', JSON.stringify(dataToBackup));
-            
             const now = new Date();
             const timeStr = now.getHours().toString().padStart(2, '0') + ":" + now.getMinutes().toString().padStart(2, '0') + ":" + now.getSeconds().toString().padStart(2, '0');
             localStorage.setItem('betags_last_backup_timestamp', timeStr);
-            
             renderBackupTable();
-            console.log("Auto Backup Ejecutado: " + timeStr);
         }
 
         function save() { localStorage.setItem('betags_v3_miner', JSON.stringify(bets)); updateStats(); }
@@ -917,35 +929,18 @@
         function renderBackupTable() {
             const backupData = JSON.parse(localStorage.getItem('betags_backup_data')) || [];
             const tbody = document.getElementById('backup-table-body');
-            const timeEl = document.getElementById('last-backup-time');
             const lastTime = localStorage.getItem('betags_last_backup_timestamp');
-            
-            if(timeEl && lastTime) timeEl.innerText = "Último guardado automático: " + lastTime;
+            if(document.getElementById('last-backup-time') && lastTime) document.getElementById('last-backup-time').innerText = "Último guardado automático: " + lastTime;
             tbody.innerHTML = '';
-
             if (backupData.length === 0) {
                 tbody.innerHTML = '<tr><td colspan="8" class="p-8 text-center text-slate-500 italic">No hay datos en el backup. Resuelve una apuesta para activar.</td></tr>';
                 return;
             }
-
             backupData.forEach(b => {
                 const tr = document.createElement('tr');
                 tr.className = "hover:bg-slate-700/20 transition-all";
                 const profitColor = b.profit >= 0 ? 'text-emerald-400' : 'text-red-400';
-                tr.innerHTML = `
-                    <td class="p-4 font-mono text-slate-400">${b.fecha || 'N/A'}</td>
-                    <td class="p-4 font-bold text-slate-200">${b.evento}</td>
-                    <td class="p-4"><span class="bg-slate-800 px-2 py-1 rounded text-[10px] font-bold">${b.mercado}</span></td>
-                    <td class="p-4 font-bold">@${b.cuota.toFixed(2)}</td>
-                    <td class="p-4">$${b.stake.toFixed(2)}</td>
-                    <td class="p-4 font-black">${b.resultado === 'win' ? '✅' : '❌'} ${b.resultado.toUpperCase()}</td>
-                    <td class="p-4 font-black ${profitColor}">$${b.profit.toFixed(2)}</td>
-                    <td class="p-4 text-center">
-                        <button onclick="deleteBackupItem(${b.id})" class="text-red-400 hover:text-red-200 transition-colors">
-                            <i class="fa-solid fa-trash-can"></i>
-                        </button>
-                    </td>
-                `;
+                tr.innerHTML = `<td class="p-4 font-mono text-slate-400">${b.fecha || 'N/A'}</td><td class="p-4 font-bold text-slate-200">${b.evento}</td><td class="p-4"><span class="bg-slate-800 px-2 py-1 rounded text-[10px] font-bold">${b.mercado}</span></td><td class="p-4 font-bold">@${b.cuota.toFixed(2)}</td><td class="p-4">$${b.stake.toFixed(2)}</td><td class="p-4 font-black">${b.resultado === 'win' ? '✅' : '❌'} ${b.resultado.toUpperCase()}</td><td class="p-4 font-black ${profitColor}">$${b.profit.toFixed(2)}</td><td class="p-4 text-center"><button onclick="deleteBackupItem(${b.id})" class="text-red-400 hover:text-red-200 transition-colors"><i class="fa-solid fa-trash-can"></i></button></td>`;
                 tbody.appendChild(tr);
             });
         }
@@ -984,7 +979,6 @@
             const resolvedFiltered = filtered.filter(b => b.status !== 'pending');
             const allResolved = bets.filter(b => b.status === 'win' || b.status === 'loss');
             
-            // LÓGICA DE MEJORA: Beneficios basados solo en Apuestas Reales
             const realResolved = bets.filter(b => b.isStrategic && (b.status === 'win' || b.status === 'loss'));
             const totalRealProfit = realResolved.reduce((a, b) => a + b.profit, 0);
 
@@ -1017,13 +1011,11 @@
             const finalBank = getCurrentBankroll();
             document.getElementById('top-bankroll').innerText = "$" + finalBank.toFixed(2);
             
-            // MEJORA: El monto retirable se basa solo en el Profit Real acumulado
             const withdrawable = Math.max(0, totalRealProfit);
             document.getElementById('withdrawable-amount').innerText = withdrawable.toFixed(2);
             document.getElementById('top-withdrawals').innerText = "$" + totalWithdrawals.toFixed(2);
             
             const btnWithdraw = document.getElementById('btn-withdraw');
-            // Activar si el profit real supera el 30% del bankroll inicial
             if (withdrawable >= (BANKROLL_BASE * 0.30)) btnWithdraw.disabled = false; else btnWithdraw.disabled = true;
             
             document.getElementById('m-roi').innerText = (totalProfitFiltered/BANKROLL_BASE*100).toFixed(1) + "%";
@@ -1042,25 +1034,7 @@
                 const card = document.createElement('div'); card.className = "bet-card-custom";
                 let sCol = b.status === 'win' ? "#22c55e" : (b.status === 'loss' ? "#ef4444" : "#eab308");
                 let sClass = b.status === 'win' ? "status-win-border" : (b.status === 'loss' ? "status-loss-border" : "status-pending-border");
-                card.innerHTML = `
-                    <div class="card-status-strip ${sClass}"></div>
-                    <div class="status-indicator" style="color: ${sCol}">${b.status === 'pending' ? 'P' : b.status.toUpperCase()}</div>
-                    <div class="mb-2"><span class="text-[10px] text-emerald-500 uppercase font-black">${b.league}</span><h2 class="text-xl font-bold text-white leading-tight">${b.teams}</h2></div>
-                    <div class="flex gap-2 mb-4"><div class="px-2 py-1 rounded bg-slate-800 text-xs font-bold text-emerald-400">${b.market}</div>${b.isStrategic ? '<div class="pill-badge badge-real">⭐ REAL</div>' : ''}</div>
-                    <div class="card-data-grid">
-                        <div><p class="text-[9px] text-slate-500 uppercase">Cuota</p><p class="font-bold">${b.odd}</p></div>
-                        <div><p class="text-[9px] text-slate-500 uppercase">Stake</p><p class="font-bold">$${b.stake}</p></div>
-                        <div><p class="text-[9px] text-slate-500 uppercase">Edge</p><p class="font-bold text-emerald-400">${b.edge}%</p></div>
-                        <div><p class="text-[9px] text-slate-500 uppercase">Profit</p><p class="font-bold ${b.profit >= 0 ? 'text-emerald-400' : 'text-red-400'}">${b.profit.toFixed(2)}</p></div>
-                    </div>
-                    <div class="flex justify-between items-center mt-4">
-                        <div class="flex gap-2">
-                            <button onclick="resolve(${b.id}, 'win')" class="btn-status btn-win"><i class="fa-solid fa-check"></i></button>
-                            <button onclick="resolve(${b.id}, 'loss')" class="btn-status btn-loss"><i class="fa-solid fa-xmark"></i></button>
-                            <button onclick="shareBet(${b.id}, 'ws')" class="btn-status btn-share-ws"><i class="fa-brands fa-whatsapp"></i></button>
-                        </div>
-                        <button onclick="deleteBet(${b.id})" class="btn-status btn-delete"><i class="fa-solid fa-trash-can"></i></button>
-                    </div>`;
+                card.innerHTML = `<div class="card-status-strip ${sClass}"></div><div class="status-indicator" style="color: ${sCol}">${b.status === 'pending' ? 'P' : b.status.toUpperCase()}</div><div class="mb-2"><span class="text-[10px] text-emerald-500 uppercase font-black">${b.league}</span><h2 class="text-xl font-bold text-white leading-tight">${b.teams}</h2></div><div class="flex gap-2 mb-4"><div class="px-2 py-1 rounded bg-slate-800 text-xs font-bold text-emerald-400">${b.market}</div>${b.isStrategic ? '<div class="pill-badge badge-real">⭐ REAL</div>' : ''}</div><div class="card-data-grid"><div><p class="text-[9px] text-slate-500 uppercase">Cuota</p><p class="font-bold">${b.odd}</p></div><div><p class="text-[9px] text-slate-500 uppercase">Stake</p><p class="font-bold">$${b.stake}</p></div><div><p class="text-[9px] text-slate-500 uppercase">Edge</p><p class="font-bold text-emerald-400">${b.edge}%</p></div><div><p class="text-[9px] text-slate-500 uppercase">Profit</p><p class="font-bold ${b.profit >= 0 ? 'text-emerald-400' : 'text-red-400'}">${b.profit.toFixed(2)}</p></div></div><div class="flex justify-between items-center mt-4"><div class="flex gap-2"><button onclick="resolve(${b.id}, 'win')" class="btn-status btn-win"><i class="fa-solid fa-check"></i></button><button onclick="resolve(${b.id}, 'loss')" class="btn-status btn-loss"><i class="fa-solid fa-xmark"></i></button><button onclick="shareBet(${b.id}, 'ws')" class="btn-status btn-share-ws"><i class="fa-brands fa-whatsapp"></i></button></div><button onclick="deleteBet(${b.id})" class="btn-status btn-delete"><i class="fa-solid fa-trash-can"></i></button></div>`;
                 grid.appendChild(card);
             });
         }
