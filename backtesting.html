@@ -25,7 +25,6 @@
         .recommendation-box::after { content: '\f0eb'; font-family: 'Font Awesome 6 Free'; position: absolute; right: 20px; top: 50%; transform: translateY(-50%); font-size: 40px; opacity: 0.1; font-weight: 900; }
         .simulation-border { border-left: 4px solid #f59e0b !important; }
         .valid-badge { background: rgba(16, 185, 129, 0.2); color: #10b981; padding: 2px 6px; border-radius: 4px; font-size: 8px; font-weight: 900; border: 1px solid rgba(16, 185, 129, 0.3); }
-        /* Mejora Visual para Kelly */
         .kelly-badge { background: rgba(59, 130, 246, 0.2); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.4); padding: 2px 5px; border-radius: 4px; font-weight: 800; }
     </style>
 </head>
@@ -41,11 +40,10 @@
             <div id="ai-recommendation" class="recommendation-box hidden">
                 <h3 class="text-xs font-black text-blue-300 uppercase mb-2"><i class="fa-solid fa-robot mr-2"></i>Asistente Estratégico BetAGS</h3>
                 <p id="rec-text" class="text-sm font-medium text-white italic">Analizando patrones...</p>
-                
                 <div id="kelly-management" class="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div class="p-3 bg-blue-500/10 border border-blue-500/30 rounded-lg">
                         <p class="text-[10px] text-blue-400 font-black uppercase">Optimización Kelly (Fraccional 0.5)</p>
-                        <p id="kelly-advice" class="text-xs text-slate-300 mt-1">Calculando exposición ideal...</p>
+                        <p id="kelly-advice" class="text-xs text-slate-300 mt-1">Calculando exposición...</p>
                     </div>
                     <div id="gem-alert" class="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-lg hidden">
                         <p class="text-[10px] text-emerald-400 font-black uppercase">Gema Detectada</p>
@@ -84,7 +82,7 @@
                     </div>
                 </div>
                 <div class="space-y-8">
-                    <div class="engine-header bg-emerald-600/20 text-emerald-400 border border-emerald-500/30 uppercase text-sm">Validación por Equipos (>5 Picks)</div>
+                    <div class="engine-header bg-emerald-600/20 text-emerald-400 border border-emerald-500/30 uppercase text-sm">Análisis por Equipos (>5 Picks)</div>
                     <div id="validated-teams-list" class="space-y-2 max-h-[400px] overflow-y-auto pr-2"></div>
                 </div>
             </div>
@@ -107,7 +105,7 @@
         <div class="glass-card p-4 rounded-2xl border-b-2 border-purple-500">
             <div class="grid grid-cols-2 md:grid-cols-5 gap-4 items-end">
                 <div><label class="text-[10px] font-black text-slate-500 uppercase block mb-1">Mercado</label>
-                    <select id="filter-market" class="w-full" onchange="applyFilters()"><option value="all">TODOS</option><option value="GANADOR LOCAL (1)">LOCAL (1)</option><option value="EMPATE (X)">EMPATE (X)</option><option value="GANADOR VISITANTE (2)">VISITANTE (2)</option><option value="OVER 2.5">OVER 2.5</option><option value="UNDER 2.5">UNDER 2.5</option><option value="BTTS SÍ">BTTS SÍ</option><option value="BTTS NO">BTTS NO</option></select>
+                    <select id="filter-market" class="w-full" onchange="applyFilters()"><option value="all">TODOS</option><option value="OVER 2.5">OVER 2.5</option><option value="UNDER 2.5">UNDER 2.5</option></select>
                 </div>
                 <div><label class="text-[10px] font-black text-slate-500 uppercase block mb-1">Cuota Mín.</label><input type="number" id="filter-min-odd" step="0.1" placeholder="1.0" class="w-full" oninput="applyFilters()"></div>
                 <div><label class="text-[10px] font-black text-slate-500 uppercase block mb-1">Cuota Máx.</label><input type="number" id="filter-max-odd" step="0.1" placeholder="10.0" class="w-full" oninput="applyFilters()"></div>
@@ -154,56 +152,47 @@
     </div>
 
     <script>
-        let fullData = JSON.parse(localStorage.getItem('backtesting_data')) || [];
+        let fullData = [];
         let filteredData = [];
         let equityChart;
-        const MIN_SAMPLE = 5;
 
-        // FUNCIÓN CLAVE: Extrae equipos de "Equipo A - Equipo B" o de campos individuales
-        function getTeamNames(pick) {
-            let local = pick.local || pick.home || pick.equipo_local || pick.equipoLocal;
-            let visitante = pick.visitante || pick.away || pick.equipo_visitante || pick.equipoVisitante;
-
-            if (!local || !visitante) {
-                const fullStr = pick.partido || pick.equipo || pick.match || pick.evento || "";
-                if (fullStr.includes(" - ")) {
-                    const parts = fullStr.split(" - ");
-                    local = parts[0]?.trim();
-                    visitante = parts[1]?.trim();
-                }
-            }
-            return { local: local || "Desconocido", visitante: visitante || "Desconocido" };
+        function syncWithMiner() {
+            const minerData = JSON.parse(localStorage.getItem('betags_v3_miner')) || [];
+            const resolved = minerData.filter(b => b.status !== 'pending');
+            const mapped = resolved.map(b => ({ 
+                id: b.id, fecha: b.date, liga: b.league, evento: b.teams, mercado: b.market, cuota: b.odd, probabilidad: b.prob, edge: b.edge, stake: b.stake, resultado: b.status, profit: b.profit, motor: 'v1' 
+            }));
+            localStorage.setItem('backtesting_data', JSON.stringify(mapped));
+            fullData = mapped;
         }
 
-        // MEJORA: Función para calcular el Criterio de Kelly (Fraccional)
-        // b = cuota - 1 | p = probabilidad de ganar | q = probabilidad de perder
-        // Formula: f = (bp - q) / b
+        function getTeamNames(pick) {
+            let local = "Desconocido", visitante = "Desconocido";
+            const fullStr = pick.evento || "";
+            if (fullStr.includes(" - ")) {
+                const parts = fullStr.split(" - ");
+                local = parts[0]?.trim();
+                visitante = parts[1]?.trim();
+            }
+            return { local, visitante };
+        }
+
         function calculateKelly(odd, winRate) {
             if (odd <= 1 || winRate === 0) return 0;
-            const b = odd - 1;
-            const p = winRate / 100;
-            const q = 1 - p;
-            const f = (b * p - q) / b;
-            // Usamos Medio Kelly (f * 0.5) para mayor seguridad y menor volatilidad
-            return Math.max(0, f * 0.5); 
+            const b = odd - 1, p = winRate / 100, q = 1 - p;
+            return Math.max(0, ((b * p - q) / b) * 0.5); 
         }
 
         function applyFilters() {
             const market = document.getElementById('filter-market').value;
             const minOdd = parseFloat(document.getElementById('filter-min-odd').value) || 0;
             const maxOdd = parseFloat(document.getElementById('filter-max-odd').value) || 999;
-            filteredData = fullData.filter(b => {
-                const matchMarket = market === 'all' || b.mercado === market;
-                return matchMarket && b.cuota >= minOdd && b.cuota <= maxOdd;
-            });
+            filteredData = fullData.filter(b => (market === 'all' || b.mercado === market) && b.cuota >= minOdd && b.cuota <= maxOdd);
             updateUI();
         }
 
         function updateUI() {
-            renderStats();
-            renderEquityChart();
-            renderLeagueStats();
-            renderTeamTable();
+            renderStats(); renderEquityChart(); renderLeagueStats(); renderTeamTable();
         }
 
         function renderStats() {
@@ -225,22 +214,14 @@
         function renderEquityChart() {
             const ctx = document.getElementById('equityChart').getContext('2d');
             const simStake = parseFloat(document.getElementById('sim-stake').value) || 0;
-            let cR = 0, cS = 0;
-            const rPts = [0], sPts = [0];
+            let cR = 0, cS = 0; const rPts = [0], sPts = [0];
             filteredData.forEach(b => { 
                 cR += b.profit; rPts.push(cR); 
                 if (b.profit > 0) cS += (b.cuota - 1) * simStake; else if (b.profit < 0) cS -= simStake;
                 sPts.push(cS);
             });
             if(equityChart) equityChart.destroy();
-            equityChart = new Chart(ctx, {
-                type: 'line',
-                data: { labels: rPts.map((_, i) => i), datasets: [
-                    { label: 'Real', data: rPts, borderColor: '#8b5cf6', backgroundColor: 'rgba(139, 92, 246, 0.1)', fill: true, tension: 0.3 },
-                    { label: 'Simulado', data: sPts, borderColor: '#f59e0b', borderDash: [5, 5], tension: 0.3 }
-                ]},
-                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { labels: { color: '#94a3b8' } } } }
-            });
+            equityChart = new Chart(ctx, { type: 'line', data: { labels: rPts.map((_, i) => i), datasets: [{ label: 'Real', data: rPts, borderColor: '#8b5cf6', fill: true, tension: 0.3 }, { label: 'Simulado', data: sPts, borderColor: '#f59e0b', borderDash: [5, 5], tension: 0.3 }]}, options: { responsive: true, maintainAspectRatio: false } });
         }
 
         function renderLeagueStats() {
@@ -253,115 +234,61 @@
             });
         }
 
-        function getTeamData() {
+        function renderTeamTable() {
+            const tbody = document.getElementById('team-insight-body');
             const teams = {};
             filteredData.forEach(b => {
                 const names = getTeamNames(b);
                 [names.local, names.visitante].forEach(t => {
                     const key = `${t}_${b.mercado}`;
-                    if(!teams[key]) teams[key] = { name: t, market: b.mercado, profit: 0, stake: 0, w: 0, l: 0, count: 0, avgOdd: 0, sumOdd: 0 };
-                    teams[key].profit += b.profit; teams[key].stake += b.stake; teams[key].count++;
-                    teams[key].sumOdd += b.cuota;
+                    if(!teams[key]) teams[key] = { name: t, market: b.mercado, profit: 0, stake: 0, w: 0, l: 0, count: 0, sumOdd: 0 };
+                    teams[key].profit += b.profit; teams[key].stake += b.stake; teams[key].count++; teams[key].sumOdd += b.cuota;
                     if(b.profit > 0) teams[key].w++; else if(b.profit < 0) teams[key].l++;
-                    teams[key].avgOdd = teams[key].sumOdd / teams[key].count;
                 });
             });
-            return teams;
-        }
-
-        function renderTeamTable() {
-            const tbody = document.getElementById('team-insight-body');
-            const data = getTeamData();
             tbody.innerHTML = '';
-            Object.values(data).sort((a,b) => b.profit - a.profit).forEach(d => {
+            Object.values(teams).sort((a,b) => b.profit - a.profit).forEach(d => {
                 const yieldV = d.stake > 0 ? (d.profit/d.stake)*100 : 0;
                 const winRate = (d.w / d.count) * 100;
-                
-                // MEJORA: Cálculo de Kelly Sugerido por equipo/mercado
-                const kellyFrac = calculateKelly(d.avgOdd, winRate);
-                const kellyDisplay = kellyFrac > 0 ? (kellyFrac * 100).toFixed(1) + '%' : '0%';
-
-                tbody.innerHTML += `<tr>
-                    <td class="font-black text-white uppercase">${d.name}</td>
-                    <td class="text-slate-400 font-bold">${d.market}</td>
-                    <td class="text-center">${d.count} ${d.count >= MIN_SAMPLE ? '<span class="valid-badge">VALIDADO</span>' : ''}</td>
-                    <td class="text-center">${d.w}-${d.l}</td>
-                    <td class="text-right font-bold ${d.profit>=0?'text-emerald-400':'text-red-400'}">$${d.profit.toFixed(2)}</td>
-                    <td class="text-right">${yieldV.toFixed(1)}%</td>
-                    <td class="text-right font-bold text-blue-400">
-                        <span class="kelly-badge">${kellyDisplay}</span>
-                    </td>
-                </tr>`;
+                const kelly = calculateKelly(d.sumOdd/d.count, winRate);
+                tbody.innerHTML += `<tr><td class="font-black text-white uppercase">${d.name}</td><td class="text-slate-400 font-bold">${d.market}</td><td class="text-center">${d.count} ${d.count >= 5 ? '<span class="valid-badge">VALIDADO</span>' : ''}</td><td class="text-center">${d.w}-${d.l}</td><td class="text-right font-bold ${d.profit>=0?'text-emerald-400':'text-red-400'}">$${d.profit.toFixed(2)}</td><td class="text-right">${yieldV.toFixed(1)}%</td><td class="text-right"><span class="kelly-badge">${(kelly * 100).toFixed(1)}%</span></td></tr>`;
             });
         }
 
         function generateInsights() {
             if(fullData.length === 0) return alert("Sin datos.");
-            const analysis = { leagues: {}, markets: {}, odds: {}, edge: {} };
-            let globalWins = 0;
-            let sumOdds = 0;
-
+            const analysis = { leagues: {}, markets: {}, odds: {} };
+            let globalWins = 0, sumOdds = 0;
             fullData.forEach(b => {
                 analysis.leagues[b.liga] = (analysis.leagues[b.liga] || 0) + b.profit;
                 analysis.markets[b.mercado] = (analysis.markets[b.mercado] || 0) + b.profit;
                 const r = (Math.floor(b.cuota * 2) / 2).toFixed(1);
                 analysis.odds[r] = (analysis.odds[r] || 0) + b.profit;
-                const e = b.edge ? Math.floor(parseFloat(b.edge) / 5) * 5 + "%" : "0%";
-                analysis.edge[e] = (analysis.edge[e] || 0) + b.profit;
-                
                 if(b.profit > 0) globalWins++;
                 sumOdds += b.cuota;
             });
-
-            const fillList = (id, data, prefix = '') => {
-                const el = document.getElementById(id); el.innerHTML = '';
-                Object.entries(data).sort((a,b)=>b[1]-a[1]).slice(0, 10).forEach(([k, v]) => {
-                    el.innerHTML += `<div class="insight-row"><span>${prefix} ${k}</span><span class="${v>=0?'text-emerald-400':'text-red-400'} font-black">$${v.toFixed(2)}</span></div>`;
-                });
-            };
-
-            fillList('v1-top-leagues', analysis.leagues); fillList('v1-top-markets', analysis.markets);
-            fillList('v1-top-odds', analysis.odds, 'Cuota'); fillList('v1-top-edge', analysis.edge);
 
             const getBest = (obj) => Object.entries(obj).sort((a,b)=>b[1]-a[1])[0]?.[0] || '-';
             document.getElementById('winner-leagues').innerText = getBest(analysis.leagues);
             document.getElementById('winner-markets').innerText = getBest(analysis.markets);
             document.getElementById('winner-odds').innerText = getBest(analysis.odds);
-            document.getElementById('winner-edge').innerText = getBest(analysis.edge);
+            document.getElementById('winner-edge').innerText = "V1 Motor";
 
-            const teamData = getTeamData();
-            const gems = Object.values(teamData).filter(d => d.count >= MIN_SAMPLE && d.profit > 0).sort((a,b) => b.profit - a.profit);
-            
-            // MEJORA: Lógica AI con Kelly Global
             const globalWinRate = (globalWins / fullData.length) * 100;
-            const avgOdd = sumOdds / fullData.length;
-            const globalKelly = calculateKelly(avgOdd, globalWinRate);
-
+            const globalKelly = calculateKelly(sumOdds/fullData.length, globalWinRate);
             document.getElementById('ai-recommendation').classList.remove('hidden');
-            document.getElementById('rec-text').innerHTML = `Estrategia: Prioriza <span class="text-yellow-400 font-black">${getBest(analysis.markets)}</span> cuota <span class="text-blue-400 font-black">${getBest(analysis.odds)}</span>.`;
-            
-            // Actualizar consejo de Kelly
-            const kellyAdvice = document.getElementById('kelly-advice');
-            if (globalKelly > 0) {
-                kellyAdvice.innerHTML = `Según tu WinRate del <span class="text-blue-400 font-bold">${globalWinRate.toFixed(1)}%</span>, Kelly sugiere un stake del <span class="text-blue-400 font-bold">${(globalKelly * 100).toFixed(2)}%</span> de tu banca por operación.`;
-            } else {
-                kellyAdvice.innerHTML = `Alerta: Tu WinRate actual no justifica un stake positivo. Revisa tu estrategia antes de aumentar el capital.`;
-            }
-
-            const gemCont = document.getElementById('gem-alert');
-            if(gems.length > 0) {
-                gemCont.classList.remove('hidden');
-                document.getElementById('gem-text').innerText = `${gems[0].name} (${gems[0].market}) Profit: $${gems[0].profit.toFixed(2)}`;
-            }
-
-            const teamList = document.getElementById('validated-teams-list'); teamList.innerHTML = '';
-            gems.forEach(g => { teamList.innerHTML += `<div class="p-2 bg-white/5 rounded border border-white/10 flex justify-between items-center text-[11px]"><span>${g.name} [${g.market}]</span><span class="text-emerald-400 font-bold">$${g.profit.toFixed(2)}</span></div>`; });
+            document.getElementById('rec-text').innerHTML = `Estrategia: Prioriza <span class="text-yellow-400 font-black">${getBest(analysis.markets)}</span> en <span class="text-blue-400 font-black">${getBest(analysis.leagues)}</span>.`;
+            document.getElementById('kelly-advice').innerHTML = `Kelly sugiere stake del <span class="text-blue-400 font-bold">${(globalKelly * 100).toFixed(2)}%</span> global.`;
             toggleModal();
         }
 
         function toggleModal() { const m = document.getElementById('insights-modal'); m.style.display = (m.style.display === 'flex' ? 'none' : 'flex'); }
-        function clearBacktest() { if(confirm('¿Borrar historial?')) { localStorage.removeItem('backtesting_data'); location.reload(); } }
-        applyFilters();
+        function clearBacktest() { if(confirm('¿Borrar historial?')) { localStorage.removeItem('betags_v3_miner'); localStorage.removeItem('backtesting_data'); location.reload(); } }
+        
+        window.onload = () => {
+            syncWithMiner();
+            applyFilters();
+        }
     </script>
 </body>
 </html>
