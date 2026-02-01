@@ -15,7 +15,6 @@
             --card-bg: #111827;
             --accent-green: #00ff88;
             --neon-blue: #00d2ff;
-            --pending-yellow: #facc15; /* Color para apuestas pendientes */
         }
         body { 
             background-color: var(--dark-bg); 
@@ -65,10 +64,17 @@
             box-shadow: 0 0 20px rgba(0, 210, 255, 0.4);
         }
 
-        /* EFECTO NEÓN ELIMINADO - Ahora es un resaltado sutil */
-        .market-highlight-clean {
-            background: rgba(0, 210, 255, 0.08) !important;
+        /* Fila Neón para Sugerencia en Tabla */
+        .market-neon-highlight {
+            background: rgba(0, 210, 255, 0.15) !important;
+            box-shadow: inset 0 0 15px rgba(0, 210, 255, 0.3);
             border-left: 4px solid var(--neon-blue) !important;
+            animation: pulse-neon-row 2s infinite ease-in-out;
+        }
+
+        @keyframes pulse-neon-row {
+            0%, 100% { opacity: 1; }
+            50% { background: rgba(0, 210, 255, 0.25) !important; }
         }
 
         @keyframes neon-glow-flow {
@@ -87,7 +93,7 @@
 
         .status-win-border { background: #22c55e; box-shadow: 0 0 15px #22c55e; }
         .status-loss-border { background: #ef4444; box-shadow: 0 0 15px #ef4444; }
-        .status-pending-border { background: var(--pending-yellow); box-shadow: 0 0 20px var(--pending-yellow); }
+        .status-pending-border { background: #eab308; box-shadow: 0 0 15px #eab308; }
 
         .pill-badge {
             border-radius: 8px;
@@ -731,13 +737,7 @@
             }
         }
 
-        // CORRECCIÓN LÓGICA: El bankroll actual descuenta el capital arriesgado en apuestas pendientes.
-        function getCurrentBankroll() { 
-            const settledProfit = bets.reduce((acc, b) => acc + (b.profit || 0), 0);
-            const pendingExposure = bets.filter(b => b.status === 'pending').reduce((acc, b) => acc + (b.stake || 0), 0);
-            return userBankroll + settledProfit + bankrollOffset - pendingExposure; 
-        }
-
+        function getCurrentBankroll() { return userBankroll + bets.reduce((acc, b) => acc + (b.profit || 0), 0) + bankrollOffset; }
         function factorial(n) { return n <= 1 ? 1 : n * factorial(n - 1); }
         function poissonProb(k, lambda) { return (Math.pow(lambda, k) * Math.exp(-lambda)) / factorial(k); }
 
@@ -884,9 +884,9 @@
             const currentLeague = document.getElementById('league_name').value || "Desconocida";
             const usePValue = document.getElementById('use_pvalue_mgmt').checked;
             
-            // LIMPIAR RESALTADO PREVIO DE ESTA FILA
+            // LIMPIAR COLOR NEÓN PREVIO DE ESTA FILA
             const row = document.getElementById('row_' + id);
-            row.classList.remove('market-highlight-clean');
+            row.classList.remove('market-neon-highlight');
 
             if(odd > 1) {
                 const edge = (odd * prob) - 1;
@@ -910,10 +910,9 @@
 
                 if (edge > 0) finalAdjustedKelly = Math.max(0.005, finalAdjustedKelly);
 
-                // CÁLCULO SOBRE EL BANKROLL DISPONIBLE REAL (Incluyendo exposición)
-                const realAvailableBank = getCurrentBankroll();
+                // CÁLCULO SOBRE EL BANKROLL DE CONFIGURACIÓN
                 const stakePercent = finalAdjustedKelly * 100;
-                const stakeCash = realAvailableBank * finalAdjustedKelly;
+                const stakeCash = userBankroll * finalAdjustedKelly;
 
                 const edgeEl = document.getElementById('edge_' + id);
                 edgeEl.innerText = (edge * 100).toFixed(1) + "%";
@@ -936,7 +935,8 @@
                     document.getElementById('strategy-assistant-box').classList.remove('hidden');
                     
                     if (advice.isStrategic) {
-                        row.classList.add('market-highlight-clean');
+                        // APLICAR COLOR NEÓN A LA FILA SI ES ESTRATÉGICA
+                        row.classList.add('market-neon-highlight');
 
                         let html = `<div class="flex flex-col gap-1">`;
                         advice.evaluations.forEach(ev => { html += `<div class="text-[11px]"><span class="text-bet-yellow font-black">${ev.category}:</span> <span class="text-white">${ev.name}</span> <span class="text-emerald-400 font-bold">(${ev.yield.toFixed(1)}%)</span></div>`; });
@@ -1054,29 +1054,14 @@
             const fMinOdd = parseFloat(document.getElementById('f_min_odd').value) || 0;
             const fMaxOdd = parseFloat(document.getElementById('f_max_odd').value) || 999;
             const fMinEdge = parseFloat(document.getElementById('f_min_edge').value) || -999;
-            
-            // FILTRO DE APUESTAS
-            const filtered = bets.filter(b => 
-                (fMar === "" || b.market === fMar) && 
-                (fAst === "" || (fAst === "real" && b.isStrategic) || (fAst === "manual" && !b.isStrategic)) && 
-                (b.odd >= fMinOdd) && 
-                (b.odd <= fMaxOdd) && 
-                (parseFloat(b.edge) >= fMinEdge)
-            );
-
-            // CÁLCULO DE BANKROLL INDEPENDIENTE PARA EL FILTRO ACTUAL
-            const profitFiltered = filtered.reduce((acc, b) => acc + (b.profit || 0), 0);
-            const exposureFiltered = filtered.filter(b => b.status === 'pending').reduce((acc, b) => acc + (b.stake || 0), 0);
-            const currentBankrollForFilter = userBankroll + profitFiltered + bankrollOffset - exposureFiltered;
-
-            // ACTUALIZACIÓN DE TOP BAR (BANKROLL) SEGÚN FILTRO
-            document.getElementById('top-bankroll').innerText = userCurrency + currentBankrollForFilter.toFixed(2);
-
+            const filtered = bets.filter(b => (fMar === "" || b.market === fMar) && (fAst === "" || (fAst === "real" && b.isStrategic) || (fAst === "manual" && !b.isStrategic)) && (b.odd >= fMinOdd) && (b.odd <= fMaxOdd) && (parseFloat(b.edge) >= fMinEdge));
             const resolvedFiltered = filtered.filter(b => b.status !== 'pending');
             const allResolved = bets.filter(b => b.status === 'win' || b.status === 'loss');
             const realResolved = bets.filter(b => b.isStrategic && (b.status === 'win' || b.status === 'loss'));
-            
             const totalRealProfit = realResolved.reduce((a, b) => a + b.profit, 0);
+            const globalProfit = allResolved.reduce((a, b) => a + b.profit, 0);
+            const globalStaked = allResolved.reduce((a, b) => a + b.stake, 0);
+            const globalAvgOdd = allResolved.length > 0 ? (allResolved.reduce((a, b) => a + b.odd, 0) / allResolved.length) : 0;
             
             const currentMarketFilter = document.getElementById('f_market').value;
             let targetBets = allResolved;
@@ -1113,6 +1098,8 @@
             document.getElementById('top-profit').innerText = userCurrency + totalProfitFiltered.toFixed(2);
             document.getElementById('top-yield').innerText = (yieldFiltered * 100).toFixed(1) + "%";
             
+            const finalBank = getCurrentBankroll();
+            document.getElementById('top-bankroll').innerText = userCurrency + finalBank.toFixed(2);
             const withdrawable = Math.max(0, totalRealProfit);
             document.getElementById('withdrawable-amount').innerText = withdrawable.toFixed(2);
             document.getElementById('top-withdrawals').innerText = userCurrency + totalWithdrawals.toFixed(2);
@@ -1137,11 +1124,11 @@
                 const neonClass = b.isStrategic ? "strategic-neon-border" : "";
                 card.className = `bet-card-custom ${neonClass}`;
                 
-                let sCol = b.status === 'win' ? "#22c55e" : (b.status === 'loss' ? "#ef4444" : "var(--pending-yellow)");
+                let sCol = b.status === 'win' ? "#22c55e" : (b.status === 'loss' ? "#ef4444" : "#eab308");
                 let sClass = b.status === 'win' ? "status-win-border" : (b.status === 'loss' ? "status-loss-border" : "status-pending-border");
                 card.innerHTML = `
                     <div class="card-status-strip ${sClass}"></div>
-                    <div class="status-indicator" style="color: ${sCol}">${b.status === 'pending' ? 'PENDIENTE' : b.status.toUpperCase()}</div>
+                    <div class="status-indicator" style="color: ${sCol}">${b.status === 'pending' ? 'P' : b.status.toUpperCase()}</div>
                     <div class="mb-2">
                         <span class="text-[10px] text-emerald-500 uppercase font-black">${b.league}</span>
                         <h2 class="text-xl font-bold text-white leading-tight">${b.teams}</h2>
