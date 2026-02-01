@@ -303,7 +303,7 @@
                                 <th class="p-4">Cuota Mercado</th>
                                 <th class="p-4">Edge %</th>
                                 <th class="p-4 text-orange-400">Overround</th>
-                                <th class="p-4">Stake (Kelly x Market P-Val)</th>
+                                <th class="p-4">Stake Sugerido</th>
                                 <th class="p-4 text-center">Acción</th>
                             </tr>
                         </thead>
@@ -330,7 +330,7 @@
                         </div>
                         <div>
                             <label class="text-[10px] font-bold text-slate-500 uppercase block mb-1">Monto de Bankroll Total</label>
-                            <input type="number" id="user_bank_total" class="w-full p-3 text-sm font-mono" value="100.00" oninput="saveFinancialConfig()">
+                            <input type="number" id="user_bank_total" class="w-full p-3 text-sm font-mono" value="1000.00" oninput="saveFinancialConfig()">
                         </div>
                     </div>
                     <p class="text-[10px] text-slate-400 italic">Este monto se utilizará para calcular el stake monetario al lado del porcentaje sugerido por Kelly.</p>
@@ -540,9 +540,9 @@
         let bankrollOffset = parseFloat(localStorage.getItem('betags_bank_offset')) || 0;
         let totalWithdrawals = parseFloat(localStorage.getItem('betags_withdrawals')) || 0; 
         
-        // NUEVAS VARIABLES FINANCIERAS
-        let userBankroll = parseFloat(localStorage.getItem('user_bankroll_total')) || 100.00;
-        let userCurrency = localStorage.getItem('user_currency') || "$";
+        // CONFIGURACIÓN DE BANKROLL REAL
+        let userBankroll = parseFloat(localStorage.getItem('user_bankroll_total')) || 1000.00;
+        let userCurrency = localStorage.getItem('user_currency') || "MXN$";
 
         let pChart, bChart;
 
@@ -577,7 +577,7 @@
         }
 
         function saveFinancialConfig() {
-            userBankroll = parseFloat(document.getElementById('user_bank_total').value) || 100.00;
+            userBankroll = parseFloat(document.getElementById('user_bank_total').value) || 1000.00;
             localStorage.setItem('user_bankroll_total', userBankroll);
             updateStats();
             updateAllEdges();
@@ -851,9 +851,9 @@
             const partnerOdd = parseFloat(document.getElementById('odd_' + partnerId).value) || 0;
             const currentLeague = document.getElementById('league_name').value || "Desconocida";
             const usePValue = document.getElementById('use_pvalue_mgmt').checked;
+            
             if(odd > 1) {
                 const edge = (odd * prob) - 1;
-                const currentBank = getCurrentBankroll();
                 const standardKelly = Math.max(0, (edge / (odd - 1)) * KELLY_FRAC);
                 let limitedKelly = Math.min(MAX_BANK_PERCENT, standardKelly);
                 
@@ -874,7 +874,7 @@
 
                 if (edge > 0) finalAdjustedKelly = Math.max(0.005, finalAdjustedKelly);
 
-                // MONTO MONETARIO BASADO EN EL BANKROLL CONFIGURADO
+                // CÁLCULO SOBRE EL BANKROLL DE CONFIGURACIÓN
                 const stakePercent = finalAdjustedKelly * 100;
                 const stakeCash = userBankroll * finalAdjustedKelly;
 
@@ -884,13 +884,12 @@
                 
                 const stakeCell = document.getElementById('stake_' + id);
                 if (finalAdjustedKelly > 0) {
-                    // MEJORA VISUAL SOLICITADA: Stake % (Divisa Monto)
                     let labelsHtml = `<span class="stake-main">${stakePercent.toFixed(1)}%</span> `;
                     labelsHtml += `<span class="text-[10px] text-slate-400 font-bold">(${userCurrency}${stakeCash.toFixed(2)})</span>`;
                     
                     if (marketPValue < 0.05) labelsHtml += `<div class="mt-1 text-[7px] text-bet-yellow font-black uppercase">EXPERT IN ${marketName}</div>`;
                     stakeCell.innerHTML = labelsHtml;
-                    stakeCell.setAttribute('data-stake-value', stakeCash); // Guardar valor para registro
+                    stakeCell.setAttribute('data-stake-value', stakeCash); 
                 } else stakeCell.innerText = "--";
                 
                 if(partnerOdd > 1) document.getElementById('overround_' + id).innerText = (((1/odd) + (1/partnerOdd) - 1) * 100).toFixed(1) + "%";
@@ -1022,7 +1021,6 @@
             const globalProfit = allResolved.reduce((a, b) => a + b.profit, 0);
             const globalStaked = allResolved.reduce((a, b) => a + b.stake, 0);
             const globalAvgOdd = allResolved.length > 0 ? (allResolved.reduce((a, b) => a + b.odd, 0) / allResolved.length) : 0;
-            const globalYieldDec = globalStaked > 0 ? (globalProfit / globalStaked) : 0;
             
             const currentMarketFilter = document.getElementById('f_market').value;
             let targetBets = allResolved;
@@ -1043,34 +1041,37 @@
                 pValDisplayMetric.innerText = txt;
                 pValDisplayTop.className = marketPVal < 0.05 ? "text-xl font-bold text-emerald-400" : "text-xl font-bold text-red-400";
                 pValDisplayMetric.className = marketPVal < 0.05 ? "text-lg font-bold text-emerald-400" : "text-lg font-bold text-red-400";
-            } else {
-                pValDisplayTop.innerText = "--";
-                pValDisplayMetric.innerText = "--";
-            }
+            } else { pValDisplayTop.innerText = "--"; pValDisplayMetric.innerText = "--"; }
             
             const totalProfitFiltered = resolvedFiltered.reduce((a, b) => a + b.profit, 0);
             const totalStakedFiltered = resolvedFiltered.reduce((a, b) => a + b.stake, 0);
             const winsFiltered = resolvedFiltered.filter(b => b.status === 'win').length;
             const yieldFiltered = totalStakedFiltered > 0 ? (totalProfitFiltered / totalStakedFiltered) : 0;
+            
             let peak = userBankroll, current = userBankroll, maxDD = 0;
             [...resolvedFiltered].reverse().forEach(b => { current += b.profit; if (current > peak) peak = current; let dd = peak > 0 ? (peak - current) / peak : 0; if (dd > maxDD) maxDD = dd; });
+            
             document.getElementById('v1-yield').innerText = (yieldFiltered * 100).toFixed(1) + "%";
             document.getElementById('v1-profit').innerText = userCurrency + totalProfitFiltered.toFixed(2);
             document.getElementById('v1-count').innerText = resolvedFiltered.length;
             document.getElementById('top-profit').innerText = userCurrency + totalProfitFiltered.toFixed(2);
             document.getElementById('top-yield').innerText = (yieldFiltered * 100).toFixed(1) + "%";
+            
             const finalBank = getCurrentBankroll();
             document.getElementById('top-bankroll').innerText = userCurrency + finalBank.toFixed(2);
             const withdrawable = Math.max(0, totalRealProfit);
             document.getElementById('withdrawable-amount').innerText = withdrawable.toFixed(2);
             document.getElementById('top-withdrawals').innerText = userCurrency + totalWithdrawals.toFixed(2);
+            
             const btnWithdraw = document.getElementById('btn-withdraw');
             if (withdrawable >= (userBankroll * 0.30)) btnWithdraw.disabled = false; else btnWithdraw.disabled = true;
+            
             document.getElementById('m-roi').innerText = (totalProfitFiltered/userBankroll*100).toFixed(1) + "%";
             document.getElementById('m-hit').innerText = (resolvedFiltered.length > 0 ? (winsFiltered/resolvedFiltered.length*100).toFixed(1) : 0) + "%";
             document.getElementById('m-dd').innerText = (maxDD * 100).toFixed(1) + "%";
             document.getElementById('m-avg-odd').innerText = tAvgOdd.toFixed(2); 
             document.getElementById('m-avg-profit').innerText = userCurrency + (resolvedFiltered.length > 0 ? (totalProfitFiltered / resolvedFiltered.length).toFixed(2) : "0");
+            
             renderHistory(filtered); 
             renderBankrollChart(resolvedFiltered);
         }
