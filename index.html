@@ -467,7 +467,7 @@
                     <h2 class="text-sm font-black text-emerald-400 uppercase italic mb-4">Minado & Filtros</h2>
                     <div class="space-y-4">
                         <button onclick="resetBankroll()" class="w-full bg-red-600/20 hover:bg-red-600 text-red-400 hover:text-white text-[11px] py-3 rounded-xl uppercase font-black transition-all border border-red-500/30 mb-2">
-                            <i class="fa-solid fa-rotate-right mr-2"></i> Reiniciar Bank Principal
+                            <i class="fa-solid fa-rotate-right mr-2"></i> Reiniciar Bank
                         </button>
 
                         <button onclick="sendResolvedToBacktesting()" class="w-full bg-purple-600 hover:bg-purple-500 text-white text-[11px] py-3 rounded-xl uppercase font-black transition-all shadow-lg shadow-purple-900/40 mb-2 border border-purple-400/30">
@@ -475,7 +475,7 @@
                         </button>
                         
                         <div>
-                            <label class="text-[9px] text-slate-500 uppercase block mb-1">Filtro de Asistente (Reinicio Independiente)</label>
+                            <label class="text-[9px] text-slate-500 uppercase block mb-1">Filtro de Asistente</label>
                             <select id="f_assistant" class="w-full p-2 text-xs" onchange="applyFilters()">
                                 <option value="real" selected>SOLO APUESTAS REALES (ASISTENTE)</option>
                                 <option value="">TODOS (MIXTOS)</option>
@@ -586,6 +586,7 @@
 
         window.onload = function() {
             setDefaultDate();
+            // Cargar configuración financiera guardada
             document.getElementById('user_bank_total').value = userBankroll;
             document.getElementById('user_currency').value = userCurrency;
             updateCurrencySymbol();
@@ -598,11 +599,12 @@
             updateStats();
         };
 
+        // MEJORAS DE CONFIGURACIÓN FINANCIERA
         function updateCurrencySymbol() {
             userCurrency = document.getElementById('user_currency').value;
             localStorage.setItem('user_currency', userCurrency);
             document.querySelectorAll('.curr-symbol').forEach(el => el.innerText = userCurrency);
-            updateAllEdges();
+            updateAllEdges(); // Recalcular stakes visuales con nueva moneda
         }
 
         function saveFinancialConfig() {
@@ -624,7 +626,7 @@
         }
 
         function resetBankroll() {
-            if(confirm(`¿Quieres reiniciar tu banca global actual a ${userBankroll} ${userCurrency}?`)) {
+            if(confirm(`¿Quieres reiniciar tu banca actual a ${userBankroll} ${userCurrency}?`)) {
                 const totalCurrentProfit = bets.reduce((acc, b) => acc + (b.profit || 0), 0);
                 bankrollOffset = -totalCurrentProfit;
                 localStorage.setItem('betags_bank_offset', bankrollOffset);
@@ -643,33 +645,12 @@
                     localStorage.setItem('betags_withdrawals', totalWithdrawals);
                     bankrollOffset -= realProfit;
                     localStorage.setItem('betags_bank_offset', bankrollOffset);
-                    sendWithdrawalNotification(realProfit);
                     updateStats();
                     alert("¡Beneficios reales transferidos al apartado!");
                 }
             } else {
                 alert("Las apuestas estratégicas aún no alcanzan el 30% de ganancia mínima.");
             }
-        }
-
-        async function sendWithdrawalNotification(amount) {
-            if(!tg_config.token || !tg_config.chatId) return;
-            const text = `💰 *NOTIFICACIÓN DE RETIRO BETAGS* 💰\n\n` +
-                         `✅ *Monto Retirado:* ${userCurrency}${amount.toFixed(2)}\n` +
-                         `🏦 *Estado de Banca:* Protegida\n\n` +
-                         `💡 *¿POR QUÉ RECOMENDAMOS EL RETIRO?*\n` +
-                         `1. *Preservación de Capital:* Se ha superado el 30% de profit real.\n` +
-                         `2. *Reset de Varianza:* Estabiliza el factor Kelly.\n` +
-                         `3. *Disciplina:* Inversor profesional liquida ganancias periódicamente.`;
-
-            try {
-                const url = `https://api.telegram.org/bot${tg_config.token}/sendMessage?chat_id=${tg_config.chatId}&text=${encodeURIComponent(text)}&parse_mode=Markdown`;
-                await fetch(url);
-                if(tg_config.channelId) {
-                    const urlChannel = `https://api.telegram.org/bot${tg_config.token}/sendMessage?chat_id=${tg_config.channelId}&text=${encodeURIComponent(text)}&parse_mode=Markdown`;
-                    await fetch(urlChannel);
-                }
-            } catch (e) { console.error(e); }
         }
 
         function showTab(tabId) {
@@ -697,8 +678,22 @@
         }
 
         async function sendToTelegramAuto(bet) {
-            if(!tg_config.auto || !bet.isStrategic) return;
-            const text = `🚀 *BETAGS PRO ALERT* 🚀\n⭐ ESTRATÉGICA ⭐\n\n📅 *Fecha:* ${bet.date || 'No definida'}\n🏆 *Liga:* ${bet.league}\n⚽ *Evento:* ${bet.teams}\n🎯 *Mercado:* ${bet.market}\n💰 *Cuota:* ${bet.odd.toFixed(2)}\n🔥 *Stake:* ${userCurrency}${bet.stake.toFixed(2)}\n📈 *Edge:* ${bet.edge}%\n🤖 _Algoritmo: Dixon-Coles V2_`;
+            if(!tg_config.auto) return;
+            // MEJORA: Solo enviar si es sugerida por el asistente (Estratégica)
+            if (!bet.isStrategic) return; 
+
+            const star = "⭐ ESTRATÉGICA ⭐";
+            const text = `🚀 *BETAGS PRO ALERT* 🚀\n` +
+                         `${star}\n\n` +
+                         `📅 *Fecha:* ${bet.date || 'No definida'}\n` +
+                         `🏆 *Liga:* ${bet.league}\n` +
+                         `⚽ *Evento:* ${bet.teams}\n` +
+                         `🎯 *Mercado:* ${bet.market}\n` +
+                         `💰 *Cuota:* ${bet.odd.toFixed(2)}\n` +
+                         `🔥 *Stake:* ${userCurrency}${bet.stake.toFixed(2)}\n` +
+                         `📈 *Edge:* ${bet.edge}%\n` +
+                         `🤖 _Algoritmo: Dixon-Coles V2_`;
+
             if(tg_config.chatId) {
                 try {
                     const url = `https://api.telegram.org/bot${tg_config.token}/sendMessage?chat_id=${tg_config.chatId}&text=${encodeURIComponent(text)}&parse_mode=Markdown`;
@@ -724,7 +719,16 @@
             const statusText = bet.status === 'win' ? 'GANADA' : 'PERDIDA';
             const profitText = bet.profit >= 0 ? `+${userCurrency}${bet.profit.toFixed(2)}` : `-${userCurrency}${Math.abs(bet.profit).toFixed(2)}`;
             const star = bet.isStrategic ? "⭐ APUESTA REAL ⭐" : "📊 ANÁLISIS DIXON-COLES";
-            const text = `🏁 *PICK RESUELTO* 🏁\n${statusIcon} *${statusText}* (${profitText})\n\n📅 *Fecha:* ${bet.date || 'No definida'}\n${star}\n🏆 *Liga:* ${bet.league}\n⚽ *Evento:* ${bet.teams}\n🎯 *Mercado:* ${bet.market}\n💰 *Cuota:* ${bet.odd.toFixed(2)}\n🤖 _Algoritmo: Dixon-Coles V2_`;
+            const text = `🏁 *PICK RESUELTO* 🏁\n` +
+                         `${statusIcon} *${statusText}* (${profitText})\n\n` +
+                         `📅 *Fecha:* ${bet.date || 'No definida'}\n` +
+                         `${star}\n` +
+                         `🏆 *Liga:* ${bet.league}\n` +
+                         `⚽ *Evento:* ${bet.teams}\n` +
+                         `🎯 *Mercado:* ${bet.market}\n` +
+                         `💰 *Cuota:* ${bet.odd.toFixed(2)}\n` +
+                         `🤖 _Algoritmo: Dixon-Coles V2_`;
+
             if(tg_config.chatId && bet.tgMessageId) {
                 try { await fetch(`https://api.telegram.org/bot${tg_config.token}/editMessageText?chat_id=${tg_config.chatId}&message_id=${bet.tgMessageId}&text=${encodeURIComponent(text)}&parse_mode=Markdown`); } catch (e) {}
             }
@@ -733,8 +737,10 @@
             }
         }
 
+        function getCurrentBankroll() { return userBankroll + bets.reduce((acc, b) => acc + (b.profit || 0), 0) + bankrollOffset; }
         function factorial(n) { return n <= 1 ? 1 : n * factorial(n - 1); }
         function poissonProb(k, lambda) { return (Math.pow(lambda, k) * Math.exp(-lambda)) / factorial(k); }
+
         function getTauAdjustment(x, y, hL, aL) {
             if (x === 0 && y === 0) return 1 - (hL * aL * RHO_DC);
             if (x === 0 && y === 1) return 1 + (hL * RHO_DC);
@@ -877,6 +883,8 @@
             const partnerOdd = parseFloat(document.getElementById('odd_' + partnerId).value) || 0;
             const currentLeague = document.getElementById('league_name').value || "Desconocida";
             const usePValue = document.getElementById('use_pvalue_mgmt').checked;
+            
+            // LIMPIAR COLOR NEÓN PREVIO DE ESTA FILA
             const row = document.getElementById('row_' + id);
             row.classList.remove('market-neon-highlight');
 
@@ -884,6 +892,7 @@
                 const edge = (odd * prob) - 1;
                 const standardKelly = Math.max(0, (edge / (odd - 1)) * KELLY_FRAC);
                 let limitedKelly = Math.min(MAX_BANK_PERCENT, standardKelly);
+                
                 const history = JSON.parse(localStorage.getItem('backtesting_data')) || [];
                 const marketBets = history.filter(b => b.mercado === marketName);
                 let marketPValue = 1.0; 
@@ -898,17 +907,24 @@
                 let pConfidenceMultiplier = usePValue ? Math.max(0.05, 1 - marketPValue) : 1.0;
                 const chaosPenalty = Math.min(1, (chaosProb / prob)); 
                 let finalAdjustedKelly = limitedKelly * chaosPenalty * pConfidenceMultiplier;
+
                 if (edge > 0) finalAdjustedKelly = Math.max(0.005, finalAdjustedKelly);
 
+                // CÁLCULO SOBRE EL BANKROLL DE CONFIGURACIÓN
                 const stakePercent = finalAdjustedKelly * 100;
                 const stakeCash = userBankroll * finalAdjustedKelly;
+
                 const edgeEl = document.getElementById('edge_' + id);
                 edgeEl.innerText = (edge * 100).toFixed(1) + "%";
                 edgeEl.className = edge > 0 ? "p-4 text-emerald-400 font-bold" : "p-4 text-red-500";
                 
                 const stakeCell = document.getElementById('stake_' + id);
                 if (finalAdjustedKelly > 0) {
-                    stakeCell.innerHTML = `<span class="stake-main">${stakePercent.toFixed(1)}%</span> <span class="text-[10px] text-slate-400 font-bold">(${userCurrency}${stakeCash.toFixed(2)})</span>`;
+                    let labelsHtml = `<span class="stake-main">${stakePercent.toFixed(1)}%</span> `;
+                    labelsHtml += `<span class="text-[10px] text-slate-400 font-bold">(${userCurrency}${stakeCash.toFixed(2)})</span>`;
+                    
+                    if (marketPValue < 0.05) labelsHtml += `<div class="mt-1 text-[7px] text-bet-yellow font-black uppercase">EXPERT IN ${marketName}</div>`;
+                    stakeCell.innerHTML = labelsHtml;
                     stakeCell.setAttribute('data-stake-value', stakeCash); 
                 } else stakeCell.innerText = "--";
                 
@@ -917,8 +933,11 @@
                 if(edge > 0.01) { 
                     const advice = getStrategicAdvice(currentLeague, marketName, odd, edge, chaosProb);
                     document.getElementById('strategy-assistant-box').classList.remove('hidden');
+                    
                     if (advice.isStrategic) {
+                        // APLICAR COLOR NEÓN A LA FILA SI ES ESTRATÉGICA
                         row.classList.add('market-neon-highlight');
+
                         let html = `<div class="flex flex-col gap-1">`;
                         advice.evaluations.forEach(ev => { html += `<div class="text-[11px]"><span class="text-bet-yellow font-black">${ev.category}:</span> <span class="text-white">${ev.name}</span> <span class="text-emerald-400 font-bold">(${ev.yield.toFixed(1)}%)</span></div>`; });
                         document.getElementById('strategy-text').innerHTML = html + `</div>`;
@@ -936,14 +955,23 @@
             const eventName = document.getElementById('event_name').value || "Evento Desconocido";
             const leagueName = document.getElementById('league_name').value || "INTERNACIONAL";
             if(!odd) return alert("Ingresa cuota");
+            
             const stakeContainer = document.getElementById('stake_' + id);
             const stakeVal = parseFloat(stakeContainer.getAttribute('data-stake-value')) || 0;
+            
             const edge = (odd * prob) - 1;
             const advice = getStrategicAdvice(leagueName, market, odd, edge, chaosProb);
             const newBet = { id: Date.now(), league: leagueName, teams: eventName, date: document.getElementById('event_date').value, market, odd, prob, edge: (edge * 100).toFixed(2), stake: stakeVal, status: 'pending', profit: 0, engine: 'Dixon-Coles V2', isStrategic: advice.isStrategic };
             bets.unshift(newBet);
             save();
             sendToTelegramAuto(newBet);
+            alert("Pick registrado.");
+        }
+
+        function shareBet(id, platform) {
+            const b = bets.find(x => x.id === id); if(!b) return;
+            const message = encodeURIComponent(`🚀 *BETAGS PICK*\n🏆 ${b.league}\n⚽ ${b.teams}\n🎯 ${b.market}\n💰 @${b.odd.toFixed(2)}\n🔥 Stake: ${userCurrency}${b.stake.toFixed(2)}`);
+            window.open(platform === 'ws' ? `https://api.whatsapp.com/send?text=${message}` : `https://t.me/share/url?url=https://betags.pro&text=${message}`, '_blank');
         }
 
         function resolve(id, status) {
@@ -957,10 +985,15 @@
 
         function triggerAutoBackup() {
             const resolvedBets = bets.filter(b => b.status === 'win' || b.status === 'loss');
-            const dataToBackup = resolvedBets.map(b => ({ id: b.id, fecha: b.date, liga: b.league, evento: b.teams, mercado: b.market, cuota: b.odd, probabilidad: (b.prob * 100).toFixed(2), edge: b.edge, stake: b.stake, resultado: b.status, profit: b.profit, motor: 'Dixon-Coles V2' }));
+            const dataToBackup = resolvedBets.map(b => ({
+                id: b.id, fecha: b.date, liga: b.league, evento: b.teams, 
+                mercado: b.market, cuota: b.odd, probabilidad: (b.prob * 100).toFixed(2), 
+                edge: b.edge, stake: b.stake, resultado: b.status, profit: b.profit, motor: 'Dixon-Coles V2'
+            }));
             localStorage.setItem('betags_backup_data', JSON.stringify(dataToBackup));
             const now = new Date();
-            localStorage.setItem('betags_last_backup_timestamp', now.toLocaleTimeString());
+            const timeStr = now.getHours().toString().padStart(2, '0') + ":" + now.getMinutes().toString().padStart(2, '0') + ":" + now.getSeconds().toString().padStart(2, '0');
+            localStorage.setItem('betags_last_backup_timestamp', timeStr);
             renderBackupTable();
         }
 
@@ -968,61 +1001,117 @@
 
         function sendResolvedToBacktesting(silent = false) {
             const resolvedBets = bets.filter(b => b.status === 'win' || b.status === 'loss');
-            localStorage.setItem('backtesting_data', JSON.stringify(resolvedBets));
-            if(!silent) alert("Sincronizado.");
+            const dataToBacktest = resolvedBets.map(b => ({ id: b.id, fecha: b.date, liga: b.league, evento: b.teams, mercado: b.market, cuota: b.odd, probabilidad: (b.probabilidad || 0), edge: b.edge, stake: b.stake, resultado: b.status, profit: b.profit, motor: 'Dixon-Coles V2' }));
+            localStorage.setItem('backtesting_data', JSON.stringify(dataToBacktest));
+            if(!silent) alert("Sincronizado con Backtesting.");
         }
 
         function renderBackupTable() {
             const backupData = JSON.parse(localStorage.getItem('betags_backup_data')) || [];
             const tbody = document.getElementById('backup-table-body');
+            const lastTime = localStorage.getItem('betags_last_backup_timestamp');
+            if(document.getElementById('last-backup-time') && lastTime) document.getElementById('last-backup-time').innerText = "Autosave: " + lastTime;
             tbody.innerHTML = '';
+            if (backupData.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="8" class="p-8 text-center text-slate-500 italic">No hay datos.</td></tr>';
+                return;
+            }
             backupData.forEach(b => {
+                const tr = document.createElement('tr');
+                tr.className = "hover:bg-slate-700/20 transition-all";
                 const profitColor = b.profit >= 0 ? 'text-emerald-400' : 'text-red-400';
-                tbody.innerHTML += `<tr class="hover:bg-slate-700/20"><td class="p-4 text-slate-400">${b.fecha}</td><td class="p-4 font-bold">${b.evento}</td><td class="p-4">${b.mercado}</td><td class="p-4">@${b.cuota.toFixed(2)}</td><td class="p-4">${userCurrency}${b.stake.toFixed(2)}</td><td class="p-4">${b.resultado === 'win' ? '✅' : '❌'}</td><td class="p-4 font-black ${profitColor}">${userCurrency}${b.profit.toFixed(2)}</td><td class="p-4"><button onclick="deleteBackupItem(${b.id})" class="text-red-400"><i class="fa-solid fa-trash-can"></i></button></td></tr>`;
+                tr.innerHTML = `<td class="p-4 font-mono text-slate-400">${b.fecha || 'N/A'}</td><td class="p-4 font-bold text-slate-200">${b.evento}</td><td class="p-4"><span class="bg-slate-800 px-2 py-1 rounded text-[10px] font-bold">${b.mercado}</span></td><td class="p-4 font-bold">@${b.cuota.toFixed(2)}</td><td class="p-4">${userCurrency}${b.stake.toFixed(2)}</td><td class="p-4 font-black">${b.resultado === 'win' ? '✅' : '❌'}</td><td class="p-4 font-black ${profitColor}">${userCurrency}${b.profit.toFixed(2)}</td><td class="p-4 text-center"><button onclick="deleteBackupItem(${b.id})" class="text-red-400 hover:text-red-200 transition-colors"><i class="fa-solid fa-trash-can"></i></button></td>`;
+                tbody.appendChild(tr);
             });
         }
+
+        function deleteBackupItem(id) {
+            if(confirm('¿Eliminar?')) {
+                let backupData = JSON.parse(localStorage.getItem('betags_backup_data')) || [];
+                backupData = backupData.filter(item => item.id !== id);
+                localStorage.setItem('betags_backup_data', JSON.stringify(backupData));
+                renderBackupTable();
+            }
+        }
+
+        function importBackupToROI() {
+            const backupData = JSON.parse(localStorage.getItem('betags_backup_data')) || [];
+            if (backupData.length === 0) return alert("Nada que recuperar.");
+            let importedCount = 0;
+            backupData.forEach(b => {
+                if (!bets.some(existing => existing.id === b.id)) {
+                    bets.push({ id: b.id, league: b.liga, teams: b.evento, date: b.fecha, market: b.mercado, odd: b.cuota, prob: parseFloat(b.probabilidad)/100, edge: b.edge, stake: b.stake, status: b.resultado, profit: b.profit, engine: 'Dixon-Coles V2', isStrategic: false });
+                    importedCount++;
+                }
+            });
+            if (importedCount > 0) { save(); updateStats(); alert(`Recuperadas ${importedCount} apuestas.`); }
+        }
+
+        function clearBackup() { if(confirm('¿Limpiar historial?')) { localStorage.removeItem('betags_backup_data'); renderBackupTable(); } }
 
         function applyFilters() {
             const fMar = document.getElementById('f_market').value, fAst = document.getElementById('f_assistant').value;
             const fMinOdd = parseFloat(document.getElementById('f_min_odd').value) || 0;
             const fMaxOdd = parseFloat(document.getElementById('f_max_odd').value) || 999;
             const fMinEdge = parseFloat(document.getElementById('f_min_edge').value) || -999;
-
-            // Filtramos las apuestas
-            const filtered = bets.filter(b => 
-                (fMar === "" || b.market === fMar) && 
-                (fAst === "" || (fAst === "real" && b.isStrategic) || (fAst === "manual" && !b.isStrategic)) && 
-                (b.odd >= fMinOdd) && (b.odd <= fMaxOdd) && 
-                (parseFloat(b.edge) >= fMinEdge)
-            );
-
+            const filtered = bets.filter(b => (fMar === "" || b.market === fMar) && (fAst === "" || (fAst === "real" && b.isStrategic) || (fAst === "manual" && !b.isStrategic)) && (b.odd >= fMinOdd) && (b.odd <= fMaxOdd) && (parseFloat(b.edge) >= fMinEdge));
             const resolvedFiltered = filtered.filter(b => b.status !== 'pending');
+            const allResolved = bets.filter(b => b.status === 'win' || b.status === 'loss');
+            const realResolved = bets.filter(b => b.isStrategic && (b.status === 'win' || b.status === 'loss'));
+            const totalRealProfit = realResolved.reduce((a, b) => a + b.profit, 0);
+            const globalProfit = allResolved.reduce((a, b) => a + b.profit, 0);
+            const globalStaked = allResolved.reduce((a, b) => a + b.stake, 0);
+            const globalAvgOdd = allResolved.length > 0 ? (allResolved.reduce((a, b) => a + b.odd, 0) / allResolved.length) : 0;
+            
+            const currentMarketFilter = document.getElementById('f_market').value;
+            let targetBets = allResolved;
+            if (currentMarketFilter !== "") targetBets = allResolved.filter(b => b.market === currentMarketFilter);
+            
+            const tProfit = targetBets.reduce((a, b) => a + b.profit, 0);
+            const tStaked = targetBets.reduce((a, b) => a + b.stake, 0);
+            const tAvgOdd = targetBets.length > 0 ? (targetBets.reduce((a, b) => a + b.odd, 0) / targetBets.length) : 0;
+            const tYieldDec = tStaked > 0 ? (tProfit / tStaked) : 0;
+            const marketPVal = calculatePValue(targetBets.length, tYieldDec, tAvgOdd);
+            
+            const pValDisplayTop = document.getElementById('top-pvalue');
+            const pValDisplayMetric = document.getElementById('m-market-pvalue');
+            
+            if (marketPVal !== null) {
+                const txt = (marketPVal * 100).toFixed(2) + "%";
+                pValDisplayTop.innerText = txt;
+                pValDisplayMetric.innerText = txt;
+                pValDisplayTop.className = marketPVal < 0.05 ? "text-xl font-bold text-emerald-400" : "text-xl font-bold text-red-400";
+                pValDisplayMetric.className = marketPVal < 0.05 ? "text-lg font-bold text-emerald-400" : "text-lg font-bold text-red-400";
+            } else { pValDisplayTop.innerText = "--"; pValDisplayMetric.innerText = "--"; }
+            
             const totalProfitFiltered = resolvedFiltered.reduce((a, b) => a + b.profit, 0);
             const totalStakedFiltered = resolvedFiltered.reduce((a, b) => a + b.stake, 0);
+            const winsFiltered = resolvedFiltered.filter(b => b.status === 'win').length;
+            const yieldFiltered = totalStakedFiltered > 0 ? (totalProfitFiltered / totalStakedFiltered) : 0;
             
-            // --- LÓGICA DE REINICIO DE BANK POR FILTRO ---
-            // El bankroll inicial siempre es userBankroll. Se le suma el profit del FILTRO ACTUAL.
-            const bankrollForThisFilter = userBankroll + totalProfitFiltered;
-
-            document.getElementById('v1-yield').innerText = (totalStakedFiltered > 0 ? (totalProfitFiltered / totalStakedFiltered * 100).toFixed(1) : 0) + "%";
+            let peak = userBankroll, current = userBankroll, maxDD = 0;
+            [...resolvedFiltered].reverse().forEach(b => { current += b.profit; if (current > peak) peak = current; let dd = peak > 0 ? (peak - current) / peak : 0; if (dd > maxDD) maxDD = dd; });
+            
+            document.getElementById('v1-yield').innerText = (yieldFiltered * 100).toFixed(1) + "%";
             document.getElementById('v1-profit').innerText = userCurrency + totalProfitFiltered.toFixed(2);
             document.getElementById('v1-count').innerText = resolvedFiltered.length;
-            
             document.getElementById('top-profit').innerText = userCurrency + totalProfitFiltered.toFixed(2);
-            document.getElementById('top-bankroll').innerText = userCurrency + (bankrollForThisFilter).toFixed(2);
-            document.getElementById('m-roi').innerText = (userBankroll > 0 ? (totalProfitFiltered / userBankroll * 100).toFixed(1) : 0) + "%";
-
-            // Drawdown y Métricas
-            let peak = userBankroll, current = userBankroll, maxDD = 0;
-            [...resolvedFiltered].reverse().forEach(b => {
-                current += b.profit;
-                if (current > peak) peak = current;
-                let dd = peak > 0 ? (peak - current) / peak : 0;
-                if (dd > maxDD) maxDD = dd;
-            });
-
+            document.getElementById('top-yield').innerText = (yieldFiltered * 100).toFixed(1) + "%";
+            
+            const finalBank = getCurrentBankroll();
+            document.getElementById('top-bankroll').innerText = userCurrency + finalBank.toFixed(2);
+            const withdrawable = Math.max(0, totalRealProfit);
+            document.getElementById('withdrawable-amount').innerText = withdrawable.toFixed(2);
+            document.getElementById('top-withdrawals').innerText = userCurrency + totalWithdrawals.toFixed(2);
+            
+            const btnWithdraw = document.getElementById('btn-withdraw');
+            if (withdrawable >= (userBankroll * 0.30)) btnWithdraw.disabled = false; else btnWithdraw.disabled = true;
+            
+            document.getElementById('m-roi').innerText = (totalProfitFiltered/userBankroll*100).toFixed(1) + "%";
+            document.getElementById('m-hit').innerText = (resolvedFiltered.length > 0 ? (winsFiltered/resolvedFiltered.length*100).toFixed(1) : 0) + "%";
             document.getElementById('m-dd').innerText = (maxDD * 100).toFixed(1) + "%";
-            document.getElementById('m-hit').innerText = (resolvedFiltered.length > 0 ? (resolvedFiltered.filter(b => b.status === 'win').length / resolvedFiltered.length * 100).toFixed(1) : 0) + "%";
+            document.getElementById('m-avg-odd').innerText = tAvgOdd.toFixed(2); 
+            document.getElementById('m-avg-profit').innerText = userCurrency + (resolvedFiltered.length > 0 ? (totalProfitFiltered / resolvedFiltered.length).toFixed(2) : "0");
             
             renderHistory(filtered); 
             renderBankrollChart(resolvedFiltered);
@@ -1034,22 +1123,31 @@
                 const card = document.createElement('div'); 
                 const neonClass = b.isStrategic ? "strategic-neon-border" : "";
                 card.className = `bet-card-custom ${neonClass}`;
+                
                 let sCol = b.status === 'win' ? "#22c55e" : (b.status === 'loss' ? "#ef4444" : "#eab308");
+                let sClass = b.status === 'win' ? "status-win-border" : (b.status === 'loss' ? "status-loss-border" : "status-pending-border");
                 card.innerHTML = `
-                    <div class="card-status-strip ${b.status === 'win' ? 'status-win-border' : (b.status === 'loss' ? 'status-loss-border' : 'status-pending-border')}"></div>
-                    <div class="status-indicator" style="color: ${sCol}">${b.status.toUpperCase()}</div>
-                    <div class="mb-2"><span class="text-[10px] text-emerald-500 font-black">${b.league}</span><h2 class="text-xl font-bold text-white">${b.teams}</h2></div>
-                    <div class="flex gap-2 mb-4"><div class="px-2 py-1 rounded bg-slate-800 text-xs text-emerald-400">${b.market}</div>${b.isStrategic ? '<div class="pill-badge badge-real">⭐ REAL</div>' : ''}</div>
+                    <div class="card-status-strip ${sClass}"></div>
+                    <div class="status-indicator" style="color: ${sCol}">${b.status === 'pending' ? 'P' : b.status.toUpperCase()}</div>
+                    <div class="mb-2">
+                        <span class="text-[10px] text-emerald-500 uppercase font-black">${b.league}</span>
+                        <h2 class="text-xl font-bold text-white leading-tight">${b.teams}</h2>
+                    </div>
+                    <div class="flex gap-2 mb-4">
+                        <div class="px-2 py-1 rounded bg-slate-800 text-xs font-bold text-emerald-400">${b.market}</div>
+                        ${b.isStrategic ? '<div class="pill-badge badge-real">⭐ REAL</div>' : ''}
+                    </div>
                     <div class="card-data-grid">
-                        <div><p class="text-[9px] text-slate-500">Cuota</p><p class="font-bold">${b.odd}</p></div>
-                        <div><p class="text-[9px] text-slate-500">Stake</p><p class="font-bold">${userCurrency}${b.stake.toFixed(2)}</p></div>
-                        <div><p class="text-[9px] text-slate-500">Edge</p><p class="font-bold text-emerald-400">${b.edge}%</p></div>
-                        <div><p class="text-[9px] text-slate-500">Profit</p><p class="font-bold ${b.profit >= 0 ? 'text-emerald-400' : 'text-red-400'}">${userCurrency}${b.profit.toFixed(2)}</p></div>
+                        <div><p class="text-[9px] text-slate-500 uppercase">Cuota</p><p class="font-bold">${b.odd}</p></div>
+                        <div><p class="text-[9px] text-slate-500 uppercase">Stake</p><p class="font-bold">${userCurrency}${b.stake.toFixed(2)}</p></div>
+                        <div><p class="text-[9px] text-slate-500 uppercase">Edge</p><p class="font-bold text-emerald-400">${b.edge}%</p></div>
+                        <div><p class="text-[9px] text-slate-500 uppercase">Profit</p><p class="font-bold ${b.profit >= 0 ? 'text-emerald-400' : 'text-red-400'}">${userCurrency}${b.profit.toFixed(2)}</p></div>
                     </div>
                     <div class="flex justify-between items-center mt-4">
                         <div class="flex gap-2">
                             <button onclick="resolve(${b.id}, 'win')" class="btn-status btn-win"><i class="fa-solid fa-check"></i></button>
                             <button onclick="resolve(${b.id}, 'loss')" class="btn-status btn-loss"><i class="fa-solid fa-xmark"></i></button>
+                            <button onclick="shareBet(${b.id}, 'ws')" class="btn-status btn-share-ws"><i class="fa-brands fa-whatsapp"></i></button>
                         </div>
                         <button onclick="deleteBet(${b.id})" class="btn-status btn-delete"><i class="fa-solid fa-trash-can"></i></button>
                     </div>`;
@@ -1061,15 +1159,15 @@
 
         function renderPoissonChart(labels, home, away) {
             const ctx = document.getElementById('poissonChart').getContext('2d'); if(pChart) pChart.destroy();
-            pChart = new Chart(ctx, { type: 'line', data: { labels, datasets: [ { label: 'Local', data: home, borderColor: '#3b82f6', tension: 0.4, fill: true, backgroundColor: 'rgba(59, 130, 246, 0.1)' }, { label: 'Visitante', data: away, borderColor: '#f97316', tension: 0.4, fill: true, backgroundColor: 'rgba(249, 115, 22, 0.1)' } ]}, options: { responsive: true, maintainAspectRatio: false } });
+            pChart = new Chart(ctx, { type: 'line', data: { labels, datasets: [ { label: 'Local', data: home, borderColor: '#3b82f6', tension: 0.4, fill: true, backgroundColor: 'rgba(59, 130, 246, 0.1)' }, { label: 'Visitante', data: away, borderColor: '#f97316', tension: 0.4, fill: true, backgroundColor: 'rgba(249, 115, 22, 0.1)' } ]}, options: { responsive: true, maintainAspectRatio: false, scales: { y: { grid: { color: 'rgba(255,255,255,0.05)' } } } } });
         }
 
         function renderBankrollChart(resolved) {
             const ctx = document.getElementById('bankrollChart').getContext('2d'); if(bChart) bChart.destroy();
-            let currentBank = userBankroll;
+            let currentBank = userBankroll + bankrollOffset;
             let bankData = [currentBank];
             [...resolved].reverse().forEach(b => { currentBank += b.profit; bankData.push(currentBank); });
-            bChart = new Chart(ctx, { type: 'line', data: { labels: bankData.map((_, i) => i), datasets: [ { label: 'Banca', data: bankData, borderColor: '#00ff88', borderWidth: 3, pointRadius: 0, fill: true, backgroundColor: 'rgba(0, 255, 136, 0.05)' } ] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } } });
+            bChart = new Chart(ctx, { type: 'line', data: { labels: bankData.map((_, i) => i), datasets: [ { label: 'Banca', data: bankData, borderColor: '#00ff88', borderWidth: 3, pointRadius: 0, fill: true, backgroundColor: 'rgba(0, 255, 136, 0.05)' } ] }, options: { responsive: true, maintainAspectRatio: false, scales: { x: { display: false }, y: { grid: { color: 'rgba(255,255,255,0.05)' } } }, plugins: { legend: { display: false } } } });
         }
 
         function exportData() { window.open("data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(bets))); }
