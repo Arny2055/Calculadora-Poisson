@@ -62,6 +62,9 @@
 
         .status-win-border { background: #22c55e; box-shadow: 0 0 15px #22c55e; }
         .status-loss-border { background: #ef4444; box-shadow: 0 0 15px #ef4444; }
+        .status-half-win-border { background: #84cc16; box-shadow: 0 0 15px #84cc16; }
+        .status-half-loss-border { background: #f97316; box-shadow: 0 0 15px #f97316; }
+        .status-void-border { background: #94a3b8; box-shadow: 0 0 15px #94a3b8; }
         .status-pending-border { background: #eab308; box-shadow: 0 0 15px #eab308; }
 
         .pill-badge {
@@ -97,6 +100,9 @@
         
         .btn-loss { background: rgba(239, 68, 68, 0.1); color: #f87171; }
         .btn-loss:hover { background: #ef4444; color: white; }
+
+        .btn-auto { background: rgba(0, 210, 255, 0.1); color: #00d2ff; }
+        .btn-auto:hover { background: #00d2ff; color: white; }
 
         .btn-delete { background: rgba(255,255,255,0.05); color: #94a3b8; }
         .btn-delete:hover { background: #475569; color: white; }
@@ -496,12 +502,12 @@
 
         async function updateTelegramStatus(bet) {
             if(!tg_config.token) return;
-            const statusIcon = bet.status === 'win' ? '✅' : '❌';
-            const statusText = bet.status === 'win' ? 'GANADA' : 'PERDIDA';
+            const statusLabels = { 'win': 'GANADA ✅', 'loss': 'PERDIDA ❌', 'half-win': 'MEDIO GANADA 💹', 'half-loss': 'MEDIO PERDIDA ⚠️', 'void': 'ANULADA 🔄' };
+            const statusText = statusLabels[bet.status] || bet.status.toUpperCase();
             const profitText = bet.profit >= 0 ? `+$${bet.profit.toFixed(2)}` : `-$${Math.abs(bet.profit).toFixed(2)}`;
             const star = bet.isStrategic ? "⭐ APUESTA REAL ⭐" : "📊 ANÁLISIS POISSON";
             const text = `🏁 *PICK RESUELTO* 🏁\n` +
-                         `${statusIcon} *${statusText}* (${profitText})\n\n` +
+                         `*${statusText}* (${profitText})\n\n` +
                          `📅 *Fecha:* ${bet.date || 'No definida'}\n` +
                          `${star}\n` +
                          `🏆 *Liga:* ${bet.league}\n` +
@@ -539,11 +545,8 @@
         }
 
         function calculate() {
-            // MEJORA: Obtener los promedios directamente desde el input (Lambda)
             const h_lambda = parseFloat(document.getElementById('h_gf').value) || 0;
             const a_lambda = parseFloat(document.getElementById('a_gf').value) || 0;
-            
-            // MEJORA: Obtener línea dinámica de Over/Under
             const ou_line = parseFloat(document.getElementById('ou_line_input').value) || 2.5;
             
             let h_p = [], a_p = [], labels = [];
@@ -690,9 +693,47 @@
             window.open(platform === 'ws' ? `https://api.whatsapp.com/send?text=${message}` : `https://t.me/share/url?url=https://betags.pro&text=${message}`, '_blank');
         }
 
+        // --- MEJORA: LÓGICA DE RESOLUCIÓN POR MARCADOR ---
+        function calculateAutoOutcome(marketStr, h, a) {
+            const total = h + a;
+            const isOver = marketStr.toUpperCase().includes("OVER");
+            const line = parseFloat(marketStr.split(" ").pop());
+            
+            if (isOver) {
+                if (total > line + 0.25) return 'win';
+                if (total < line - 0.25) return 'loss';
+                if (total === line) return 'void';
+                if (Math.abs(total - line) === 0.25) return total > line ? 'half-win' : 'half-loss';
+            } else { // UNDER
+                if (total < line - 0.25) return 'win';
+                if (total > line + 0.25) return 'loss';
+                if (total === line) return 'void';
+                if (Math.abs(total - line) === 0.25) return total < line ? 'half-win' : 'half-loss';
+            }
+            return 'pending';
+        }
+
+        function resolveByScore(id) {
+            const scoreH = parseInt(document.getElementById(`scoreH_${id}`).value) || 0;
+            const scoreA = parseInt(document.getElementById(`scoreA_${id}`).value) || 0;
+            const b = bets.find(x => x.id === id);
+            if(!b) return;
+            const newStatus = calculateAutoOutcome(b.market, scoreH, scoreA);
+            if (newStatus !== 'pending') resolve(id, newStatus);
+        }
+
         function resolve(id, status) {
-            const b = bets.find(x => x.id === id); b.status = status;
-            b.profit = status === 'win' ? b.stake * (b.odd - 1) : (status === 'loss' ? -b.stake : 0);
+            const b = bets.find(x => x.id === id); 
+            if(!b) return;
+            b.status = status;
+            
+            // Cálculo de profit para líneas asiáticas
+            if(status === 'win') b.profit = b.stake * (b.odd - 1);
+            else if(status === 'loss') b.profit = -b.stake;
+            else if(status === 'half-win') b.profit = (b.stake * (b.odd - 1)) / 2;
+            else if(status === 'half-loss') b.profit = -(b.stake / 2);
+            else if(status === 'void') b.profit = 0;
+
             save(); 
             updateTelegramStatus(b);
             sendResolvedToBacktesting(true); 
@@ -701,7 +742,7 @@
         function save() { localStorage.setItem('betags_v3_miner', JSON.stringify(bets)); updateStats(); }
 
         function sendResolvedToBacktesting(silent = false) {
-            const resolvedBets = bets.filter(b => b.status === 'win' || b.status === 'loss');
+            const resolvedBets = bets.filter(b => b.status !== 'pending');
             const dataToBacktest = resolvedBets.map(b => ({ id: b.id, fecha: b.date, liga: b.league, evento: b.teams, mercado: b.market, cuota: b.odd, probabilidad: (b.prob * 100).toFixed(2), edge: b.edge, stake: b.stake, resultado: b.status, profit: b.profit, motor: 'v1' }));
             localStorage.setItem('backtesting_data', JSON.stringify(dataToBacktest));
             if(!silent) alert("Datos sincronizados con Backtesting.");
@@ -758,20 +799,31 @@
             const grid = document.getElementById('history-grid'); grid.innerHTML = '';
             data.forEach(b => {
                 const card = document.createElement('div'); card.className = "bet-card-custom";
-                let sCol = b.status === 'win' ? "#22c55e" : (b.status === 'loss' ? "#ef4444" : "#eab308");
-                let sClass = b.status === 'win' ? "status-win-border" : (b.status === 'loss' ? "status-loss-border" : "status-pending-border");
+                const statusColors = { 'win': '#22c55e', 'loss': '#ef4444', 'half-win': '#84cc16', 'half-loss': '#f97316', 'void': '#94a3b8', 'pending': '#eab308' };
+                let sCol = statusColors[b.status] || '#eab308';
+                let sClass = `status-${b.status}-border`;
                 const realBadge = b.isStrategic ? `<div class="pill-badge badge-real">⭐ REAL</div>` : '';
+                
                 card.innerHTML = `
                     <div class="card-status-strip ${sClass}"></div>
                     <div class="status-indicator" style="color: ${sCol}">${b.status === 'pending' ? 'P' : b.status.toUpperCase()}</div>
                     <div class="mb-2"><span class="text-[10px] text-emerald-500 uppercase font-black">${b.league}</span><h2 class="text-xl font-bold text-white leading-tight">${b.teams}</h2></div>
                     <div class="flex gap-2 mb-4"><div class="px-2 py-1 rounded bg-slate-800 text-xs font-bold text-emerald-400">${b.market}</div>${realBadge}</div>
+                    
                     <div class="card-data-grid">
                         <div><p class="text-[9px] text-slate-500 uppercase">Cuota</p><p class="font-bold">${b.odd}</p></div>
                         <div><p class="text-[9px] text-slate-500 uppercase">Stake</p><p class="font-bold">$${b.stake}</p></div>
                         <div><p class="text-[9px] text-slate-500 uppercase">Edge</p><p class="font-bold text-emerald-400">${b.edge}%</p></div>
                         <div><p class="text-[9px] text-slate-500 uppercase">Profit</p><p class="font-bold ${b.profit >= 0 ? 'text-emerald-400' : 'text-red-400'}">${b.profit.toFixed(2)}</p></div>
                     </div>
+
+                    <div class="flex items-center gap-2 mb-4 bg-black/30 p-2 rounded-xl border border-white/5">
+                        <input type="number" id="scoreH_${b.id}" class="w-12 p-1 text-center text-xs" placeholder="L">
+                        <span class="text-slate-500">-</span>
+                        <input type="number" id="scoreA_${b.id}" class="w-12 p-1 text-center text-xs" placeholder="V">
+                        <button onclick="resolveByScore(${b.id})" class="btn-status btn-auto flex-1 ml-2" title="Auto Resolver"><i class="fa-solid fa-bolt"></i></button>
+                    </div>
+
                     <div class="flex justify-between items-center mt-4">
                         <div class="flex gap-2">
                             <button onclick="resolve(${b.id}, 'win')" class="btn-status btn-win"><i class="fa-solid fa-check"></i></button>
