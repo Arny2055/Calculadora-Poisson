@@ -738,7 +738,11 @@
             }
         }
 
-        function getCurrentBankroll() { return userBankroll + bets.reduce((acc, b) => acc + (b.profit || 0), 0) + bankrollOffset; }
+        // FUNCIÓN MEJORADA: Calcula banca basada en el filtro actual o banca real base
+        function getCurrentBankroll(currentProfitFiltered = 0) { 
+             return userBankroll + currentProfitFiltered + bankrollOffset; 
+        }
+
         function factorial(n) { return n <= 1 ? 1 : n * factorial(n - 1); }
         function poissonProb(k, lambda) { return (Math.pow(lambda, k) * Math.exp(-lambda)) / factorial(k); }
 
@@ -885,7 +889,6 @@
             const currentLeague = document.getElementById('league_name').value || "Desconocida";
             const usePValue = document.getElementById('use_pvalue_mgmt').checked;
             
-            // LIMPIAR COLOR NEÓN PREVIO DE ESTA FILA
             const row = document.getElementById('row_' + id);
             row.classList.remove('market-neon-highlight');
 
@@ -911,7 +914,6 @@
 
                 if (edge > 0) finalAdjustedKelly = Math.max(0.005, finalAdjustedKelly);
 
-                // CÁLCULO SOBRE EL BANKROLL DE CONFIGURACIÓN
                 const stakePercent = finalAdjustedKelly * 100;
                 const stakeCash = userBankroll * finalAdjustedKelly;
 
@@ -936,9 +938,7 @@
                     document.getElementById('strategy-assistant-box').classList.remove('hidden');
                     
                     if (advice.isStrategic) {
-                        // APLICAR COLOR NEÓN A LA FILA SI ES ESTRATÉGICA
                         row.classList.add('market-neon-highlight');
-
                         let html = `<div class="flex flex-col gap-1">`;
                         advice.evaluations.forEach(ev => { html += `<div class="text-[11px]"><span class="text-bet-yellow font-black">${ev.category}:</span> <span class="text-white">${ev.name}</span> <span class="text-emerald-400 font-bold">(${ev.yield.toFixed(1)}%)</span></div>`; });
                         document.getElementById('strategy-text').innerHTML = html + `</div>`;
@@ -1060,10 +1060,13 @@
             const allResolved = bets.filter(b => b.status === 'win' || b.status === 'loss');
             const realResolved = bets.filter(b => b.isStrategic && (b.status === 'win' || b.status === 'loss'));
             const totalRealProfit = realResolved.reduce((a, b) => a + b.profit, 0);
-            const globalProfit = allResolved.reduce((a, b) => a + b.profit, 0);
-            const globalStaked = allResolved.reduce((a, b) => a + b.stake, 0);
-            const globalAvgOdd = allResolved.length > 0 ? (allResolved.reduce((a, b) => a + b.odd, 0) / allResolved.length) : 0;
             
+            const totalProfitFiltered = resolvedFiltered.reduce((a, b) => a + b.profit, 0);
+            const totalStakedFiltered = resolvedFiltered.reduce((a, b) => a + b.stake, 0);
+            const winsFiltered = resolvedFiltered.filter(b => b.status === 'win').length;
+            const yieldFiltered = totalStakedFiltered > 0 ? (totalProfitFiltered / totalStakedFiltered) : 0;
+            
+            // p-Value global/mercado
             const currentMarketFilter = document.getElementById('f_market').value;
             let targetBets = allResolved;
             if (currentMarketFilter !== "") targetBets = allResolved.filter(b => b.market === currentMarketFilter);
@@ -1076,7 +1079,6 @@
             
             const pValDisplayTop = document.getElementById('top-pvalue');
             const pValDisplayMetric = document.getElementById('m-market-pvalue');
-            
             if (marketPVal !== null) {
                 const txt = (marketPVal * 100).toFixed(2) + "%";
                 pValDisplayTop.innerText = txt;
@@ -1085,22 +1087,20 @@
                 pValDisplayMetric.className = marketPVal < 0.05 ? "text-lg font-bold text-emerald-400" : "text-lg font-bold text-red-400";
             } else { pValDisplayTop.innerText = "--"; pValDisplayMetric.innerText = "--"; }
             
-            const totalProfitFiltered = resolvedFiltered.reduce((a, b) => a + b.profit, 0);
-            const totalStakedFiltered = resolvedFiltered.reduce((a, b) => a + b.stake, 0);
-            const winsFiltered = resolvedFiltered.filter(b => b.status === 'win').length;
-            const yieldFiltered = totalStakedFiltered > 0 ? (totalProfitFiltered / totalStakedFiltered) : 0;
-            
             let peak = userBankroll, current = userBankroll, maxDD = 0;
             [...resolvedFiltered].reverse().forEach(b => { current += b.profit; if (current > peak) peak = current; let dd = peak > 0 ? (peak - current) / peak : 0; if (dd > maxDD) maxDD = dd; });
             
+            // Actualización de UI
             document.getElementById('v1-yield').innerText = (yieldFiltered * 100).toFixed(1) + "%";
             document.getElementById('v1-profit').innerText = userCurrency + totalProfitFiltered.toFixed(2);
             document.getElementById('v1-count').innerText = resolvedFiltered.length;
             document.getElementById('top-profit').innerText = userCurrency + totalProfitFiltered.toFixed(2);
             document.getElementById('top-yield').innerText = (yieldFiltered * 100).toFixed(1) + "%";
             
-            const finalBank = getCurrentBankroll();
+            // MEJORA SOLICITADA: Bankroll Actual = Bank Inicial + Profit del Filtro Actual + Offset
+            const finalBank = getCurrentBankroll(totalProfitFiltered);
             document.getElementById('top-bankroll').innerText = userCurrency + finalBank.toFixed(2);
+            
             const withdrawable = Math.max(0, totalRealProfit);
             document.getElementById('withdrawable-amount').innerText = withdrawable.toFixed(2);
             document.getElementById('top-withdrawals').innerText = userCurrency + totalWithdrawals.toFixed(2);
