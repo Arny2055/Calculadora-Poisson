@@ -15,6 +15,8 @@
         .recommendation-box { background: linear-gradient(90deg, #1e1b4b, #312e81); border: 1px solid #4338ca; padding: 15px; border-radius: 12px; }
         .strategy-match { background: rgba(16, 185, 129, 0.2) !important; border: 2px solid #10b981 !important; }
         .matrix-cell { padding: 8px; text-align: center; border: 1px solid rgba(255,255,255,0.05); font-size: 10px; }
+        .value-positive { color: #00ff88; font-weight: bold; }
+        .value-negative { color: #ff4444; }
     </style>
 </head>
 <body>
@@ -51,16 +53,16 @@
                         <input type="text" id="league_name" class="w-full p-2 text-xs" placeholder="Liga">
                         <input type="text" id="event_name" class="w-full p-2 text-xs" placeholder="Evento">
                     </div>
-                    <input type="number" id="ou_line_input" step="0.25" class="w-full p-2 text-xs font-bold text-emerald-400" value="2.5">
-                    <div class="p-4 bg-slate-800/40 rounded-xl">
-                        <label class="text-[9px] text-slate-500 block">Media Goles Local</label>
-                        <input type="number" id="h_gf" step="0.01" class="w-full p-2 text-center" placeholder="1.75">
+                    <input type="hidden" id="ou_line_input" value="2.5">
+                    <div class="p-4 bg-slate-800/40 rounded-xl border border-white/5">
+                        <label class="text-[9px] text-slate-500 block uppercase font-bold mb-1">Media Goles Local (xG)</label>
+                        <input type="number" id="h_gf" step="0.01" class="w-full p-2 text-center text-xl font-bold" placeholder="1.75">
                     </div>
-                    <div class="p-4 bg-slate-800/40 rounded-xl">
-                        <label class="text-[9px] text-slate-500 block">Media Goles Visitante</label>
-                        <input type="number" id="a_gf" step="0.01" class="w-full p-2 text-center" placeholder="1.25">
+                    <div class="p-4 bg-slate-800/40 rounded-xl border border-white/5">
+                        <label class="text-[9px] text-slate-500 block uppercase font-bold mb-1">Media Goles Visitante (xG)</label>
+                        <input type="number" id="a_gf" step="0.01" class="w-full p-2 text-center text-xl font-bold" placeholder="1.25">
                     </div>
-                    <button onclick="calculate()" class="w-full bg-emerald-600 hover:bg-emerald-500 py-3 rounded-xl font-black text-sm uppercase tracking-widest">Ejecutar Simulación</button>
+                    <button onclick="calculate()" class="w-full bg-emerald-600 hover:bg-emerald-500 py-4 rounded-xl font-black text-sm uppercase tracking-widest transition-all transform active:scale-95 shadow-lg shadow-emerald-900/20">Ejecutar Simulación</button>
                 </div>
             </div>
 
@@ -70,14 +72,21 @@
             </div>
         </div>
 
-        <div class="glass-card rounded-2xl mt-6 overflow-hidden">
+        <div class="glass-card rounded-2xl mt-6 overflow-hidden border border-white/5">
             <table class="w-full text-left text-sm">
-                <thead class="bg-slate-900 text-slate-500 uppercase text-[10px]">
+                <thead class="bg-slate-900 text-slate-500 uppercase text-[10px] tracking-wider">
                     <tr>
-                        <th class="p-4">Mercado</th><th class="p-4">Prob %</th><th class="p-4">Cuota Justa</th><th class="p-4">Mercado</th><th class="p-4">Edge %</th><th class="p-4">Stake</th><th class="p-4 text-center">Acción</th>
+                        <th class="p-4 text-emerald-400">Mercado 2.5 / BTTS</th>
+                        <th class="p-4">Probabilidad %</th>
+                        <th class="p-4">Cuota Justa</th>
+                        <th class="p-4">Cuota Casa</th>
+                        <th class="p-4">Edge (Valor)</th>
+                        <th class="p-4">Stake Sugerido</th>
+                        <th class="p-4 text-center">Acción</th>
                     </tr>
                 </thead>
-                <tbody id="market-table" class="divide-y divide-slate-800"></tbody>
+                <tbody id="market-table" class="divide-y divide-slate-800">
+                    </tbody>
             </table>
         </div>
     </div>
@@ -86,80 +95,176 @@
         let bets = JSON.parse(localStorage.getItem('betags_v3_miner')) || [];
         let pChart;
 
-        function factorial(n) { return n <= 1 ? 1 : n * factorial(n - 1); }
-        function poissonProb(k, l) { return (Math.pow(l, k) * Math.exp(-l)) / factorial(k); }
+        function factorial(n) { 
+            if (n === 0) return 1;
+            let res = 1;
+            for (let i = 2; i <= n; i++) res *= i;
+            return res;
+        }
+        
+        function poissonProb(k, l) { 
+            return (Math.pow(l, k) * Math.exp(-l)) / factorial(k); 
+        }
 
         function calculate() {
             const h_l = parseFloat(document.getElementById('h_gf').value) || 0;
             const a_l = parseFloat(document.getElementById('a_gf').value) || 0;
-            const line = parseFloat(document.getElementById('ou_line_input').value) || 2.5;
+            const line = 2.5;
             
-            let h_p = [], a_p = [], labels = [], p_over = 0, p_under = 0;
-            const matrix = document.getElementById('score-matrix'); matrix.innerHTML = '';
+            let h_p = [], a_p = [], labels = [];
+            let p_over = 0, p_under = 0;
+            
+            // Probabilidad BTTS
+            // P(BTTS Sí) = P(Home > 0) * P(Away > 0)
+            const prob_h_zero = poissonProb(0, h_l);
+            const prob_a_zero = poissonProb(0, a_l);
+            const prob_btts_yes = (1 - prob_h_zero) * (1 - prob_a_zero);
+            const prob_btts_no = 1 - prob_btts_yes;
+
+            const matrix = document.getElementById('score-matrix'); 
+            matrix.innerHTML = '';
 
             for(let i=0; i<=5; i++) {
-                labels.push(i + "G"); h_p.push(poissonProb(i, h_l)); a_p.push(poissonProb(i, a_l));
+                labels.push(i + "G"); 
+                h_p.push(poissonProb(i, h_l)); 
+                a_p.push(poissonProb(i, a_l));
             }
             renderPoissonChart(labels, h_p, a_p);
 
+            // Matriz de resultados exactos (0-5 goles por equipo)
             for(let h=0; h<=5; h++) {
                 for(let a=0; a<=5; a++) {
                     const prob = poissonProb(h, h_l) * poissonProb(a, a_l);
                     if(h + a > line) p_over += prob;
                     if(h + a < line) p_under += prob;
-                    const cell = document.createElement('div'); cell.className = 'matrix-cell';
+                    
+                    const cell = document.createElement('div'); 
+                    cell.className = 'matrix-cell';
                     cell.style.backgroundColor = `rgba(0, 255, 136, ${prob * 2})`;
                     cell.innerHTML = `<b>${h}-${a}</b><br>${(prob * 100).toFixed(1)}%`;
                     matrix.appendChild(cell);
                 }
             }
-            renderMarketTable([{id:'over', name:`OVER ${line}`, prob:p_over, partner:'under'}, {id:'under', name:`UNDER ${line}`, prob:p_under, partner:'over'}]);
+
+            const marketData = [
+                { id: 'over25', name: 'OVER 2.5 GOLES', prob: p_over },
+                { id: 'under25', name: 'UNDER 2.5 GOLES', prob: p_under },
+                { id: 'btts_yes', name: 'BTTS (SÍ)', prob: prob_btts_yes },
+                { id: 'btts_no', name: 'BTTS (NO)', prob: prob_btts_no }
+            ];
+
+            renderMarketTable(marketData);
+            showStrategyAssistant(p_over, prob_btts_yes);
         }
 
         function renderPoissonChart(labels, home, away) {
             const ctx = document.getElementById('poissonChart').getContext('2d');
             if(pChart) pChart.destroy();
-            pChart = new Chart(ctx, { type: 'line', data: { labels, datasets: [
-                { label: 'Local', data: home, borderColor: '#3b82f6', tension: 0.4 },
-                { label: 'Visitante', data: away, borderColor: '#f97316', tension: 0.4 }
-            ]}, options: { responsive: true, maintainAspectRatio: false }});
+            pChart = new Chart(ctx, { 
+                type: 'line', 
+                data: { 
+                    labels, 
+                    datasets: [
+                        { label: 'Local', data: home, borderColor: '#3b82f6', backgroundColor: 'rgba(59, 130, 246, 0.1)', fill: true, tension: 0.4 },
+                        { label: 'Visitante', data: away, borderColor: '#f97316', backgroundColor: 'rgba(249, 115, 22, 0.1)', fill: true, tension: 0.4 }
+                    ]
+                }, 
+                options: { 
+                    responsive: true, 
+                    maintainAspectRatio: false,
+                    plugins: { legend: { labels: { color: '#94a3b8' } } },
+                    scales: { y: { ticks: { color: '#64748b' }, grid: { color: 'rgba(255,255,255,0.05)' } }, x: { ticks: { color: '#64748b' }, grid: { display: false } } }
+                }
+            });
         }
 
         function renderMarketTable(data) {
-            const table = document.getElementById('market-table'); table.innerHTML = '';
+            const table = document.getElementById('market-table'); 
+            table.innerHTML = '';
             data.forEach(m => {
-                const fair = (1/m.prob).toFixed(2);
+                const fair = (1 / m.prob).toFixed(2);
                 table.innerHTML += `
-                    <tr class="hover:bg-slate-800/30" id="row_${m.id}">
+                    <tr class="hover:bg-slate-800/30 transition-colors" id="row_${m.id}">
                         <td class="p-4 font-bold text-slate-200">${m.name}</td>
-                        <td class="p-4 text-emerald-400">${(m.prob * 100).toFixed(1)}%</td>
-                        <td class="p-4 text-slate-500">${fair}</td>
-                        <td class="p-4"><input type="number" step="0.01" class="w-16 p-1 text-xs" oninput="updateEdge('${m.id}', ${m.prob}, '${m.name}')" id="odd_${m.id}"></td>
+                        <td class="p-4 text-emerald-400 font-medium">${(m.prob * 100).toFixed(1)}%</td>
+                        <td class="p-4 text-slate-500 font-mono">${fair}</td>
+                        <td class="p-4"><input type="number" step="0.01" class="w-20 p-1 text-xs font-bold" oninput="updateEdge('${m.id}', ${m.prob}, '${m.name}')" id="odd_${m.id}" placeholder="0.00"></td>
                         <td class="p-4 font-bold" id="edge_${m.id}">--</td>
                         <td class="p-4 text-bet-yellow font-black" id="stake_${m.id}">--</td>
-                        <td class="p-4 text-center"><button onclick="registerBet('${m.id}', '${m.name}', ${m.prob})" class="bg-emerald-600 px-3 py-1 rounded-lg text-[10px] font-black">FIJAR</button></td>
+                        <td class="p-4 text-center">
+                            <button onclick="registerBet('${m.id}', '${m.name}', ${m.prob})" class="bg-emerald-600 hover:bg-emerald-400 px-4 py-2 rounded-lg text-[10px] font-black transition-all">FIJAR</button>
+                        </td>
                     </tr>`;
             });
         }
 
         function updateEdge(id, prob, marketName) {
             const odd = parseFloat(document.getElementById('odd_' + id).value) || 0;
+            const edgeElement = document.getElementById('edge_' + id);
+            const stakeElement = document.getElementById('stake_' + id);
+
             if(odd > 1) {
                 const edge = (odd * prob) - 1;
-                const stake = (100 * (edge / (odd - 1)) * 0.125); // Simplified Kelly
-                document.getElementById('edge_' + id).innerText = (edge * 100).toFixed(1) + "%";
-                document.getElementById('stake_' + id).innerText = stake > 0 ? "$" + stake.toFixed(2) : "--";
+                const edgePercent = (edge * 100).toFixed(1);
+                
+                edgeElement.innerText = edgePercent + "%";
+                edgeElement.className = edge > 0 ? "p-4 value-positive" : "p-4 value-negative";
+
+                if (edge > 0) {
+                    // Kelly Criterion Fraccionado (12.5% de agresividad)
+                    const kelly = (prob - (1 - prob) / (odd - 1)) * 0.125;
+                    const stake = Math.max(0, kelly * 100).toFixed(2);
+                    stakeElement.innerText = stake + "%";
+                } else {
+                    stakeElement.innerText = "NO VALOR";
+                }
+            } else {
+                edgeElement.innerText = "--";
+                stakeElement.innerText = "--";
+            }
+        }
+
+        function showStrategyAssistant(p_over, p_btts) {
+            const box = document.getElementById('strategy-assistant-box');
+            const text = document.getElementById('strategy-text');
+            const signal = document.getElementById('strategy-signal');
+            box.classList.remove('hidden');
+
+            if (p_over > 0.65 && p_btts > 0.60) {
+                text.innerText = "ALTA PROBABILIDAD DE PARTIDO ABIERTO. BUSCAR OVER 2.5.";
+                signal.innerText = "🔥";
+            } else if (p_over < 0.40) {
+                text.innerText = "ESCENARIO DE POCOS GOLES. POSIBLE UNDER 2.5.";
+                signal.innerText = "🛡️";
+            } else {
+                text.innerText = "PARTIDO CON VALORES ESTÁNDAR. REVISAR CUOTAS.";
+                signal.innerText = "📊";
             }
         }
 
         function registerBet(id, market, prob) {
             const odd = parseFloat(document.getElementById('odd_' + id).value);
-            if(!odd) return alert("Ingresa cuota");
-            const stake = parseFloat(document.getElementById('stake_' + id).innerText.replace('$','')) || 0;
-            const newBet = { id: Date.now(), league: document.getElementById('league_name').value || "LIGA", teams: document.getElementById('event_name').value || "EVENTO", market, odd, prob, stake, status: 'pending', profit: 0, date: new Date().toLocaleDateString('es-ES') };
+            if(!odd || odd <= 1) return alert("Ingresa una cuota válida para registrar.");
+            
+            const stakeText = document.getElementById('stake_' + id).innerText;
+            const stake = parseFloat(stakeText) || 0;
+            
+            const newBet = { 
+                id: Date.now(), 
+                league: document.getElementById('league_name').value || "LIGA", 
+                teams: document.getElementById('event_name').value || "EVENTO", 
+                market, 
+                odd, 
+                prob, 
+                stake, 
+                status: 'pending', 
+                profit: 0, 
+                date: new Date().toLocaleDateString('es-ES') 
+            };
+            
             bets.unshift(newBet);
             localStorage.setItem('betags_v3_miner', JSON.stringify(bets));
-            alert("Registrado en ROI.");
+            alert("✅ Registro exitoso. Visita la sección ROI para seguimiento.");
         }
     </script>
 </body>
