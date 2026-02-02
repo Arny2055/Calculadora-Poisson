@@ -54,8 +54,10 @@
                 <div class="space-y-4">
                     <select id="f_market" class="w-full bg-slate-800 p-2 text-xs rounded" onchange="updateStats()">
                         <option value="">Todos los Mercados</option>
-                        <option value="OVER">Solo Over</option>
-                        <option value="UNDER">Solo Under</option>
+                        <option value="OVER 2.5">Over 2.5</option>
+                        <option value="UNDER 2.5">Under 2.5</option>
+                        <option value="BTTS YES">BTTS Yes</option>
+                        <option value="BTTS NO">BTTS No</option>
                     </select>
                     <button onclick="exportData()" class="w-full py-2 bg-slate-700 text-[10px] font-bold rounded">EXPORTAR JSON</button>
                     <button onclick="clearHistory()" class="w-full py-2 bg-red-900/30 text-red-400 text-[10px] font-bold rounded">BORRAR TODO</button>
@@ -76,13 +78,21 @@
         let bChart;
 
         function updateStats() {
-            const filtered = bets; 
+            const filterVal = document.getElementById('f_market').value;
+            
+            // Aplicar filtro si hay una selección
+            const filtered = filterVal 
+                ? bets.filter(b => b.market.toUpperCase() === filterVal.toUpperCase()) 
+                : bets;
+
             const resolved = filtered.filter(b => b.status !== 'pending');
             const profit = resolved.reduce((a, b) => a + b.profit, 0);
             const staked = resolved.reduce((a, b) => a + b.stake, 0);
+            const wins = resolved.filter(b => b.status === 'win').length;
             
             document.getElementById('stat-profit').innerText = "$" + profit.toFixed(2);
             document.getElementById('stat-yield').innerText = (staked > 0 ? (profit/staked*100).toFixed(1) : 0) + "%";
+            document.getElementById('stat-hit').innerText = (resolved.length > 0 ? (wins/resolved.length*100).toFixed(1) : 0) + "%";
             document.getElementById('stat-count').innerText = resolved.length;
             
             renderHistory(filtered);
@@ -122,8 +132,27 @@
             const ctx = document.getElementById('bankrollChart').getContext('2d');
             if(bChart) bChart.destroy();
             let current = 100, data = [100];
+            // Invertimos una copia para mostrar el progreso cronológico (del más viejo al más nuevo)
             [...resolved].reverse().forEach(b => { current += b.profit; data.push(current); });
-            bChart = new Chart(ctx, { type: 'line', data: { labels: data.map((_,i)=>i), datasets: [{ label: 'Bankroll', data: data, borderColor: '#00ff88', fill: true, backgroundColor: 'rgba(0,255,136,0.1)' }] }});
+            bChart = new Chart(ctx, { 
+                type: 'line', 
+                data: { 
+                    labels: data.map((_,i)=>i), 
+                    datasets: [{ 
+                        label: 'Bankroll', 
+                        data: data, 
+                        borderColor: '#00ff88', 
+                        fill: true, 
+                        backgroundColor: 'rgba(0,255,136,0.1)',
+                        tension: 0.3 
+                    }] 
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: { y: { grid: { color: 'rgba(255,255,255,0.05)' } }, x: { display: false } }
+                }
+            });
         }
 
         function deleteBet(id) { bets = bets.filter(x => x.id !== id); localStorage.setItem('betags_v3_miner', JSON.stringify(bets)); updateStats(); }
