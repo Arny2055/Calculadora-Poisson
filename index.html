@@ -10,106 +10,510 @@
     <style>
         :root { --bet-green: #006341; --bet-yellow: #ffeb00; --dark-bg: #050d0a; --accent-green: #00ff88; }
         body { background-color: var(--dark-bg); color: #f8fafc; font-family: 'Inter', sans-serif; }
-        .glass-card { background: rgba(17, 24, 39, 0.7); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.05); }
+        .glass-card { background: rgba(17, 24, 39, 0.7); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.05); transition: all 0.3s ease; }
         input { background-color: #1f2937 !important; color: white !important; border: 1px solid #374151 !important; border-radius: 0.5rem; }
+        .recommendation-box { background: linear-gradient(90deg, #1e1b4b, #312e81); border: 1px solid #4338ca; padding: 15px; border-radius: 12px; }
+        .strategy-match { background: rgba(16, 185, 129, 0.2) !important; border: 2px solid #10b981 !important; }
         .matrix-cell { padding: 8px; text-align: center; border: 1px solid rgba(255,255,255,0.05); font-size: 10px; }
-        .best-market-row { background: rgba(255, 235, 0, 0.07) !important; box-shadow: inset 4px 0 0 0 var(--bet-yellow); }
+        .value-positive { color: #00ff88; font-weight: bold; }
+        .value-negative { color: #ff4444; }
+        
+        /* Estilos para los botones de toggle */
+        .btn-toggle { @apply px-4 py-2 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all border; }
+        .btn-active { @apply bg-emerald-500/20 border-emerald-500 text-emerald-400; }
+        .btn-inactive { @apply bg-slate-800 border-slate-700 text-slate-500; }
+
+        /* Estilo para el mini-selector de modo de entrada */
+        .mode-selector-pill {
+            background: #111827;
+            border-radius: 8px;
+            padding: 4px;
+            display: flex;
+            gap: 4px;
+            margin-bottom: 12px;
+        }
+        .mode-btn {
+            flex: 1;
+            padding: 6px;
+            font-size: 9px;
+            font-weight: 800;
+            border-radius: 6px;
+            text-transform: uppercase;
+            transition: all 0.2s;
+        }
+        .mode-btn.active { background: #059669; color: white; }
+        .mode-btn.inactive { color: #4b5563; }
+
+        /* MEJORA: Resalte para el mejor mercado */
+        .best-market-row { 
+            background: rgba(255, 235, 0, 0.07) !important; 
+            box-shadow: inset 4px 0 0 0 var(--bet-yellow);
+        }
+        .suggested-badge {
+            background: var(--bet-yellow);
+            color: black;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 8px;
+            font-weight: 900;
+            margin-left: 8px;
+            text-transform: uppercase;
+        }
     </style>
 </head>
 <body>
-    <nav class="sticky top-0 z-50 bg-slate-900/90 border-b border-emerald-500/20 p-4">
-        <div class="container mx-auto flex justify-between items-center">
-            <h1 class="text-2xl font-black italic text-white tracking-tighter">BET<span class="text-bet-yellow">AGS</span></h1>
-            <button onclick="sendAnalysisToAI()" class="bg-blue-600 px-4 py-2 rounded-lg text-[10px] font-bold">ENVIAR ANÁLISIS A IA</button>
+    <nav class="sticky top-0 z-50 bg-slate-900/90 backdrop-blur border-b border-emerald-500/20 p-4">
+        <div class="container mx-auto flex flex-col md:flex-row justify-between items-center gap-4">
+            <h1 class="text-2xl font-black italic text-white tracking-tighter">
+                BET<span class="text-bet-yellow">AGS</span> <span class="text-[10px] uppercase tracking-widest text-emerald-400 not-italic ml-1">CALCULATOR</span>
+            </h1>
+            <div class="flex bg-slate-800 p-1 rounded-xl gap-1">
+                <a href="index.html" class="px-4 py-2 rounded-lg text-sm font-bold bg-slate-700 text-bet-yellow">CALCULADORA</a>
+                <a href="roi.html" class="px-4 py-2 rounded-lg text-sm font-bold text-slate-400 hover:text-white">ANÁLISIS ROI</a>
+                <a href="config.html" class="px-4 py-2 rounded-lg text-sm font-bold text-slate-400 hover:text-white"><i class="fa-solid fa-robot"></i></a>
+                <a href="backtesting.html" class="px-4 py-2 rounded-lg text-sm font-bold bg-purple-600/20 text-purple-400 border border-purple-500/30">LAB</a>
+            </div>
         </div>
     </nav>
 
     <div class="container mx-auto p-4 max-w-7xl">
+        <div class="flex flex-wrap gap-2 mb-6 justify-end">
+            <button id="btn-visual-section" onclick="toggleSection('visual-section', this)" class="px-4 py-2 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all border bg-emerald-500/20 border-emerald-500 text-emerald-400">
+                <i class="fa-solid fa-chart-line mr-2"></i> Gráfica y Matriz
+            </button>
+            <button id="btn-table-section" onclick="toggleSection('table-section', this)" class="px-4 py-2 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all border bg-emerald-500/20 border-emerald-500 text-emerald-400">
+                <i class="fa-solid fa-table mr-2"></i> Tabla de Mercados
+            </button>
+            <button onclick="toggleBlueLine()" id="btn-blue-line" class="px-4 py-2 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all border bg-blue-500/20 border-blue-500 text-blue-400">
+                <i class="fa-solid fa-eye mr-2"></i> Línea Azul
+            </button>
+        </div>
+
+        <div id="strategy-assistant-box" class="recommendation-box hidden mb-6">
+            <div class="flex items-center justify-between">
+                <div>
+                    <h3 class="text-xs font-black text-blue-300 uppercase mb-1"><i class="fa-solid fa-robot mr-2"></i>ASISTENTE ESTRATÉGICO</h3>
+                    <div id="strategy-text" class="text-sm text-white font-medium italic">Esperando datos...</div>
+                </div>
+                <div id="strategy-signal" class="text-2xl animate-bounce"></div>
+            </div>
+        </div>
+
         <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <div class="glass-card p-6 rounded-2xl">
-                <h2 class="text-lg font-bold text-bet-yellow uppercase mb-4">Motor de Goles</h2>
+                <h2 class="text-lg font-bold text-bet-yellow uppercase mb-4 italic underline decoration-emerald-500">Motor de Goles</h2>
+                
+                <div class="mode-selector-pill">
+                    <button id="mode-avg" onclick="setEntryMode('avg')" class="mode-btn active">Media xG</button>
+                    <button id="mode-total" onclick="setEntryMode('total')" class="mode-btn inactive">Total (Last 5)</button>
+                </div>
+
                 <div class="space-y-4">
-                    <input type="text" id="event_name" class="w-full p-2 text-xs" placeholder="Equipo Local vs Visitante">
-                    <div class="p-4 bg-slate-800/40 rounded-xl"><label class="text-[9px] text-slate-500 uppercase font-bold">Local xG</label><input type="number" id="h_gf" step="0.01" class="w-full p-2 text-center text-xl font-bold" placeholder="1.75"></div>
-                    <div class="p-4 bg-slate-800/40 rounded-xl"><label class="text-[9px] text-slate-500 uppercase font-bold">Visitante xG</label><input type="number" id="a_gf" step="0.01" class="w-full p-2 text-center text-xl font-bold" placeholder="1.25"></div>
-                    <button onclick="calculate()" class="w-full bg-emerald-600 py-4 rounded-xl font-black uppercase text-sm tracking-widest shadow-lg">Ejecutar Simulación</button>
+                    <div class="grid grid-cols-2 gap-2">
+                        <input type="text" id="league_name" class="w-full p-2 text-xs" placeholder="Liga">
+                        <input type="text" id="event_name" class="w-full p-2 text-xs" placeholder="Evento">
+                    </div>
+                    <input type="hidden" id="ou_line_input" value="2.5">
+                    
+                    <div class="p-4 bg-slate-800/40 rounded-xl border border-white/5">
+                        <label id="label-h" class="text-[9px] text-slate-500 block uppercase font-bold mb-1">Media Goles Local (xG)</label>
+                        <input type="number" id="h_gf" step="0.01" class="w-full p-2 text-center text-xl font-bold" placeholder="1.75">
+                    </div>
+                    
+                    <div class="p-4 bg-slate-800/40 rounded-xl border border-white/5">
+                        <label id="label-a" class="text-[9px] text-slate-500 block uppercase font-bold mb-1">Media Goles Visitante (xG)</label>
+                        <input type="number" id="a_gf" step="0.01" class="w-full p-2 text-center text-xl font-bold" placeholder="1.25">
+                    </div>
+                    
+                    <button onclick="calculate()" class="w-full bg-emerald-600 hover:bg-emerald-500 py-4 rounded-xl font-black text-sm uppercase tracking-widest transition-all transform active:scale-95 shadow-lg shadow-emerald-900/20">Ejecutar Simulación</button>
                 </div>
             </div>
-            <div class="lg:col-span-2 glass-card p-6 rounded-2xl">
+
+            <div id="visual-section" class="lg:col-span-2 glass-card p-6 rounded-2xl">
                 <div class="h-[250px]"><canvas id="poissonChart"></canvas></div>
                 <div class="mt-4 grid grid-cols-6 gap-1" id="score-matrix"></div>
             </div>
         </div>
 
-        <div class="glass-card rounded-2xl mt-6 overflow-hidden">
+        <div id="table-section" class="glass-card rounded-2xl mt-6 overflow-hidden border border-white/5">
             <table class="w-full text-left text-sm">
-                <thead class="bg-slate-900 text-[10px] tracking-wider"><tr><th class="p-4 text-emerald-400">Mercado</th><th class="p-4">Prob %</th><th class="p-4">Justa</th><th class="p-4">Casa</th><th class="p-4">Edge</th><th class="p-4">Stake</th><th class="p-4"></th></tr></thead>
-                <tbody id="market-table" class="divide-y divide-slate-800"></tbody>
+                <thead class="bg-slate-900 text-slate-500 uppercase text-[10px] tracking-wider">
+                    <tr>
+                        <th class="p-4 text-emerald-400">Mercado 2.5 / BTTS</th>
+                        <th class="p-4">Probabilidad %</th>
+                        <th class="p-4">Cuota Justa</th>
+                        <th class="p-4">Cuota Casa</th>
+                        <th class="p-4">Edge (Valor)</th>
+                        <th class="p-4">Stake Sugerido</th>
+                        <th class="p-4 text-center">Acción</th>
+                    </tr>
+                </thead>
+                <tbody id="market-table" class="divide-y divide-slate-800">
+                </tbody>
             </table>
         </div>
     </div>
 
     <script>
+        let bets = JSON.parse(localStorage.getItem('betags_v3_miner')) || [];
         let pChart;
-        function factorial(n) { if (n === 0) return 1; let res = 1; for (let i = 2; i <= n; i++) res *= i; return res; }
-        function poissonProb(k, l) { return (Math.pow(l, k) * Math.exp(-l)) / factorial(k); }
+        let blueLineVisible = true;
+        let entryMode = 'avg'; // Variable para controlar el modo de entrada
+
+        // Cargar preferencias de visibilidad al iniciar
+        window.addEventListener('DOMContentLoaded', () => {
+            const sections = ['visual-section', 'table-section'];
+            sections.forEach(id => {
+                const isHidden = localStorage.getItem('hide_' + id) === 'true';
+                if (isHidden) {
+                    const el = document.getElementById(id);
+                    const btn = document.getElementById('btn-' + id);
+                    if (el && btn) {
+                        el.classList.add('hidden');
+                        btn.classList.replace('bg-emerald-500/20', 'bg-slate-800');
+                        btn.classList.replace('border-emerald-500', 'border-slate-700');
+                        btn.classList.replace('text-emerald-400', 'text-slate-500');
+                    }
+                }
+            });
+
+            // MEJORA: Cargar el modo de entrada guardado
+            const savedMode = localStorage.getItem('betags_entry_mode') || 'avg';
+            setEntryMode(savedMode);
+        });
+
+        // Función para cambiar el modo de entrada (MEJORA CON PERSISTENCIA)
+        function setEntryMode(mode) {
+            entryMode = mode;
+            // Guardar en localStorage para que persista
+            localStorage.setItem('betags_entry_mode', mode);
+
+            const btnAvg = document.getElementById('mode-avg');
+            const btnTotal = document.getElementById('mode-total');
+            const labelH = document.getElementById('label-h');
+            const labelA = document.getElementById('label-a');
+            const inputH = document.getElementById('h_gf');
+            const inputA = document.getElementById('a_gf');
+
+            if (mode === 'avg') {
+                btnAvg.classList.add('active');
+                btnAvg.classList.remove('inactive');
+                btnTotal.classList.add('inactive');
+                btnTotal.classList.remove('active');
+                
+                labelH.innerText = "Media Goles Local (xG)";
+                labelA.innerText = "Media Goles Visitante (xG)";
+                inputH.placeholder = "1.75";
+                inputA.placeholder = "1.25";
+            } else {
+                btnAvg.classList.add('inactive');
+                btnAvg.classList.remove('active');
+                btnTotal.classList.add('active');
+                btnTotal.classList.remove('inactive');
+                
+                labelH.innerText = "Total Goles Local (Últ. 5)";
+                labelA.innerText = "Total Goles Visitante (Últ. 5)";
+                inputH.placeholder = "8";
+                inputA.placeholder = "6";
+            }
+        }
+
+        function factorial(n) { 
+            if (n === 0) return 1;
+            let res = 1;
+            for (let i = 2; i <= n; i++) res *= i;
+            return res;
+        }
+        
+        function poissonProb(k, l) { 
+            return (Math.pow(l, k) * Math.exp(-l)) / factorial(k); 
+        }
+
+        // Funciones de visibilidad mejorada con persistencia
+        function toggleSection(id, btn) {
+            const el = document.getElementById(id);
+            const isHidden = !el.classList.contains('hidden');
+            
+            if (isHidden) {
+                el.classList.add('hidden');
+                btn.classList.replace('bg-emerald-500/20', 'bg-slate-800');
+                btn.classList.replace('border-emerald-500', 'border-slate-700');
+                btn.classList.replace('text-emerald-400', 'text-slate-500');
+            } else {
+                el.classList.remove('hidden');
+                btn.classList.replace('bg-slate-800', 'bg-emerald-500/20');
+                btn.classList.replace('border-slate-700', 'border-emerald-500');
+                btn.classList.replace('text-slate-500', 'text-emerald-400');
+            }
+            // Guardar estado
+            localStorage.setItem('hide_' + id, isHidden);
+        }
+
+        function toggleBlueLine() {
+            if (!pChart) return;
+            blueLineVisible = !blueLineVisible;
+            pChart.setDatasetVisibility(0, blueLineVisible);
+            pChart.update();
+            
+            const btn = document.getElementById('btn-blue-line');
+            if (blueLineVisible) {
+                btn.classList.replace('bg-slate-800', 'bg-blue-500/20');
+                btn.classList.replace('border-slate-700', 'border-blue-500');
+                btn.classList.replace('text-slate-500', 'text-blue-400');
+                btn.innerHTML = '<i class="fa-solid fa-eye mr-2"></i> Línea Azul';
+            } else {
+                btn.classList.replace('bg-blue-500/20', 'bg-slate-800');
+                btn.classList.replace('border-blue-500', 'border-slate-700');
+                btn.classList.replace('text-blue-400', 'text-slate-500');
+                btn.innerHTML = '<i class="fa-solid fa-eye-slash mr-2"></i> Línea Azul';
+            }
+        }
 
         function calculate() {
-            const h_l = parseFloat(document.getElementById('h_gf').value) || 0;
-            const a_l = parseFloat(document.getElementById('a_gf').value) || 0;
-            let h_p = [], a_p = [], labels = [], p_over = 0;
-            const matrix = document.getElementById('score-matrix'); matrix.innerHTML = '';
+            // Lógica de entrada dinámica (MEJORA)
+            let h_l = parseFloat(document.getElementById('h_gf').value) || 0;
+            let a_l = parseFloat(document.getElementById('a_gf').value) || 0;
 
-            for(let i=0; i<=5; i++) { labels.push(i + "G"); h_p.push(poissonProb(i, h_l)); a_p.push(poissonProb(i, a_l)); }
+            if (entryMode === 'total') {
+                h_l = h_l / 5;
+                a_l = a_l / 5;
+            }
+
+            const line = 2.5;
+            
+            let h_p = [], a_p = [], labels = [];
+            let p_over = 0, p_under = 0;
+            
+            const prob_h_zero = poissonProb(0, h_l);
+            const prob_a_zero = poissonProb(0, a_l);
+            const prob_btts_yes = (1 - prob_h_zero) * (1 - prob_a_zero);
+            const prob_btts_no = 1 - prob_btts_yes;
+
+            const matrix = document.getElementById('score-matrix'); 
+            matrix.innerHTML = '';
+
+            for(let i=0; i<=5; i++) {
+                labels.push(i + "G"); 
+                h_p.push(poissonProb(i, h_l)); 
+                a_p.push(poissonProb(i, a_l));
+            }
             renderPoissonChart(labels, h_p, a_p);
 
             for(let h=0; h<=5; h++) {
                 for(let a=0; a<=5; a++) {
                     const prob = poissonProb(h, h_l) * poissonProb(a, a_l);
-                    if(h + a > 2.5) p_over += prob;
-                    const cell = document.createElement('div'); cell.className = 'matrix-cell';
+                    if(h + a > line) p_over += prob;
+                    if(h + a < line) p_under += prob;
+                    
+                    const cell = document.createElement('div'); 
+                    cell.className = 'matrix-cell';
                     cell.style.backgroundColor = `rgba(0, 255, 136, ${prob * 2})`;
                     cell.innerHTML = `<b>${h}-${a}</b><br>${(prob * 100).toFixed(1)}%`;
                     matrix.appendChild(cell);
                 }
             }
-            renderMarketTable([{ name: 'OVER 2.5', prob: p_over }, { name: 'UNDER 2.5', prob: 1-p_over }]);
+
+            const marketData = [
+                { id: 'over25', name: 'OVER 2.5 GOLES', prob: p_over },
+                { id: 'under25', name: 'UNDER 2.5 GOLES', prob: p_under },
+                { id: 'btts_yes', name: 'BTTS (SÍ)', prob: prob_btts_yes },
+                { id: 'btts_no', name: 'BTTS (NO)', prob: prob_btts_no }
+            ];
+
+            renderMarketTable(marketData);
+            showStrategyAssistant(p_over, prob_btts_yes);
+            highlightSuggestedMarket(); // Llamada a la sugerencia
         }
 
         function renderPoissonChart(labels, home, away) {
             const ctx = document.getElementById('poissonChart').getContext('2d');
             if(pChart) pChart.destroy();
-            pChart = new Chart(ctx, { type: 'line', data: { labels, datasets: [{ label: 'Local', data: home, borderColor: '#3b82f6', fill: true }, { label: 'Visitante', data: away, borderColor: '#f97316', fill: true }] }, options: { responsive: true, maintainAspectRatio: false } });
-        }
-
-        function renderMarketTable(data) {
-            const table = document.getElementById('market-table'); table.innerHTML = '';
-            data.forEach(m => {
-                table.innerHTML += `<tr class="market-row"><td class="p-4 font-bold">${m.name}</td><td class="p-4 text-emerald-400">${(m.prob * 100).toFixed(1)}%</td><td class="p-4">${(1/m.prob).toFixed(2)}</td><td class="p-4"><input type="number" class="w-20 p-1 text-xs" oninput="updateEdge(this, ${m.prob})"></td><td class="p-4 edge-val">--</td><td class="p-4 stake-val">--</td><td class="p-4"><button class="bg-emerald-600 px-3 py-1 rounded">FIX</button></td></tr>`;
+            pChart = new Chart(ctx, { 
+                type: 'line', 
+                data: { 
+                    labels, 
+                    datasets: [
+                        { label: 'Local', data: home, borderColor: '#3b82f6', backgroundColor: 'rgba(59, 130, 246, 0.1)', fill: true, tension: 0.4, hidden: !blueLineVisible },
+                        { label: 'Visitante', data: away, borderColor: '#f97316', backgroundColor: 'rgba(249, 115, 22, 0.1)', fill: true, tension: 0.4 }
+                    ]
+                }, 
+                options: { 
+                    responsive: true, 
+                    maintainAspectRatio: false,
+                    plugins: { legend: { labels: { color: '#94a3b8' } } },
+                    scales: { y: { ticks: { color: '#64748b' }, grid: { color: 'rgba(255,255,255,0.05)' } }, x: { ticks: { color: '#64748b' }, grid: { display: false } } }
+                }
             });
         }
 
-        function updateEdge(el, prob) {
-            const odd = parseFloat(el.value);
-            const row = el.closest('tr');
+        function renderMarketTable(data) {
+            const table = document.getElementById('market-table'); 
+            table.innerHTML = '';
+            data.forEach(m => {
+                const fair = (1 / m.prob).toFixed(2);
+                table.innerHTML += `
+                    <tr class="hover:bg-slate-800/30 transition-colors market-row" id="row_${m.id}" data-prob="${m.prob}">
+                        <td class="p-4 font-bold text-slate-200 market-name-cell">
+                            ${m.name}
+                        </td>
+                        <td class="p-4 text-emerald-400 font-medium text-prob">${(m.prob * 100).toFixed(1)}%</td>
+                        <td class="p-4 text-slate-500 font-mono">${fair}</td>
+                        <td class="p-4"><input type="number" step="0.01" class="w-20 p-1 text-xs font-bold odd-input" oninput="updateEdge('${m.id}', ${m.prob}, '${m.name}')" id="odd_${m.id}" placeholder="0.00"></td>
+                        <td class="p-4 font-bold text-edge" id="edge_${m.id}">--</td>
+                        <td class="p-4 text-bet-yellow font-black" id="stake_${m.id}">--</td>
+                        <td class="p-4 text-center">
+                            <button onclick="registerBet('${m.id}', '${m.name}', ${m.prob})" class="bg-emerald-600 hover:bg-emerald-400 px-4 py-2 rounded-lg text-[10px] font-black transition-all">FIJAR</button>
+                        </td>
+                    </tr>`;
+            });
+        }
+
+        function updateEdge(id, prob, marketName) {
+            const odd = parseFloat(document.getElementById('odd_' + id).value) || 0;
+            const edgeElement = document.getElementById('edge_' + id);
+            const stakeElement = document.getElementById('stake_' + id);
+
             if(odd > 1) {
                 const edge = (odd * prob) - 1;
-                row.querySelector('.edge-val').innerText = (edge * 100).toFixed(1) + "%";
-                row.querySelector('.stake-val').innerText = Math.max(0, edge * 5).toFixed(1) + "%";
+                const edgePercent = (edge * 100).toFixed(1);
+                
+                edgeElement.innerText = edgePercent + "%";
+                edgeElement.className = edge > 0 ? "p-4 value-positive text-edge" : "p-4 value-negative text-edge";
+
+                if (edge > 0) {
+                    const kelly = (prob - (1 - prob) / (odd - 1)) * 0.125;
+                    const stake = Math.max(0, kelly * 100).toFixed(2);
+                    stakeElement.innerText = stake + "%";
+                } else {
+                    stakeElement.innerText = "NO VALOR";
+                }
+            } else {
+                edgeElement.innerText = "--";
+                stakeElement.innerText = "--";
+            }
+            highlightSuggestedMarket(); // Re-evaluar sugerencia al cambiar cuotas
+        }
+
+        // --- MEJORA: SUGERENCIA DEL MERCADO MÁS PENÍTICO (RENTABLE/PROBABLE) ---
+        function highlightSuggestedMarket() {
+            const rows = document.querySelectorAll('.market-row');
+            let bestRow = null;
+            let maxVal = -Infinity;
+            let criteria = 'prob'; // Por defecto busca probabilidad
+
+            // Primero vemos si hay algún Edge positivo para sugerir por VALOR
+            rows.forEach(row => {
+                const edgeText = row.querySelector('.text-edge').innerText;
+                const edgeVal = parseFloat(edgeText);
+                if (!isNaN(edgeVal) && edgeVal > 0) {
+                    criteria = 'edge';
+                }
+            });
+
+            rows.forEach(row => {
+                row.classList.remove('best-market-row');
+                const badge = row.querySelector('.suggested-badge');
+                if (badge) badge.remove();
+
+                if (criteria === 'edge') {
+                    const val = parseFloat(row.querySelector('.text-edge').innerText) || -999;
+                    if (val > maxVal) { maxVal = val; bestRow = row; }
+                } else {
+                    const val = parseFloat(row.getAttribute('data-prob'));
+                    if (val > maxVal) { maxVal = val; bestRow = row; }
+                }
+            });
+
+            if (bestRow) {
+                bestRow.classList.add('best-market-row');
+                const nameCell = bestRow.querySelector('.market-name-cell');
+                const label = criteria === 'edge' ? 'Pick de Valor' : 'Más Probable';
+                nameCell.innerHTML += `<span class="suggested-badge">${label}</span>`;
             }
         }
 
-        function sendAnalysisToAI() {
-            const analysis = {
-                tool: "POISSON_PRO",
-                match: document.getElementById('event_name').value || "Desconocido",
-                local_xg: document.getElementById('h_gf').value,
-                away_xg: document.getElementById('a_gf').value,
-                over25_prob: document.querySelector('.market-row')?.innerText.split('\n')[1] || "0%"
-            };
-            navigator.clipboard.writeText("ANALISIS_IA:" + JSON.stringify(analysis));
-            alert("Análisis de Poisson copiado. ¡Envíamelo para darte mi veredicto!");
+        function showStrategyAssistant(p_over, p_btts) {
+            const box = document.getElementById('strategy-assistant-box');
+            const text = document.getElementById('strategy-text');
+            const signal = document.getElementById('strategy-signal');
+            box.classList.remove('hidden');
+
+            if (p_over > 0.65 && p_btts > 0.60) {
+                text.innerText = "ALTA PROBABILIDAD DE PARTIDO ABIERTO. BUSCAR OVER 2.5.";
+                signal.innerText = "🔥";
+            } else if (p_over < 0.40) {
+                text.innerText = "ESCENARIO DE POCOS GOLES. POSIBLE UNDER 2.5.";
+                signal.innerText = "🛡️";
+            } else {
+                text.innerText = "PARTIDO CON VALORES ESTÁNDAR. REVISAR CUOTAS.";
+                signal.innerText = "📊";
+            }
         }
+
+        function registerBet(id, market, prob) {
+            const odd = parseFloat(document.getElementById('odd_' + id).value);
+            if(!odd || odd <= 1) return alert("Ingresa una cuota válida para registrar.");
+            
+            const stakeText = document.getElementById('stake_' + id).innerText;
+            const stake = parseFloat(stakeText) || 0;
+            
+            const newBet = { 
+                id: Date.now(), 
+                league: document.getElementById('league_name').value || "LIGA", 
+                teams: document.getElementById('event_name').value || "EVENTO", 
+                market, 
+                odd, 
+                prob, 
+                stake, 
+                status: 'pending', 
+                profit: 0, 
+                date: new Date().toLocaleDateString('es-ES') 
+            };
+            
+            bets.unshift(newBet);
+            localStorage.setItem('betags_v3_miner', JSON.stringify(bets));
+            alert("✅ Registro exitoso. Visita la sección ROI para seguimiento.");
+        }
+
+        // --- MÓDULO DE RETROALIMENTACIÓN ASISTIDA ---
+        function getHistoricalEdge() {
+            const history = JSON.parse(localStorage.getItem('backtesting_data')) || [];
+            if (history.length < 5) return null;
+
+            const stats = { leagues: {}, markets: {}, odds: {} };
+            
+            history.forEach(bet => {
+                stats.leagues[bet.liga] = (stats.leagues[bet.liga] || 0) + bet.profit;
+                stats.markets[bet.mercado] = (stats.markets[bet.mercado] || 0) + bet.profit;
+                const range = bet.cuota < 1.8 ? 'BAJA' : bet.cuota <= 2.5 ? 'MEDIA' : 'ALTA';
+                stats.odds[range] = (stats.odds[range] || 0) + bet.profit;
+            });
+
+            return {
+                bestLeague: Object.entries(stats.leagues).sort((a,b) => b[1]-a[1])[0],
+                bestMarket: Object.entries(stats.markets).sort((a,b) => b[1]-a[1])[0],
+                bestRange: Object.entries(stats.odds).sort((a,b) => b[1]-a[1])[0]
+            };
+        }
+
+        const originalShowStrategy = showStrategyAssistant;
+        showStrategyAssistant = function(p_over, p_btts) {
+            originalShowStrategy(p_over, p_btts); 
+            
+            const intel = getHistoricalEdge();
+            if (!intel) return;
+
+            const currentLeague = document.getElementById('league_name').value.toUpperCase();
+            const assistantBox = document.getElementById('strategy-assistant-box');
+            const text = document.getElementById('strategy-text');
+
+            if (currentLeague === intel.bestLeague[0].toUpperCase()) {
+                text.innerHTML += `<br><span class="text-emerald-400 font-black text-[10px]">[HISTORIAL: Esta es tu mejor liga (+${intel.bestLeague[1].toFixed(2)}$)]</span>`;
+                assistantBox.classList.add('border-2', 'border-emerald-500', 'animate-pulse');
+            } else {
+                assistantBox.classList.remove('border-2', 'border-emerald-500', 'animate-pulse');
+            }
+        };
     </script>
 </body>
 </html>
