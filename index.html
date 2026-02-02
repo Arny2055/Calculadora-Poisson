@@ -23,8 +23,26 @@
         .btn-active { @apply bg-emerald-500/20 border-emerald-500 text-emerald-400; }
         .btn-inactive { @apply bg-slate-800 border-slate-700 text-slate-500; }
 
-        /* Estilo para los inputs de 5 partidos */
-        .input-mini { width: 32px !important; padding: 4px !important; text-align: center; font-size: 10px !important; }
+        /* Estilo para el mini-selector de modo de entrada */
+        .mode-selector-pill {
+            background: #111827;
+            border-radius: 8px;
+            padding: 4px;
+            display: flex;
+            gap: 4px;
+            margin-bottom: 12px;
+        }
+        .mode-btn {
+            flex: 1;
+            padding: 6px;
+            font-size: 9px;
+            font-weight: 800;
+            border-radius: 6px;
+            text-transform: uppercase;
+            transition: all 0.2s;
+        }
+        .mode-btn.active { background: #059669; color: white; }
+        .mode-btn.inactive { color: #4b5563; }
     </style>
 </head>
 <body>
@@ -68,47 +86,29 @@
         <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <div class="glass-card p-6 rounded-2xl">
                 <h2 class="text-lg font-bold text-bet-yellow uppercase mb-4 italic underline decoration-emerald-500">Motor de Goles</h2>
+                
+                <div class="mode-selector-pill">
+                    <button id="mode-avg" onclick="setEntryMode('avg')" class="mode-btn active">Media xG</button>
+                    <button id="mode-total" onclick="setEntryMode('total')" class="mode-btn inactive">Total (Last 5)</button>
+                </div>
+
                 <div class="space-y-4">
                     <div class="grid grid-cols-2 gap-2">
                         <input type="text" id="league_name" class="w-full p-2 text-xs" placeholder="Liga">
                         <input type="text" id="event_name" class="w-full p-2 text-xs" placeholder="Evento">
                     </div>
-                    
-                    <div class="p-3 bg-emerald-950/20 border border-emerald-500/30 rounded-xl">
-                        <label class="text-[9px] text-emerald-400 block uppercase font-black mb-2 tracking-widest text-center">Calcular xG (Últimos 5 partidos)</label>
-                        <div class="flex flex-col gap-3">
-                            <div>
-                                <p class="text-[8px] text-slate-400 mb-1 uppercase">Goles Local:</p>
-                                <div class="flex justify-between">
-                                    <input type="number" class="input-mini h5_1" placeholder="0">
-                                    <input type="number" class="input-mini h5_2" placeholder="0">
-                                    <input type="number" class="input-mini h5_3" placeholder="0">
-                                    <input type="number" class="input-mini h5_4" placeholder="0">
-                                    <input type="number" class="input-mini h5_5" placeholder="0">
-                                </div>
-                            </div>
-                            <div>
-                                <p class="text-[8px] text-slate-400 mb-1 uppercase">Goles Visita:</p>
-                                <div class="flex justify-between">
-                                    <input type="number" class="input-mini a5_1" placeholder="0">
-                                    <input type="number" class="input-mini a5_2" placeholder="0">
-                                    <input type="number" class="input-mini a5_3" placeholder="0">
-                                    <input type="number" class="input-mini a5_4" placeholder="0">
-                                    <input type="number" class="input-mini a5_5" placeholder="0">
-                                </div>
-                            </div>
-                            <button onclick="calculateAverages()" class="w-full bg-slate-700 hover:bg-slate-600 py-1 rounded text-[9px] font-bold text-white uppercase">Calcular Promedios</button>
-                        </div>
-                    </div>
                     <input type="hidden" id="ou_line_input" value="2.5">
+                    
                     <div class="p-4 bg-slate-800/40 rounded-xl border border-white/5">
-                        <label class="text-[9px] text-slate-500 block uppercase font-bold mb-1">Media Goles Local (xG)</label>
+                        <label id="label-h" class="text-[9px] text-slate-500 block uppercase font-bold mb-1">Media Goles Local (xG)</label>
                         <input type="number" id="h_gf" step="0.01" class="w-full p-2 text-center text-xl font-bold" placeholder="1.75">
                     </div>
+                    
                     <div class="p-4 bg-slate-800/40 rounded-xl border border-white/5">
-                        <label class="text-[9px] text-slate-500 block uppercase font-bold mb-1">Media Goles Visitante (xG)</label>
+                        <label id="label-a" class="text-[9px] text-slate-500 block uppercase font-bold mb-1">Media Goles Visitante (xG)</label>
                         <input type="number" id="a_gf" step="0.01" class="w-full p-2 text-center text-xl font-bold" placeholder="1.25">
                     </div>
+                    
                     <button onclick="calculate()" class="w-full bg-emerald-600 hover:bg-emerald-500 py-4 rounded-xl font-black text-sm uppercase tracking-widest transition-all transform active:scale-95 shadow-lg shadow-emerald-900/20">Ejecutar Simulación</button>
                 </div>
             </div>
@@ -142,6 +142,7 @@
         let bets = JSON.parse(localStorage.getItem('betags_v3_miner')) || [];
         let pChart;
         let blueLineVisible = true;
+        let entryMode = 'avg'; // Variable para controlar el modo de entrada
 
         // Cargar preferencias de visibilidad al iniciar
         window.addEventListener('DOMContentLoaded', () => {
@@ -161,30 +162,31 @@
             });
         });
 
-        // NUEVA FUNCIÓN PARA CALCULAR PROMEDIOS DESDE 5 PARTIDOS
-        function calculateAverages() {
-            // Obtener goles local
-            const hGoles = [
-                parseFloat(document.querySelector('.h5_1').value) || 0,
-                parseFloat(document.querySelector('.h5_2').value) || 0,
-                parseFloat(document.querySelector('.h5_3').value) || 0,
-                parseFloat(document.querySelector('.h5_4').value) || 0,
-                parseFloat(document.querySelector('.h5_5').value) || 0
-            ];
-            // Obtener goles visita
-            const aGoles = [
-                parseFloat(document.querySelector('.a5_1').value) || 0,
-                parseFloat(document.querySelector('.a5_2').value) || 0,
-                parseFloat(document.querySelector('.a5_3').value) || 0,
-                parseFloat(document.querySelector('.a5_4').value) || 0,
-                parseFloat(document.querySelector('.a5_5').value) || 0
-            ];
+        // Función para cambiar el modo de entrada (MEJORA)
+        function setEntryMode(mode) {
+            entryMode = mode;
+            const btnAvg = document.getElementById('mode-avg');
+            const btnTotal = document.getElementById('mode-total');
+            const labelH = document.getElementById('label-h');
+            const labelA = document.getElementById('label-a');
+            const inputH = document.getElementById('h_gf');
+            const inputA = document.getElementById('a_gf');
 
-            const sumH = hGoles.reduce((a, b) => a + b, 0);
-            const sumA = aGoles.reduce((a, b) => a + b, 0);
-
-            document.getElementById('h_gf').value = (sumH / 5).toFixed(2);
-            document.getElementById('a_gf').value = (sumA / 5).toFixed(2);
+            if (mode === 'avg') {
+                btnAvg.classList.replace('inactive', 'active');
+                btnTotal.classList.replace('active', 'inactive');
+                labelH.innerText = "Media Goles Local (xG)";
+                labelA.innerText = "Media Goles Visitante (xG)";
+                inputH.placeholder = "1.75";
+                inputA.placeholder = "1.25";
+            } else {
+                btnAvg.classList.replace('active', 'inactive');
+                btnTotal.classList.replace('inactive', 'active');
+                labelH.innerText = "Total Goles Local (Últ. 5)";
+                labelA.innerText = "Total Goles Visitante (Últ. 5)";
+                inputH.placeholder = "8";
+                inputA.placeholder = "6";
+            }
         }
 
         function factorial(n) { 
@@ -239,8 +241,15 @@
         }
 
         function calculate() {
-            const h_l = parseFloat(document.getElementById('h_gf').value) || 0;
-            const a_l = parseFloat(document.getElementById('a_gf').value) || 0;
+            // Lógica de entrada dinámica (MEJORA)
+            let h_l = parseFloat(document.getElementById('h_gf').value) || 0;
+            let a_l = parseFloat(document.getElementById('a_gf').value) || 0;
+
+            if (entryMode === 'total') {
+                h_l = h_l / 5;
+                a_l = a_l / 5;
+            }
+
             const line = 2.5;
             
             let h_p = [], a_p = [], labels = [];
@@ -403,7 +412,6 @@
             const stats = { leagues: {}, markets: {}, odds: {} };
             
             history.forEach(bet => {
-                // Agrupar por rentabilidad
                 stats.leagues[bet.liga] = (stats.leagues[bet.liga] || 0) + bet.profit;
                 stats.markets[bet.mercado] = (stats.markets[bet.mercado] || 0) + bet.profit;
                 const range = bet.cuota < 1.8 ? 'BAJA' : bet.cuota <= 2.5 ? 'MEDIA' : 'ALTA';
@@ -417,10 +425,9 @@
             };
         }
 
-        // Inyectar retroalimentación en el asistente visual
         const originalShowStrategy = showStrategyAssistant;
         showStrategyAssistant = function(p_over, p_btts) {
-            originalShowStrategy(p_over, p_btts); // Mantiene tu lógica anterior
+            originalShowStrategy(p_over, p_btts); 
             
             const intel = getHistoricalEdge();
             if (!intel) return;
@@ -429,16 +436,12 @@
             const assistantBox = document.getElementById('strategy-assistant-box');
             const text = document.getElementById('strategy-text');
 
-            // Retroalimentación en tiempo real
             if (currentLeague === intel.bestLeague[0].toUpperCase()) {
                 text.innerHTML += `<br><span class="text-emerald-400 font-black text-[10px]">[HISTORIAL: Esta es tu mejor liga (+${intel.bestLeague[1].toFixed(2)}$)]</span>`;
                 assistantBox.classList.add('border-2', 'border-emerald-500', 'animate-pulse');
             } else {
-                // Limpiar efectos si se cambia de liga
                 assistantBox.classList.remove('border-2', 'border-emerald-500', 'animate-pulse');
             }
-            
-            console.log("IA BetAGS: Analizando compatibilidad con histórico...", intel);
         };
     </script>
 </body>
