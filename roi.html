@@ -15,11 +15,15 @@
         
         /* Estado Pendiente: Fondo Amarillo */
         .status-pending { background-color: var(--bet-yellow); color: #000; border-top-color: #000; }
-        .status-pending .text-slate-500, .status-pending .text-emerald-400 { color: #333 !important; }
+        .status-pending .text-slate-500, .status-pending .text-emerald-400, .status-pending .text-slate-400 { color: #333 !important; }
         .status-pending .btn-res { border: 1px solid rgba(0,0,0,0.2); }
+        .status-pending .bg-black\/10 { background: rgba(0,0,0,0.05); }
 
         .status-win { border-color: #22c55e; }
         .status-loss { border-color: #ef4444; }
+
+        /* Estilo para el botón pendiente específico */
+        .btn-pending { background-color: #64748b; }
     </style>
 </head>
 <body>
@@ -69,6 +73,9 @@
                         <option value="BTTS YES">BTTS Yes</option>
                         <option value="BTTS NO">BTTS No</option>
                     </select>
+                    <button onclick="exportToExcel()" class="w-full py-2 bg-emerald-700 hover:bg-emerald-600 text-white text-[10px] font-bold rounded transition-colors uppercase tracking-wider">
+                        <i class="fa-solid fa-file-excel mr-2"></i>Exportar Excel (.csv)
+                    </button>
                     <button onclick="exportData()" class="w-full py-2 bg-slate-700 text-[10px] font-bold rounded">EXPORTAR JSON</button>
                     <button onclick="clearHistory()" class="w-full py-2 bg-red-900/30 text-red-400 text-[10px] font-bold rounded">BORRAR TODO</button>
                 </div>
@@ -103,11 +110,9 @@
         function calculatePValue(n, yieldVal, avgOdd) {
             if (n < 5 || avgOdd <= 1) return null;
             const yieldDec = yieldVal / 100;
-            // Desviación estándar del Yield basada en cuotas promedio
             const sd = Math.sqrt(avgOdd - 1) / Math.sqrt(n);
             const z = yieldDec / sd;
             
-            // Error function approximation (erf)
             const t = 1 / (1 + 0.5 * Math.abs(z));
             const ans = 1 - t * Math.exp(-z * z - 1.26551223 + t * (1.00002368 + t * (0.37409196 + t * (0.09678418 + t * (-0.18628806 + t * (0.27886807 + t * (-1.13520398 + t * (1.48851587 + t * (-0.82215223 + t * 0.17087277)))))))));
             
@@ -130,19 +135,17 @@
                                marketUpper.includes('BTTS SÍ') || 
                                marketUpper.includes('BTTS SI');
                     }
-
                     if (filterUpper === 'BTTS NO') {
                         return marketUpper.includes('BTTS NO') || 
                                marketUpper.includes('BTTS (NO)');
                     }
-                    
                     return marketUpper.includes(filterUpper);
                 }) 
                 : bets;
 
-            const resolved = filtered.filter(b => b.status !== 'pending');
-            const profit = resolved.reduce((a, b) => a + b.profit, 0);
-            const staked = resolved.reduce((a, b) => a + b.stake, 0);
+            const resolved = filtered.filter(b => b.status !== 'pending' && b.status !== undefined);
+            const profit = resolved.reduce((a, b) => a + (b.profit || 0), 0);
+            const staked = resolved.reduce((a, b) => a + (b.stake || 0), 0);
             const wins = resolved.filter(b => b.status === 'win').length;
             const avgOdd = resolved.length > 0 ? resolved.reduce((a, b) => a + b.odd, 0) / resolved.length : 0;
             const currentYield = staked > 0 ? (profit/staked*100) : 0;
@@ -152,12 +155,10 @@
             document.getElementById('stat-hit').innerText = (resolved.length > 0 ? (wins/resolved.length*100).toFixed(1) : 0) + "%";
             document.getElementById('stat-count').innerText = resolved.length;
 
-            // Lógica de P-Value
             const pVal = calculatePValue(resolved.length, currentYield, avgOdd);
             const pElem = document.getElementById('stat-pvalue');
             if(pVal !== null) {
                 pElem.innerText = (pVal * 100).toFixed(2) + "%";
-                // Color dinámico: < 5% es estadísticamente significativo (verde)
                 pElem.className = pVal < 0.05 ? "text-xl font-bold text-emerald-400" : "text-xl font-bold text-yellow-500";
             } else {
                 pElem.innerText = "--";
@@ -176,15 +177,22 @@
             
             slicedData.forEach(b => {
                 const card = document.createElement('div');
-                card.className = `bet-card-custom status-${b.status || 'pending'}`;
+                const currentStatus = b.status || 'pending';
+                card.className = `bet-card-custom status-${currentStatus}`;
                 
+                // Cálculo de Edge para mostrar en tarjeta
+                const edgeDisplay = b.edge ? (b.edge * 100).toFixed(1) + "%" : "N/A";
+
                 card.innerHTML = `
                     <div class="flex justify-between text-[10px] text-slate-500 mb-1">
                         <span class="font-bold uppercase">${b.league || 'Liga N/A'}</span>
                         <span>${b.date}</span>
                     </div>
                     <h4 class="font-bold text-sm mb-1">${b.teams}</h4>
-                    <p class="text-xs text-emerald-400 font-bold mb-2">${b.market}</p>
+                    <div class="flex justify-between items-center mb-2">
+                         <p class="text-xs text-emerald-400 font-bold">${b.market}</p>
+                         <p class="text-[9px] text-slate-400 uppercase">Edge: ${edgeDisplay}</p>
+                    </div>
                     
                     <div class="grid grid-cols-2 gap-2 mb-4 bg-black/10 p-2 rounded-lg">
                         <div class="text-center">
@@ -198,8 +206,9 @@
                     </div>
 
                     <div class="flex gap-2">
-                        <button onclick="resolve(${b.id}, 'win')" class="btn-res bg-green-600 text-white px-3 py-1 text-[10px] rounded font-bold">WIN</button>
-                        <button onclick="resolve(${b.id}, 'loss')" class="btn-res bg-red-600 text-white px-3 py-1 text-[10px] rounded font-bold">LOSS</button>
+                        <button onclick="resolve(${b.id}, 'win')" class="btn-res bg-green-600 hover:bg-green-500 text-white px-2 py-1 text-[9px] rounded font-bold transition-colors">WIN</button>
+                        <button onclick="resolve(${b.id}, 'loss')" class="btn-res bg-red-600 hover:bg-red-500 text-white px-2 py-1 text-[9px] rounded font-bold transition-colors">LOSS</button>
+                        <button onclick="resolve(${b.id}, 'pending')" class="btn-res bg-slate-600 hover:bg-slate-500 text-white px-2 py-1 text-[9px] rounded font-bold transition-colors">PENDIENTE</button>
                         <button onclick="deleteBet(${b.id})" class="ml-auto text-slate-500 hover:text-red-500"><i class="fa-solid fa-trash"></i></button>
                     </div>
                 `;
@@ -224,7 +233,11 @@
             const b = bets.find(x => x.id === id);
             if(b) {
                 b.status = status;
-                b.profit = status === 'win' ? b.stake * (b.odd - 1) : -b.stake;
+                if(status === 'pending') {
+                    b.profit = 0;
+                } else {
+                    b.profit = status === 'win' ? b.stake * (b.odd - 1) : -b.stake;
+                }
                 localStorage.setItem('betags_v3_miner', JSON.stringify(bets));
                 updateStats();
             }
@@ -265,7 +278,48 @@
         }
         
         function clearHistory() { if(confirm('¿Borrar historial?')) { bets = []; localStorage.setItem('betags_v3_miner', JSON.stringify(bets)); updateStats(); } }
+        
         function exportData() { window.open("data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(bets))); }
+
+        // NUEVA FUNCIÓN: EXPORTAR A EXCEL (CSV)
+        function exportToExcel() {
+            if (bets.length === 0) return alert("No hay datos para exportar");
+
+            // Encabezados solicitados
+            const headers = ["FECHA", "LIGA", "EQUIPOS", "MERCADO 2.5 / BTTS", "PROBABILIDAD %", "CUOTA JUSTA", "CUOTA CASA", "EDGE (VALOR)", "STAKE SUGERIDO", "ACCIÓN"];
+            
+            const rows = bets.map(b => {
+                const prob = b.prob ? (b.prob * 100).toFixed(2) + "%" : "N/A";
+                const fairOdd = b.fair_odd || (b.prob ? (1 / b.prob).toFixed(2) : "N/A");
+                const edge = b.edge ? (b.edge * 100).toFixed(2) + "%" : "N/A";
+                const statusMap = { 'win': 'GANADA', 'loss': 'PERDIDA', 'pending': 'PENDIENTE' };
+
+                return [
+                    `"${b.date || ''}"`,
+                    `"${b.league || ''}"`,
+                    `"${b.teams || ''}"`,
+                    `"${b.market || ''}"`,
+                    `"${prob}"`,
+                    `"${fairOdd}"`,
+                    `"${b.odd || ''}"`,
+                    `"${edge}"`,
+                    `"${b.stake || ''}"`,
+                    `"${statusMap[b.status] || 'PENDIENTE'}"`
+                ].join(",");
+            });
+
+            const csvContent = "\uFEFF" + headers.join(",") + "\n" + rows.join("\n");
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            
+            link.setAttribute("href", url);
+            link.setAttribute("download", `BetAGS_Export_${new Date().toISOString().slice(0,10)}.csv`);
+            link.style.visibility = 'hidden';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
 
         window.onload = updateStats;
     </script>
