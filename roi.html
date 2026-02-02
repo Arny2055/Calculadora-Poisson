@@ -13,13 +13,16 @@
         .glass-card { background: rgba(17, 24, 39, 0.7); border: 1px solid rgba(255, 255, 255, 0.05); }
         .bet-card-custom { background: #111827; border-radius: 15px; padding: 20px; position: relative; border-top: 4px solid #eab308; transition: all 0.3s ease; }
         
-        /* Estado Pendiente: Fondo Amarillo */
         .status-pending { background-color: var(--bet-yellow); color: #000; border-top-color: #000; }
         .status-pending .text-slate-500, .status-pending .text-emerald-400 { color: #333 !important; }
         .status-pending .btn-res { border: 1px solid rgba(0,0,0,0.2); }
 
         .status-win { border-color: #22c55e; }
         .status-loss { border-color: #ef4444; }
+
+        /* Estilo Botón IA */
+        .btn-ai-bridge { background: linear-gradient(45deg, #3b82f6, #8b5cf6); color: white; border: none; font-weight: bold; transition: all 0.3s; }
+        .btn-ai-bridge:hover { transform: translateY(-2px); box-shadow: 0 4px 15px rgba(59, 130, 246, 0.4); }
     </style>
 </head>
 <body>
@@ -69,6 +72,9 @@
                         <option value="BTTS YES">BTTS Yes</option>
                         <option value="BTTS NO">BTTS No</option>
                     </select>
+                    <button onclick="copyContextForAI()" class="w-full py-2 btn-ai-bridge text-[10px] rounded flex items-center justify-center gap-2">
+                        <i class="fa-solid fa-robot"></i> COPIAR CONTEXTO PARA IA
+                    </button>
                     <button onclick="exportData()" class="w-full py-2 bg-slate-700 text-[10px] font-bold rounded">EXPORTAR JSON</button>
                     <button onclick="clearHistory()" class="w-full py-2 bg-red-900/30 text-red-400 text-[10px] font-bold rounded">BORRAR TODO</button>
                 </div>
@@ -89,57 +95,25 @@
     <script>
         let bets = JSON.parse(localStorage.getItem('betags_v3_miner')) || [];
         let bChart;
-        
-        // Variables para Scroll Infinito
         let itemsLimit = 10;
         let isBatchLoading = false;
 
-        function resetAndStats() {
-            itemsLimit = 10; // Reiniciar límite al cambiar filtro
-            updateStats();
-        }
+        function resetAndStats() { itemsLimit = 10; updateStats(); }
 
-        // Función matemática para calcular P-Value (Aproximación Normal)
         function calculatePValue(n, yieldVal, avgOdd) {
             if (n < 5 || avgOdd <= 1) return null;
             const yieldDec = yieldVal / 100;
-            // Desviación estándar del Yield basada en cuotas promedio
             const sd = Math.sqrt(avgOdd - 1) / Math.sqrt(n);
             const z = yieldDec / sd;
-            
-            // Error function approximation (erf)
             const t = 1 / (1 + 0.5 * Math.abs(z));
             const ans = 1 - t * Math.exp(-z * z - 1.26551223 + t * (1.00002368 + t * (0.37409196 + t * (0.09678418 + t * (-0.18628806 + t * (0.27886807 + t * (-1.13520398 + t * (1.48851587 + t * (-0.82215223 + t * 0.17087277)))))))));
-            
             const prob = z >= 0 ? 1 - (ans + 1) / 2 : (ans + 1) / 2;
             return prob;
         }
 
         function updateStats() {
             const filterVal = document.getElementById('f_market').value;
-            
-            const filtered = filterVal 
-                ? bets.filter(b => {
-                    if (!b.market) return false;
-                    const marketUpper = b.market.toString().toUpperCase();
-                    const filterUpper = filterVal.toUpperCase();
-                    
-                    if (filterUpper === 'BTTS YES') {
-                        return marketUpper.includes('BTTS YES') || 
-                               marketUpper.includes('BTTS (SÍ)') || 
-                               marketUpper.includes('BTTS SÍ') || 
-                               marketUpper.includes('BTTS SI');
-                    }
-
-                    if (filterUpper === 'BTTS NO') {
-                        return marketUpper.includes('BTTS NO') || 
-                               marketUpper.includes('BTTS (NO)');
-                    }
-                    
-                    return marketUpper.includes(filterUpper);
-                }) 
-                : bets;
-
+            const filtered = filterVal ? bets.filter(b => b.market?.toString().toUpperCase().includes(filterVal.toUpperCase())) : bets;
             const resolved = filtered.filter(b => b.status !== 'pending');
             const profit = resolved.reduce((a, b) => a + b.profit, 0);
             const staked = resolved.reduce((a, b) => a + b.stake, 0);
@@ -152,17 +126,12 @@
             document.getElementById('stat-hit').innerText = (resolved.length > 0 ? (wins/resolved.length*100).toFixed(1) : 0) + "%";
             document.getElementById('stat-count').innerText = resolved.length;
 
-            // Lógica de P-Value
             const pVal = calculatePValue(resolved.length, currentYield, avgOdd);
             const pElem = document.getElementById('stat-pvalue');
             if(pVal !== null) {
                 pElem.innerText = (pVal * 100).toFixed(2) + "%";
-                // Color dinámico: < 5% es estadísticamente significativo (verde)
                 pElem.className = pVal < 0.05 ? "text-xl font-bold text-emerald-400" : "text-xl font-bold text-yellow-500";
-            } else {
-                pElem.innerText = "--";
-                pElem.className = "text-xl font-bold text-slate-500";
-            }
+            } else { pElem.innerText = "--"; pElem.className = "text-xl font-bold text-slate-500"; }
             
             renderHistory(filtered);
             renderBankrollChart(resolved);
@@ -171,13 +140,10 @@
         function renderHistory(data) {
             const grid = document.getElementById('history-grid'); 
             grid.innerHTML = '';
-            
             const slicedData = data.slice(0, itemsLimit);
-            
             slicedData.forEach(b => {
                 const card = document.createElement('div');
                 card.className = `bet-card-custom status-${b.status || 'pending'}`;
-                
                 card.innerHTML = `
                     <div class="flex justify-between text-[10px] text-slate-500 mb-1">
                         <span class="font-bold uppercase">${b.league || 'Liga N/A'}</span>
@@ -185,36 +151,40 @@
                     </div>
                     <h4 class="font-bold text-sm mb-1">${b.teams}</h4>
                     <p class="text-xs text-emerald-400 font-bold mb-2">${b.market}</p>
-                    
                     <div class="grid grid-cols-2 gap-2 mb-4 bg-black/10 p-2 rounded-lg">
-                        <div class="text-center">
-                            <p class="text-[9px] uppercase opacity-70">Cuota</p>
-                            <p class="text-xs font-bold">${b.odd}</p>
-                        </div>
-                        <div class="text-center border-l border-white/10">
-                            <p class="text-[9px] uppercase opacity-70">Stake</p>
-                            <p class="text-xs font-bold">${b.stake}</p>
-                        </div>
+                        <div class="text-center"><p class="text-[9px] opacity-70">Cuota</p><p class="text-xs font-bold">${b.odd}</p></div>
+                        <div class="text-center border-l border-white/10"><p class="text-[9px] opacity-70">Stake</p><p class="text-xs font-bold">${b.stake}</p></div>
                     </div>
-
                     <div class="flex gap-2">
                         <button onclick="resolve(${b.id}, 'win')" class="btn-res bg-green-600 text-white px-3 py-1 text-[10px] rounded font-bold">WIN</button>
                         <button onclick="resolve(${b.id}, 'loss')" class="btn-res bg-red-600 text-white px-3 py-1 text-[10px] rounded font-bold">LOSS</button>
                         <button onclick="deleteBet(${b.id})" class="ml-auto text-slate-500 hover:text-red-500"><i class="fa-solid fa-trash"></i></button>
-                    </div>
-                `;
+                    </div>`;
                 grid.appendChild(card);
             });
-
             document.getElementById('loading-trigger').style.display = itemsLimit >= data.length ? 'none' : 'flex';
+        }
+
+        // FUNCIÓN DE COMUNICACIÓN CON IA
+        function copyContextForAI() {
+            const resolved = bets.filter(b => b.status !== 'pending');
+            const context = {
+                tool: "ROI_LAB",
+                total_bets: bets.length,
+                resolved_count: resolved.length,
+                profit: document.getElementById('stat-profit').innerText,
+                yield: document.getElementById('stat-yield').innerText,
+                p_value: document.getElementById('stat-pvalue').innerText,
+                recent_trend: resolved.slice(0, 5).map(b => b.status)
+            };
+            navigator.clipboard.writeText("CONTEXTO_BETAGS:" + JSON.stringify(context));
+            alert("Contexto de ROI copiado. Pégalo en el chat con la IA.");
         }
 
         window.addEventListener('scroll', () => {
             if ((window.innerHeight + window.scrollY) >= document.body.offsetHeight - 500) {
                 if (!isBatchLoading && itemsLimit < bets.length) {
-                    isBatchLoading = true;
-                    itemsLimit += 10;
-                    updateStats();
+                    isBatchLoading = true; itemsLimit += 10; updateStats();
                     setTimeout(() => { isBatchLoading = false; }, 200);
                 }
             }
@@ -237,36 +207,14 @@
             [...resolved].reverse().forEach(b => { current += b.profit; data.push(current); });
             bChart = new Chart(ctx, { 
                 type: 'line', 
-                data: { 
-                    labels: data.map((_,i)=>i), 
-                    datasets: [{ 
-                        label: 'Bankroll', 
-                        data: data, 
-                        borderColor: '#00ff88', 
-                        fill: true, 
-                        backgroundColor: 'rgba(0,255,136,0.1)',
-                        tension: 0.3 
-                    }] 
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    scales: { y: { grid: { color: 'rgba(255,255,255,0.05)' } }, x: { display: false } }
-                }
+                data: { labels: data.map((_,i)=>i), datasets: [{ label: 'Bankroll', data: data, borderColor: '#00ff88', fill: true, backgroundColor: 'rgba(0,255,136,0.1)', tension: 0.3 }] },
+                options: { responsive: true, maintainAspectRatio: false, scales: { y: { grid: { color: 'rgba(255,255,255,0.05)' } }, x: { display: false } } }
             });
         }
 
-        function deleteBet(id) { 
-            if(confirm('¿Estás seguro de que deseas eliminar esta apuesta?')) {
-                bets = bets.filter(x => x.id !== id); 
-                localStorage.setItem('betags_v3_miner', JSON.stringify(bets)); 
-                updateStats(); 
-            }
-        }
-        
-        function clearHistory() { if(confirm('¿Borrar historial?')) { bets = []; localStorage.setItem('betags_v3_miner', JSON.stringify(bets)); updateStats(); } }
+        function deleteBet(id) { if(confirm('¿Eliminar?')) { bets = bets.filter(x => x.id !== id); localStorage.setItem('betags_v3_miner', JSON.stringify(bets)); updateStats(); } }
+        function clearHistory() { if(confirm('¿Borrar?')) { bets = []; localStorage.setItem('betags_v3_miner', JSON.stringify(bets)); updateStats(); } }
         function exportData() { window.open("data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(bets))); }
-
         window.onload = updateStats;
     </script>
 </body>
