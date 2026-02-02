@@ -85,18 +85,39 @@
     <script>
         let bets = JSON.parse(localStorage.getItem('betags_v3_miner')) || [];
         let bChart;
+        
+        // Variables para Scroll Infinito
         let itemsLimit = 10;
         let isBatchLoading = false;
 
         function resetAndStats() {
-            itemsLimit = 10;
+            itemsLimit = 10; // Reiniciar límite al cambiar filtro
             updateStats();
         }
 
         function updateStats() {
             const filterVal = document.getElementById('f_market').value;
+            
             const filtered = filterVal 
-                ? bets.filter(b => b.market?.toString().toUpperCase().includes(filterVal.toUpperCase())) 
+                ? bets.filter(b => {
+                    if (!b.market) return false;
+                    const marketUpper = b.market.toString().toUpperCase();
+                    const filterUpper = filterVal.toUpperCase();
+                    
+                    if (filterUpper === 'BTTS YES') {
+                        return marketUpper.includes('BTTS YES') || 
+                               marketUpper.includes('BTTS (SÍ)') || 
+                               marketUpper.includes('BTTS SÍ') || 
+                               marketUpper.includes('BTTS SI');
+                    }
+
+                    if (filterUpper === 'BTTS NO') {
+                        return marketUpper.includes('BTTS NO') || 
+                               marketUpper.includes('BTTS (NO)');
+                    }
+                    
+                    return marketUpper.includes(filterUpper);
+                }) 
                 : bets;
 
             const resolved = filtered.filter(b => b.status !== 'pending');
@@ -116,11 +137,13 @@
         function renderHistory(data) {
             const grid = document.getElementById('history-grid'); 
             grid.innerHTML = '';
+            
             const slicedData = data.slice(0, itemsLimit);
             
             slicedData.forEach(b => {
                 const card = document.createElement('div');
                 card.className = `bet-card-custom status-${b.status || 'pending'}`;
+                
                 card.innerHTML = `
                     <div class="flex justify-between text-[10px] text-slate-500 mb-1">
                         <span class="font-bold uppercase">${b.league || 'Liga N/A'}</span>
@@ -128,10 +151,18 @@
                     </div>
                     <h4 class="font-bold text-sm mb-1">${b.teams}</h4>
                     <p class="text-xs text-emerald-400 font-bold mb-2">${b.market}</p>
+                    
                     <div class="grid grid-cols-2 gap-2 mb-4 bg-black/10 p-2 rounded-lg">
-                        <div class="text-center"><p class="text-[9px] uppercase opacity-70">Cuota</p><p class="text-xs font-bold">${b.odd}</p></div>
-                        <div class="text-center border-l border-white/10"><p class="text-[9px] uppercase opacity-70">Stake</p><p class="text-xs font-bold">${b.stake}</p></div>
+                        <div class="text-center">
+                            <p class="text-[9px] uppercase opacity-70">Cuota</p>
+                            <p class="text-xs font-bold">${b.odd}</p>
+                        </div>
+                        <div class="text-center border-l border-white/10">
+                            <p class="text-[9px] uppercase opacity-70">Stake</p>
+                            <p class="text-xs font-bold">${b.stake}</p>
+                        </div>
                     </div>
+
                     <div class="flex gap-2">
                         <button onclick="resolve(${b.id}, 'win')" class="btn-res bg-green-600 text-white px-3 py-1 text-[10px] rounded font-bold">WIN</button>
                         <button onclick="resolve(${b.id}, 'loss')" class="btn-res bg-red-600 text-white px-3 py-1 text-[10px] rounded font-bold">LOSS</button>
@@ -140,8 +171,20 @@
                 `;
                 grid.appendChild(card);
             });
+
             document.getElementById('loading-trigger').style.display = itemsLimit >= data.length ? 'none' : 'flex';
         }
+
+        window.addEventListener('scroll', () => {
+            if ((window.innerHeight + window.scrollY) >= document.body.offsetHeight - 500) {
+                if (!isBatchLoading && itemsLimit < bets.length) {
+                    isBatchLoading = true;
+                    itemsLimit += 10;
+                    updateStats();
+                    setTimeout(() => { isBatchLoading = false; }, 200);
+                }
+            }
+        });
 
         function resolve(id, status) {
             const b = bets.find(x => x.id === id);
@@ -160,18 +203,38 @@
             [...resolved].reverse().forEach(b => { current += b.profit; data.push(current); });
             bChart = new Chart(ctx, { 
                 type: 'line', 
-                data: { labels: data.map((_,i)=>i), datasets: [{ label: 'Bankroll', data: data, borderColor: '#00ff88', fill: true, backgroundColor: 'rgba(0,255,136,0.1)', tension: 0.3 }] },
-                options: { responsive: true, maintainAspectRatio: false, scales: { y: { grid: { color: 'rgba(255,255,255,0.05)' } }, x: { display: false } } }
+                data: { 
+                    labels: data.map((_,i)=>i), 
+                    datasets: [{ 
+                        label: 'Bankroll', 
+                        data: data, 
+                        borderColor: '#00ff88', 
+                        fill: true, 
+                        backgroundColor: 'rgba(0,255,136,0.1)',
+                        tension: 0.3 
+                    }] 
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: { y: { grid: { color: 'rgba(255,255,255,0.05)' } }, x: { display: false } }
+                }
             });
         }
 
         function deleteBet(id) { 
-            if(confirm('¿Eliminar apuesta?')) { bets = bets.filter(x => x.id !== id); localStorage.setItem('betags_v3_miner', JSON.stringify(bets)); updateStats(); } 
+            if(confirm('¿Estás seguro de que deseas eliminar esta apuesta?')) {
+                bets = bets.filter(x => x.id !== id); 
+                localStorage.setItem('betags_v3_miner', JSON.stringify(bets)); 
+                updateStats(); 
+            }
         }
-
-        function clearHistory() { if(confirm('¿Borrar todo?')) { bets = []; localStorage.setItem('betags_v3_miner', JSON.stringify(bets)); updateStats(); } }
+        
+        function clearHistory() { if(confirm('¿Borrar historial?')) { bets = []; localStorage.setItem('betags_v3_miner', JSON.stringify(bets)); updateStats(); } }
         function exportData() { window.open("data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(bets))); }
+
         window.onload = updateStats;
     </script>
 </body>
 </html>
+
