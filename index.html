@@ -143,6 +143,7 @@
                         <th class="p-4">Probabilidad %</th>
                         <th class="p-4">Cuota Justa</th>
                         <th class="p-4">Cuota Casa</th>
+                        <th class="p-4">Overround</th>
                         <th class="p-4">Edge (Valor)</th>
                         <th class="p-4">Stake Sugerido</th>
                         <th class="p-4 text-center">Acción</th>
@@ -158,9 +159,8 @@
         let bets = JSON.parse(localStorage.getItem('betags_v3_miner')) || [];
         let pChart;
         let blueLineVisible = true;
-        let entryMode = 'avg'; // Variable para controlar el modo de entrada
+        let entryMode = 'avg'; 
 
-        // Cargar preferencias de visibilidad al iniciar
         window.addEventListener('DOMContentLoaded', () => {
             const sections = ['visual-section', 'table-section'];
             sections.forEach(id => {
@@ -177,15 +177,12 @@
                 }
             });
 
-            // MEJORA: Cargar el modo de entrada guardado
             const savedMode = localStorage.getItem('betags_entry_mode') || 'avg';
             setEntryMode(savedMode);
         });
 
-        // Función para cambiar el modo de entrada (MEJORA CON PERSISTENCIA)
         function setEntryMode(mode) {
             entryMode = mode;
-            // Guardar en localStorage para que persista
             localStorage.setItem('betags_entry_mode', mode);
 
             const btnAvg = document.getElementById('mode-avg');
@@ -229,7 +226,6 @@
             return (Math.pow(l, k) * Math.exp(-l)) / factorial(k); 
         }
 
-        // Funciones de visibilidad mejorada con persistencia
         function toggleSection(id, btn) {
             const el = document.getElementById(id);
             const isHidden = !el.classList.contains('hidden');
@@ -245,7 +241,6 @@
                 btn.classList.replace('border-slate-700', 'border-emerald-500');
                 btn.classList.replace('text-slate-500', 'text-emerald-400');
             }
-            // Guardar estado
             localStorage.setItem('hide_' + id, isHidden);
         }
 
@@ -270,7 +265,6 @@
         }
 
         function calculate() {
-            // Lógica de entrada dinámica (MEJORA)
             let h_l = parseFloat(document.getElementById('h_gf').value) || 0;
             let a_l = parseFloat(document.getElementById('a_gf').value) || 0;
 
@@ -280,7 +274,6 @@
             }
 
             const line = 2.5;
-            
             let h_p = [], a_p = [], labels = [];
             let p_over = 0, p_under = 0;
             
@@ -322,7 +315,7 @@
 
             renderMarketTable(marketData);
             showStrategyAssistant(p_over, prob_btts_yes);
-            highlightSuggestedMarket(); // Llamada a la sugerencia
+            highlightSuggestedMarket();
         }
 
         function renderPoissonChart(labels, home, away) {
@@ -352,13 +345,14 @@
             data.forEach(m => {
                 const fair = (1 / m.prob).toFixed(2);
                 table.innerHTML += `
-                    <tr class="hover:bg-slate-800/30 transition-colors market-row" id="row_${m.id}" data-prob="${m.prob}">
+                    <tr class="hover:bg-slate-800/30 transition-colors market-row" id="row_${m.id}" data-prob="${m.prob}" data-fair="${fair}">
                         <td class="p-4 font-bold text-slate-200 market-name-cell">
                             ${m.name}
                         </td>
                         <td class="p-4 text-emerald-400 font-medium text-prob">${(m.prob * 100).toFixed(1)}%</td>
-                        <td class="p-4 text-slate-500 font-mono">${fair}</td>
+                        <td class="p-4 text-slate-500 font-mono fair-odd-cell">${fair}</td>
                         <td class="p-4"><input type="number" step="0.01" class="w-20 p-1 text-xs font-bold odd-input" oninput="updateEdge('${m.id}', ${m.prob}, '${m.name}')" id="odd_${m.id}" placeholder="0.00"></td>
+                        <td class="p-4 text-slate-400 font-mono" id="overround_${m.id}">--</td>
                         <td class="p-4 font-bold text-edge" id="edge_${m.id}">--</td>
                         <td class="p-4 text-bet-yellow font-black" id="stake_${m.id}">--</td>
                         <td class="p-4 text-center">
@@ -372,8 +366,13 @@
             const odd = parseFloat(document.getElementById('odd_' + id).value) || 0;
             const edgeElement = document.getElementById('edge_' + id);
             const stakeElement = document.getElementById('stake_' + id);
+            const overroundElement = document.getElementById('overround_' + id);
 
             if(odd > 1) {
+                // Cálculo de Overround (Probabilidad implícita de la casa)
+                const impliedProb = (1 / odd) * 100;
+                overroundElement.innerText = impliedProb.toFixed(1) + "%";
+
                 const edge = (odd * prob) - 1;
                 const edgePercent = (edge * 100).toFixed(1);
                 
@@ -388,20 +387,19 @@
                     stakeElement.innerText = "NO VALOR";
                 }
             } else {
+                overroundElement.innerText = "--";
                 edgeElement.innerText = "--";
                 stakeElement.innerText = "--";
             }
-            highlightSuggestedMarket(); // Re-evaluar sugerencia al cambiar cuotas
+            highlightSuggestedMarket(); 
         }
 
-        // --- MEJORA: SUGERENCIA DEL MERCADO MÁS PENÍTICO (RENTABLE/PROBABLE) ---
         function highlightSuggestedMarket() {
             const rows = document.querySelectorAll('.market-row');
             let bestRow = null;
             let maxVal = -Infinity;
-            let criteria = 'prob'; // Por defecto busca probabilidad
+            let criteria = 'prob';
 
-            // Primero vemos si hay algún Edge positivo para sugerir por VALOR
             rows.forEach(row => {
                 const edgeText = row.querySelector('.text-edge').innerText;
                 const edgeVal = parseFloat(edgeText);
@@ -451,18 +449,24 @@
         }
 
         function registerBet(id, market, prob) {
-            const odd = parseFloat(document.getElementById('odd_' + id).value);
-            if(!odd || odd <= 1) return alert("Ingresa una cuota válida para registrar.");
+            const oddCasa = parseFloat(document.getElementById('odd_' + id).value);
+            if(!oddCasa || oddCasa <= 1) return alert("Ingresa una cuota válida para registrar.");
             
             const stakeText = document.getElementById('stake_' + id).innerText;
             const stake = parseFloat(stakeText) || 0;
-            
+            const edgeText = document.getElementById('edge_' + id).innerText;
+            const overroundText = document.getElementById('overround_' + id).innerText;
+            const fairOdd = (1 / prob).toFixed(2);
+
             const newBet = { 
                 id: Date.now(), 
                 league: document.getElementById('league_name').value || "LIGA", 
                 teams: document.getElementById('event_name').value || "EVENTO", 
                 market, 
-                odd, 
+                fair_odd: fairOdd,
+                odd: oddCasa, 
+                overround: overroundText,
+                edge: edgeText,
                 prob, 
                 stake, 
                 status: 'pending', 
@@ -472,10 +476,9 @@
             
             bets.unshift(newBet);
             localStorage.setItem('betags_v3_miner', JSON.stringify(bets));
-            alert("✅ Registro exitoso. Visita la sección ROI para seguimiento.");
+            alert("✅ Registro exitoso. Datos enviados a ROI:\nLiga: " + newBet.league + "\nEvento: " + newBet.teams + "\nCuota Justa: " + fairOdd + "\nOverround: " + overroundText + "\nEdge: " + edgeText);
         }
 
-        // --- MÓDULO DE RETROALIMENTACIÓN ASISTIDA ---
         function getHistoricalEdge() {
             const history = JSON.parse(localStorage.getItem('backtesting_data')) || [];
             if (history.length < 5) return null;
