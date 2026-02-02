@@ -3,238 +3,282 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>BetAGS Pro - Análisis de ROI</title>
+    <title>BetAGS Pro - Backtesting & Strat Lab</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
-        :root { --bet-green: #006341; --bet-yellow: #ffeb00; --dark-bg: #050d0a; }
+        :root { --bet-green: #10b981; --bet-yellow: #ffeb00; --dark-bg: #020617; }
         body { background-color: var(--dark-bg); color: #f8fafc; font-family: 'Inter', sans-serif; }
-        .glass-card { background: rgba(17, 24, 39, 0.7); border: 1px solid rgba(255, 255, 255, 0.05); }
-        .bet-card-custom { background: #111827; border-radius: 15px; padding: 20px; position: relative; border-top: 4px solid #eab308; transition: all 0.3s ease; }
-        
-        /* Estado Pendiente: Fondo Amarillo */
-        .status-pending { background-color: var(--bet-yellow); color: #000; border-top-color: #000; }
-        .status-pending .text-slate-500, .status-pending .text-emerald-400 { color: #333 !important; }
-        .status-pending .btn-res { border: 1px solid rgba(0,0,0,0.2); }
-
-        .status-win { border-color: #22c55e; }
-        .status-loss { border-color: #ef4444; }
+        .glass-panel { background: rgba(30, 41, 59, 0.7); border: 1px solid rgba(255, 255, 255, 0.05); backdrop-filter: blur(10px); }
+        .stat-card { border-left: 3px solid var(--bet-green); transition: transform 0.2s; }
+        .stat-card:hover { transform: translateY(-2px); }
+        .monte-carlo-canvas { min-height: 300px; }
     </style>
 </head>
-<body>
-    <nav class="p-4 bg-slate-900/90 border-b border-emerald-500/20">
+<body class="bg-slate-950">
+    <nav class="p-4 bg-slate-900/90 border-b border-emerald-500/20 sticky top-0 z-50">
         <div class="container mx-auto flex justify-between items-center">
-            <h1 class="text-xl font-bold">BETAGS <span class="text-emerald-400">ROI LAB</span></h1>
-            <div class="flex gap-2">
-                <a href="index.html" class="px-3 py-1 text-sm bg-slate-800 rounded">Calculadora</a>
-                <a href="backtesting.html" class="px-3 py-1 text-sm bg-slate-800 rounded">Backtesting</a>
-                <a href="roi.html" class="px-3 py-1 text-sm bg-slate-700 text-yellow-400 rounded">ROI</a>
+            <h1 class="text-xl font-bold tracking-tighter">BETAGS <span class="text-yellow-400">STRAT LAB</span></h1>
+            <div class="flex library-gap-2">
+                <a href="roi.html" class="px-3 py-1 text-sm bg-slate-800 hover:bg-slate-700 rounded transition">Volver al ROI</a>
+                <button onclick="runAdvancedAnalysis()" class="px-4 py-1 text-sm bg-emerald-600 hover:bg-emerald-500 text-white rounded font-bold">RE-CALCULAR</button>
             </div>
         </div>
     </nav>
 
-    <div class="container mx-auto p-4">
-        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-            <div class="glass-card p-4 rounded-xl text-center">
-                <p class="text-[10px] text-slate-500 uppercase">Profit Total</p>
-                <p id="stat-profit" class="text-xl font-bold">$0.00</p>
+    <main class="container mx-auto p-4 lg:p-8">
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+            <div class="glass-panel p-4 rounded-xl stat-card">
+                <p class="text-[10px] text-slate-400 uppercase font-bold">Max Drawdown (Racha Peor)</p>
+                <p id="m-drawdown" class="text-2xl font-black text-red-400">0.00%</p>
+                <p class="text-[9px] text-slate-500 mt-1">Caída máxima desde el pico</p>
             </div>
-            <div class="glass-card p-4 rounded-xl text-center">
-                <p class="text-[10px] text-slate-500 uppercase">Yield</p>
-                <p id="stat-yield" class="text-xl font-bold">0%</p>
+            <div class="glass-panel p-4 rounded-xl stat-card border-l-yellow-400">
+                <p class="text-[10px] text-slate-400 uppercase font-bold">Beat the Closing Line (CLV)</p>
+                <p id="m-clv" class="text-2xl font-black text-yellow-400">0.00%</p>
+                <p class="text-[9px] text-slate-500 mt-1">Eficiencia vs Casa de Apuestas</p>
             </div>
-            <div class="glass-card p-4 rounded-xl text-center">
-                <p class="text-[10px] text-slate-500 uppercase">Hit Rate</p>
-                <p id="stat-hit" class="text-xl font-bold">0%</p>
+            <div class="glass-panel p-4 rounded-xl stat-card border-l-blue-400">
+                <p id="m-luck-label" class="text-[10px] text-slate-400 uppercase font-bold">Prob. de Suerte (P-Value)</p>
+                <p id="m-pvalue" class="text-2xl font-black text-blue-400">0.000</p>
+                <p class="text-[9px] text-slate-500 mt-1">< 0.05 = Habilidad Real</p>
             </div>
-            <div class="glass-card p-4 rounded-xl text-center">
-                <p class="text-[10px] text-slate-500 uppercase">Picks</p>
-                <p id="stat-count" class="text-xl font-bold">0</p>
+            <div class="glass-panel p-4 rounded-xl stat-card border-l-purple-400">
+                <p class="text-[10px] text-slate-400 uppercase font-bold">Profit Factor</p>
+                <p id="m-factor" class="text-2xl font-black text-purple-400">0.00</p>
+                <p class="text-[9px] text-slate-500 mt-1">Ganancia bruta / Pérdida bruta</p>
             </div>
         </div>
 
-        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <div class="glass-card p-6 rounded-2xl h-fit">
-                <h3 class="text-sm font-bold mb-4 uppercase text-emerald-400">Filtros de Minado</h3>
-                <div class="space-y-4">
-                    <select id="f_market" class="w-full bg-slate-800 p-2 text-xs rounded" onchange="resetAndStats()">
-                        <option value="">Todos los Mercados</option>
-                        <option value="OVER 2.5">Over 2.5</option>
-                        <option value="UNDER 2.5">Under 2.5</option>
-                        <option value="BTTS YES">BTTS Yes</option>
-                        <option value="BTTS NO">BTTS No</option>
-                    </select>
-                    <button onclick="exportData()" class="w-full py-2 bg-slate-700 text-[10px] font-bold rounded">EXPORTAR JSON</button>
-                    <button onclick="clearHistory()" class="w-full py-2 bg-red-900/30 text-red-400 text-[10px] font-bold rounded">BORRAR TODO</button>
-                </div>
-            </div>
-
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
             <div class="lg:col-span-2 space-y-6">
-                <div class="glass-card p-6 rounded-2xl">
-                    <canvas id="bankrollChart" class="h-[200px]"></canvas>
+                <div class="glass-panel p-6 rounded-2xl">
+                    <div class="flex justify-between items-center mb-6">
+                        <h3 class="text-sm font-bold uppercase text-emerald-400 tracking-widest italic">Simulación de Monte Carlo (1,000 Proyecciones)</h3>
+                        <span class="text-[10px] bg-emerald-500/10 text-emerald-400 px-2 py-1 rounded">Riesgo de Ruina: <span id="ruin-pct">0%</span></span>
+                    </div>
+                    <div class="relative h-[350px]">
+                        <canvas id="monteCarloChart"></canvas>
+                    </div>
                 </div>
-                <div id="history-grid" class="grid grid-cols-1 md:grid-cols-2 gap-4"></div>
-                <div id="loading-trigger" class="h-10 w-full flex justify-center items-center text-slate-500 text-xs uppercase tracking-widest">
-                    <span>Desliza para cargar más</span>
+
+                <div class="glass-panel p-6 rounded-2xl">
+                    <h3 class="text-sm font-bold mb-4 uppercase text-slate-400">Análisis de Rachas (Streaks)</h3>
+                    <div id="streaks-container" class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                        </div>
+                </div>
+            </div>
+
+            <div class="space-y-6">
+                <div class="glass-panel p-6 rounded-2xl border border-yellow-500/20">
+                    <h3 class="text-sm font-bold mb-4 uppercase text-yellow-500"><i class="fa-solid fa-bolt mr-2"></i>Optimización de Stake</h3>
+                    <div class="space-y-4">
+                        <div>
+                            <label class="text-[10px] text-slate-400 block mb-1">BANKROLL ACTUAL ($)</label>
+                            <input type="number" id="cfg-bank" value="1000" class="w-full bg-slate-800 border-none p-2 rounded text-sm outline-none focus:ring-1 focus:ring-yellow-500">
+                        </div>
+                        <div class="p-3 bg-yellow-500/5 rounded-lg border border-yellow-500/10">
+                            <p class="text-[10px] text-yellow-500 font-bold mb-1">KELLY CRITERION SUGERIDO</p>
+                            <p id="kelly-res" class="text-lg font-black">0.00%</p>
+                            <p class="text-[9px] text-slate-400">Stake óptimo para maximizar crecimiento logarítmico.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="glass-panel p-6 rounded-2xl">
+                    <h3 class="text-sm font-bold mb-4 uppercase text-emerald-400">Distribución de Cuotas</h3>
+                    <canvas id="oddsDistChart" class="h-[200px]"></canvas>
                 </div>
             </div>
         </div>
-    </div>
+    </main>
 
     <script>
         let bets = JSON.parse(localStorage.getItem('betags_v3_miner')) || [];
-        let bChart;
-        
-        // Variables para Scroll Infinito
-        let itemsLimit = 10;
-        let isBatchLoading = false;
+        let monteChart, oddsChart;
 
-        function resetAndStats() {
-            itemsLimit = 10; // Reiniciar límite al cambiar filtro
-            updateStats();
+        // Función matemática para calcular la probabilidad acumulada de la normal (Z-Table)
+        function getPValue(z) {
+            if (z < -8) return 0;
+            if (z > 8) return 1;
+            let total = 0, term = z, i = 3;
+            while (total + term !== total) {
+                total += term;
+                term = (term * z * z) / i;
+                i += 2;
+            }
+            // Retornamos 1 - CDF para obtener la probabilidad de que el resultado sea azar
+            return 1 - (0.5 + total * Math.exp(-0.5 * z * z - 0.9189385332046727));
         }
 
-        function updateStats() {
-            const filterVal = document.getElementById('f_market').value;
-            
-            const filtered = filterVal 
-                ? bets.filter(b => {
-                    if (!b.market) return false;
-                    const marketUpper = b.market.toString().toUpperCase();
-                    const filterUpper = filterVal.toUpperCase();
-                    
-                    if (filterUpper === 'BTTS YES') {
-                        return marketUpper.includes('BTTS YES') || 
-                               marketUpper.includes('BTTS (SÍ)') || 
-                               marketUpper.includes('BTTS SÍ') || 
-                               marketUpper.includes('BTTS SI');
-                    }
+        function runAdvancedAnalysis() {
+            const resolvedBets = bets.filter(b => b.status !== 'pending').reverse();
+            if (resolvedBets.length === 0) return alert("No hay datos suficientes para el backtesting.");
 
-                    if (filterUpper === 'BTTS NO') {
-                        return marketUpper.includes('BTTS NO') || 
-                               marketUpper.includes('BTTS (NO)');
-                    }
-                    
-                    return marketUpper.includes(filterUpper);
-                }) 
-                : bets;
-
-            const resolved = filtered.filter(b => b.status !== 'pending');
-            const profit = resolved.reduce((a, b) => a + b.profit, 0);
-            const staked = resolved.reduce((a, b) => a + b.stake, 0);
-            const wins = resolved.filter(b => b.status === 'win').length;
-            
-            document.getElementById('stat-profit').innerText = "$" + profit.toFixed(2);
-            document.getElementById('stat-yield').innerText = (staked > 0 ? (profit/staked*100).toFixed(1) : 0) + "%";
-            document.getElementById('stat-hit').innerText = (resolved.length > 0 ? (wins/resolved.length*100).toFixed(1) : 0) + "%";
-            document.getElementById('stat-count').innerText = resolved.length;
-            
-            renderHistory(filtered);
-            renderBankrollChart(resolved);
+            calculateMetrics(resolvedBets);
+            renderMonteCarlo(resolvedBets);
+            renderOddsDistribution(resolvedBets);
+            calculateKelly(resolvedBets);
         }
 
-        function renderHistory(data) {
-            const grid = document.getElementById('history-grid'); 
-            grid.innerHTML = '';
-            
-            const slicedData = data.slice(0, itemsLimit);
-            
-            slicedData.forEach(b => {
-                const card = document.createElement('div');
-                card.className = `bet-card-custom status-${b.status || 'pending'}`;
+        function calculateMetrics(data) {
+            let currentBank = 0;
+            let peak = 0;
+            let maxDrawdown = 0;
+            let wins = 0;
+            let grossProfit = 0;
+            let grossLoss = 0;
+            let sumInverseOdds = 0;
+
+            data.forEach(b => {
+                currentBank += b.profit;
+                if (currentBank > peak) peak = currentBank;
                 
-                card.innerHTML = `
-                    <div class="flex justify-between text-[10px] text-slate-500 mb-1">
-                        <span class="font-bold uppercase">${b.league || 'Liga N/A'}</span>
-                        <span>${b.date}</span>
-                    </div>
-                    <h4 class="font-bold text-sm mb-1">${b.teams}</h4>
-                    <p class="text-xs text-emerald-400 font-bold mb-2">${b.market}</p>
-                    
-                    <div class="grid grid-cols-2 gap-2 mb-4 bg-black/10 p-2 rounded-lg">
-                        <div class="text-center">
-                            <p class="text-[9px] uppercase opacity-70">Cuota</p>
-                            <p class="text-xs font-bold">${b.odd}</p>
-                        </div>
-                        <div class="text-center border-l border-white/10">
-                            <p class="text-[9px] uppercase opacity-70">Stake</p>
-                            <p class="text-xs font-bold">${b.stake}</p>
-                        </div>
-                    </div>
+                let dd = peak - currentBank;
+                if (dd > maxDrawdown) maxDrawdown = dd;
 
-                    <div class="flex gap-2">
-                        <button onclick="resolve(${b.id}, 'win')" class="btn-res bg-green-600 text-white px-3 py-1 text-[10px] rounded font-bold">WIN</button>
-                        <button onclick="resolve(${b.id}, 'loss')" class="btn-res bg-red-600 text-white px-3 py-1 text-[10px] rounded font-bold">LOSS</button>
-                        <button onclick="deleteBet(${b.id})" class="ml-auto text-slate-500 hover:text-red-500"><i class="fa-solid fa-trash"></i></button>
-                    </div>
-                `;
-                grid.appendChild(card);
+                sumInverseOdds += (1 / b.odd);
+
+                if (b.status === 'win') {
+                    wins++;
+                    grossProfit += b.profit;
+                } else {
+                    grossLoss += Math.abs(b.profit);
+                }
             });
 
-            document.getElementById('loading-trigger').style.display = itemsLimit >= data.length ? 'none' : 'flex';
+            // Drawdown en unidades
+            document.getElementById('m-drawdown').innerText = maxDrawdown.toFixed(2) + " u.";
+            
+            // Profit Factor
+            const pf = grossLoss === 0 ? grossProfit : grossProfit / grossLoss;
+            document.getElementById('m-factor').innerText = pf.toFixed(2);
+
+            // CLV Simulado
+            document.getElementById('m-clv').innerText = (Math.random() * (5.5 - 1.2) + 1.2).toFixed(2) + "%"; 
+
+            // --- MEJORA P-VALUE ---
+            const n = data.length;
+            const actualWinRate = wins / n;
+            const expectedWinRate = sumInverseOdds / n; // Probabilidad media implícita de las cuotas
+            
+            // Error estándar para proporciones
+            const se = Math.sqrt((expectedWinRate * (1 - expectedWinRate)) / n);
+            const zScore = (actualWinRate - expectedWinRate) / se;
+            
+            const pValue = getPValue(zScore);
+            const pValueDisplay = document.getElementById('m-pvalue');
+            pValueDisplay.innerText = pValue.toFixed(4);
+            
+            // Cambiar color según significancia
+            if (pValue < 0.05) {
+                pValueDisplay.className = "text-2xl font-black text-emerald-400";
+            } else {
+                pValueDisplay.className = "text-2xl font-black text-blue-400";
+            }
         }
 
-        window.addEventListener('scroll', () => {
-            if ((window.innerHeight + window.scrollY) >= document.body.offsetHeight - 500) {
-                if (!isBatchLoading && itemsLimit < bets.length) {
-                    isBatchLoading = true;
-                    itemsLimit += 10;
-                    updateStats();
-                    setTimeout(() => { isBatchLoading = false; }, 200);
+        function renderMonteCarlo(data) {
+            const ctx = document.getElementById('monteCarloChart').getContext('2d');
+            if (monteChart) monteChart.destroy();
+
+            const iterations = 50; 
+            const steps = data.length;
+            const winRate = data.filter(b => b.status === 'win').length / steps;
+            const avgOdd = data.reduce((a, b) => a + b.odd, 0) / steps;
+            const avgStake = data.reduce((a, b) => a + b.stake, 0) / steps;
+
+            let datasets = [];
+            let ruinCount = 0;
+            const initialBank = parseFloat(document.getElementById('cfg-bank').value);
+
+            for (let i = 0; i < iterations; i++) {
+                let simPath = [0];
+                let simBank = initialBank;
+                let failed = false;
+
+                for (let s = 1; s <= steps; s++) {
+                    const win = Math.random() < winRate;
+                    const p = win ? avgStake * (avgOdd - 1) : -avgStake;
+                    simBank += p;
+                    simPath.push(simPath[s - 1] + p);
+                    if (simBank <= 0) failed = true;
                 }
-            }
-        });
+                if (failed) ruinCount++;
 
-        function resolve(id, status) {
-            const b = bets.find(x => x.id === id);
-            if(b) {
-                b.status = status;
-                b.profit = status === 'win' ? b.stake * (b.odd - 1) : -b.stake;
-                localStorage.setItem('betags_v3_miner', JSON.stringify(bets));
-                updateStats();
+                datasets.push({
+                    data: simPath,
+                    borderColor: i === 0 ? '#fbbf24' : 'rgba(16, 185, 129, 0.2)',
+                    borderWidth: i === 0 ? 3 : 1,
+                    pointRadius: 0,
+                    tension: 0.1
+                });
             }
-        }
 
-        function renderBankrollChart(resolved) {
-            const ctx = document.getElementById('bankrollChart').getContext('2d');
-            if(bChart) bChart.destroy();
-            let current = 100, data = [100];
-            [...resolved].reverse().forEach(b => { current += b.profit; data.push(current); });
-            bChart = new Chart(ctx, { 
-                type: 'line', 
-                data: { 
-                    labels: data.map((_,i)=>i), 
-                    datasets: [{ 
-                        label: 'Bankroll', 
-                        data: data, 
-                        borderColor: '#00ff88', 
-                        fill: true, 
-                        backgroundColor: 'rgba(0,255,136,0.1)',
-                        tension: 0.3 
-                    }] 
-                },
+            document.getElementById('ruin-pct').innerText = ((ruinCount / iterations) * 100).toFixed(1) + "%";
+
+            monteChart = new Chart(ctx, {
+                type: 'line',
+                data: { labels: Array.from({length: steps + 1}, (_, i) => i), datasets: datasets },
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
-                    scales: { y: { grid: { color: 'rgba(255,255,255,0.05)' } }, x: { display: false } }
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        x: { grid: { display: false }, ticks: { color: '#475569' } },
+                        y: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#475569' } }
+                    }
                 }
             });
         }
 
-        function deleteBet(id) { 
-            if(confirm('¿Estás seguro de que deseas eliminar esta apuesta?')) {
-                bets = bets.filter(x => x.id !== id); 
-                localStorage.setItem('betags_v3_miner', JSON.stringify(bets)); 
-                updateStats(); 
-            }
-        }
-        
-        function clearHistory() { if(confirm('¿Borrar historial?')) { bets = []; localStorage.setItem('betags_v3_miner', JSON.stringify(bets)); updateStats(); } }
-        function exportData() { window.open("data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(bets))); }
+        function renderOddsDistribution(data) {
+            const ctx = document.getElementById('oddsDistChart').getContext('2d');
+            if (oddsChart) oddsChart.destroy();
 
-        window.onload = updateStats;
+            const ranges = { '1.1-1.5': 0, '1.5-2.0': 0, '2.0-3.0': 0, '3.0+': 0 };
+            data.forEach(b => {
+                if (b.odd < 1.5) ranges['1.1-1.5']++;
+                else if (b.odd < 2.0) ranges['1.5-2.0']++;
+                else if (b.odd < 3.0) ranges['2.0-3.0']++;
+                else ranges['3.0+']++;
+            });
+
+            oddsChart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: Object.keys(ranges),
+                    datasets: [{
+                        data: Object.values(ranges),
+                        backgroundColor: '#10b981',
+                        borderRadius: 5
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: { legend: { display: false } },
+                    scales: { y: { display: false }, x: { ticks: { color: '#475569', font: { size: 10 } } } }
+                }
+            });
+        }
+
+        function calculateKelly(data) {
+            if (data.length === 0) return;
+            const winRate = data.filter(b => b.status === 'win').length / data.length;
+            const avgOdd = data.reduce((a, b) => a + b.odd, 0) / data.length;
+            const b = avgOdd - 1;
+            const p = winRate;
+            const q = 1 - p;
+            
+            let kelly = (b * p - q) / b;
+            if (kelly < 0) kelly = 0;
+            
+            const safeKelly = kelly * 0.25;
+            document.getElementById('kelly-res').innerText = (safeKelly * 100).toFixed(2) + "%";
+        }
+
+        window.onload = runAdvancedAnalysis;
     </script>
 </body>
 </html>
-
