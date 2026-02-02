@@ -16,23 +16,15 @@
         .excel-table th { background: rgba(255, 255, 255, 0.05); color: #10b981; text-transform: uppercase; padding: 10px; text-align: left; border-bottom: 2px solid rgba(16, 185, 129, 0.2); }
         .excel-table td { padding: 10px; border-bottom: 1px solid rgba(255, 255, 255, 0.03); vertical-align: middle; }
         
-        /* ESTADOS DE FILA ACTUALIZADOS */
-        .row-win { background: rgba(34, 197, 94, 0.05); }
-        .row-loss { background: rgba(239, 68, 68, 0.05); }
-        
-        /* MEJORA: PENDIENTE MÁS AMARILLA */
-        .row-pending { 
-            background: rgba(255, 235, 0, 0.22) !important; /* Amarillo más denso */
-            border-left: 6px solid var(--bet-yellow); /* Barra lateral más gruesa */
-        }
-        /* Forzar que todo el texto de la fila sea amarillo para mayor visibilidad */
-        .row-pending td { 
-            color: var(--bet-yellow) !important; 
-            font-weight: 500;
-        }
-        
-        .text-pending { color: #ffeb00 !important; }
+        .row-win { background: rgba(34, 197, 94, 0.15) !important; border-left: 6px solid #22c55e; }
+        .row-win td { color: #4ade80 !important; font-weight: 500; }
 
+        .row-loss { background: rgba(239, 68, 68, 0.15) !important; border-left: 6px solid #ef4444; }
+        .row-loss td { color: #f87171 !important; font-weight: 500; }
+        
+        .row-pending { background: rgba(255, 235, 0, 0.22) !important; border-left: 6px solid var(--bet-yellow); }
+        .row-pending td { color: var(--bet-yellow) !important; font-weight: 500; }
+        
         .btn-action { padding: 4px 8px; border-radius: 4px; font-weight: bold; font-size: 9px; transition: all 0.2s; opacity: 0.8; }
         .btn-action:hover { opacity: 1; transform: scale(1.05); }
         .btn-win { background: #15803d; color: white; }
@@ -85,10 +77,10 @@
                     <div class="space-y-4">
                         <select id="f_market" class="w-full bg-slate-800 p-2 text-xs rounded border border-white/10" onchange="updateStats()">
                             <option value="">Todos los Mercados</option>
-                            <option value="OVER 2.5">Over 2.5</option>
-                            <option value="UNDER 2.5">Under 2.5</option>
-                            <option value="BTTS YES">BTTS Yes</option>
-                            <option value="BTTS NO">BTTS No</option>
+                            <option value="OVER 2.5 GOLES">Over 2.5 Goles</option>
+                            <option value="UNDER 2.5 GOLES">Under 2.5 Goles</option>
+                            <option value="BTTS (SÍ)">BTTS (Sí)</option>
+                            <option value="BTTS (NO)">BTTS (No)</option>
                         </select>
                         <button onclick="exportToExcel()" class="w-full py-2 bg-emerald-700 hover:bg-emerald-600 text-white text-[10px] font-bold rounded uppercase">
                             <i class="fa-solid fa-file-excel mr-2"></i>Exportar Excel (.csv)
@@ -122,13 +114,9 @@
                                     <th></th>
                                 </tr>
                             </thead>
-                            <tbody id="history-body">
-                                </tbody>
+                            <tbody id="history-body"></tbody>
                         </table>
                     </div>
-                </div>
-                <div id="loading-trigger" class="py-4 w-full flex justify-center items-center text-slate-500 text-[10px] uppercase tracking-widest">
-                    <span>Fin del historial</span>
                 </div>
             </div>
         </div>
@@ -141,13 +129,15 @@
 
         function calculatePValue(n, yieldVal, avgOdd) {
             if (n < 5 || avgOdd <= 1) return null;
-            const yieldDec = yieldVal / 100;
-            const sd = Math.sqrt(avgOdd - 1) / Math.sqrt(n);
-            const z = yieldDec / sd;
-            const t = 1 / (1 + 0.5 * Math.abs(z));
-            const ans = 1 - t * Math.exp(-z * z - 1.26551223 + t * (1.00002368 + t * (0.37409196 + t * (0.09678418 + t * (-0.18628806 + t * (0.27886807 + t * (-1.13520398 + t * (1.48851587 + t * (-0.82215223 + t * 0.17087277)))))))));
-            const prob = z >= 0 ? 1 - (ans + 1) / 2 : (ans + 1) / 2;
-            return prob;
+            try {
+                const yieldDec = yieldVal / 100;
+                const sd = Math.sqrt(avgOdd - 1) / Math.sqrt(n);
+                if (sd === 0) return null;
+                const z = yieldDec / sd;
+                const t = 1 / (1 + 0.5 * Math.abs(z));
+                const ans = 1 - t * Math.exp(-z * z - 1.26551223 + t * (1.00002368 + t * (0.37409196 + t * (0.09678418 + t * (-0.18628806 + t * (0.27886807 + t * (-1.13520398 + t * (1.48851587 + t * (-0.82215223 + t * 0.17087277)))))))));
+                return z >= 0 ? 1 - (ans + 1) / 2 : (ans + 1) / 2;
+            } catch (e) { return null; }
         }
 
         function updateStats() {
@@ -184,38 +174,39 @@
             tbody.innerHTML = '';
             
             if (data.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="9" class="p-10 text-center text-slate-500">No se encontraron apuestas registradas.</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="9" class="p-10 text-center text-slate-500">No hay datos.</td></tr>';
                 return;
             }
 
-            const displayData = [...data].reverse();
+            const displayData = [...data].sort((a, b) => {
+                const dateA = a.date ? new Date(a.date) : 0;
+                const dateB = b.date ? new Date(b.date) : 0;
+                return dateB - dateA || (b.id - a.id);
+            });
             
             displayData.forEach(b => {
                 const tr = document.createElement('tr');
                 const status = b.status || 'pending';
                 tr.className = `row-${status}`;
                 
-                // MANTENER LÓGICA DE EDGE
                 let edgeValue = 0;
                 if (b.edge) {
-                    const cleanEdge = b.edge.toString().replace('%', '').trim();
-                    edgeValue = parseFloat(cleanEdge) || 0;
+                    edgeValue = parseFloat(b.edge.toString().replace('%', '')) || 0;
                 }
-                const edgeDisplay = edgeValue.toFixed(1) + "%";
                 
                 const probDisplay = b.prob ? (Number(b.prob) * 100).toFixed(1) + "%" : "N/A";
                 const fairOddDisplay = b.fair_odd ? Number(b.fair_odd).toFixed(2) : (b.prob ? (1/Number(b.prob)).toFixed(2) : "N/A");
 
                 tr.innerHTML = `
                     <td>
-                        <div class="font-bold text-slate-200">${b.teams || 'Evento Desconocido'}</div>
-                        <div class="text-[9px] text-slate-500">${b.date || ''} | ${b.league || ''}</div>
+                        <div class="font-bold text-slate-200">${b.teams || 'Evento'}</div>
+                        <div class="text-[9px] text-slate-500">${b.date || ''}</div>
                     </td>
                     <td class="font-bold text-emerald-400">${b.market || '-'}</td>
                     <td>${probDisplay}</td>
                     <td>${fairOddDisplay}</td>
                     <td class="font-bold">${b.odd || '0.00'}</td>
-                    <td class="${edgeValue > 0 ? 'text-emerald-400' : 'text-slate-400'}">${edgeDisplay}</td>
+                    <td class="${edgeValue > 0 ? 'text-emerald-400' : 'text-slate-400'}">${edgeValue.toFixed(1)}%</td>
                     <td>${b.stake || '0'}u</td>
                     <td>
                         <div class="flex gap-1">
@@ -225,7 +216,7 @@
                         </div>
                     </td>
                     <td>
-                        <button onclick="deleteBet('${b.id}')" class="text-slate-600 hover:text-red-500 transition-colors px-2"><i class="fa-solid fa-trash"></i></button>
+                        <button onclick="deleteBet('${b.id}')" class="text-slate-600 hover:text-red-500 px-2"><i class="fa-solid fa-trash"></i></button>
                     </td>
                 `;
                 tbody.appendChild(tr);
@@ -236,16 +227,9 @@
             const index = bets.findIndex(x => x.id.toString() === id.toString());
             if(index !== -1) {
                 bets[index].status = status;
-                const odd = Number(bets[index].odd);
-                const stake = Number(bets[index].stake);
-
-                if(status === 'pending') {
-                    bets[index].profit = 0;
-                } else if(status === 'win') {
-                    bets[index].profit = stake * (odd - 1);
-                } else {
-                    bets[index].profit = -stake;
-                }
+                const odd = Number(bets[index].odd) || 0;
+                const stake = Number(bets[index].stake) || 0;
+                bets[index].profit = status === 'win' ? stake * (odd - 1) : (status === 'loss' ? -stake : 0);
                 saveAndRefresh();
             }
         }
@@ -256,42 +240,30 @@
             
             let current = 100;
             let chartData = [100];
-            
             const sorted = [...resolved].sort((a,b) => new Date(a.date) - new Date(b.date));
-            sorted.forEach(b => { 
-                current += Number(b.profit); 
-                chartData.push(current); 
-            });
+            sorted.forEach(b => { current += Number(b.profit); chartData.push(current); });
 
             bChart = new Chart(ctx, { 
                 type: 'line', 
                 data: { 
                     labels: chartData.map((_,i)=>i), 
                     datasets: [{ 
-                        label: 'Bankroll', 
                         data: chartData, 
                         borderColor: '#10b981', 
-                        fill: true, 
                         backgroundColor: 'rgba(16,185,129,0.1)',
-                        borderWidth: 2,
-                        pointRadius: 2,
-                        tension: 0.3 
+                        fill: true, tension: 0.3, pointRadius: 0
                     }] 
                 },
                 options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
+                    responsive: true, maintainAspectRatio: false,
                     plugins: { legend: { display: false } },
-                    scales: { 
-                        y: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#64748b', font: { size: 9 } } },
-                        x: { display: false } 
-                    }
+                    scales: { x: { display: false }, y: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#64748b', font: { size: 9 } } } }
                 }
             });
         }
 
         function deleteBet(id) { 
-            if(confirm('¿Eliminar esta apuesta del historial?')) {
+            if(confirm('¿Eliminar apuesta?')) {
                 bets = bets.filter(x => x.id.toString() !== id.toString()); 
                 saveAndRefresh(); 
             }
@@ -303,25 +275,17 @@
         }
 
         function clearHistory() { 
-            if(confirm('¡ATENCIÓN! Se borrarán todos los datos del ROI. ¿Continuar?')) { 
-                bets = []; 
-                saveAndRefresh(); 
-            } 
+            if(confirm('¿Borrar todo?')) { bets = []; saveAndRefresh(); } 
         }
 
         function exportToExcel() {
-            if (bets.length === 0) return alert("No hay datos para exportar");
-            const headers = ["FECHA", "LIGA", "EQUIPOS", "MERCADO", "CUOTA CASA", "STAKE", "PROFIT", "RESULTADO"];
-            const rows = bets.map(b => [
-                `"${b.date || ''}"`, `"${b.league || ''}"`, `"${b.teams || ''}"`, `"${b.market || ''}"`,
-                `"${b.odd || ''}"`, `"${b.stake || ''}"`, `"${b.profit || 0}"`, `"${(b.status || 'PENDIENTE').toUpperCase()}"`
-            ].join(","));
-            const csvContent = "\uFEFF" + headers.join(",") + "\n" + rows.join("\n");
-            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-            const url = URL.createObjectURL(blob);
+            if (bets.length === 0) return;
+            const headers = ["FECHA", "EQUIPOS", "MERCADO", "CUOTA", "STAKE", "PROFIT", "RESULTADO"];
+            const rows = bets.map(b => [b.date, b.teams, b.market, b.odd, b.stake, b.profit, b.status].join(","));
+            const csv = "\uFEFF" + headers.join(",") + "\n" + rows.join("\n");
             const link = document.createElement("a");
-            link.setAttribute("href", url);
-            link.setAttribute("download", `ROI_BetAGS_${new Date().toLocaleDateString()}.csv`);
+            link.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv);
+            link.download = `ROI_BetAGS.csv`;
             link.click();
         }
 
