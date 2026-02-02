@@ -43,6 +43,22 @@
         }
         .mode-btn.active { background: #059669; color: white; }
         .mode-btn.inactive { color: #4b5563; }
+
+        /* MEJORA: Resalte para el mejor mercado */
+        .best-market-row { 
+            background: rgba(255, 235, 0, 0.07) !important; 
+            box-shadow: inset 4px 0 0 0 var(--bet-yellow);
+        }
+        .suggested-badge {
+            background: var(--bet-yellow);
+            color: black;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 8px;
+            font-weight: 900;
+            margin-left: 8px;
+            text-transform: uppercase;
+        }
     </style>
 </head>
 <body>
@@ -306,6 +322,7 @@
 
             renderMarketTable(marketData);
             showStrategyAssistant(p_over, prob_btts_yes);
+            highlightSuggestedMarket(); // Llamada a la sugerencia
         }
 
         function renderPoissonChart(labels, home, away) {
@@ -335,12 +352,14 @@
             data.forEach(m => {
                 const fair = (1 / m.prob).toFixed(2);
                 table.innerHTML += `
-                    <tr class="hover:bg-slate-800/30 transition-colors" id="row_${m.id}">
-                        <td class="p-4 font-bold text-slate-200">${m.name}</td>
-                        <td class="p-4 text-emerald-400 font-medium">${(m.prob * 100).toFixed(1)}%</td>
+                    <tr class="hover:bg-slate-800/30 transition-colors market-row" id="row_${m.id}" data-prob="${m.prob}">
+                        <td class="p-4 font-bold text-slate-200 market-name-cell">
+                            ${m.name}
+                        </td>
+                        <td class="p-4 text-emerald-400 font-medium text-prob">${(m.prob * 100).toFixed(1)}%</td>
                         <td class="p-4 text-slate-500 font-mono">${fair}</td>
-                        <td class="p-4"><input type="number" step="0.01" class="w-20 p-1 text-xs font-bold" oninput="updateEdge('${m.id}', ${m.prob}, '${m.name}')" id="odd_${m.id}" placeholder="0.00"></td>
-                        <td class="p-4 font-bold" id="edge_${m.id}">--</td>
+                        <td class="p-4"><input type="number" step="0.01" class="w-20 p-1 text-xs font-bold odd-input" oninput="updateEdge('${m.id}', ${m.prob}, '${m.name}')" id="odd_${m.id}" placeholder="0.00"></td>
+                        <td class="p-4 font-bold text-edge" id="edge_${m.id}">--</td>
                         <td class="p-4 text-bet-yellow font-black" id="stake_${m.id}">--</td>
                         <td class="p-4 text-center">
                             <button onclick="registerBet('${m.id}', '${m.name}', ${m.prob})" class="bg-emerald-600 hover:bg-emerald-400 px-4 py-2 rounded-lg text-[10px] font-black transition-all">FIJAR</button>
@@ -359,7 +378,7 @@
                 const edgePercent = (edge * 100).toFixed(1);
                 
                 edgeElement.innerText = edgePercent + "%";
-                edgeElement.className = edge > 0 ? "p-4 value-positive" : "p-4 value-negative";
+                edgeElement.className = edge > 0 ? "p-4 value-positive text-edge" : "p-4 value-negative text-edge";
 
                 if (edge > 0) {
                     const kelly = (prob - (1 - prob) / (odd - 1)) * 0.125;
@@ -371,6 +390,45 @@
             } else {
                 edgeElement.innerText = "--";
                 stakeElement.innerText = "--";
+            }
+            highlightSuggestedMarket(); // Re-evaluar sugerencia al cambiar cuotas
+        }
+
+        // --- MEJORA: SUGERENCIA DEL MERCADO MÁS PENÍTICO (RENTABLE/PROBABLE) ---
+        function highlightSuggestedMarket() {
+            const rows = document.querySelectorAll('.market-row');
+            let bestRow = null;
+            let maxVal = -Infinity;
+            let criteria = 'prob'; // Por defecto busca probabilidad
+
+            // Primero vemos si hay algún Edge positivo para sugerir por VALOR
+            rows.forEach(row => {
+                const edgeText = row.querySelector('.text-edge').innerText;
+                const edgeVal = parseFloat(edgeText);
+                if (!isNaN(edgeVal) && edgeVal > 0) {
+                    criteria = 'edge';
+                }
+            });
+
+            rows.forEach(row => {
+                row.classList.remove('best-market-row');
+                const badge = row.querySelector('.suggested-badge');
+                if (badge) badge.remove();
+
+                if (criteria === 'edge') {
+                    const val = parseFloat(row.querySelector('.text-edge').innerText) || -999;
+                    if (val > maxVal) { maxVal = val; bestRow = row; }
+                } else {
+                    const val = parseFloat(row.getAttribute('data-prob'));
+                    if (val > maxVal) { maxVal = val; bestRow = row; }
+                }
+            });
+
+            if (bestRow) {
+                bestRow.classList.add('best-market-row');
+                const nameCell = bestRow.querySelector('.market-name-cell');
+                const label = criteria === 'edge' ? 'Pick de Valor' : 'Más Probable';
+                nameCell.innerHTML += `<span class="suggested-badge">${label}</span>`;
             }
         }
 
