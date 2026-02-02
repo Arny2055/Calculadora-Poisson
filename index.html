@@ -338,6 +338,52 @@
             localStorage.setItem('betags_v3_miner', JSON.stringify(bets));
             alert("✅ Registro exitoso. Visita la sección ROI para seguimiento.");
         }
+
+        // --- MÓDULO DE RETROALIMENTACIÓN ASISTIDA ---
+        function getHistoricalEdge() {
+            const history = JSON.parse(localStorage.getItem('backtesting_data')) || [];
+            if (history.length < 5) return null;
+
+            const stats = { leagues: {}, markets: {}, odds: {} };
+            
+            history.forEach(bet => {
+                // Agrupar por rentabilidad
+                stats.leagues[bet.liga] = (stats.leagues[bet.liga] || 0) + bet.profit;
+                stats.markets[bet.mercado] = (stats.markets[bet.mercado] || 0) + bet.profit;
+                const range = bet.cuota < 1.8 ? 'BAJA' : bet.cuota <= 2.5 ? 'MEDIA' : 'ALTA';
+                stats.odds[range] = (stats.odds[range] || 0) + bet.profit;
+            });
+
+            return {
+                bestLeague: Object.entries(stats.leagues).sort((a,b) => b[1]-a[1])[0],
+                bestMarket: Object.entries(stats.markets).sort((a,b) => b[1]-a[1])[0],
+                bestRange: Object.entries(stats.odds).sort((a,b) => b[1]-a[1])[0]
+            };
+        }
+
+        // Inyectar retroalimentación en el asistente visual
+        const originalShowStrategy = showStrategyAssistant;
+        showStrategyAssistant = function(p_over, p_btts) {
+            originalShowStrategy(p_over, p_btts); // Mantiene tu lógica anterior
+            
+            const intel = getHistoricalEdge();
+            if (!intel) return;
+
+            const currentLeague = document.getElementById('league_name').value.toUpperCase();
+            const assistantBox = document.getElementById('strategy-assistant-box');
+            const text = document.getElementById('strategy-text');
+
+            // Retroalimentación en tiempo real
+            if (currentLeague === intel.bestLeague[0].toUpperCase()) {
+                text.innerHTML += `<br><span class="text-emerald-400 font-black text-[10px]">[HISTORIAL: Esta es tu mejor liga (+${intel.bestLeague[1].toFixed(2)}$)]</span>`;
+                assistantBox.classList.add('border-2', 'border-emerald-500', 'animate-pulse');
+            } else {
+                // Limpiar efectos si se cambia de liga
+                assistantBox.classList.remove('border-2', 'border-emerald-500', 'animate-pulse');
+            }
+            
+            console.log("IA BetAGS: Analizando compatibilidad con histórico...", intel);
+        };
     </script>
 </body>
 </html>
