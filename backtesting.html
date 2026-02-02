@@ -39,7 +39,7 @@
 
             <div id="ai-recommendation" class="recommendation-box hidden">
                 <h3 class="text-xs font-black text-blue-300 uppercase mb-2"><i class="fa-solid fa-robot mr-2"></i>Asistente Estratégico BetAGS</h3>
-                <p id="rec-text" class="text-sm font-medium text-white italic">Analizando patrones...</p>
+                <div id="rec-text" class="text-sm font-medium text-white italic">Analizando patrones...</div>
                 <div id="kelly-management" class="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div class="p-3 bg-blue-500/10 border border-blue-500/30 rounded-lg">
                         <p class="text-[10px] text-blue-400 font-black uppercase">Optimización Kelly (Fraccional 0.5)</p>
@@ -192,7 +192,12 @@
         }
 
         function updateUI() {
-            renderStats(); renderEquityChart(); renderLeagueStats(); renderTeamTable();
+            renderStats(); 
+            renderEquityChart(); 
+            renderLeagueStats(); 
+            renderTeamTable();
+            // Ejecución del escáner de patrones
+            runDeepAnalysis();
         }
 
         function renderStats() {
@@ -255,6 +260,40 @@
             });
         }
 
+        // --- ESCÁNER DE PATRONES DE RENTABILIDAD ---
+        function runDeepAnalysis() {
+            // Usamos filteredData para que el análisis sea sensible a los filtros de la pantalla principal
+            const data = filteredData.length > 0 ? filteredData : (JSON.parse(localStorage.getItem('backtesting_data')) || []);
+            if (data.length === 0) return;
+
+            const ranges = {
+                '1.20-1.60': { p: 0, c: 0 },
+                '1.61-2.00': { p: 0, c: 0 },
+                '2.01-2.50': { p: 0, c: 0 },
+                '2.51+': { p: 0, c: 0 }
+            };
+
+            data.forEach(b => {
+                let r = b.cuota <= 1.6 ? '1.20-1.60' : b.cuota <= 2.0 ? '1.61-2.00' : b.cuota <= 2.5 ? '2.01-2.50' : '2.51+';
+                ranges[r].p += b.profit;
+                ranges[r].c++;
+            });
+
+            const bestRange = Object.entries(ranges).sort((a,b) => b[1].p - a[1].p)[0];
+            
+            const recText = document.getElementById('rec-text');
+            // Limpiar para evitar duplicados en cada actualización de UI
+            const currentContent = recText.innerHTML.includes('PATRÓN DETECTADO') ? "" : recText.innerHTML;
+            
+            recText.innerHTML = `
+                <div class="bg-black/40 p-3 rounded-lg border border-purple-500/30 mb-2">
+                    <p class="text-purple-400 font-black text-[11px] mb-1"><i class="fa-solid fa-microchip mr-2"></i>PATRÓN DETECTADO</p>
+                    <p class="text-white text-xs">Tu zona de mayor éxito es el rango de cuotas <span class="text-yellow-400">${bestRange[0]}</span> con un beneficio de <span class="text-emerald-400">$${bestRange[1].p.toFixed(2)}</span>.</p>
+                </div>
+                ${currentContent}
+            `;
+        }
+
         function generateInsights() {
             if(fullData.length === 0) return alert("Sin datos.");
             const analysis = { leagues: {}, markets: {}, odds: {} };
@@ -276,8 +315,15 @@
 
             const globalWinRate = (globalWins / fullData.length) * 100;
             const globalKelly = calculateKelly(sumOdds/fullData.length, globalWinRate);
+            
             document.getElementById('ai-recommendation').classList.remove('hidden');
+            
+            // Texto base de la recomendación
             document.getElementById('rec-text').innerHTML = `Estrategia: Prioriza <span class="text-yellow-400 font-black">${getBest(analysis.markets)}</span> en <span class="text-blue-400 font-black">${getBest(analysis.leagues)}</span>.`;
+            
+            // Ejecutar el análisis profundo para inyectar el patrón detectado
+            runDeepAnalysis();
+
             document.getElementById('kelly-advice').innerHTML = `Kelly sugiere stake del <span class="text-blue-400 font-bold">${(globalKelly * 100).toFixed(2)}%</span> global.`;
             toggleModal();
         }
