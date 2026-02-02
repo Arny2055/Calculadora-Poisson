@@ -10,16 +10,18 @@
     <style>
         :root { --bet-green: #006341; --bet-yellow: #ffeb00; --dark-bg: #050d0a; --accent-green: #00ff88; }
         body { background-color: var(--dark-bg); color: #f8fafc; font-family: 'Inter', sans-serif; }
-        .glass-card { background: rgba(17, 24, 39, 0.7); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.05); }
+        .glass-card { background: rgba(17, 24, 39, 0.7); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.05); transition: all 0.3s ease; }
         input { background-color: #1f2937 !important; color: white !important; border: 1px solid #374151 !important; border-radius: 0.5rem; }
         .recommendation-box { background: linear-gradient(90deg, #1e1b4b, #312e81); border: 1px solid #4338ca; padding: 15px; border-radius: 12px; }
         .strategy-match { background: rgba(16, 185, 129, 0.2) !important; border: 2px solid #10b981 !important; }
         .matrix-cell { padding: 8px; text-align: center; border: 1px solid rgba(255,255,255,0.05); font-size: 10px; }
         .value-positive { color: #00ff88; font-weight: bold; }
         .value-negative { color: #ff4444; }
-        /* Estilo para los botones de visibilidad */
-        .btn-toggle { background: rgba(59, 130, 246, 0.2); border: 1px solid #3b82f6; color: #60a5fa; padding: 5px 12px; border-radius: 8px; font-size: 11px; font-weight: bold; transition: all 0.3s; }
-        .btn-toggle:hover { background: #3b82f6; color: white; }
+        
+        /* Estilos para los botones de toggle */
+        .btn-toggle { @apply px-4 py-2 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all border; }
+        .btn-active { @apply bg-emerald-500/20 border-emerald-500 text-emerald-400; }
+        .btn-inactive { @apply bg-slate-800 border-slate-700 text-slate-500; }
     </style>
 </head>
 <body>
@@ -38,6 +40,18 @@
     </nav>
 
     <div class="container mx-auto p-4 max-w-7xl">
+        <div class="flex flex-wrap gap-2 mb-6 justify-end">
+            <button onclick="toggleSection('visual-section', this)" class="px-4 py-2 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all border bg-emerald-500/20 border-emerald-500 text-emerald-400">
+                <i class="fa-solid fa-chart-line mr-2"></i> Gráfica y Matriz
+            </button>
+            <button onclick="toggleSection('table-section', this)" class="px-4 py-2 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all border bg-emerald-500/20 border-emerald-500 text-emerald-400">
+                <i class="fa-solid fa-table mr-2"></i> Tabla de Mercados
+            </button>
+            <button onclick="toggleBlueLine()" id="btn-blue-line" class="px-4 py-2 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all border bg-blue-500/20 border-blue-500 text-blue-400">
+                <i class="fa-solid fa-eye mr-2"></i> Línea Azul
+            </button>
+        </div>
+
         <div id="strategy-assistant-box" class="recommendation-box hidden mb-6">
             <div class="flex items-center justify-between">
                 <div>
@@ -69,29 +83,13 @@
                 </div>
             </div>
 
-            <div class="lg:col-span-2 glass-card p-6 rounded-2xl">
+            <div id="visual-section" class="lg:col-span-2 glass-card p-6 rounded-2xl">
                 <div class="h-[250px]"><canvas id="poissonChart"></canvas></div>
-                
-                <div class="mt-6 flex justify-between items-center border-t border-white/10 pt-4">
-                    <span class="text-[10px] text-slate-400 uppercase font-bold tracking-widest">Matriz de Probabilidades</span>
-                    <button onclick="toggleElement('matrix-wrapper', this)" class="btn-toggle">
-                        <i class="fa-solid fa-eye-slash mr-2"></i>MOSTRAR MATRIZ
-                    </button>
-                </div>
-                
-                <div id="matrix-wrapper" style="display: none;" class="mt-4">
-                    <div class="grid grid-cols-6 gap-1" id="score-matrix"></div>
-                </div>
+                <div class="mt-4 grid grid-cols-6 gap-1" id="score-matrix"></div>
             </div>
         </div>
 
-        <div class="flex justify-end mt-6 mb-2">
-            <button onclick="toggleElement('market-wrapper', this)" class="btn-toggle">
-                <i class="fa-solid fa-eye-slash mr-2"></i>MOSTRAR TABLA DE MERCADOS
-            </button>
-        </div>
-
-        <div id="market-wrapper" style="display: none;" class="glass-card rounded-2xl overflow-hidden border border-white/5">
+        <div id="table-section" class="glass-card rounded-2xl mt-6 overflow-hidden border border-white/5">
             <table class="w-full text-left text-sm">
                 <thead class="bg-slate-900 text-slate-500 uppercase text-[10px] tracking-wider">
                     <tr>
@@ -113,18 +111,7 @@
     <script>
         let bets = JSON.parse(localStorage.getItem('betags_v3_miner')) || [];
         let pChart;
-
-        // Función para ocultar/mostrar elementos
-        function toggleElement(id, btn) {
-            const el = document.getElementById(id);
-            if (el.style.display === "none") {
-                el.style.display = "block";
-                btn.innerHTML = `<i class="fa-solid fa-eye mr-2"></i>OCULTAR`;
-            } else {
-                el.style.display = "none";
-                btn.innerHTML = `<i class="fa-solid fa-eye-slash mr-2"></i>MOSTRAR ${id === 'matrix-wrapper' ? 'MATRIZ' : 'TABLA'}`;
-            }
-        }
+        let blueLineVisible = true;
 
         function factorial(n) { 
             if (n === 0) return 1;
@@ -135,6 +122,42 @@
         
         function poissonProb(k, l) { 
             return (Math.pow(l, k) * Math.exp(-l)) / factorial(k); 
+        }
+
+        // Funciones de visibilidad
+        function toggleSection(id, btn) {
+            const el = document.getElementById(id);
+            if (el.classList.contains('hidden')) {
+                el.classList.remove('hidden');
+                btn.classList.replace('bg-slate-800', 'bg-emerald-500/20');
+                btn.classList.replace('border-slate-700', 'border-emerald-500');
+                btn.classList.replace('text-slate-500', 'text-emerald-400');
+            } else {
+                el.classList.add('hidden');
+                btn.classList.replace('bg-emerald-500/20', 'bg-slate-800');
+                btn.classList.replace('border-emerald-500', 'border-slate-700');
+                btn.classList.replace('text-emerald-400', 'text-slate-500');
+            }
+        }
+
+        function toggleBlueLine() {
+            if (!pChart) return;
+            blueLineVisible = !blueLineVisible;
+            pChart.setDatasetVisibility(0, blueLineVisible);
+            pChart.update();
+            
+            const btn = document.getElementById('btn-blue-line');
+            if (blueLineVisible) {
+                btn.classList.replace('bg-slate-800', 'bg-blue-500/20');
+                btn.classList.replace('border-slate-700', 'border-blue-500');
+                btn.classList.replace('text-slate-500', 'text-blue-400');
+                btn.innerHTML = '<i class="fa-solid fa-eye mr-2"></i> Línea Azul';
+            } else {
+                btn.classList.replace('bg-blue-500/20', 'bg-slate-800');
+                btn.classList.replace('border-blue-500', 'border-slate-700');
+                btn.classList.replace('text-blue-400', 'text-slate-500');
+                btn.innerHTML = '<i class="fa-solid fa-eye-slash mr-2"></i> Línea Azul';
+            }
         }
 
         function calculate() {
@@ -193,7 +216,7 @@
                 data: { 
                     labels, 
                     datasets: [
-                        { label: 'Local', data: home, borderColor: '#3b82f6', backgroundColor: 'rgba(59, 130, 246, 0.1)', fill: true, tension: 0.4 },
+                        { label: 'Local', data: home, borderColor: '#3b82f6', backgroundColor: 'rgba(59, 130, 246, 0.1)', fill: true, tension: 0.4, hidden: !blueLineVisible },
                         { label: 'Visitante', data: away, borderColor: '#f97316', backgroundColor: 'rgba(249, 115, 22, 0.1)', fill: true, tension: 0.4 }
                     ]
                 }, 
