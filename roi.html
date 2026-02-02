@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BetAGS Pro - Análisis de ROI</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        :root { --bet-green: #006341; --bet-yellow: #ffeb00; --dark-bg: #050d0a; }
+        body { background-color: var(--dark-bg); color: #f8fafc; font-family: 'Inter', sans-serif; }
+        .glass-card { background: rgba(17, 24, 39, 0.7); border: 1px solid rgba(255, 255, 255, 0.05); }
+        .bet-card-custom { background: #111827; border-radius: 15px; padding: 20px; position: relative; border-top: 4px solid #eab308; }
+        .status-win { border-color: #22c55e; }
+        .status-loss { border-color: #ef4444; }
+    </style>
+</head>
+<body>
+    <nav class="p-4 bg-slate-900/90 border-b border-emerald-500/20">
+        <div class="container mx-auto flex justify-between items-center">
+            <h1 class="text-xl font-bold">BETAGS <span class="text-emerald-400">ROI LAB</span></h1>
+            <div class="flex gap-2">
+                <a href="index.html" class="px-3 py-1 text-sm bg-slate-800 rounded">Calculadora</a>
+                <a href="roi.html" class="px-3 py-1 text-sm bg-slate-700 text-yellow-400 rounded">ROI</a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mx-auto p-4">
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+            <div class="glass-card p-4 rounded-xl text-center">
+                <p class="text-[10px] text-slate-500 uppercase">Profit Total</p>
+                <p id="stat-profit" class="text-xl font-bold">$0.00</p>
+            </div>
+            <div class="glass-card p-4 rounded-xl text-center">
+                <p class="text-[10px] text-slate-500 uppercase">Yield</p>
+                <p id="stat-yield" class="text-xl font-bold">0%</p>
+            </div>
+            <div class="glass-card p-4 rounded-xl text-center">
+                <p class="text-[10px] text-slate-500 uppercase">Hit Rate</p>
+                <p id="stat-hit" class="text-xl font-bold">0%</p>
+            </div>
+            <div class="glass-card p-4 rounded-xl text-center">
+                <p class="text-[10px] text-slate-500 uppercase">Picks</p>
+                <p id="stat-count" class="text-xl font-bold">0</p>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div class="glass-card p-6 rounded-2xl h-fit">
+                <h3 class="text-sm font-bold mb-4 uppercase text-emerald-400">Filtros de Minado</h3>
+                <div class="space-y-4">
+                    <select id="f_market" class="w-full bg-slate-800 p-2 text-xs rounded" onchange="updateStats()">
+                        <option value="">Todos los Mercados</option>
+                        <option value="OVER">Solo Over</option>
+                        <option value="UNDER">Solo Under</option>
+                    </select>
+                    <button onclick="exportData()" class="w-full py-2 bg-slate-700 text-[10px] font-bold rounded">EXPORTAR JSON</button>
+                    <button onclick="clearHistory()" class="w-full py-2 bg-red-900/30 text-red-400 text-[10px] font-bold rounded">BORRAR TODO</button>
+                </div>
+            </div>
+
+            <div class="lg:col-span-2 space-y-6">
+                <div class="glass-card p-6 rounded-2xl">
+                    <canvas id="bankrollChart" class="h-[200px]"></canvas>
+                </div>
+                <div id="history-grid" class="grid grid-cols-1 md:grid-cols-2 gap-4"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let bets = JSON.parse(localStorage.getItem('betags_v3_miner')) || [];
+        let bChart;
+
+        function updateStats() {
+            const filtered = bets; 
+            const resolved = filtered.filter(b => b.status !== 'pending');
+            const profit = resolved.reduce((a, b) => a + b.profit, 0);
+            const staked = resolved.reduce((a, b) => a + b.stake, 0);
+            
+            document.getElementById('stat-profit').innerText = "$" + profit.toFixed(2);
+            document.getElementById('stat-yield').innerText = (staked > 0 ? (profit/staked*100).toFixed(1) : 0) + "%";
+            document.getElementById('stat-count').innerText = resolved.length;
+            
+            renderHistory(filtered);
+            renderBankrollChart(resolved);
+        }
+
+        function renderHistory(data) {
+            const grid = document.getElementById('history-grid'); grid.innerHTML = '';
+            data.forEach(b => {
+                const card = document.createElement('div');
+                card.className = `bet-card-custom status-${b.status}`;
+                card.innerHTML = `
+                    <div class="flex justify-between text-[10px] text-slate-500 mb-1"><span>${b.date}</span><span>${b.status.toUpperCase()}</span></div>
+                    <h4 class="font-bold text-sm">${b.teams}</h4>
+                    <p class="text-xs text-emerald-400 mb-2">${b.market} @${b.odd}</p>
+                    <div class="flex gap-2">
+                        <button onclick="resolve(${b.id}, 'win')" class="bg-green-600 px-2 py-1 text-[10px] rounded">Win</button>
+                        <button onclick="resolve(${b.id}, 'loss')" class="bg-red-600 px-2 py-1 text-[10px] rounded">Loss</button>
+                        <button onclick="deleteBet(${b.id})" class="ml-auto text-slate-500"><i class="fa-solid fa-trash"></i></button>
+                    </div>
+                `;
+                grid.appendChild(card);
+            });
+        }
+
+        function resolve(id, status) {
+            const b = bets.find(x => x.id === id);
+            if(b) {
+                b.status = status;
+                b.profit = status === 'win' ? b.stake * (b.odd - 1) : -b.stake;
+                localStorage.setItem('betags_v3_miner', JSON.stringify(bets));
+                updateStats();
+            }
+        }
+
+        function renderBankrollChart(resolved) {
+            const ctx = document.getElementById('bankrollChart').getContext('2d');
+            if(bChart) bChart.destroy();
+            let current = 100, data = [100];
+            [...resolved].reverse().forEach(b => { current += b.profit; data.push(current); });
+            bChart = new Chart(ctx, { type: 'line', data: { labels: data.map((_,i)=>i), datasets: [{ label: 'Bankroll', data: data, borderColor: '#00ff88', fill: true, backgroundColor: 'rgba(0,255,136,0.1)' }] }});
+        }
+
+        function deleteBet(id) { bets = bets.filter(x => x.id !== id); localStorage.setItem('betags_v3_miner', JSON.stringify(bets)); updateStats(); }
+        function clearHistory() { if(confirm('¿Borrar historial?')) { bets = []; localStorage.setItem('betags_v3_miner', JSON.stringify(bets)); updateStats(); } }
+        function exportData() { window.open("data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(bets))); }
+
+        window.onload = updateStats;
+    </script>
+</body>
+</html>
