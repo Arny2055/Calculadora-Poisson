@@ -15,6 +15,12 @@
         .recommendation-box { background: linear-gradient(90deg, #1e1b4b, #312e81); border: 1px solid #4338ca; padding: 15px; border-radius: 12px; }
         .matrix-cell { padding: 6px; text-align: center; border: 1px solid rgba(255,255,255,0.05); font-size: 9px; border-radius: 4px; }
         
+        /* Estilos para el selector de modo */
+        .mode-selector { display: flex; background: #111827; border-radius: 8px; padding: 2px; border: 1px solid #374151; }
+        .mode-btn { flex: 1; padding: 6px; font-size: 10px; font-weight: 800; border-radius: 6px; transition: all 0.3s; text-align: center; cursor: pointer; color: #4b5563; }
+        .mode-btn.active { background: var(--bet-green); color: white; border: 1px solid var(--accent-green); }
+        .mode-btn.active-xg { background: #3b82f6; color: white; border: 1px solid #60a5fa; }
+
         .gold-value-row { background: linear-gradient(90deg, rgba(255, 215, 0, 0.05), rgba(255, 215, 0, 0.15)) !important; border-left: 4px solid var(--gold-value) !important; }
         .scroll-custom::-webkit-scrollbar { width: 6px; }
         .scroll-custom::-webkit-scrollbar-thumb { background: #374151; border-radius: 10px; }
@@ -51,15 +57,22 @@
                 </div>
 
                 <div class="glass-card p-5 rounded-2xl border-l-4 border-emerald-500 shadow-lg">
-                    <h2 class="text-xs font-bold text-emerald-400 uppercase mb-3"><i class="fa-solid fa-chart-line mr-2"></i>Promedio de Goles a Favor</h2>
+                    <div class="flex justify-between items-center mb-3">
+                        <h2 class="text-xs font-bold text-emerald-400 uppercase"><i class="fa-solid fa-chart-line mr-2"></i>Configuración</h2>
+                        <div class="mode-selector w-32" id="mode-container">
+                            <div onclick="setAnalysisMode('GOLES')" id="mode-goles" class="mode-btn active">GOLES</div>
+                            <div onclick="setAnalysisMode('XG')" id="mode-xg" class="mode-btn">xG</div>
+                        </div>
+                    </div>
+
                     <div class="space-y-4">
                         <div class="bg-slate-800/40 p-4 rounded-xl border border-blue-500/20">
-                            <label class="text-[9px] font-black text-blue-400 mb-2 uppercase block">Local (Promedio Goles)</label>
+                            <label class="text-[9px] font-black text-blue-400 mb-2 uppercase block">Local (A Favor)</label>
                             <input type="number" id="h_gf" step="0.01" class="w-full p-3 text-lg" placeholder="Ej: 1.75">
                         </div>
 
                         <div class="bg-slate-800/40 p-4 rounded-xl border border-orange-500/20">
-                            <label class="text-[9px] font-black text-orange-400 mb-2 uppercase block">Visitante (Promedio Goles)</label>
+                            <label class="text-[9px] font-black text-orange-400 mb-2 uppercase block">Visitante (A Favor)</label>
                             <input type="number" id="a_gf" step="0.01" class="w-full p-3 text-lg" placeholder="Ej: 1.20">
                         </div>
                         
@@ -89,7 +102,7 @@
                                 <th class="p-4">C. Casa</th>
                                 <th class="p-4">Edge</th>
                                 <th class="p-4">Stake</th>
-                                <th class="p-4 text-center">ROI</th>
+                                <th class="p-4 text-center">ROI Lab</th>
                             </tr>
                         </thead>
                         <tbody id="market-table" class="divide-y divide-slate-800/50"></tbody>
@@ -101,7 +114,23 @@
 
     <script>
         let pChart;
+        let currentAnalysisMode = 'GOLES';
         const STORAGE_KEY = 'betags_v3_miner';
+
+        // GESTIÓN DE MODO DE ANÁLISIS
+        function setAnalysisMode(mode) {
+            currentAnalysisMode = mode;
+            const btnGoles = document.getElementById('mode-goles');
+            const btnXG = document.getElementById('mode-xg');
+            
+            if(mode === 'GOLES') {
+                btnGoles.classList.add('active');
+                btnXG.classList.remove('active', 'active-xg');
+            } else {
+                btnXG.classList.add('active', 'active-xg');
+                btnGoles.classList.remove('active');
+            }
+        }
 
         // MOTOR POISSON
         function factorial(n) { return (n <= 1) ? 1 : n * factorial(n - 1); }
@@ -109,12 +138,10 @@
 
         function calculatePoisson() {
             const val = (id) => parseFloat(document.getElementById(id).value) || 0;
-            
-            // Usamos directamente el promedio ingresado como el valor esperado (lambda)
             const lambda_h = val('h_gf');
             const lambda_a = val('a_gf');
 
-            if(lambda_h <= 0 && lambda_a <= 0) return alert("Ingresa los promedios de gol.");
+            if(lambda_h <= 0 && lambda_a <= 0) return alert("Ingresa los promedios.");
 
             let p_h = [], p_a = [];
             for(let i=0; i<=5; i++) { 
@@ -195,14 +222,16 @@
             const newBet = {
                 id: Date.now(), 
                 date: new Date().toISOString().split('T')[0], 
-                teams: `${league}: ${event}`, 
+                // Añadimos la marca del modo de análisis al nombre del evento/liga
+                teams: `[${currentAnalysisMode}] ${league}: ${event}`, 
                 market: market, 
                 prob: prob, 
                 odd: odd, 
                 edge: document.getElementById('edge_' + id).innerText, 
                 stake: parseFloat(document.getElementById('stake_' + id).innerText) || 0, 
                 status: 'pending', 
-                profit: 0
+                profit: 0,
+                method: currentAnalysisMode // Dato extra guardado
             };
             
             let bets = JSON.parse(localStorage.getItem(STORAGE_KEY)) || [];
@@ -220,7 +249,8 @@
             let p_over = 0;
             for(let h=0; h<=5; h++) { for(let a=0; a<=5; a++) { if(h+a > 2.5) p_over += (p_h[h] * p_a[a]); } }
             
-            text.innerText = p_over > 0.60 ? "ESCENARIO DINÁMICO: TENDENCIA AL OVER." : (p_over < 0.40 ? "ESCENARIO CERRADO: TENDENCIA AL UNDER." : "MERCADO EN EQUILIBRIO ESTADÍSTICO.");
+            const modeText = currentAnalysisMode === 'XG' ? "Datos basados en Expectativa de Gol (xG)." : "Datos basados en Promedio de Goles.";
+            text.innerHTML = `${modeText} <br> <span class="text-xs">${p_over > 0.60 ? "ESCENARIO DINÁMICO: TENDENCIA AL OVER." : (p_over < 0.40 ? "ESCENARIO CERRADO: TENDENCIA AL UNDER." : "MERCADO EN EQUILIBRIO ESTADÍSTICO.")}`;
             document.getElementById('strategy-signal').innerText = p_over > 0.60 ? "🔥" : (p_over < 0.40 ? "🛡️" : "📊");
         }
 
