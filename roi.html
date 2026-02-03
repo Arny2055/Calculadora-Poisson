@@ -57,7 +57,7 @@
     </nav>
 
     <div class="container mx-auto p-4">
-        <div class="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
+        <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-6">
             <div class="glass-card p-4 rounded-xl text-center">
                 <p class="text-[10px] text-slate-500 uppercase">Profit Total</p>
                 <p id="stat-profit" class="text-xl font-bold">$0.00</p>
@@ -69,6 +69,10 @@
             <div class="glass-card p-4 rounded-xl text-center">
                 <p class="text-[10px] text-slate-500 uppercase">Hit Rate</p>
                 <p id="stat-hit" class="text-xl font-bold">0%</p>
+            </div>
+            <div class="glass-card p-4 rounded-xl text-center">
+                <p class="text-[10px] text-slate-500 uppercase text-red-400 font-bold">Max Drawdown</p>
+                <p id="stat-dd" class="text-xl font-bold text-red-400">0.00u</p>
             </div>
             <div class="glass-card p-4 rounded-xl text-center">
                 <p class="text-[10px] text-slate-500 uppercase">Picks</p>
@@ -262,18 +266,33 @@
             });
 
             const resolved = filtered.filter(b => b.status === 'win' || b.status === 'loss');
-            const profit = resolved.reduce((a, b) => a + (Number(b.profit) || 0), 0);
-            const staked = resolved.reduce((a, b) => a + (Number(b.stake) || 0), 0);
-            const wins = resolved.filter(b => b.status === 'win').length;
-            const avgOdd = resolved.length > 0 ? resolved.reduce((a, b) => a + (Number(b.odd) || 0), 0) / resolved.length : 0;
+            const sortedResolved = [...resolved].sort((a,b) => new Date(a.date) - new Date(b.date));
+            
+            // Cálculo de Profit y Drawdown
+            const profit = sortedResolved.reduce((a, b) => a + (Number(b.profit) || 0), 0);
+            const staked = sortedResolved.reduce((a, b) => a + (Number(b.stake) || 0), 0);
+            
+            let currentBank = 100;
+            let peak = 100;
+            let maxDD = 0;
+            sortedResolved.forEach(b => {
+                currentBank += Number(b.profit);
+                if(currentBank > peak) peak = currentBank;
+                let dd = peak - currentBank;
+                if(dd > maxDD) maxDD = dd;
+            });
+
+            const wins = sortedResolved.filter(b => b.status === 'win').length;
+            const avgOdd = sortedResolved.length > 0 ? sortedResolved.reduce((a, b) => a + (Number(b.odd) || 0), 0) / sortedResolved.length : 0;
             const currentYield = staked > 0 ? (profit/staked*100) : 0;
             
             document.getElementById('stat-profit').innerText = (profit >= 0 ? "+" : "") + profit.toFixed(2) + "u";
             document.getElementById('stat-yield').innerText = currentYield.toFixed(1) + "%";
-            document.getElementById('stat-hit').innerText = (resolved.length > 0 ? (wins/resolved.length*100).toFixed(1) : 0) + "%";
-            document.getElementById('stat-count').innerText = resolved.length;
+            document.getElementById('stat-hit').innerText = (sortedResolved.length > 0 ? (wins/sortedResolved.length*100).toFixed(1) : 0) + "%";
+            document.getElementById('stat-dd').innerText = maxDD.toFixed(2) + "u";
+            document.getElementById('stat-count').innerText = sortedResolved.length;
 
-            const pVal = calculatePValue(resolved.length, currentYield, avgOdd);
+            const pVal = calculatePValue(sortedResolved.length, currentYield, avgOdd);
             const pElem = document.getElementById('stat-pvalue');
             if(pVal !== null) {
                 pElem.innerText = (pVal * 100).toFixed(2) + "%";
@@ -281,7 +300,7 @@
             } else { pElem.innerText = "--"; }
             
             renderHistory(filtered);
-            renderBankrollChart(resolved);
+            renderBankrollChart(sortedResolved);
         }
 
         function renderHistory(data) {
@@ -336,14 +355,13 @@
             }
         }
 
-        function renderBankrollChart(resolved) {
+        function renderBankrollChart(sortedResolved) {
             const ctx = document.getElementById('bankrollChart').getContext('2d');
             if(bChart) bChart.destroy();
             
             let current = 100;
             let chartData = [100];
-            const sorted = [...resolved].sort((a,b) => new Date(a.date) - new Date(b.date));
-            sorted.forEach(b => { current += Number(b.profit); chartData.push(current); });
+            sortedResolved.forEach(b => { current += Number(b.profit); chartData.push(current); });
 
             bChart = new Chart(ctx, { 
                 type: 'line', 
