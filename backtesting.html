@@ -60,6 +60,13 @@
             display: grid;
             grid-template-columns: 1.2fr 1fr;
             gap: 20px;
+            margin-bottom: 20px;
+        }
+
+        .secondary-layout {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
             margin-bottom: 30px;
         }
 
@@ -138,7 +145,7 @@
 
     <div class="main-layout">
         <div class="chart-box">
-            <h4 style="margin:0 0 10px 0; font-size:0.8rem;">ANÁLISIS DINÁMICO DE CAPITAL</h4>
+            <h4 style="margin:0 0 10px 0; font-size:0.8rem; color:var(--accent)">CURVA DE CAPITAL ACUMULADO</h4>
             <canvas id="performanceChart" height="130"></canvas>
         </div>
         
@@ -162,9 +169,15 @@
         </div>
     </div>
 
-    <div class="analysis-box">
-        <h3 style="margin:0 0 10px 0; font-size: 1rem; color:var(--accent)">DIAGNÓSTICO MAESTRO DE VALOR</h3>
-        <p id="master-feedback" style="color:var(--text-muted); line-height:1.6; font-size:0.9rem;"></p>
+    <div class="secondary-layout">
+        <div class="chart-box">
+            <h4 style="margin:0 0 10px 0; font-size:0.8rem; color:var(--accent)">CORRELACIÓN: EDGE % vs PROFIT REAL</h4>
+            <canvas id="scatterChart" height="130"></canvas>
+        </div>
+        <div class="analysis-box">
+            <h3 style="margin:0 0 10px 0; font-size: 1rem; color:var(--accent)">DIAGNÓSTICO MAESTRO DE VALOR</h3>
+            <p id="master-feedback" style="color:var(--text-muted); line-height:1.6; font-size:0.9rem;"></p>
+        </div>
     </div>
 
     <div class="table-container">
@@ -188,6 +201,7 @@
 <script>
     const BACKTEST_KEY = 'betags_backtesting';
     let pChart;
+    let sChart;
 
     function runBacktest() {
         const rawData = localStorage.getItem(BACKTEST_KEY);
@@ -199,6 +213,7 @@
         const stats = processDeepStats(sortedBets);
         updateUI(stats);
         renderChart(sortedBets);
+        renderScatterChart(sortedBets); // Llamada al nuevo gráfico
         renderTable(sortedBets);
     }
 
@@ -226,17 +241,14 @@
             totalEdge += e;
             if(b.status === 'win') wins++;
 
-            // Minería de Edge
             if(e <= 5) insights.edgeRanges['Bajo (0-5%)'] += p;
             else if(e <= 12) insights.edgeRanges['Medio (5-12%)'] += p;
             else insights.edgeRanges['Alto (>12%)'] += p;
 
-            // Minería de Probabilidad
             if(prob >= 60) insights.probRanges['Favorito (>60%)'] += p;
             else if(prob >= 40) insights.probRanges['Medio (40-60%)'] += p;
             else insights.probRanges['Underdog (<40%)'] += p;
 
-            // Equipos y Stakes
             insights.teamProfit[b.teams] = (insights.teamProfit[b.teams] || 0) + p;
             insights.stakeProfit[b.stake] = (insights.stakeProfit[b.stake] || 0) + p;
         });
@@ -257,7 +269,6 @@
         document.getElementById('profit-val').innerText = stats.totalProfit + "u";
         document.getElementById('profit-val').style.color = stats.totalProfit >= 0 ? "var(--success)" : "var(--danger)";
 
-        // Render Insight Cards
         const renderList = (id, data) => {
             document.getElementById(id).innerHTML = Object.entries(data)
                 .map(([k, v]) => `<div class="insight-item"><span>${k}</span><span class="insight-value" style="color:${v>=0?'var(--success)':'var(--danger)'}">${v.toFixed(2)}u</span></div>`).join('');
@@ -271,7 +282,6 @@
         document.getElementById('team-wins-insights').innerHTML = topTeams
             .map(([k, v]) => `<div class="insight-item"><span>${k.substring(0,15)}</span><span class="insight-value">${v.toFixed(1)}u</span></div>`).join('');
 
-        // Feedback
         const bestEdge = Object.entries(stats.insights.edgeRanges).reduce((a,b) => a[1]>b[1]?a:b)[0];
         document.getElementById('master-feedback').innerHTML = `
             🚀 Tu zona de máxima eficiencia es el <strong>Edge ${bestEdge}</strong>. 
@@ -298,6 +308,48 @@
                 }]
             },
             options: { responsive: true, plugins: { legend: { display: false } }, scales: { x: { display: false } } }
+        });
+    }
+
+    // Mejora: Función para renderizar el gráfico de dispersión
+    function renderScatterChart(bets) {
+        const ctx = document.getElementById('scatterChart').getContext('2d');
+        if (sChart) sChart.destroy();
+
+        const scatterData = bets.map(b => ({
+            x: parseFloat(b.edge) || 0,
+            y: parseFloat(b.profit) || 0
+        }));
+
+        sChart = new Chart(ctx, {
+            type: 'scatter',
+            data: {
+                datasets: [{
+                    label: 'Relación Edge/Profit',
+                    data: scatterData,
+                    backgroundColor: scatterData.map(d => d.y >= 0 ? 'rgba(16, 185, 129, 0.6)' : 'rgba(239, 68, 68, 0.6)'),
+                    pointRadius: 6,
+                    pointHoverRadius: 8
+                }]
+            },
+            options: {
+                responsive: true,
+                scales: {
+                    x: {
+                        title: { display: true, text: 'Edge Calculado %', color: '#64748b' },
+                        grid: { color: 'rgba(255,255,255,0.05)' },
+                        ticks: { color: '#64748b' }
+                    },
+                    y: {
+                        title: { display: true, text: 'Profit Final (u)', color: '#64748b' },
+                        grid: { color: 'rgba(255,255,255,0.05)' },
+                        ticks: { color: '#64748b' }
+                    }
+                },
+                plugins: {
+                    legend: { display: false }
+                }
+            }
         });
     }
 
