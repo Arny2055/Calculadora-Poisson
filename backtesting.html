@@ -83,6 +83,14 @@
             border: 1px solid var(--border);
         }
 
+        .math-box {
+            background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+            border: 1px solid var(--accent);
+            padding: 20px;
+            border-radius: 16px;
+            margin-bottom: 30px;
+        }
+
         .table-container {
             background: var(--card-bg);
             border-radius: 12px;
@@ -118,7 +126,6 @@
         }
 
         .insight-value { font-weight: bold; color: var(--accent); }
-        .label-pill { font-size: 0.65rem; padding: 2px 6px; border-radius: 10px; background: rgba(255,255,255,0.05); }
     </style>
 </head>
 <body>
@@ -127,20 +134,29 @@
     <header>
         <div>
             <h1 style="margin:0">BetAGS <span style="color:var(--accent)">Quantum Miner Pro</span></h1>
-            <p style="color: var(--text-muted); margin: 5px 0 0 0;">Minería de Edge, Probabilidad y Valor Real.</p>
+            <p style="color: var(--text-muted); margin: 5px 0 0 0;">Validación Estadística y Criterio de Kelly.</p>
         </div>
         <div>
             <button onclick="clearBacktest()" style="background: transparent; color: var(--danger); border: 1px solid var(--danger);">Reset</button>
-            <button onclick="runBacktest()">Ejecutar Minería de Valor</button>
+            <button onclick="runBacktest()">Ejecutar Simulación Matemática</button>
         </div>
     </header>
 
     <div class="grid-stats">
         <div class="stat-card"><h3>Yield Total</h3><p id="roi-val">0%</p></div>
-        <div class="stat-card"><h3>Hit Rate</h3><p id="winrate-val">0%</p></div>
-        <div class="stat-card"><h3>Avg Edge %</h3><p id="avg-edge-val">0%</p></div>
+        <div class="stat-card"><h3>p-Value (Suerte)</h3><p id="p-val">0.00</p></div>
+        <div class="stat-card"><h3>Kelly Sugerido</h3><p id="kelly-val">0%</p></div>
         <div class="stat-card"><h3>Profit Neto</h3><p id="profit-val">0u</p></div>
-        <div class="stat-card"><h3>Racha Actual</h3><p id="streak-val">0</p></div>
+        <div class="stat-card"><h3>EV por Apuesta</h3><p id="ev-val">0u</p></div>
+    </div>
+
+    <div class="math-box">
+        <h4 style="margin:0 0 10px 0; font-size:0.8rem; color:var(--accent); text-transform:uppercase;">Ecuaciones de Rendimiento Cuántico</h4>
+        <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap:20px; font-size:0.85rem; color:var(--text-muted);">
+            <div><strong>Crecimiento Kelly:</strong> Optimiza el crecimiento de banca evitando la ruina.</div>
+            <div><strong>Significancia (p):</strong> Si p < 0.05, tu sistema es estadísticamente superior al azar.</div>
+            <div><strong>Valor Esperado (EV):</strong> La ganancia matemática teórica por cada unidad apostada.</div>
+        </div>
     </div>
 
     <div class="main-layout">
@@ -186,8 +202,7 @@
                 <tr>
                     <th>Evento / Fecha</th>
                     <th>Prob %</th>
-                    <th>C. Justa</th>
-                    <th>C. Casa</th>
+                    <th>EV Calc</th>
                     <th>Edge %</th>
                     <th>Stake</th>
                     <th>Profit</th>
@@ -200,8 +215,7 @@
 
 <script>
     const BACKTEST_KEY = 'betags_backtesting';
-    let pChart;
-    let sChart;
+    let pChart, sChart;
 
     function runBacktest() {
         const rawData = localStorage.getItem(BACKTEST_KEY);
@@ -209,33 +223,33 @@
         if (bets.length === 0) return;
 
         const sortedBets = [...bets].sort((a, b) => new Date(a.date) - new Date(b.date));
-        
         const stats = processDeepStats(sortedBets);
         updateUI(stats);
         renderChart(sortedBets);
-        renderScatterChart(sortedBets); // Llamada al nuevo gráfico
+        renderScatterChart(sortedBets);
         renderTable(sortedBets);
     }
 
     function processDeepStats(bets) {
-        let totalProfit = 0;
-        let totalStaked = 0;
-        let totalEdge = 0;
-        let wins = 0;
+        let totalProfit = 0, totalStaked = 0, totalEdge = 0, wins = 0, totalEV = 0;
         
         const insights = {
             edgeRanges: { 'Bajo (0-5%)': 0, 'Medio (5-12%)': 0, 'Alto (>12%)': 0 },
             probRanges: { 'Favorito (>60%)': 0, 'Medio (40-60%)': 0, 'Underdog (<40%)': 0 },
-            teamProfit: {},
-            stakeProfit: {}
+            teamProfit: {}, stakeProfit: {}
         };
 
         bets.forEach(b => {
             const p = Number(b.profit) || 0;
             const s = Number(b.stake) || 0;
             const e = parseFloat(b.edge) || 0;
-            const prob = parseFloat(b.prob) || (1/parseFloat(b.odd_fair)*100) || 0;
+            const prob = parseFloat(b.prob)/100 || (1/parseFloat(b.odd_fair)) || 0;
+            const odd = parseFloat(b.odd);
 
+            // Cálculo de EV individual
+            const ev = (prob * (odd - 1) * s) - ((1 - prob) * s);
+            totalEV += ev;
+            
             totalProfit += p;
             totalStaked += s;
             totalEdge += e;
@@ -245,29 +259,45 @@
             else if(e <= 12) insights.edgeRanges['Medio (5-12%)'] += p;
             else insights.edgeRanges['Alto (>12%)'] += p;
 
-            if(prob >= 60) insights.probRanges['Favorito (>60%)'] += p;
-            else if(prob >= 40) insights.probRanges['Medio (40-60%)'] += p;
+            if(prob*100 >= 60) insights.probRanges['Favorito (>60%)'] += p;
+            else if(prob*100 >= 40) insights.probRanges['Medio (40-60%)'] += p;
             else insights.probRanges['Underdog (<40%)'] += p;
 
             insights.teamProfit[b.teams] = (insights.teamProfit[b.teams] || 0) + p;
             insights.stakeProfit[b.stake] = (insights.stakeProfit[b.stake] || 0) + p;
         });
 
+        // Cálculo de p-value simplificado (Z-Score)
+        const avgOdd = bets.reduce((a,b) => a + parseFloat(b.odd), 0) / bets.length;
+        const expectedWinRate = 1 / avgOdd;
+        const actualWinRate = wins / bets.length;
+        const zScore = (actualWinRate - expectedWinRate) / Math.sqrt((expectedWinRate * (1 - expectedWinRate)) / bets.length);
+        const pValue = 1 - 0.5 * (1 + Math.sign(zScore) * (1 - Math.exp(-2 * Math.pow(zScore, 2) / Math.PI)));
+
+        // Kelly Sugerido (Fraccional 0.25 para seguridad)
+        const avgEdgeDecimal = (totalEdge / bets.length) / 100;
+        const bKelly = avgOdd - 1;
+        const kelly = ((avgEdgeDecimal * bKelly + avgEdgeDecimal) / bKelly) * 0.25 * 100;
+
         return {
             yield: ((totalProfit/totalStaked)*100).toFixed(2),
-            winRate: ((wins/bets.length)*100).toFixed(1),
+            winRate: (actualWinRate*100).toFixed(1),
             avgEdge: (totalEdge/bets.length).toFixed(2),
             totalProfit: totalProfit.toFixed(2),
+            pValue: pValue.toFixed(4),
+            kelly: Math.max(0, kelly).toFixed(2),
+            avgEV: (totalEV / bets.length).toFixed(2),
             insights
         };
     }
 
     function updateUI(stats) {
         document.getElementById('roi-val').innerText = stats.yield + "%";
-        document.getElementById('winrate-val').innerText = stats.winRate + "%";
-        document.getElementById('avg-edge-val').innerText = stats.avgEdge + "%";
+        document.getElementById('p-val').innerText = stats.pValue;
+        document.getElementById('p-val').style.color = stats.pValue < 0.05 ? "var(--success)" : "var(--warning)";
+        document.getElementById('kelly-val').innerText = stats.kelly + "%";
         document.getElementById('profit-val').innerText = stats.totalProfit + "u";
-        document.getElementById('profit-val').style.color = stats.totalProfit >= 0 ? "var(--success)" : "var(--danger)";
+        document.getElementById('ev-val').innerText = stats.avgEV + "u";
 
         const renderList = (id, data) => {
             document.getElementById(id).innerHTML = Object.entries(data)
@@ -282,11 +312,10 @@
         document.getElementById('team-wins-insights').innerHTML = topTeams
             .map(([k, v]) => `<div class="insight-item"><span>${k.substring(0,15)}</span><span class="insight-value">${v.toFixed(1)}u</span></div>`).join('');
 
-        const bestEdge = Object.entries(stats.insights.edgeRanges).reduce((a,b) => a[1]>b[1]?a:b)[0];
         document.getElementById('master-feedback').innerHTML = `
-            🚀 Tu zona de máxima eficiencia es el <strong>Edge ${bestEdge}</strong>. 
-            Estás obteniendo mejores resultados en eventos calificados como <strong>${Object.entries(stats.insights.probRanges).reduce((a,b) => a[1]>b[1]?a:b)[0]}</strong>.
-            La correlación entre tu Cuota Justa y el Profit Neto sugiere que tu modelo de probabilidad es ${stats.avgEdge > 5 ? 'robusto' : 'ajustable'}.
+            ${stats.pValue < 0.05 ? '✅ <strong>Habilidad Confirmada:</strong> Tu p-value indica que tus ganancias NO son casualidad.' : '⚠️ <strong>Varianza Detectada:</strong> Tus resultados podrían ser azar. Necesitas más muestras.'} 
+            Tu EV promedio por apuesta es de <strong>${stats.avgEV} unidades</strong>. 
+            El Criterio de Kelly sugiere un stake agresivo del <strong>${stats.kelly}%</strong> para maximizar crecimiento.
         `;
     }
 
@@ -300,75 +329,49 @@
                 labels: bets.map((_, i) => i + 1),
                 datasets: [{
                     data: bets.map(b => balance += Number(b.profit)),
-                    borderColor: '#38bdf8',
-                    borderWidth: 2,
-                    fill: true,
-                    backgroundColor: 'rgba(56, 189, 248, 0.05)',
-                    pointRadius: 0, tension: 0.3
+                    borderColor: '#38bdf8', borderWidth: 2, fill: true,
+                    backgroundColor: 'rgba(56, 189, 248, 0.05)', pointRadius: 0, tension: 0.3
                 }]
             },
             options: { responsive: true, plugins: { legend: { display: false } }, scales: { x: { display: false } } }
         });
     }
 
-    // Mejora: Función para renderizar el gráfico de dispersión
     function renderScatterChart(bets) {
         const ctx = document.getElementById('scatterChart').getContext('2d');
         if (sChart) sChart.destroy();
-
-        const scatterData = bets.map(b => ({
-            x: parseFloat(b.edge) || 0,
-            y: parseFloat(b.profit) || 0
-        }));
-
         sChart = new Chart(ctx, {
             type: 'scatter',
             data: {
                 datasets: [{
-                    label: 'Relación Edge/Profit',
-                    data: scatterData,
-                    backgroundColor: scatterData.map(d => d.y >= 0 ? 'rgba(16, 185, 129, 0.6)' : 'rgba(239, 68, 68, 0.6)'),
-                    pointRadius: 6,
-                    pointHoverRadius: 8
+                    data: bets.map(b => ({ x: parseFloat(b.edge) || 0, y: parseFloat(b.profit) || 0 })),
+                    backgroundColor: bets.map(b => b.profit >= 0 ? 'rgba(16, 185, 129, 0.6)' : 'rgba(239, 68, 68, 0.6)'),
+                    pointRadius: 6
                 }]
             },
-            options: {
-                responsive: true,
-                scales: {
-                    x: {
-                        title: { display: true, text: 'Edge Calculado %', color: '#64748b' },
-                        grid: { color: 'rgba(255,255,255,0.05)' },
-                        ticks: { color: '#64748b' }
-                    },
-                    y: {
-                        title: { display: true, text: 'Profit Final (u)', color: '#64748b' },
-                        grid: { color: 'rgba(255,255,255,0.05)' },
-                        ticks: { color: '#64748b' }
-                    }
-                },
-                plugins: {
-                    legend: { display: false }
-                }
-            }
+            options: { responsive: true, plugins: { legend: { display: false } } }
         });
     }
 
     function renderTable(bets) {
         const tbody = document.getElementById('data-table');
-        tbody.innerHTML = [...bets].reverse().map(b => `
-            <tr>
-                <td><strong>${b.teams}</strong><br><small style="color:var(--text-muted)">${b.date} | ${b.market}</small></td>
-                <td>${b.prob}%</td>
-                <td>${b.odd_fair}</td>
-                <td>${b.odd}</td>
-                <td style="color:${parseFloat(b.edge)>0?'var(--success)':'var(--text-muted)'}">${b.edge}%</td>
-                <td>${b.stake}u</td>
-                <td style="font-weight:bold; color:${b.profit>=0?'var(--success)':'var(--danger)'}">${b.profit}u</td>
-            </tr>
-        `).join('');
+        tbody.innerHTML = [...bets].reverse().map(b => {
+            const prob = parseFloat(b.prob)/100 || (1/parseFloat(b.odd_fair));
+            const ev = (prob * (parseFloat(b.odd) - 1) * b.stake) - ((1 - prob) * b.stake);
+            return `
+                <tr>
+                    <td><strong>${b.teams}</strong><br><small style="color:var(--text-muted)">${b.date}</small></td>
+                    <td>${(prob*100).toFixed(1)}%</td>
+                    <td style="color:${ev>=0?'var(--success)':'var(--danger)'}">${ev.toFixed(2)}u</td>
+                    <td>${b.edge}%</td>
+                    <td>${b.stake}u</td>
+                    <td style="font-weight:bold; color:${b.profit>=0?'var(--success)':'var(--danger)'}">${b.profit}u</td>
+                </tr>
+            `;
+        }).join('');
     }
 
-    function clearBacktest() { if(confirm('¿Reiniciar base de datos?')) { localStorage.removeItem(BACKTEST_KEY); location.reload(); } }
+    function clearBacktest() { if(confirm('¿Reiniciar?')) { localStorage.removeItem(BACKTEST_KEY); location.reload(); } }
     window.onload = runBacktest;
 </script>
 </body>
