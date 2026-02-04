@@ -205,21 +205,49 @@
         const STORAGE_KEY = 'betags_v3_miner';
         const MODE_KEY = 'betags_preferred_mode'; 
         
-        // Parámetro Rho para Dixon-Coles (Se ajustará dinámicamente)
+        // Parámetro Rho para Dixon-Coles
         let RHO_CORRECTION = -0.11;
 
-        // Diccionario de ajuste automático de Rho
+        // DICCIONARIO EXPANDIDO DE RHO (Auto-detección)
         const RHO_MAP = [
-            { keys: ['bundesliga', 'eredivisie', 'mls', 'holanda', 'alemania', 'austria'], value: -0.07, label: 'Ofensiva' },
-            { keys: ['premier', 'laliga', 'serie a', 'liga mx', 'mx', 'champions', 'libertadores'], value: -0.11, label: 'Standard' },
-            { keys: ['ligue 2', 'segunda', 'argentina', 'colombia', 'brasil b', 'grecia', 'iran'], value: -0.15, label: 'Defensiva' }
+            { 
+                keys: [
+                    'bundesliga', 'eredivisie', 'mls', 'holanda', 'alemania', 'austria', 'noruega', 
+                    'suecia', 'dinamarca', 'islandia', 'suiza', 'bélgica', 'belgium', 'japan', 
+                    'j-league', 'australia', 'a-league', 'finlandia', 'estonia', 'suomi', 'eliteserien',
+                    'allsvenskan', 'superligaen', 'tipico', 'nb i', 'hungría'
+                ], 
+                value: -0.07, 
+                label: 'Ofensiva (+Over)' 
+            },
+            { 
+                keys: [
+                    'premier', 'laliga', 'serie a', 'liga mx', 'mx', 'champions', 'libertadores', 
+                    'mundial', 'eurocopa', 'liga nos', 'portugal', 'rusia', 'turkey', 'turquía', 
+                    'brasil a', 'chile', 'uruguay', 'paraguay', 'ecuador', 'concacaf', 'uefa', 
+                    'south africa', 'scotland', 'escocia', 'bolivia', 'mls next', 'copa oro',
+                    'mls pro', 'premier league', 'fa cup', 'copa del rey'
+                ], 
+                value: -0.11, 
+                label: 'Standard' 
+            },
+            { 
+                keys: [
+                    'ligue 2', 'segunda', 'argentina', 'colombia', 'brasil b', 'grecia', 'iran', 
+                    'rumania', 'marruecos', 'egipto', 'argelia', 'tunisia', 'sudáfrica', 'venezuela', 
+                    'perú', 'b nacional', 'ascenso', 'italia b', 'bwin', 'costa rica', 'honduras', 
+                    'guatemala', 'israel', 'chipre', 'albania', 'serie b', 'championship', 
+                    'league one', 'league two', 'primera b', 'expansion', 'copa argentina'
+                ], 
+                value: -0.15, 
+                label: 'Defensiva (+Under)' 
+            }
         ];
 
         function autoAdjustRho() {
             const leagueInput = document.getElementById('league_name').value.toLowerCase();
             const indicator = document.getElementById('rho_indicator');
             
-            // Valor por defecto
             let newVal = -0.11;
             let newLabel = 'Standard';
 
@@ -233,7 +261,7 @@
 
             RHO_CORRECTION = newVal;
             indicator.innerText = `Rho: ${newVal} (${newLabel})`;
-            indicator.style.color = newVal === -0.07 ? '#3b82f6' : (newVal === -0.15 ? '#f87171' : '#64748b');
+            indicator.style.color = newVal === -0.07 ? '#00ff88' : (newVal === -0.15 ? '#f87171' : '#64748b');
         }
 
         function setAnalysisMode(mode) {
@@ -300,7 +328,6 @@
         function processMarkets(p_h, p_a, lh, la) {
             let p_over = 0, p_under = 0;
             const matrix = document.getElementById('score-matrix'); matrix.innerHTML = '';
-            
             let maxProb = 0;
             let bestScore = "0-0";
 
@@ -308,11 +335,7 @@
                 for(let a=0; a<=5; a++) {
                     const tau = getDixonColesTau(h, a, lh, la);
                     const prob = (p_h[h] * p_a[a]) * tau;
-                    
-                    if(prob > maxProb) {
-                        maxProb = prob;
-                        bestScore = `${h}-${a}`;
-                    }
+                    if(prob > maxProb) { maxProb = prob; bestScore = `${h}-${a}`; }
                 }
             }
 
@@ -320,19 +343,13 @@
                 for(let a=0; a<=5; a++) {
                     const tau = getDixonColesTau(h, a, lh, la);
                     const prob = (p_h[h] * p_a[a]) * tau;
-
                     if(h + a > 2.5) p_over += prob;
                     if(h + a < 2.5) p_under += prob;
                     
                     const cell = document.createElement('div');
                     cell.className = 'matrix-cell';
-                    
-                    if(prob === maxProb && prob > 0) {
-                        cell.classList.add('matrix-cell-gold');
-                    } else {
-                        cell.style.backgroundColor = `rgba(0, 255, 136, ${prob * 4})`;
-                    }
-
+                    if(prob === maxProb && prob > 0) cell.classList.add('matrix-cell-gold');
+                    else cell.style.backgroundColor = `rgba(0, 255, 136, ${prob * 4})`;
                     cell.innerHTML = `<b>${h}-${a}</b><br>${(prob*100).toFixed(1)}%`;
                     matrix.appendChild(cell);
                 }
@@ -420,8 +437,8 @@
             let p_over = 0;
             for(let h=0; h<=5; h++) { for(let a=0; a<=5; a++) { if(h+a > 2.5) p_over += (p_h[h] * p_a[a]); } }
             
-            const modeText = currentAnalysisMode === 'XG' ? "Analizando con Expectativa de Gol (xG)." : "Analizando con Goles Reales.";
-            text.innerHTML = `${modeText} + Dixon-Coles Dinámico (Rho: ${RHO_CORRECTION}) <br> <span class="text-xs text-slate-400">${p_over > 0.60 ? "ESCENARIO DINÁMICO: TENDENCIA AL OVER." : (p_over < 0.40 ? "ESCENARIO CERRADO: TENDENCIA AL UNDER." : "MERCADO EN EQUILIBRIO ESTADÍSTICO.")}`;
+            const modeText = currentAnalysisMode === 'XG' ? "Analizando con xG." : "Analizando con Goles.";
+            text.innerHTML = `${modeText} | Dixon-Coles: ${RHO_CORRECTION} <br> <span class="text-xs text-slate-400">${p_over > 0.60 ? "ESCENARIO DINÁMICO: TENDENCIA AL OVER." : (p_over < 0.40 ? "ESCENARIO CERRADO: TENDENCIA AL UNDER." : "MERCADO EN EQUILIBRIO ESTADÍSTICO.")}`;
             document.getElementById('strategy-signal').innerText = p_over > 0.60 ? "🔥" : (p_over < 0.40 ? "🛡️" : "📊");
         }
 
@@ -437,11 +454,8 @@
                     ]
                 },
                 options: { 
-                    responsive: true, 
-                    maintainAspectRatio: false, 
-                    plugins: { 
-                        legend: { labels: { color: '#94a3b8', font: { size: 10, weight: 'bold' } } } 
-                    },
+                    responsive: true, maintainAspectRatio: false, 
+                    plugins: { legend: { labels: { color: '#94a3b8', font: { size: 10, weight: 'bold' } } } },
                     scales: {
                         y: { grid: { color: 'rgba(255,255,255,0.03)' }, ticks: { color: '#64748b', font: { size: 9 } } },
                         x: { grid: { display: false }, ticks: { color: '#64748b', font: { size: 9 } } }
@@ -458,7 +472,7 @@
             document.getElementById('score-matrix').innerHTML = '';
             document.getElementById('market-table').innerHTML = '';
             document.getElementById('strategy-assistant-box').classList.add('hidden');
-            autoAdjustRho(); // Reset Rho indicator
+            autoAdjustRho();
             if(pChart) { pChart.destroy(); pChart = null; }
         }
 
