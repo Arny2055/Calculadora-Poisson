@@ -171,7 +171,7 @@
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div class="glass-card p-4 rounded-2xl h-[250px]"><canvas id="poissonChart"></canvas></div>
                     <div class="glass-card p-4 rounded-2xl overflow-y-auto max-h-[250px] scroll-custom">
-                        <h3 class="text-[9px] font-bold text-slate-500 uppercase mb-2">Matriz de Marcador Exacto</h3>
+                        <h3 class="text-[9px] font-bold text-slate-500 uppercase mb-2">Matriz de Marcador Exacto (Dixon-Coles)</h3>
                         <div class="grid grid-cols-6 gap-1" id="score-matrix"></div>
                     </div>
                 </div>
@@ -200,11 +200,14 @@
         let pChart;
         let currentAnalysisMode = 'GOLES';
         const STORAGE_KEY = 'betags_v3_miner';
-        const MODE_KEY = 'betags_preferred_mode'; // Nueva clave para persistencia
+        const MODE_KEY = 'betags_preferred_mode'; 
+        
+        // Parámetro Rho para Dixon-Coles (Dependencia de goles)
+        // -0.11 es un valor estándar para corregir el infra-ajuste de empates.
+        const RHO_CORRECTION = -0.11;
 
         function setAnalysisMode(mode) {
             currentAnalysisMode = mode;
-            // Guardar en localStorage para persistencia
             localStorage.setItem(MODE_KEY, mode);
 
             const btnGoles = document.getElementById('mode-goles');
@@ -223,7 +226,6 @@
                 contA.classList.remove('input-container-xg');
                 calcBtn.className = "w-full bg-emerald-600 hover:bg-emerald-500 py-4 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all shadow-lg active:scale-[0.98]";
                 title.classList.replace('text-blue-400', 'text-emerald-400');
-                title.classList.remove('text-blue-400'); // Asegurar limpieza de clase xG
             } else {
                 btnXG.classList.add('active', 'active-xg');
                 btnGoles.classList.remove('active');
@@ -232,12 +234,24 @@
                 contA.classList.add('input-container-xg');
                 calcBtn.className = "w-full bg-blue-600 hover:bg-blue-500 py-4 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all shadow-lg active:scale-[0.98]";
                 title.classList.add('text-blue-400');
-                title.classList.remove('text-emerald-400'); // Asegurar limpieza de clase Goles
+                title.classList.remove('text-emerald-400');
             }
         }
 
         function factorial(n) { return (n <= 1) ? 1 : n * factorial(n - 1); }
         function poissonProb(k, lambda) { return (Math.pow(lambda, k) * Math.exp(-lambda)) / factorial(k); }
+
+        /**
+         * AJUSTE DIXON-COLES (Factor Tau)
+         * Corrige las probabilidades para marcadores 0-0, 1-0, 0-1 y 1-1
+         */
+        function getDixonColesTau(x, y, lh, la) {
+            if (x === 0 && y === 0) return 1 - (lh * la * RHO_CORRECTION);
+            if (x === 1 && y === 0) return 1 + (la * RHO_CORRECTION);
+            if (x === 0 && y === 1) return 1 + (lh * RHO_CORRECTION);
+            if (x === 1 && y === 1) return 1 - RHO_CORRECTION;
+            return 1;
+        }
 
         function calculatePoisson() {
             const val = (id) => parseFloat(document.getElementById(id).value) || 0;
@@ -253,20 +267,24 @@
             }
             
             renderChart(p_h, p_a);
-            processMarkets(p_h, p_a);
+            processMarkets(p_h, p_a, lambda_h, lambda_a);
             updateAssistant(p_h, p_a);
         }
 
-        function processMarkets(p_h, p_a) {
+        function processMarkets(p_h, p_a, lh, la) {
             let p_over = 0, p_under = 0;
             const matrix = document.getElementById('score-matrix'); matrix.innerHTML = '';
             
             let maxProb = 0;
             let bestScore = "0-0";
+            let totalProb = 0; // Para normalización si fuera necesario
 
+            // Primera pasada para encontrar el mejor marcador con ajuste Dixon-Coles
             for(let h=0; h<=5; h++) {
                 for(let a=0; a<=5; a++) {
-                    const prob = p_h[h] * p_a[a];
+                    const tau = getDixonColesTau(h, a, lh, la);
+                    const prob = (p_h[h] * p_a[a]) * tau;
+                    
                     if(prob > maxProb) {
                         maxProb = prob;
                         bestScore = `${h}-${a}`;
@@ -274,9 +292,12 @@
                 }
             }
 
+            // Segunda pasada para renderizar matriz y calcular mercados
             for(let h=0; h<=5; h++) {
                 for(let a=0; a<=5; a++) {
-                    const prob = p_h[h] * p_a[a];
+                    const tau = getDixonColesTau(h, a, lh, la);
+                    const prob = (p_h[h] * p_a[a]) * tau;
+
                     if(h + a > 2.5) p_over += prob;
                     if(h + a < 2.5) p_under += prob;
                     
@@ -294,13 +315,21 @@
                 }
             }
             
-            const p_btts_yes = (1 - p_h[0]) * (1 - p_a[0]);
+            // BTTS ajustado con Dixon-Coles (0-0 es el único marcador que no es BTTS Sí pero se ajusta)
+            const prob_0_0 = (p_h[0] * p_a[0]) * getDixonColesTau(0, 0, lh, la);
+            // Simplificación: BTTS No incluye todos los marcadores donde alguno es 0.
+            let p_btts_no = 0;
+            for(let i=0; i<=5; i++) {
+                p_btts_no += (p_h[i] * p_a[0]) * getDixonColesTau(i, 0, lh, la); // Marcadores x-0
+                if(i > 0) p_btts_no += (p_h[0] * p_a[i]) * getDixonColesTau(0, i, lh, la); // Marcadores 0-x
+            }
+
             const markets = [
-                { id: 'cs', name: `MARCADOR: ${bestScore}`, prob: maxProb }, // Nuevo campo dinámico
+                { id: 'cs', name: `MARCADOR: ${bestScore}`, prob: maxProb },
                 { id: 'o25', name: 'OVER 2.5 GOLES', prob: p_over },
                 { id: 'u25', name: 'UNDER 2.5 GOLES', prob: p_under },
-                { id: 'by', name: 'BTTS (SÍ)', prob: p_btts_yes },
-                { id: 'bn', name: 'BTTS (NO)', prob: 1 - p_btts_yes }
+                { id: 'by', name: 'BTTS (SÍ)', prob: 1 - p_btts_no },
+                { id: 'bn', name: 'BTTS (NO)', prob: p_btts_no }
             ];
 
             const tbody = document.getElementById('market-table'); tbody.innerHTML = '';
@@ -369,10 +398,12 @@
             const box = document.getElementById('strategy-assistant-box'); box.classList.remove('hidden');
             const text = document.getElementById('strategy-text');
             let p_over = 0;
+            // Aquí se mantiene Poisson simple para el asistente por rendimiento, 
+            // pero el mercado real usa Dixon-Coles.
             for(let h=0; h<=5; h++) { for(let a=0; a<=5; a++) { if(h+a > 2.5) p_over += (p_h[h] * p_a[a]); } }
             
             const modeText = currentAnalysisMode === 'XG' ? "Analizando con Expectativa de Gol (xG)." : "Analizando con Goles Reales.";
-            text.innerHTML = `${modeText} <br> <span class="text-xs text-slate-400">${p_over > 0.60 ? "ESCENARIO DINÁMICO: TENDENCIA AL OVER." : (p_over < 0.40 ? "ESCENARIO CERRADO: TENDENCIA AL UNDER." : "MERCADO EN EQUILIBRIO ESTADÍSTICO.")}`;
+            text.innerHTML = `${modeText} + Dixon-Coles Activo <br> <span class="text-xs text-slate-400">${p_over > 0.60 ? "ESCENARIO DINÁMICO: TENDENCIA AL OVER." : (p_over < 0.40 ? "ESCENARIO CERRADO: TENDENCIA AL UNDER." : "MERCADO EN EQUILIBRIO ESTADÍSTICO.")}`;
             document.getElementById('strategy-signal').innerText = p_over > 0.60 ? "🔥" : (p_over < 0.40 ? "🛡️" : "📊");
         }
 
@@ -402,29 +433,16 @@
         }
 
         function clearData() {
-            // Limpiar inputs de texto y números
             document.getElementById('league_name').value = '';
             document.getElementById('event_name').value = '';
             document.getElementById('h_gf').value = '';
             document.getElementById('a_gf').value = '';
-            
-            // Limpiar matriz de marcadores y tabla de mercados
             document.getElementById('score-matrix').innerHTML = '';
             document.getElementById('market-table').innerHTML = '';
-            
-            // Ocultar asistente de estrategia
             document.getElementById('strategy-assistant-box').classList.add('hidden');
-            
-            // Destruir gráfica si existe
-            if(pChart) {
-                pChart.destroy();
-                pChart = null;
-            }
-            
-            console.log("Datos limpiados.");
+            if(pChart) { pChart.destroy(); pChart = null; }
         }
 
-        // --- LÓGICA DE INICIO ---
         window.onload = () => {
             const savedMode = localStorage.getItem(MODE_KEY) || 'GOLES';
             setAnalysisMode(savedMode);
