@@ -130,7 +130,10 @@
                 <div class="glass-card p-5 rounded-2xl">
                     <h2 class="text-xs font-bold text-slate-500 uppercase mb-3"><i class="fa-solid fa-pen-to-square mr-2"></i>Identificación</h2>
                     <div class="grid grid-cols-2 gap-2">
-                        <input type="text" id="league_name" placeholder="Liga" class="p-2 uppercase font-bold text-emerald-400">
+                        <div class="flex flex-col gap-1">
+                            <input type="text" id="league_name" placeholder="Liga" class="p-2 uppercase font-bold text-emerald-400" oninput="autoAdjustRho()">
+                            <span id="rho_indicator" class="text-[8px] font-bold text-slate-500 uppercase px-1">Rho: -0.11 (Standard)</span>
+                        </div>
                         <input type="text" id="event_name" placeholder="Evento" class="p-2 uppercase font-bold text-emerald-400">
                     </div>
                 </div>
@@ -202,9 +205,36 @@
         const STORAGE_KEY = 'betags_v3_miner';
         const MODE_KEY = 'betags_preferred_mode'; 
         
-        // Parámetro Rho para Dixon-Coles (Dependencia de goles)
-        // -0.11 es un valor estándar para corregir el infra-ajuste de empates.
-        const RHO_CORRECTION = -0.11;
+        // Parámetro Rho para Dixon-Coles (Se ajustará dinámicamente)
+        let RHO_CORRECTION = -0.11;
+
+        // Diccionario de ajuste automático de Rho
+        const RHO_MAP = [
+            { keys: ['bundesliga', 'eredivisie', 'mls', 'holanda', 'alemania', 'austria'], value: -0.07, label: 'Ofensiva' },
+            { keys: ['premier', 'laliga', 'serie a', 'liga mx', 'mx', 'champions', 'libertadores'], value: -0.11, label: 'Standard' },
+            { keys: ['ligue 2', 'segunda', 'argentina', 'colombia', 'brasil b', 'grecia', 'iran'], value: -0.15, label: 'Defensiva' }
+        ];
+
+        function autoAdjustRho() {
+            const leagueInput = document.getElementById('league_name').value.toLowerCase();
+            const indicator = document.getElementById('rho_indicator');
+            
+            // Valor por defecto
+            let newVal = -0.11;
+            let newLabel = 'Standard';
+
+            for (const group of RHO_MAP) {
+                if (group.keys.some(key => leagueInput.includes(key))) {
+                    newVal = group.value;
+                    newLabel = group.label;
+                    break;
+                }
+            }
+
+            RHO_CORRECTION = newVal;
+            indicator.innerText = `Rho: ${newVal} (${newLabel})`;
+            indicator.style.color = newVal === -0.07 ? '#3b82f6' : (newVal === -0.15 ? '#f87171' : '#64748b');
+        }
 
         function setAnalysisMode(mode) {
             currentAnalysisMode = mode;
@@ -241,10 +271,6 @@
         function factorial(n) { return (n <= 1) ? 1 : n * factorial(n - 1); }
         function poissonProb(k, lambda) { return (Math.pow(lambda, k) * Math.exp(-lambda)) / factorial(k); }
 
-        /**
-         * AJUSTE DIXON-COLES (Factor Tau)
-         * Corrige las probabilidades para marcadores 0-0, 1-0, 0-1 y 1-1
-         */
         function getDixonColesTau(x, y, lh, la) {
             if (x === 0 && y === 0) return 1 - (lh * la * RHO_CORRECTION);
             if (x === 1 && y === 0) return 1 + (la * RHO_CORRECTION);
@@ -277,9 +303,7 @@
             
             let maxProb = 0;
             let bestScore = "0-0";
-            let totalProb = 0; // Para normalización si fuera necesario
 
-            // Primera pasada para encontrar el mejor marcador con ajuste Dixon-Coles
             for(let h=0; h<=5; h++) {
                 for(let a=0; a<=5; a++) {
                     const tau = getDixonColesTau(h, a, lh, la);
@@ -292,7 +316,6 @@
                 }
             }
 
-            // Segunda pasada para renderizar matriz y calcular mercados
             for(let h=0; h<=5; h++) {
                 for(let a=0; a<=5; a++) {
                     const tau = getDixonColesTau(h, a, lh, la);
@@ -315,13 +338,10 @@
                 }
             }
             
-            // BTTS ajustado con Dixon-Coles (0-0 es el único marcador que no es BTTS Sí pero se ajusta)
-            const prob_0_0 = (p_h[0] * p_a[0]) * getDixonColesTau(0, 0, lh, la);
-            // Simplificación: BTTS No incluye todos los marcadores donde alguno es 0.
             let p_btts_no = 0;
             for(let i=0; i<=5; i++) {
-                p_btts_no += (p_h[i] * p_a[0]) * getDixonColesTau(i, 0, lh, la); // Marcadores x-0
-                if(i > 0) p_btts_no += (p_h[0] * p_a[i]) * getDixonColesTau(0, i, lh, la); // Marcadores 0-x
+                p_btts_no += (p_h[i] * p_a[0]) * getDixonColesTau(i, 0, lh, la);
+                if(i > 0) p_btts_no += (p_h[0] * p_a[i]) * getDixonColesTau(0, i, lh, la);
             }
 
             const markets = [
@@ -398,12 +418,10 @@
             const box = document.getElementById('strategy-assistant-box'); box.classList.remove('hidden');
             const text = document.getElementById('strategy-text');
             let p_over = 0;
-            // Aquí se mantiene Poisson simple para el asistente por rendimiento, 
-            // pero el mercado real usa Dixon-Coles.
             for(let h=0; h<=5; h++) { for(let a=0; a<=5; a++) { if(h+a > 2.5) p_over += (p_h[h] * p_a[a]); } }
             
             const modeText = currentAnalysisMode === 'XG' ? "Analizando con Expectativa de Gol (xG)." : "Analizando con Goles Reales.";
-            text.innerHTML = `${modeText} + Dixon-Coles Activo <br> <span class="text-xs text-slate-400">${p_over > 0.60 ? "ESCENARIO DINÁMICO: TENDENCIA AL OVER." : (p_over < 0.40 ? "ESCENARIO CERRADO: TENDENCIA AL UNDER." : "MERCADO EN EQUILIBRIO ESTADÍSTICO.")}`;
+            text.innerHTML = `${modeText} + Dixon-Coles Dinámico (Rho: ${RHO_CORRECTION}) <br> <span class="text-xs text-slate-400">${p_over > 0.60 ? "ESCENARIO DINÁMICO: TENDENCIA AL OVER." : (p_over < 0.40 ? "ESCENARIO CERRADO: TENDENCIA AL UNDER." : "MERCADO EN EQUILIBRIO ESTADÍSTICO.")}`;
             document.getElementById('strategy-signal').innerText = p_over > 0.60 ? "🔥" : (p_over < 0.40 ? "🛡️" : "📊");
         }
 
@@ -440,12 +458,14 @@
             document.getElementById('score-matrix').innerHTML = '';
             document.getElementById('market-table').innerHTML = '';
             document.getElementById('strategy-assistant-box').classList.add('hidden');
+            autoAdjustRho(); // Reset Rho indicator
             if(pChart) { pChart.destroy(); pChart = null; }
         }
 
         window.onload = () => {
             const savedMode = localStorage.getItem(MODE_KEY) || 'GOLES';
             setAnalysisMode(savedMode);
+            autoAdjustRho();
         };
     </script>
 </body>
