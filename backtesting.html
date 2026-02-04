@@ -67,7 +67,7 @@
 
         .secondary-layout {
             display: grid;
-            grid-template-columns: 1fr 1fr 1fr;
+            grid-template-columns: 1fr 1fr 1.2fr;
             gap: 20px;
             margin-bottom: 30px;
         }
@@ -120,7 +120,10 @@
             border-radius: 8px;
             cursor: pointer;
             font-weight: 800;
+            transition: opacity 0.2s;
         }
+        
+        button:hover { opacity: 0.9; }
 
         .insight-item {
             display: flex;
@@ -151,8 +154,8 @@
         <div class="stat-card"><h3>Yield Total</h3><p id="roi-val">0%</p></div>
         <div class="stat-card"><h3>p-Value</h3><p id="p-val">0.00</p></div>
         <div class="stat-card"><h3>Kelly Sug.</h3><p id="kelly-val">0%</p></div>
-        <div class="stat-card" style="border-color: var(--entropy-color)"><h3>Entropía ($S$)</h3><p id="entropy-val" style="color: var(--entropy-color)">0.00</p></div>
-        <div class="stat-card" style="border-color: var(--laplace-color)"><h3>Estabilidad ($\mathcal{L}$)</h3><p id="laplace-val" style="color: var(--laplace-color)">0.00</p></div>
+        <div class="stat-card" style="border-color: var(--entropy-color)"><h3>Entropía (S)</h3><p id="entropy-val" style="color: var(--entropy-color)">0.00</p></div>
+        <div class="stat-card" style="border-color: var(--laplace-color)"><h3>Estabilidad (L)</h3><p id="laplace-val" style="color: var(--laplace-color)">0.00</p></div>
         <div class="stat-card" style="border-color: var(--danger)"><h3>Riesgo Ruina</h3><p id="ruin-val" style="color: var(--danger)">0%</p></div>
         <div class="stat-card"><h3>Profit Neto</h3><p id="profit-val">0u</p></div>
     </div>
@@ -160,9 +163,9 @@
     <div class="math-box">
         <h4 style="margin:0 0 10px 0; font-size:0.8rem; color:var(--accent); text-transform:uppercase;">Ecuaciones Maestras de Control</h4>
         <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap:20px; font-size:0.85rem; color:var(--text-muted);">
-            <div><strong style="color: var(--text-main)">Transformada de Laplace:</strong> $F(s) = \int_{0}^{\infty} f(t) e^{-st} dt$. Analiza la respuesta del sistema ante perturbaciones (pérdidas).</div>
-            <div><strong style="color: var(--text-main)">Estabilidad ($\sigma$):</strong> Si el componente real de los polos es negativo, el sistema amortigua la varianza y sobrevive.</div>
-            <div><strong style="color: var(--text-main)">Eficiencia Termodinámica:</strong> $\eta = 1 - \frac{T_{cold}}{T_{hot}}$. Relación entre riesgo disipado y beneficio útil.</div>
+            <div><strong style="color: var(--text-main)">Transformada de Laplace:</strong> F(s) = ∫ f(t) e^(-st) dt. Analiza la respuesta del sistema ante perturbaciones (pérdidas).</div>
+            <div><strong style="color: var(--text-main)">Estabilidad (σ):</strong> Si el componente real de los polos es negativo, el sistema amortigua la varianza y sobrevive.</div>
+            <div><strong style="color: var(--text-main)">Eficiencia Termodinámica:</strong> η = 1 - (T_cold / T_hot). Relación entre riesgo disipado y beneficio útil.</div>
         </div>
     </div>
 
@@ -220,7 +223,34 @@
     const BACKTEST_KEY = 'betags_backtesting';
     let pChart, sChart, dChart, mChart, lChart;
 
+    // Generador de datos de prueba si el localStorage está vacío
+    function injectDemoData() {
+        if (!localStorage.getItem(BACKTEST_KEY)) {
+            const demoBets = [];
+            const teams = ["Real Madrid vs Barca", "Lakers vs Celtics", "City vs Arsenal", "Nadal vs Alcaraz"];
+            for(let i=0; i<30; i++) {
+                const odd = (Math.random() * 2 + 1.5).toFixed(2);
+                const prob = (Math.random() * 40 + 30).toFixed(0);
+                const edge = (Math.random() * 15).toFixed(2);
+                const stake = (Math.random() * 5 + 1).toFixed(1);
+                const win = Math.random() > 0.5;
+                demoBets.push({
+                    date: new Date(2025, 0, i+1).toISOString(),
+                    teams: teams[Math.floor(Math.random() * teams.length)],
+                    odd: odd,
+                    prob: prob,
+                    edge: edge,
+                    stake: stake,
+                    profit: win ? (stake * (odd - 1)).toFixed(2) : (-stake).toFixed(2),
+                    status: win ? 'win' : 'loss'
+                });
+            }
+            localStorage.setItem(BACKTEST_KEY, JSON.stringify(demoBets));
+        }
+    }
+
     function runBacktest() {
+        injectDemoData();
         const rawData = localStorage.getItem(BACKTEST_KEY);
         const bets = JSON.parse(rawData) || [];
         if (bets.length === 0) return;
@@ -242,29 +272,57 @@
         const insights = {
             edgeRanges: { 'Bajo (0-5%)': 0, 'Medio (5-12%)': 0, 'Alto (>12%)': 0 },
             probRanges: { 'Favorito (>60%)': 0, 'Medio (40-60%)': 0, 'Underdog (<40%)': 0 },
-            teamProfit: {}, stakeProfit: {}
+            teamProfit: {}, 
+            stakeProfit: {}
         };
+
+        let sumOdds = 0;
+        let sumProb = 0;
 
         bets.forEach(b => {
             const p = Number(b.profit);
-            totalProfit += p; totalStaked += Number(b.stake); totalEdge += parseFloat(b.edge);
+            const edgeVal = parseFloat(b.edge);
+            const probVal = parseFloat(b.prob);
+            const stakeVal = parseFloat(b.stake);
+            
+            totalProfit += p; 
+            totalStaked += stakeVal; 
+            totalEdge += edgeVal;
+            sumOdds += parseFloat(b.odd);
+            sumProb += probVal;
+
             if(b.status === 'win') wins++;
             
+            // Lógica de rangos
+            if(edgeVal > 12) insights.edgeRanges['Alto (>12%)'] += p;
+            else if(edgeVal > 5) insights.edgeRanges['Medio (5-12%)'] += p;
+            else insights.edgeRanges['Bajo (0-5%)'] += p;
+
+            if(probVal > 60) insights.probRanges['Favorito (>60%)'] += p;
+            else if(probVal >= 40) insights.probRanges['Medio (40-60%)'] += p;
+            else insights.probRanges['Underdog (<40%)'] += p;
+
             insights.teamProfit[b.teams] = (insights.teamProfit[b.teams] || 0) + p;
-            insights.stakeProfit[b.stake] = (insights.stakeProfit[b.stake] || 0) + p;
+            insights.stakeProfit[stakeVal + "u"] = (insights.stakeProfit[stakeVal + "u"] || 0) + p;
         });
 
-        // --- CÁLCULO ESTABILIDAD LAPLACE (Proxy) ---
-        // Analizamos la "atenuación" de la curva. Un sistema estable decae poco ante el ruido.
         const mean = totalProfit / bets.length;
         const variance = profits.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / bets.length;
         const laplaceStability = (mean / (Math.sqrt(variance) + 0.0001)).toFixed(2);
 
         const wr = wins / bets.length;
         const entropy = (wr > 0 && wr < 1) ? -(wr * Math.log2(wr) + (1-wr) * Math.log2(1-wr)) : 0;
-        const avgOdd = bets.reduce((a,b) => a + parseFloat(b.odd), 0) / bets.length;
+        
+        const avgOdd = sumOdds / bets.length;
+        const avgProb = (sumProb / bets.length) / 100;
         const zScore = (wr - (1/avgOdd)) / Math.sqrt(((1/avgOdd) * (1 - (1/avgOdd))) / bets.length);
         const pValue = 1 - 0.5 * (1 + Math.sign(zScore) * (1 - Math.exp(-2 * Math.pow(zScore, 2) / Math.PI)));
+
+        // Kelly Criterion Sugerido: (bp - q) / b
+        const bKelly = avgOdd - 1;
+        const pKelly = avgProb;
+        const qKelly = 1 - pKelly;
+        const kelly = ((bKelly * pKelly - qKelly) / bKelly) * 100;
 
         return {
             yield: ((totalProfit/totalStaked)*100).toFixed(2),
@@ -272,7 +330,8 @@
             pValue: pValue.toFixed(4),
             entropy: entropy.toFixed(3),
             laplace: laplaceStability,
-            efficiency: Math.max(0, ( (totalProfit/totalStaked) / ((totalProfit/totalStaked) + Math.sqrt(variance/100)) ) * 100).toFixed(1),
+            kelly: Math.max(0, kelly).toFixed(1),
+            efficiency: Math.max(0, ( (totalProfit/totalStaked) / ((totalProfit/totalStaked) + Math.sqrt(variance/100) + 0.01) ) * 100).toFixed(1),
             insights
         };
     }
@@ -281,7 +340,6 @@
         const ctx = document.getElementById('laplaceChart').getContext('2d');
         if (lChart) lChart.destroy();
 
-        // Aproximación de la magnitud del sistema en el dominio s (frecuencias de apuestas)
         const profits = bets.map(b => Number(b.profit));
         const spectrum = [];
         for (let s = 0.1; s < 2.0; s += 0.1) {
@@ -297,14 +355,14 @@
             data: {
                 labels: Array.from({length: spectrum.length}, (_, i) => (i * 0.1).toFixed(1)),
                 datasets: [{
-                    label: 'Resonancia de Profit',
+                    label: 'Resonancia',
                     data: spectrum,
                     borderColor: '#fb7185',
                     backgroundColor: 'rgba(251, 113, 133, 0.1)',
-                    fill: true, tension: 0.4
+                    fill: true, tension: 0.4, pointRadius: 0
                 }]
             },
-            options: { responsive: true, plugins: { legend: { display: false } }, scales: { y: { display: false } } }
+            options: { responsive: true, plugins: { legend: { display: false } }, scales: { y: { display: false }, x: { grid: { display: false } } } }
         });
     }
 
@@ -315,6 +373,7 @@
         const profits = bets.map(b => Number(b.profit));
         let ruinCount = 0;
         let series = [];
+        
         for (let i = 0; i < numSims; i++) {
             let path = [100]; let bal = 100; let ruined = false;
             for (let j = 0; j < bets.length; j++) {
@@ -323,12 +382,15 @@
                 path.push(bal);
             }
             if (ruined) ruinCount++;
-            if (i < 20) series.push({ data: path, borderColor: ruined ? 'rgba(239, 68, 68, 0.2)' : 'rgba(56, 189, 248, 0.15)', borderWidth: 1, pointRadius: 0 });
+            if (i < 20) series.push({ data: path, borderColor: ruined ? 'rgba(239, 68, 68, 0.4)' : 'rgba(56, 189, 248, 0.2)', borderWidth: 1, pointRadius: 0 });
         }
+        
         const ruinProb = (ruinCount / numSims) * 100;
         document.getElementById('ruin-val').innerText = ruinProb.toFixed(1) + "%";
         document.getElementById('survival-rate').innerText = (100 - ruinProb).toFixed(1) + "%";
-        mChart = new Chart(ctx, { type: 'line', data: { labels: Array.from({length: bets.length + 1}, (_, i) => i), datasets: series }, options: { responsive: true, plugins: { legend: { display: false } }, scales: { x: { display: false } } } });
+        document.getElementById('monte-carlo-feedback').innerText = ruinProb > 10 ? "Alerta de insolvencia detectada en escenarios de stress." : "El sistema muestra una robustez cuántica superior al 90%.";
+        
+        mChart = new Chart(ctx, { type: 'line', data: { labels: Array.from({length: bets.length + 1}, (_, i) => i), datasets: series }, options: { responsive: true, plugins: { legend: { display: false } }, scales: { x: { display: false }, y: { grid: { color: 'rgba(255,255,255,0.05)' } } } } });
     }
 
     function updateUI(stats) {
@@ -337,42 +399,99 @@
         document.getElementById('profit-val').innerText = stats.totalProfit + "u";
         document.getElementById('entropy-val').innerText = stats.entropy;
         document.getElementById('laplace-val').innerText = stats.laplace;
-        document.getElementById('laplace-val').style.color = stats.laplace > 0 ? "var(--success)" : "var(--danger)";
+        document.getElementById('kelly-val').innerText = stats.kelly + "%";
+        
+        const lapColor = stats.laplace > 0 ? "var(--success)" : "var(--danger)";
+        document.getElementById('laplace-val').style.color = lapColor;
 
         document.getElementById('master-feedback').innerHTML = `
             Análisis de Laplace: Estabilidad de <strong>${stats.laplace}</strong>. 
-            ${stats.laplace > 0.5 ? 'El sistema muestra amortiguación positiva contra rachas negativas.' : 'Precaución: El sistema es oscilatorio y propenso a inestabilidad freuencial.'}
-            Eficiencia: <strong>${stats.efficiency}%</strong>.
+            ${stats.laplace > 0.5 ? 'El sistema muestra amortiguación positiva contra rachas negativas.' : 'Precaución: El sistema es oscilatorio y propenso a inestabilidad.'}
+            <br><br>Eficiencia Energética: <strong>${stats.efficiency}%</strong> del riesgo se convierte en beneficio útil.
         `;
 
         const renderList = (id, data) => {
-            document.getElementById(id).innerHTML = Object.entries(data).map(([k, v]) => `<div class="insight-item"><span>${k}</span><span class="insight-value">${v.toFixed(1)}u</span></div>`).join('');
+            document.getElementById(id).innerHTML = Object.entries(data)
+                .map(([k, v]) => `
+                    <div class="insight-item">
+                        <span>${k}</span>
+                        <span class="insight-value" style="color:${v>=0?'var(--accent)':'var(--danger)'}">${v.toFixed(1)}u</span>
+                    </div>`).join('');
         };
+
+        renderList('edge-insights', stats.insights.edgeRanges);
+        renderList('prob-insights', stats.insights.probRanges);
         renderList('team-wins-insights', stats.insights.teamProfit);
+        renderList('stake-insights', stats.insights.stakeProfit);
     }
 
     function renderChart(bets) {
         const ctx = document.getElementById('performanceChart').getContext('2d');
         if (pChart) pChart.destroy();
         let balance = 0;
-        pChart = new Chart(ctx, { type: 'line', data: { labels: bets.map((_, i) => i + 1), datasets: [{ data: bets.map(b => balance += Number(b.profit)), borderColor: '#38bdf8', borderWidth: 2, fill: true, backgroundColor: 'rgba(56, 189, 248, 0.05)', pointRadius: 0, tension: 0.3 }] }, options: { responsive: true, plugins: { legend: { display: false } } } });
+        const dataPoints = bets.map(b => balance += Number(b.profit));
+        
+        pChart = new Chart(ctx, { 
+            type: 'line', 
+            data: { 
+                labels: bets.map((_, i) => i + 1), 
+                datasets: [{ 
+                    data: dataPoints, 
+                    borderColor: '#38bdf8', 
+                    borderWidth: 2, 
+                    fill: true, 
+                    backgroundColor: 'rgba(56, 189, 248, 0.05)', 
+                    pointRadius: 0, 
+                    tension: 0.3 
+                }] 
+            }, 
+            options: { responsive: true, plugins: { legend: { display: false } }, scales: { x: { grid: { display: false } }, y: { grid: { color: 'rgba(255,255,255,0.05)' } } } } 
+        });
     }
 
     function renderDistributionChart(bets) {
         const ctx = document.getElementById('distChart').getContext('2d');
         if (dChart) dChart.destroy();
         const bins = {};
-        bets.forEach(b => { const val = Math.floor(b.profit); bins[val] = (bins[val] || 0) + 1; });
+        bets.forEach(b => { 
+            const val = Math.floor(b.profit); 
+            bins[val] = (bins[val] || 0) + 1; 
+        });
         const labels = Object.keys(bins).sort((a, b) => a - b);
-        dChart = new Chart(ctx, { type: 'bar', data: { labels: labels, datasets: [{ data: labels.map(l => bins[l]), backgroundColor: 'rgba(168, 85, 247, 0.5)' }] }, options: { responsive: true, plugins: { legend: { display: false } } } });
+        dChart = new Chart(ctx, { 
+            type: 'bar', 
+            data: { 
+                labels: labels, 
+                datasets: [{ 
+                    data: labels.map(l => bins[l]), 
+                    backgroundColor: 'rgba(168, 85, 247, 0.5)',
+                    borderRadius: 4
+                }] 
+            }, 
+            options: { responsive: true, plugins: { legend: { display: false } } } 
+        });
     }
 
     function renderTable(bets) {
         const tbody = document.getElementById('data-table');
-        tbody.innerHTML = [...bets].reverse().map(b => `<tr><td>${b.teams}</td><td>${b.prob}%</td><td>-</td><td>${b.edge}%</td><td>${b.stake}u</td><td style="color:${b.profit>=0?'var(--success)':'var(--danger)'}">${b.profit}u</td></tr>`).join('');
+        tbody.innerHTML = [...bets].reverse().map(b => {
+            const ev = ((parseFloat(b.odd) * (parseFloat(b.prob)/100)) - 1).toFixed(2);
+            return `<tr>
+                <td>${b.teams}</td>
+                <td>${b.prob}%</td>
+                <td style="color:${ev > 0 ? 'var(--success)' : 'var(--text-muted)'}">${ev}</td>
+                <td>${b.edge}%</td>
+                <td>${b.stake}u</td>
+                <td style="color:${b.profit>=0?'var(--success)':'var(--danger)'}; font-weight:bold;">${b.profit}u</td>
+            </tr>`;
+        }).join('');
     }
 
-    function clearBacktest() { localStorage.removeItem(BACKTEST_KEY); location.reload(); }
+    function clearBacktest() { 
+        localStorage.removeItem(BACKTEST_KEY); 
+        location.reload(); 
+    }
+
     window.onload = runBacktest;
 </script>
 </body>
