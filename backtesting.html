@@ -66,7 +66,7 @@
 
         .secondary-layout {
             display: grid;
-            grid-template-columns: 1fr 1fr;
+            grid-template-columns: 1fr 1fr 1fr;
             gap: 20px;
             margin-bottom: 30px;
         }
@@ -105,8 +105,6 @@
         td { padding: 12px; border-bottom: 1px solid var(--border); }
 
         .badge { padding: 4px 8px; border-radius: 4px; font-size: 0.65rem; font-weight: bold; text-transform: uppercase; }
-        .badge-win { background: rgba(16, 185, 129, 0.2); color: var(--success); }
-        .badge-loss { background: rgba(239, 68, 68, 0.2); color: var(--danger); }
         
         button {
             background: var(--accent);
@@ -198,8 +196,12 @@
 
     <div class="secondary-layout">
         <div class="chart-box">
-            <h4 style="margin:0 0 10px 0; font-size:0.8rem; color:var(--accent)">CORRELACIÓN: EDGE % vs PROFIT REAL</h4>
-            <canvas id="scatterChart" height="130"></canvas>
+            <h4 style="margin:0 0 10px 0; font-size:0.8rem; color:var(--accent)">EDGE % vs PROFIT</h4>
+            <canvas id="scatterChart" height="200"></canvas>
+        </div>
+        <div class="chart-box">
+            <h4 style="margin:0 0 10px 0; font-size:0.8rem; color:var(--entropy-color)">DISTRIBUCIÓN DE PROBABILIDAD (RETORNOS)</h4>
+            <canvas id="distChart" height="200"></canvas>
         </div>
         <div class="analysis-box">
             <h3 style="margin:0 0 10px 0; font-size: 1rem; color:var(--accent)">DIAGNÓSTICO MAESTRO DE VALOR</h3>
@@ -226,10 +228,8 @@
 
 <script>
     const BACKTEST_KEY = 'betags_backtesting';
-    let pChart, sChart;
+    let pChart, sChart, dChart;
 
-    // Configuración para renderizar LaTeX si fuera necesario (opcional en este entorno)
-    
     function runBacktest() {
         const rawData = localStorage.getItem(BACKTEST_KEY);
         const bets = JSON.parse(rawData) || [];
@@ -240,6 +240,7 @@
         updateUI(stats);
         renderChart(sortedBets);
         renderScatterChart(sortedBets);
+        renderDistributionChart(sortedBets);
         renderTable(sortedBets);
     }
 
@@ -260,7 +261,7 @@
             const prob = parseFloat(b.prob)/100 || (1/parseFloat(b.odd_fair)) || 0;
             const odd = parseFloat(b.odd);
 
-            returns.push(p / s); // Retorno relativo por apuesta
+            returns.push(p); 
 
             const ev = (prob * (odd - 1) * s) - ((1 - prob) * s);
             totalEV += ev;
@@ -283,17 +284,14 @@
         });
 
         // --- CÁLCULOS TERMODINÁMICOS ---
-        
-        // 1. Entropía de Shannon (desorden en la distribución de aciertos/errores)
         const wr = wins / bets.length;
         const lr = 1 - wr;
-        // S = -p*log2(p) - q*log2(q)
         const entropy = (wr > 0 && lr > 0) ? -(wr * Math.log2(wr) + lr * Math.log2(lr)) : 0;
 
-        // 2. Eficiencia Termodinámica (Adaptación de Carnot)
-        // η = (Retorno Neto) / (Retorno Bruto posible) -> Simplificado como Yield Ajustado por Varianza
-        const variance = returns.reduce((a, b) => a + Math.pow(b - (totalProfit/totalStaked), 2), 0) / returns.length;
-        const efficiency = Math.max(0, ( (totalProfit/totalStaked) / ((totalProfit/totalStaked) + variance) ) * 100);
+        const relReturns = bets.map(b => b.profit / b.stake);
+        const avgRelReturn = totalProfit / totalStaked;
+        const variance = relReturns.reduce((a, b) => a + Math.pow(b - avgRelReturn, 2), 0) / relReturns.length;
+        const efficiency = Math.max(0, ( avgRelReturn / (avgRelReturn + Math.sqrt(variance)) ) * 100);
 
         // --- ESTADÍSTICA CLÁSICA ---
         const avgOdd = bets.reduce((a,b) => a + parseFloat(b.odd), 0) / bets.length;
@@ -341,9 +339,9 @@
             .map(([k, v]) => `<div class="insight-item"><span>${k.substring(0,15)}</span><span class="insight-value">${v.toFixed(1)}u</span></div>`).join('');
 
         document.getElementById('master-feedback').innerHTML = `
-            ${stats.pValue < 0.05 ? '✅ <strong>Habilidad Confirmada:</strong> Estás venciendo a la entropía del mercado.' : '⚠️ <strong>Caos Térmico:</strong> La varianza es superior a tu edge. Riesgo de evaporación de banca.'} 
-            Tu eficiencia del <strong>${stats.efficiency}%</strong> indica cuánto de tu riesgo se convierte realmente en profit. 
-            Una entropía de <strong>${stats.entropy}</strong> sugiere un sistema ${stats.entropy > 0.9 ? 'altamente inestable' : 'bajo control operativo'}.
+            ${stats.pValue < 0.05 ? '✅ <strong>Habilidad Confirmada:</strong> Estás venciendo a la entropía.' : '⚠️ <strong>Caos Térmico:</strong> Resultados inconsistentes.'} 
+            Tu eficiencia es del <strong>${stats.efficiency}%</strong>. 
+            Entropía: <strong>${stats.entropy}</strong> (${stats.entropy > 0.9 ? 'Inestable' : 'Bajo control'}).
         `;
     }
 
@@ -383,6 +381,43 @@
                 scales: {
                     x: { title: { display: true, text: 'Edge %', color: '#64748b'} },
                     y: { title: { display: true, text: 'Profit U', color: '#64748b'} }
+                }
+            }
+        });
+    }
+
+    function renderDistributionChart(bets) {
+        const ctx = document.getElementById('distChart').getContext('2d');
+        if (dChart) dChart.destroy();
+
+        // Binning (Agrupar resultados en rangos de 0.5 unidades)
+        const bins = {};
+        bets.forEach(b => {
+            const val = Math.floor(b.profit * 2) / 2;
+            bins[val] = (bins[val] || 0) + 1;
+        });
+
+        const labels = Object.keys(bins).sort((a, b) => a - b);
+        const data = labels.map(l => bins[l]);
+
+        dChart = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: labels.map(l => l + 'u'),
+                datasets: [{
+                    label: 'Frecuencia',
+                    data: data,
+                    backgroundColor: labels.map(l => l >= 0 ? 'rgba(16, 185, 129, 0.5)' : 'rgba(239, 68, 68, 0.5)'),
+                    borderColor: labels.map(l => l >= 0 ? 'var(--success)' : 'var(--danger)'),
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: { legend: { display: false } },
+                scales: {
+                    y: { beginAtZero: true, title: { display: true, text: 'Frecuencia de Ocurrencia', color: '#64748b' } },
+                    x: { title: { display: true, text: 'Unidades Ganadas/Perdidas', color: '#64748b' } }
                 }
             }
         });
