@@ -14,6 +14,7 @@
             --success: #10b981;
             --danger: #ef4444;
             --warning: #f59e0b;
+            --entropy-color: #a855f7;
             --text-main: #f1f5f9;
             --text-muted: #64748b;
             --border: rgba(255,255,255,0.05);
@@ -40,7 +41,7 @@
 
         .grid-stats {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
             gap: 15px;
             margin-bottom: 30px;
         }
@@ -134,7 +135,7 @@
     <header>
         <div>
             <h1 style="margin:0">BetAGS <span style="color:var(--accent)">Quantum Miner Pro</span></h1>
-            <p style="color: var(--text-muted); margin: 5px 0 0 0;">Validación Estadística y Criterio de Kelly.</p>
+            <p style="color: var(--text-muted); margin: 5px 0 0 0;">Análisis de Entropía y Segunda Ley de la Termodinámica Financiera.</p>
         </div>
         <div>
             <button onclick="clearBacktest()" style="background: transparent; color: var(--danger); border: 1px solid var(--danger);">Reset</button>
@@ -146,16 +147,26 @@
         <div class="stat-card"><h3>Yield Total</h3><p id="roi-val">0%</p></div>
         <div class="stat-card"><h3>p-Value (Suerte)</h3><p id="p-val">0.00</p></div>
         <div class="stat-card"><h3>Kelly Sugerido</h3><p id="kelly-val">0%</p></div>
+        <div class="stat-card" style="border-color: var(--entropy-color)"><h3>Entropía ($S$)</h3><p id="entropy-val" style="color: var(--entropy-color)">0.00</p></div>
+        <div class="stat-card" style="border-color: var(--success)"><h3>Eficiencia ($\eta$)</h3><p id="efficiency-val" style="color: var(--success)">0%</p></div>
         <div class="stat-card"><h3>Profit Neto</h3><p id="profit-val">0u</p></div>
-        <div class="stat-card"><h3>EV por Apuesta</h3><p id="ev-val">0u</p></div>
     </div>
 
     <div class="math-box">
-        <h4 style="margin:0 0 10px 0; font-size:0.8rem; color:var(--accent); text-transform:uppercase;">Ecuaciones de Rendimiento Cuántico</h4>
-        <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap:20px; font-size:0.85rem; color:var(--text-muted);">
-            <div><strong>Crecimiento Kelly:</strong> Optimiza el crecimiento de banca evitando la ruina.</div>
-            <div><strong>Significancia (p):</strong> Si p < 0.05, tu sistema es estadísticamente superior al azar.</div>
-            <div><strong>Valor Esperado (EV):</strong> La ganancia matemática teórica por cada unidad apostada.</div>
+        <h4 style="margin:0 0 10px 0; font-size:0.8rem; color:var(--accent); text-transform:uppercase;">Ecuaciones de Termodinámica de Backtesting</h4>
+        <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap:20px; font-size:0.85rem; color:var(--text-muted);">
+            <div>
+                <strong style="color: var(--text-main)">Eficiencia ($\eta$):</strong> 
+                $\eta = 1 - \frac{\text{Varianza}}{\text{Retorno Esperado}}$. <br>Mide cuánto "trabajo" (profit) extraes de la "energía" (stake).
+            </div>
+            <div>
+                <strong style="color: var(--text-main)">Entropía de Shannon ($S$):</strong> 
+                $S = -\sum p_i \log_2(p_i)$. <br>Si $S$ es muy alta, el sistema es caótico y el riesgo de ruina aumenta.
+            </div>
+            <div>
+                <strong style="color: var(--text-main)">Ley de Crecimiento:</strong> 
+                $G = \text{Yield} - \frac{S^2}{2}$. <br>El crecimiento real penalizado por el desorden de los resultados.
+            </div>
         </div>
     </div>
 
@@ -217,6 +228,8 @@
     const BACKTEST_KEY = 'betags_backtesting';
     let pChart, sChart;
 
+    // Configuración para renderizar LaTeX si fuera necesario (opcional en este entorno)
+    
     function runBacktest() {
         const rawData = localStorage.getItem(BACKTEST_KEY);
         const bets = JSON.parse(rawData) || [];
@@ -232,6 +245,7 @@
 
     function processDeepStats(bets) {
         let totalProfit = 0, totalStaked = 0, totalEdge = 0, wins = 0, totalEV = 0;
+        let returns = [];
         
         const insights = {
             edgeRanges: { 'Bajo (0-5%)': 0, 'Medio (5-12%)': 0, 'Alto (>12%)': 0 },
@@ -246,7 +260,8 @@
             const prob = parseFloat(b.prob)/100 || (1/parseFloat(b.odd_fair)) || 0;
             const odd = parseFloat(b.odd);
 
-            // Cálculo de EV individual
+            returns.push(p / s); // Retorno relativo por apuesta
+
             const ev = (prob * (odd - 1) * s) - ((1 - prob) * s);
             totalEV += ev;
             
@@ -267,26 +282,38 @@
             insights.stakeProfit[b.stake] = (insights.stakeProfit[b.stake] || 0) + p;
         });
 
-        // Cálculo de p-value simplificado (Z-Score)
+        // --- CÁLCULOS TERMODINÁMICOS ---
+        
+        // 1. Entropía de Shannon (desorden en la distribución de aciertos/errores)
+        const wr = wins / bets.length;
+        const lr = 1 - wr;
+        // S = -p*log2(p) - q*log2(q)
+        const entropy = (wr > 0 && lr > 0) ? -(wr * Math.log2(wr) + lr * Math.log2(lr)) : 0;
+
+        // 2. Eficiencia Termodinámica (Adaptación de Carnot)
+        // η = (Retorno Neto) / (Retorno Bruto posible) -> Simplificado como Yield Ajustado por Varianza
+        const variance = returns.reduce((a, b) => a + Math.pow(b - (totalProfit/totalStaked), 2), 0) / returns.length;
+        const efficiency = Math.max(0, ( (totalProfit/totalStaked) / ((totalProfit/totalStaked) + variance) ) * 100);
+
+        // --- ESTADÍSTICA CLÁSICA ---
         const avgOdd = bets.reduce((a,b) => a + parseFloat(b.odd), 0) / bets.length;
         const expectedWinRate = 1 / avgOdd;
-        const actualWinRate = wins / bets.length;
-        const zScore = (actualWinRate - expectedWinRate) / Math.sqrt((expectedWinRate * (1 - expectedWinRate)) / bets.length);
+        const zScore = (wr - expectedWinRate) / Math.sqrt((expectedWinRate * (1 - expectedWinRate)) / bets.length);
         const pValue = 1 - 0.5 * (1 + Math.sign(zScore) * (1 - Math.exp(-2 * Math.pow(zScore, 2) / Math.PI)));
 
-        // Kelly Sugerido (Fraccional 0.25 para seguridad)
         const avgEdgeDecimal = (totalEdge / bets.length) / 100;
         const bKelly = avgOdd - 1;
         const kelly = ((avgEdgeDecimal * bKelly + avgEdgeDecimal) / bKelly) * 0.25 * 100;
 
         return {
             yield: ((totalProfit/totalStaked)*100).toFixed(2),
-            winRate: (actualWinRate*100).toFixed(1),
-            avgEdge: (totalEdge/bets.length).toFixed(2),
+            winRate: (wr*100).toFixed(1),
             totalProfit: totalProfit.toFixed(2),
             pValue: pValue.toFixed(4),
             kelly: Math.max(0, kelly).toFixed(2),
             avgEV: (totalEV / bets.length).toFixed(2),
+            entropy: entropy.toFixed(3),
+            efficiency: efficiency.toFixed(1),
             insights
         };
     }
@@ -297,7 +324,8 @@
         document.getElementById('p-val').style.color = stats.pValue < 0.05 ? "var(--success)" : "var(--warning)";
         document.getElementById('kelly-val').innerText = stats.kelly + "%";
         document.getElementById('profit-val').innerText = stats.totalProfit + "u";
-        document.getElementById('ev-val').innerText = stats.avgEV + "u";
+        document.getElementById('entropy-val').innerText = stats.entropy;
+        document.getElementById('efficiency-val').innerText = stats.efficiency + "%";
 
         const renderList = (id, data) => {
             document.getElementById(id).innerHTML = Object.entries(data)
@@ -313,9 +341,9 @@
             .map(([k, v]) => `<div class="insight-item"><span>${k.substring(0,15)}</span><span class="insight-value">${v.toFixed(1)}u</span></div>`).join('');
 
         document.getElementById('master-feedback').innerHTML = `
-            ${stats.pValue < 0.05 ? '✅ <strong>Habilidad Confirmada:</strong> Tu p-value indica que tus ganancias NO son casualidad.' : '⚠️ <strong>Varianza Detectada:</strong> Tus resultados podrían ser azar. Necesitas más muestras.'} 
-            Tu EV promedio por apuesta es de <strong>${stats.avgEV} unidades</strong>. 
-            El Criterio de Kelly sugiere un stake agresivo del <strong>${stats.kelly}%</strong> para maximizar crecimiento.
+            ${stats.pValue < 0.05 ? '✅ <strong>Habilidad Confirmada:</strong> Estás venciendo a la entropía del mercado.' : '⚠️ <strong>Caos Térmico:</strong> La varianza es superior a tu edge. Riesgo de evaporación de banca.'} 
+            Tu eficiencia del <strong>${stats.efficiency}%</strong> indica cuánto de tu riesgo se convierte realmente en profit. 
+            Una entropía de <strong>${stats.entropy}</strong> sugiere un sistema ${stats.entropy > 0.9 ? 'altamente inestable' : 'bajo control operativo'}.
         `;
     }
 
@@ -349,7 +377,14 @@
                     pointRadius: 6
                 }]
             },
-            options: { responsive: true, plugins: { legend: { display: false } } }
+            options: { 
+                responsive: true, 
+                plugins: { legend: { display: false } },
+                scales: {
+                    x: { title: { display: true, text: 'Edge %', color: '#64748b'} },
+                    y: { title: { display: true, text: 'Profit U', color: '#64748b'} }
+                }
+            }
         });
     }
 
@@ -371,7 +406,7 @@
         }).join('');
     }
 
-    function clearBacktest() { if(confirm('¿Reiniciar?')) { localStorage.removeItem(BACKTEST_KEY); location.reload(); } }
+    function clearBacktest() { if(confirm('¿Reiniciar todos los datos térmicos?')) { localStorage.removeItem(BACKTEST_KEY); location.reload(); } }
     window.onload = runBacktest;
 </script>
 </body>
