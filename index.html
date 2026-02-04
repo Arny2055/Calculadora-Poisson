@@ -243,7 +243,7 @@
                     'portugal', 'rusia', 'russia', 'turkey', 'turquía', 'brasil a', 'brazil', 'chile', 
                     'uruguay', 'paraguay', 'ecuador', 'concacaf', 'uefa', 'south africa', 'scotland', 
                     'escocia', 'bolivia', 'mls next', 'copa oro', 'mls pro', 'premier league', 'fa cup', 
-                    'copa del rey'
+                    'copa del rey', 'liga nacional', 'guatemala'
                 ], 
                 value: -0.11, 
                 label: 'Standard' 
@@ -262,7 +262,7 @@
             }
         ];
 
-        // --- FUNCIÓN SMART PASTE (IDENTIFICACIÓN EQUIPOS Y XG) ---
+        // --- FUNCIÓN SMART PASTE (IDENTIFICACIÓN EQUIPOS, XG Y LIGA) ---
         function processSmartPaste() {
             const rawText = document.getElementById('smart_paste_input').value;
             if (!rawText.trim()) return alert("Por favor, pega el texto de BeSoccer.");
@@ -270,9 +270,10 @@
             const lines = rawText.split('\n').map(line => line.trim()).filter(line => line !== "");
             let teams = [];
             let xgs = [];
+            let detectedLeague = "";
 
-            // Lógica de extracción basada en el patrón: 
-            // PROBABILIDAD DE VICTORIA -> Siguiente línea: Equipo -> Siguiente línea: xG
+            // 1. Extraer Equipos y xG
+            // Lógica basada en el patrón: PROBABILIDAD DE VICTORIA -> Equipo -> xG
             for (let i = 0; i < lines.length; i++) {
                 if (lines[i].includes("PROBABILIDAD DE VICTORIA")) {
                     if (lines[i+1]) teams.push(lines[i+1]);
@@ -283,23 +284,42 @@
                 }
             }
 
+            // 2. Extraer Liga (Nueva Mejora: Detección automática de liga en el texto pegado)
+            const lowerText = rawText.toLowerCase();
+            for (const group of RHO_MAP) {
+                for (const key of group.keys) {
+                    if (lowerText.includes(key.toLowerCase())) {
+                        detectedLeague = key.toUpperCase();
+                        break;
+                    }
+                }
+                if (detectedLeague) break;
+            }
+
             if (teams.length >= 2 && xgs.length >= 2) {
-                // Rellenar campos automáticamente - AHORA CON SEPARADOR "-"
+                // Rellenar campos automáticamente
                 document.getElementById('event_name').value = `${teams[0]} - ${teams[1]}`;
                 document.getElementById('h_gf').value = xgs[0];
                 document.getElementById('a_gf').value = xgs[1];
+                
+                if (detectedLeague) {
+                    document.getElementById('league_name').value = detectedLeague;
+                }
 
-                // Cambiar a modo xG automáticamente ya que es la data que estamos importando
+                // Cambiar a modo xG automáticamente
                 setAnalysisMode('XG');
+                
+                // Ajustar Rho automáticamente basado en la liga detectada
+                autoAdjustRho();
                 
                 // Ejecutar cálculo automático
                 calculatePoisson();
 
-                // Feedback visual
-                console.log("Datos importados con éxito:", teams, xgs);
-                document.getElementById('smart_paste_input').value = ""; // Limpiar para el siguiente
+                // Limpiar para el siguiente
+                document.getElementById('smart_paste_input').value = "";
+                console.log("Importado con éxito. Liga detectada:", detectedLeague || "No identificada");
             } else {
-                alert("No se pudo extraer la información. Asegúrate de copiar el bloque completo de BeSoccer.");
+                alert("No se pudo extraer la información de equipos/xG. Asegúrate de copiar el bloque completo.");
             }
         }
 
@@ -450,7 +470,7 @@
             const odd = parseFloat(document.getElementById('odd_' + id).value) || 0;
             const edgeEl = document.getElementById('edge_' + id);
             const stakeEl = document.getElementById('stake_' + id);
-            const rowEl = document.getElementById('row_' + id);
+            const rowEl = document.getElementById('row_${id}');
             if(odd > 1) {
                 const edge = (odd * prob) - 1;
                 const edgePercent = (edge * 100).toFixed(1);
