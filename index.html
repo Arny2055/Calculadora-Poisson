@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Football Data Hub PRO - API-FOOTBALL v3</title>
+    <title>Football Data Hub PRO - Anti-429</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <style>
@@ -19,16 +19,16 @@
     <header class="bg-gradient-to-r from-blue-900 to-blue-800 p-6 shadow-2xl sticky top-0 z-50">
         <div class="container mx-auto flex flex-col md:flex-row justify-between items-center gap-4">
             <h1 class="text-3xl font-extrabold flex items-center gap-2 tracking-tight">
-                <i class="fas fa-chart-line text-blue-400"></i> FOOTBALL<span class="text-blue-400">ULTRA</span>
+                <i class="fas fa-shield-alt text-blue-400"></i> FOOTBALL<span class="text-blue-400">SAFE</span>
             </h1>
-            <div class="flex flex-col gap-1 w-full md:w-auto">
+            <div class="flex flex-col gap-1 w-full md:w-auto text-right">
                 <div class="flex gap-2">
                     <input type="password" id="api-key" value="b87bae2028d2da2ee28c5d36a60f3ab8"
                            class="bg-blue-950 border border-blue-700 rounded px-4 py-2 w-full md:w-80 focus:outline-none focus:ring-2 focus:ring-blue-400 transition-all text-sm"
                            placeholder="Tu API Key de RapidAPI">
                     <button onclick="saveApiKey()" class="bg-blue-600 px-3 rounded hover:bg-blue-500 shadow-lg"><i class="fas fa-save"></i></button>
                 </div>
-                <span class="text-[10px] text-blue-200 opacity-70 italic uppercase tracking-widest text-right">* Motor: API-Football v3 (RapidAPI)</span>
+                <span id="rate-info" class="text-[10px] text-emerald-400 font-mono">ESTADO: LISTO PARA PETICIÓN</span>
             </div>
         </div>
     </header>
@@ -39,11 +39,11 @@
                 <button onclick="fetchCompetitions()" class="bg-blue-600 hover:bg-blue-500 px-5 py-2.5 rounded-xl transition-all font-bold shadow-lg flex items-center gap-2 text-sm">
                     <i class="fas fa-trophy"></i> Ligas Populares
                 </button>
-                <button onclick="fetchMatches('live')" class="bg-red-600 hover:bg-red-500 px-5 py-2.5 rounded-xl transition-all font-bold shadow-lg flex items-center gap-2 text-sm animate-pulse">
+                <button onclick="fetchMatches('live')" class="bg-red-600 hover:bg-red-500 px-5 py-2.5 rounded-xl transition-all font-bold shadow-lg flex items-center gap-2 text-sm">
                     <i class="fas fa-satellite-dish"></i> En Vivo
                 </button>
                 <div class="flex items-center bg-gray-700 rounded-xl px-3 border border-gray-600">
-                    <i class="fas fa-search-plus mr-2 text-gray-400"></i>
+                    <i class="fas fa-calendar-alt mr-2 text-gray-400"></i>
                     <input type="date" id="date-picker" onchange="fetchByDate(this.value)" class="bg-transparent text-sm focus:outline-none py-2 uppercase font-mono">
                 </div>
             </div>
@@ -51,102 +51,105 @@
 
         <div id="loader" class="hidden flex flex-col items-center justify-center my-20">
             <div class="loader ease-linear rounded-full border-4 border-t-4 border-blue-500 h-16 w-16 mb-4"></div>
-            <p class="text-blue-400 animate-pulse font-mono">EXTRAYENDO DATOS PRO...</p>
+            <p id="loader-text" class="text-blue-400 animate-pulse font-mono text-xs uppercase tracking-widest">Sincronizando...</p>
         </div>
 
         <div id="content" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            <div class="col-span-full text-center py-20 text-gray-500 border-2 border-dashed border-gray-800 rounded-3xl">
-                <i class="fas fa-terminal fa-4x mb-4 opacity-20"></i>
-                <p class="text-xl font-light italic">Esperando comando para la API v3...</p>
             </div>
-        </div>
     </main>
 
     <script>
-        // Nota: API-Football en RapidAPI no suele requerir proxy CORS si se usa desde cliente, 
-        // pero lo mantenemos como capa de seguridad si hay fallos de red.
         const API_HOST = 'api-football-v1.p.rapidapi.com';
         const API_BASE = 'https://api-football-v1.p.rapidapi.com/v3';
-
-        window.onload = () => {
-            const savedKey = localStorage.getItem('fb_api_key_v3');
-            if (savedKey) document.getElementById('api-key').value = savedKey;
-        };
-
-        function saveApiKey() {
-            const key = document.getElementById('api-key').value;
-            localStorage.setItem('fb_api_key_v3', key);
-            alert('API Key de RapidAPI guardada.');
-        }
+        
+        // Cache simple para evitar peticiones repetidas
+        const CACHE = {};
 
         async function apiRequest(endpoint) {
+            if (CACHE[endpoint]) {
+                console.log("Cargando desde Cache:", endpoint);
+                return CACHE[endpoint];
+            }
+
             const apiKey = document.getElementById('api-key').value;
             const loader = document.getElementById('loader');
-            const content = document.getElementById('content');
+            const rateInfo = document.getElementById('rate-info');
             
             loader.classList.remove('hidden');
+            rateInfo.innerText = "PETICIÓN EN CURSO...";
+            rateInfo.classList.replace('text-emerald-400', 'text-amber-400');
 
             try {
                 const response = await fetch(`${API_BASE}/${endpoint}`, {
                     method: 'GET',
-                    headers: {
-                        'x-rapidapi-key': apiKey,
-                        'x-rapidapi-host': API_HOST
-                    }
+                    headers: { 'x-rapidapi-key': apiKey, 'x-rapidapi-host': API_HOST }
                 });
                 
-                if (!response.ok) throw new Error(`Error: ${response.status} - Verifica tu suscripción en RapidAPI`);
+                if (response.status === 429) {
+                    throw new Error("LÍMITE EXCEDIDO: Espera 1 minuto y vuelve a intentar.");
+                }
+                
+                if (!response.ok) throw new Error("Error de conexión");
                 
                 const data = await response.json();
+                
+                // Guardar en cache
+                CACHE[endpoint] = data.response;
+                
+                setTimeout(() => {
+                    rateInfo.innerText = "LISTO PARA PETICIÓN";
+                    rateInfo.classList.replace('text-amber-400', 'text-emerald-400');
+                }, 2000);
+
                 loader.classList.add('hidden');
-
-                if (data.errors && Object.keys(data.errors).length > 0) {
-                    throw new Error(JSON.stringify(data.errors));
-                }
-
                 return data.response;
             } catch (error) {
                 loader.classList.add('hidden');
-                content.innerHTML = `
-                    <div class="col-span-full bg-red-950/30 border border-red-500/50 p-8 rounded-3xl text-center">
-                        <i class="fas fa-exclamation-triangle text-4xl mb-4 text-red-500"></i>
-                        <p class="text-red-400 font-mono text-sm">${error.message}</p>
-                    </div>`;
+                rateInfo.innerText = "ERROR DE SEÑAL";
+                rateInfo.classList.replace('text-amber-400', 'text-red-500');
+                showErrorMessage(error.message);
                 return null;
             }
         }
 
+        function showErrorMessage(msg) {
+            document.getElementById('content').innerHTML = `
+                <div class="col-span-full bg-red-900/20 border border-red-500/30 p-10 rounded-3xl text-center">
+                    <i class="fas fa-clock text-4xl mb-4 text-red-500"></i>
+                    <h3 class="text-xl font-bold text-white mb-2 uppercase">Límite de API alcanzado</h3>
+                    <p class="text-red-400 font-mono text-sm">${msg}</p>
+                    <p class="mt-4 text-xs text-gray-500 italic">RapidAPI Free permite 10 peticiones/min. Por favor, no hagas clics consecutivos.</p>
+                </div>`;
+        }
+
         async function fetchCompetitions() {
-            // En API-Football v3, listamos ligas principales filtrando por IDs conocidos para el plan gratuito/demo
-            // IDs comunes: 39 (PL), 140 (La Liga), 135 (Serie A), 78 (Bundesliga), 61 (Ligue 1)
-            const leagueIds = [39, 140, 135, 78, 61, 2, 3, 848]; 
+            const leagueIds = [39, 140, 135, 78, 61]; 
             const content = document.getElementById('content');
             content.innerHTML = '';
             
             for (let id of leagueIds) {
                 const data = await apiRequest(`leagues?id=${id}`);
-                if (!data) continue;
-                
-                const item = data[0];
-                content.innerHTML += `
-                    <div class="bg-gray-800 rounded-2xl p-6 border border-gray-700 hover:border-blue-500 transition-all shadow-xl group">
-                        <div class="flex items-center gap-4 mb-6">
-                            <img src="${item.league.logo}" class="w-14 h-14 object-contain">
-                            <div>
-                                <h3 class="text-xl font-bold leading-tight">${item.league.name}</h3>
-                                <span class="text-xs text-blue-400 font-mono">${item.country.name}</span>
-                            </div>
-                        </div>
-                        <div class="grid grid-cols-2 gap-2">
-                            <button onclick="fetchStandings(${item.league.id})" class="bg-blue-700/20 hover:bg-blue-600 text-blue-400 hover:text-white p-2 rounded-lg text-xs font-bold transition-all border border-blue-700/50">
-                                TABLA
-                            </button>
-                            <button onclick="fetchMatches('league=${item.league.id}&season=2025')" class="bg-gray-700/50 hover:bg-gray-600 p-2 rounded-lg text-xs font-bold transition-all">
-                                PARTIDOS
-                            </button>
-                        </div>
-                    </div>`;
+                if (data) renderLeague(data[0]);
+                // Espera 1.5 segundos entre cada liga para evitar el error 429
+                await new Promise(resolve => setTimeout(resolve, 1500));
             }
+        }
+
+        function renderLeague(item) {
+            const content = document.getElementById('content');
+            content.innerHTML += `
+                <div class="bg-gray-800 rounded-2xl p-6 border border-gray-700 hover:border-blue-500 transition-all shadow-xl">
+                    <div class="flex items-center gap-4 mb-6">
+                        <img src="${item.league.logo}" class="w-12 h-12 object-contain">
+                        <div>
+                            <h3 class="text-lg font-bold">${item.league.name}</h3>
+                            <span class="text-[10px] text-blue-400 font-mono uppercase">${item.country.name}</span>
+                        </div>
+                    </div>
+                    <button onclick="fetchStandings(${item.league.id})" class="w-full bg-blue-600/10 hover:bg-blue-600 text-blue-400 hover:text-white p-2 rounded-lg text-xs font-bold transition-all border border-blue-600/30">
+                        VER CLASIFICACIÓN
+                    </button>
+                </div>`;
         }
 
         async function fetchMatches(query) {
@@ -156,103 +159,64 @@
 
             const content = document.getElementById('content');
             content.className = "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6";
-            content.innerHTML = '';
-
-            if (data.length === 0) {
-                content.innerHTML = '<div class="col-span-full text-center p-20 bg-gray-800 rounded-3xl border border-gray-700 italic">No hay partidos disponibles.</div>';
-                return;
-            }
-
-            data.forEach(item => {
-                const f = item.fixture;
-                const goals = item.goals;
-                const status = f.status.short;
-                
-                content.innerHTML += `
-                    <div class="bg-gray-800 rounded-2xl p-5 border-t-4 ${status === '1H' || status === '2H' ? 'border-red-500 animate-pulse' : 'border-gray-700'} shadow-xl">
-                        <div class="flex justify-between text-[10px] text-gray-500 mb-4 font-bold uppercase">
-                            <span>${item.league.name}</span>
-                            <span class="${status === 'FT' ? 'text-gray-400' : 'text-emerald-400'}">${f.status.long}</span>
-                        </div>
-                        <div class="flex items-center justify-between gap-2">
-                            <div class="flex-1 text-center">
-                                <img src="${item.teams.home.logo}" class="w-10 h-10 mx-auto mb-2">
-                                <p class="text-xs font-bold truncate">${item.teams.home.name}</p>
-                            </div>
-                            <div class="flex flex-col items-center px-4">
-                                <div class="text-2xl font-black font-mono text-white">
-                                    ${goals.home ?? 0} : ${goals.away ?? 0}
-                                </div>
-                                <span class="text-[10px] text-blue-400 font-bold">${f.status.elapsed ?? 0}'</span>
-                            </div>
-                            <div class="flex-1 text-center">
-                                <img src="${item.teams.away.logo}" class="w-10 h-10 mx-auto mb-2">
-                                <p class="text-xs font-bold truncate">${item.teams.away.name}</p>
-                            </div>
-                        </div>
-                    </div>`;
-            });
+            content.innerHTML = data.length === 0 
+                ? '<div class="col-span-full text-center p-20 opacity-50 italic">No hay partidos ahora.</div>'
+                : data.map(item => renderMatchCard(item)).join('');
         }
 
-        async function fetchByDate(date) {
-            await fetchMatches(`date=${date}`);
+        function renderMatchCard(item) {
+            return `
+                <div class="bg-gray-800 rounded-2xl p-5 border-l-4 ${item.fixture.status.short === 'NS' ? 'border-gray-600' : 'border-emerald-500'} shadow-xl">
+                    <div class="flex justify-between text-[9px] text-gray-500 mb-3 font-bold uppercase">
+                        <span>${item.league.name}</span>
+                        <span>${item.fixture.status.long}</span>
+                    </div>
+                    <div class="flex items-center justify-between">
+                        <div class="text-center w-1/3">
+                            <img src="${item.teams.home.logo}" class="w-8 h-8 mx-auto mb-1">
+                            <p class="text-[10px] font-bold truncate">${item.teams.home.name}</p>
+                        </div>
+                        <div class="text-xl font-black font-mono w-1/3 text-center">
+                            ${item.goals.home ?? 0}:${item.goals.away ?? 0}
+                        </div>
+                        <div class="text-center w-1/3">
+                            <img src="${item.teams.away.logo}" class="w-8 h-8 mx-auto mb-1">
+                            <p class="text-[10px] font-bold truncate">${item.teams.away.name}</p>
+                        </div>
+                    </div>
+                </div>`;
         }
 
+        async function fetchByDate(date) { await fetchMatches(`date=${date}`); }
+        
         async function fetchStandings(leagueId) {
             const data = await apiRequest(`standings?league=${leagueId}&season=2025`);
             if (!data) return;
-
+            const table = data[0].league.standings[0];
             const content = document.getElementById('content');
             content.className = "block w-full";
-            
-            const leagueData = data[0].league;
-            const table = leagueData.standings[0];
-
             content.innerHTML = `
-                <div class="bg-gray-800 rounded-3xl shadow-2xl overflow-hidden border border-gray-700">
-                    <div class="p-6 bg-gray-750 flex justify-between items-center border-b border-gray-700">
-                        <div class="flex items-center gap-3">
-                            <img src="${leagueData.logo}" class="w-10">
-                            <h2 class="text-2xl font-black uppercase">${leagueData.name}</h2>
-                        </div>
-                        <button onclick="fetchCompetitions()" class="bg-gray-700 p-2 rounded-full hover:bg-gray-600"><i class="fas fa-times px-2"></i></button>
+                <div class="bg-gray-800 rounded-3xl overflow-hidden border border-gray-700">
+                    <div class="p-4 bg-gray-750 flex justify-between items-center border-b border-gray-700">
+                        <h2 class="font-black uppercase tracking-tighter">Tabla de Posiciones</h2>
+                        <button onclick="document.getElementById('content').innerHTML=''; fetchCompetitions();" class="text-xs bg-gray-700 px-3 py-1 rounded">Cerrar</button>
                     </div>
-                    <div class="overflow-x-auto">
-                        <table class="w-full text-sm">
-                            <thead class="bg-black/20 text-gray-400">
-                                <tr class="uppercase text-[10px] tracking-widest">
-                                    <th class="p-4 text-left">#</th>
-                                    <th class="p-4 text-left">Equipo</th>
-                                    <th class="p-4 text-center">PJ</th>
-                                    <th class="p-4 text-center">G</th>
-                                    <th class="p-4 text-center">PTS</th>
-                                    <th class="p-4 text-center">Forma</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                ${table.map(t => `
-                                    <tr class="border-t border-gray-700 hover:bg-white/5 transition-colors">
-                                        <td class="p-4 font-bold text-blue-400">${t.rank}</td>
-                                        <td class="p-4 flex items-center gap-3">
-                                            <img src="${t.team.logo}" class="w-6 h-6">
-                                            <span class="font-bold">${t.team.name}</span>
-                                        </td>
-                                        <td class="p-4 text-center">${t.all.played}</td>
-                                        <td class="p-4 text-center">${t.all.win}</td>
-                                        <td class="p-4 text-center font-black text-white">${t.points}</td>
-                                        <td class="p-4 text-center">
-                                            <div class="flex justify-center gap-1">
-                                                ${t.form ? t.form.split('').map(f => `
-                                                    <span class="w-4 h-4 rounded-sm text-[8px] flex items-center justify-center font-bold ${f === 'W' ? 'bg-green-600' : f === 'L' ? 'bg-red-600' : 'bg-gray-600'}">${f}</span>
-                                                `).join('') : '-'}
-                                            </div>
-                                        </td>
-                                    </tr>
-                                `).join('')}
-                            </tbody>
-                        </table>
-                    </div>
+                    <table class="w-full text-[11px]">
+                        <tr class="bg-black/20 text-gray-500 uppercase"><th class="p-3">Pos</th><th class="p-3 text-left">Equipo</th><th class="p-3">PTS</th></tr>
+                        ${table.map(t => `
+                            <tr class="border-t border-gray-700">
+                                <td class="p-3 text-center font-bold text-blue-400">${t.rank}</td>
+                                <td class="p-3 flex items-center gap-2"><img src="${t.team.logo}" class="w-4 h-4"> ${t.team.name}</td>
+                                <td class="p-3 text-center font-black">${t.points}</td>
+                            </tr>
+                        `).join('')}
+                    </table>
                 </div>`;
+        }
+
+        function saveApiKey() {
+            localStorage.setItem('fb_api_key_v3', document.getElementById('api-key').value);
+            alert('Configuración guardada.');
         }
     </script>
 </body>
