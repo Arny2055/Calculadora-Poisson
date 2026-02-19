@@ -3,18 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Football Data Hub - API Tool</title>
+    <title>Football Data Hub - v2.0 Corregida</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <style>
-        .loader {
-            border-top-color: #3498db;
-            animation: spinner 1.5s linear infinite;
-        }
-        @keyframes spinner {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
+        .loader { border-top-color: #3498db; animation: spinner 1.5s linear infinite; }
+        @keyframes spinner { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
     </style>
 </head>
 <body class="bg-gray-900 text-gray-100 min-h-screen font-sans">
@@ -24,10 +18,11 @@
             <h1 class="text-3xl font-bold flex items-center gap-2">
                 <i class="fas fa-futbol"></i> Football Hub 2026
             </h1>
-            <div class="flex gap-2 w-full md:w-auto">
-                <input type="text" id="api-key" value="ef70b39965b14c3eadce9041d1ab2a56" 
+            <div class="flex flex-col gap-1 w-full md:w-auto">
+                <input type="password" id="api-key" value="ef70b39965b14c3eadce9041d1ab2a56" 
                        class="bg-blue-900 border border-blue-700 rounded px-4 py-2 w-full md:w-80 focus:outline-none focus:ring-2 focus:ring-blue-400"
                        placeholder="Tu API Key">
+                <span class="text-xs text-blue-200 opacity-70 italic">* Usando Proxy CORS para evitar bloqueos</span>
             </div>
         </div>
     </header>
@@ -52,16 +47,14 @@
         <div id="content" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             <div class="col-span-full text-center py-20 text-gray-500">
                 <i class="fas fa-search fa-4x mb-4"></i>
-                <p class="text-xl">Selecciona una opción para empezar a visualizar datos</p>
+                <p class="text-xl">Selecciona una opción para empezar</p>
             </div>
         </div>
     </main>
 
-    <footer class="text-center p-8 text-gray-500 border-t border-gray-800 mt-10">
-        Powered by <a href="https://www.football-data.org/" target="_blank" class="text-blue-400">Football-Data.org</a> API
-    </footer>
-
     <script>
+        // Usamos un proxy de CORS público para evitar el error 'Failed to fetch'
+        const PROXY_URL = 'https://corsproxy.io/?'; 
         const API_BASE = 'https://api.football-data.org/v4';
 
         async function apiRequest(endpoint) {
@@ -70,14 +63,25 @@
             const content = document.getElementById('content');
             
             loader.classList.remove('hidden');
-            content.innerHTML = '';
+            
+            // Construimos la URL pasando por el proxy
+            const targetUrl = `${API_BASE}/${endpoint}`;
+            const finalUrl = PROXY_URL + encodeURIComponent(targetUrl);
 
             try {
-                const response = await fetch(`${API_BASE}/${endpoint}`, {
-                    headers: { 'X-Auth-Token': apiKey }
+                const response = await fetch(finalUrl, {
+                    method: 'GET',
+                    headers: { 
+                        'X-Auth-Token': apiKey,
+                        'Accept': 'application/json'
+                    }
                 });
                 
-                if (!response.ok) throw new Error(`Error: ${response.status}`);
+                if (response.status === 429) {
+                    throw new Error("Límite de peticiones excedido (máximo 10 por minuto). Espera un poco.");
+                }
+
+                if (!response.ok) throw new Error(`Error de servidor: ${response.status}`);
                 
                 const data = await response.json();
                 loader.classList.add('hidden');
@@ -85,9 +89,10 @@
             } catch (error) {
                 loader.classList.add('hidden');
                 content.innerHTML = `
-                    <div class="col-span-full bg-red-900/50 border border-red-500 p-4 rounded text-center text-red-200">
-                        Error al conectar con la API: ${error.message}. <br>
-                        Verifica que tu API Key sea correcta o que no hayas excedido el límite de peticiones.
+                    <div class="col-span-full bg-red-900/50 border border-red-500 p-6 rounded text-center">
+                        <i class="fas fa-exclamation-triangle text-3xl mb-3 text-red-400"></i>
+                        <p class="text-red-200 font-bold">${error.message}</p>
+                        <p class="text-sm text-red-300 mt-2">Nota: Si el error persiste, la API podría estar limitando el acceso desde proxies públicos.</p>
                     </div>`;
                 return null;
             }
@@ -98,20 +103,25 @@
             if (!data) return;
 
             const content = document.getElementById('content');
-            data.competitions.forEach(league => {
-                const card = `
-                    <div class="bg-gray-800 rounded-lg p-6 border border-gray-700 hover:border-blue-500 transition-all shadow-lg">
+            content.className = "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6";
+            content.innerHTML = '';
+
+            // Filtrar solo las competiciones que permite el plan gratuito
+            const freeTierCodes = ['WC', 'CL', 'BL1', 'DED', 'SA', 'PL', 'FL1', 'ELC', 'PPL', 'EC', 'CLI'];
+            const availableLeagues = data.competitions.filter(c => freeTierCodes.includes(c.code));
+
+            availableLeagues.forEach(league => {
+                content.innerHTML += `
+                    <div class="bg-gray-800 rounded-lg p-6 border border-gray-700 hover:border-blue-500 transition-all shadow-lg group">
                         <div class="flex items-center gap-4 mb-4">
-                            <img src="${league.emblem || 'https://via.placeholder.com/50'}" alt="${league.name}" class="w-12 h-12 object-contain">
+                            <img src="${league.emblem || 'https://via.placeholder.com/50'}" alt="${league.name}" class="w-12 h-12 object-contain group-hover:scale-110 transition-transform">
                             <h3 class="text-xl font-bold">${league.name}</h3>
                         </div>
                         <p class="text-gray-400 mb-2"><i class="fas fa-globe mr-2"></i>${league.area.name}</p>
-                        <p class="text-sm text-gray-500">Código: ${league.code}</p>
-                        <button onclick="fetchStandings('${league.code}')" class="mt-4 w-full bg-blue-700 hover:bg-blue-600 py-2 rounded font-medium">
-                            Ver Clasificación
+                        <button onclick="fetchStandings('${league.code}')" class="mt-4 w-full bg-blue-700 hover:bg-blue-600 py-2 rounded font-medium transition-colors">
+                            Ver Tabla de Posiciones
                         </button>
                     </div>`;
-                content.innerHTML += card;
             });
         }
 
@@ -123,27 +133,33 @@
             if (!data) return;
 
             const content = document.getElementById('content');
-            if (data.matches.length === 0) {
-                content.innerHTML = '<p class="col-span-full text-center text-gray-400">No hay partidos programados en este momento.</p>';
+            content.className = "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6";
+            content.innerHTML = '';
+
+            if (!data.matches || data.matches.length === 0) {
+                content.innerHTML = '<div class="col-span-full text-center p-10 bg-gray-800 rounded">No hay partidos activos en este momento.</div>';
                 return;
             }
 
             data.matches.forEach(match => {
-                const card = `
-                    <div class="bg-gray-800 rounded-lg p-4 border-l-4 ${match.status === 'IN_PLAY' ? 'border-red-500' : 'border-blue-500'}">
-                        <div class="text-xs text-gray-400 mb-2 flex justify-between">
+                content.innerHTML += `
+                    <div class="bg-gray-800 rounded-lg p-4 border-l-4 ${match.status === 'IN_PLAY' ? 'border-red-500 animate-pulse' : 'border-blue-500'}">
+                        <div class="text-xs text-gray-400 mb-3 flex justify-between uppercase tracking-wider">
                             <span>${match.competition.name}</span>
-                            <span class="font-bold">${match.status}</span>
+                            <span class="${match.status === 'IN_PLAY' ? 'text-red-400 font-bold' : ''}">${match.status}</span>
                         </div>
-                        <div class="flex justify-between items-center text-lg">
-                            <div class="flex-1 text-right pr-4">${match.homeTeam.shortName}</div>
-                            <div class="bg-gray-700 px-3 py-1 rounded font-mono text-xl">
+                        <div class="flex justify-between items-center gap-2">
+                            <div class="flex-1 text-center">
+                                <p class="font-bold text-sm">${match.homeTeam.shortName}</p>
+                            </div>
+                            <div class="bg-black/50 px-4 py-2 rounded text-xl font-mono font-bold text-yellow-400">
                                 ${match.score.fullTime.home ?? 0} - ${match.score.fullTime.away ?? 0}
                             </div>
-                            <div class="flex-1 text-left pl-4">${match.awayTeam.shortName}</div>
+                            <div class="flex-1 text-center">
+                                <p class="font-bold text-sm">${match.awayTeam.shortName}</p>
+                            </div>
                         </div>
                     </div>`;
-                content.innerHTML += card;
             });
         }
 
@@ -152,47 +168,48 @@
             if (!data) return;
 
             const content = document.getElementById('content');
-            content.classList.remove('grid-cols-1', 'md:grid-cols-2', 'lg:grid-cols-3');
-            content.classList.add('grid-cols-1');
-
-            const standing = data.standings[0].table;
-            let tableHtml = `
-                <div class="bg-gray-800 rounded-lg overflow-x-auto shadow-2xl">
-                    <table class="w-full text-left border-collapse">
-                        <thead class="bg-gray-700">
-                            <tr>
-                                <th class="p-4">Pos</th>
-                                <th class="p-4">Equipo</th>
-                                <th class="p-4">PJ</th>
-                                <th class="p-4">G</th>
-                                <th class="p-4">E</th>
-                                <th class="p-4">P</th>
-                                <th class="p-4">Pts</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            ${standing.map(team => `
-                                <tr class="border-t border-gray-700 hover:bg-gray-700/50">
-                                    <td class="p-4 font-bold">${team.position}</td>
-                                    <td class="p-4 flex items-center gap-3">
-                                        <img src="${team.team.crest}" class="w-6 h-6">
-                                        ${team.team.name}
-                                    </td>
-                                    <td class="p-4">${team.playedGames}</td>
-                                    <td class="p-4">${team.won}</td>
-                                    <td class="p-4">${team.draw}</td>
-                                    <td class="p-4">${team.lost}</td>
-                                    <td class="p-4 font-bold text-blue-400">${team.points}</td>
+            content.className = "block overflow-hidden w-full";
+            
+            const tableData = data.standings[0].table;
+            content.innerHTML = `
+                <div class="bg-gray-800 rounded-xl shadow-2xl overflow-hidden border border-gray-700">
+                    <div class="p-4 bg-gray-700 flex justify-between items-center">
+                        <h2 class="text-xl font-bold">${data.competition.name} - Clasificación</h2>
+                        <button onclick="fetchCompetitions()" class="text-sm bg-gray-600 px-3 py-1 rounded hover:bg-gray-500">Volver</button>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-sm">
+                            <thead class="bg-gray-900/50 text-gray-400">
+                                <tr>
+                                    <th class="p-4 text-left">#</th>
+                                    <th class="p-4 text-left">Club</th>
+                                    <th class="p-4 text-center">PJ</th>
+                                    <th class="p-4 text-center">G</th>
+                                    <th class="p-4 text-center">E</th>
+                                    <th class="p-4 text-center">P</th>
+                                    <th class="p-4 text-center font-bold text-white">PTS</th>
                                 </tr>
-                            `).join('')}
-                        </tbody>
-                    </table>
+                            </thead>
+                            <tbody>
+                                ${tableData.map(t => `
+                                    <tr class="border-t border-gray-700 hover:bg-white/5 transition-colors">
+                                        <td class="p-4">${t.position}</td>
+                                        <td class="p-4 flex items-center gap-3 font-semibold">
+                                            <img src="${t.team.crest}" class="w-6 h-6 object-contain">
+                                            ${t.team.name}
+                                        </td>
+                                        <td class="p-4 text-center">${t.playedGames}</td>
+                                        <td class="p-4 text-center">${t.won}</td>
+                                        <td class="p-4 text-center">${t.draw}</td>
+                                        <td class="p-4 text-center">${t.lost}</td>
+                                        <td class="p-4 text-center font-bold text-blue-400">${t.points}</td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
-                <button onclick="fetchCompetitions()" class="mt-6 text-blue-400 hover:underline">
-                    <i class="fas fa-arrow-left mr-2"></i>Volver a Competiciones
-                </button>
             `;
-            content.innerHTML = tableHtml;
         }
     </script>
 </body>
