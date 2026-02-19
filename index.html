@@ -145,6 +145,19 @@
             font-size: 11px;
         }
 
+        /* Estilos para Rachas */
+        .streak-win { color: #00ff88; font-weight: bold; }
+        .streak-draw { color: #f0db4f; font-weight: bold; }
+        .streak-loss { color: #ff4444; font-weight: bold; }
+
+        .streak-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 2px;
+            display: inline-block;
+            margin-right: 2px;
+        }
+
         /* Value Alertas */
         .card-value-high {
             border: 1px solid var(--sl-gold) !important;
@@ -508,14 +521,16 @@
                         <div id="score-matrix" class="grid grid-cols-5 gap-2"></div>
                     </div>
                     <div class="scorelab-card p-5">
-                        <h2 class="text-[10px] font-black text-slate-500 uppercase mb-4 tracking-widest text-center">Muestra (Últimos 10 del Sheet)</h2>
+                        <h2 class="text-[10px] font-black text-slate-500 uppercase mb-4 tracking-widest text-center">Muestra y Rachas</h2>
                         <div class="grid grid-cols-2 gap-4">
                             <div>
-                                <p class="text-[8px] text-cyan-500 font-bold mb-2 uppercase text-center">Home (Locales)</p>
+                                <p class="text-[8px] text-cyan-500 font-bold mb-1 uppercase text-center">Home (Local)</p>
+                                <div id="streak-home" class="flex justify-center gap-1 mb-2"></div>
                                 <div id="history-home" class="space-y-1"></div>
                             </div>
                             <div>
-                                <p class="text-[8px] text-green-500 font-bold mb-2 uppercase text-center">Away (Visitantes)</p>
+                                <p class="text-[8px] text-green-500 font-bold mb-1 uppercase text-center">Away (Visita)</p>
+                                <div id="streak-away" class="flex justify-center gap-1 mb-2"></div>
                                 <div id="history-away" class="space-y-1"></div>
                             </div>
                         </div>
@@ -910,6 +925,10 @@
             }
             // ------------------------------------------------
 
+            // NUEVO: Análisis de Rachas
+            renderStreaks('streak-home', homeMatches, true);
+            renderStreaks('streak-away', awayMatches, false);
+
             renderHistory('history-home', homeMatches, true);
             renderHistory('history-away', awayMatches, false);
 
@@ -941,6 +960,29 @@
             calculate();
         }
 
+        // --- NUEVA FUNCIÓN DE RACHAS ---
+        function renderStreaks(containerId, matches, isHome) {
+            const container = document.getElementById(containerId);
+            container.innerHTML = '';
+            if(matches.length === 0) return;
+
+            // Procesar los últimos 5 para el visual de puntos
+            const recent = matches.slice(0, 5);
+            recent.forEach(m => {
+                let res = '';
+                let color = '';
+                if(m.gl === m.gv) { res = 'E'; color = 'bg-yellow-500'; }
+                else if(isHome) {
+                    if(m.gl > m.gv) { res = 'V'; color = 'bg-green-500'; }
+                    else { res = 'D'; color = 'bg-red-500'; }
+                } else {
+                    if(m.gv > m.gl) { res = 'V'; color = 'bg-green-500'; }
+                    else { res = 'D'; color = 'bg-red-500'; }
+                }
+                container.innerHTML += `<span class="w-4 h-4 rounded-sm ${color} text-[8px] flex items-center justify-center text-black font-black">${res}</span>`;
+            });
+        }
+
         function renderHistory(containerId, matches, isHome) {
             const container = document.getElementById(containerId);
             container.innerHTML = '';
@@ -949,10 +991,18 @@
                 return;
             }
             matches.forEach(m => {
+                let winClass = '';
+                if(m.gl === m.gv) winClass = 'streak-draw';
+                else if(isHome) {
+                    winClass = m.gl > m.gv ? 'streak-win' : 'streak-loss';
+                } else {
+                    winClass = m.gv > m.gl ? 'streak-win' : 'streak-loss';
+                }
+
                 container.innerHTML += `
                     <div class="history-item">
                         <span class="text-slate-500 truncate mr-2" style="max-width: 60px">${isHome ? m.away : m.home}</span>
-                        <span class="font-bold text-white">${m.gl} - ${m.gv}</span>
+                        <span class="font-bold ${winClass}">${m.gl} - ${m.gv}</span>
                     </div>`;
             });
         }
@@ -968,7 +1018,6 @@
 
             setTimeout(() => {
                 // 1. Análisis de Tendencia (Recientes valen más)
-                // Usamos los goles guardados en window.last...
                 let h_trend = 1.0, a_trend = 1.0;
                 if(window.lastHomeGoals && window.lastHomeGoals.length > 3) {
                     const recent = window.lastHomeGoals.slice(0,3).reduce((a,b)=>a+b,0)/3;
@@ -1076,7 +1125,6 @@
             body.innerHTML = '';
             markets.forEach((m, i) => {
                 const fair = (1/m.p).toFixed(2);
-                // Cuota sugerida para un 5% de valor (solo representativo)
                 const targetOdd = (1/(m.p-0.05)).toFixed(2);
 
                 body.innerHTML += `<tr class="market-row" id="row_${i}">
