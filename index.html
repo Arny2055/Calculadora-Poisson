@@ -579,6 +579,11 @@
         const STORAGE_KEY = 'betags_pre_match';
         const IDS_KEY = 'betags_sheet_ids';
         
+        let leagueAverages = {
+            home: 1.5,
+            away: 1.2
+        };
+
         let SHEET_IDS = {
             over05ht: '',
             over25: '1BfAXMV6EHLEz3CJ2lAZO6spHJUXQ-mh6',
@@ -723,13 +728,28 @@
         }
 
         function detectValue(match, marketType) {
+            // Recalcular promedios para esta liga específica antes de detectar valor en el radar
+            const leagueMatches = database.filter(r => r.league === match.liga);
+            if(leagueMatches.length === 0) return 0;
+            
+            let totalH = 0, totalA = 0;
+            leagueMatches.forEach(lm => { totalH += lm.gl; totalA += lm.gv; });
+            const avgH = totalH / leagueMatches.length;
+            const avgA = totalA / leagueMatches.length;
+
             const hStats = getTeamStats(match.liga, match.home, true);
             const aStats = getTeamStats(match.liga, match.away, false);
             
             if(hStats.count === 0 || aStats.count === 0) return 0;
 
-            const lambdaH = (hStats.fav + aStats.con) / 2;
-            const lambdaA = (aStats.fav + hStats.con) / 2;
+            // --- Lógica xG ajustada por Liga ---
+            const attackHome = hStats.fav / avgH;
+            const defenseHome = hStats.con / avgA;
+            const attackAway = aStats.fav / avgA;
+            const defenseAway = aStats.con / avgH;
+
+            const lambdaH = attackHome * defenseAway * avgH;
+            const lambdaA = attackAway * defenseHome * avgA;
             
             let probPoisson = 0;
             if(marketType === 'over25' || marketType === 'under25') {
@@ -884,7 +904,6 @@
                              leagues.map(l => `<option value="${l}">${l}</option>`).join('');
         }
 
-        // FUNCION PARA FILTRAR EL SELECT DESDE EL BUSCADOR
         function filterLeagueOptions() {
             const searchText = document.getElementById('league_search').value.toLowerCase();
             const lSel = document.getElementById('league_select');
@@ -922,11 +941,9 @@
             hSel.innerHTML = options;
             aSel.innerHTML = options;
 
-            // MEJORA: Calcular promedios de TODA la liga al seleccionar la liga
             calculateLeagueAverages(leagueMatches);
         }
 
-        // --- NUEVAS FUNCIONES PARA PROMEDIOS DE LIGA ---
         function calculateLeagueAverages(leagueMatches) {
             if(leagueMatches.length === 0) return;
 
@@ -942,6 +959,9 @@
             const avgAway = totalAwayGoals / leagueMatches.length;
             const avgTotal = avgHome + avgAway;
 
+            leagueAverages.home = avgHome;
+            leagueAverages.away = avgAway;
+
             document.getElementById('league_avg_home').innerText = avgHome.toFixed(2);
             document.getElementById('league_avg_away').innerText = avgAway.toFixed(2);
             document.getElementById('league_avg_total').innerText = avgTotal.toFixed(2);
@@ -953,8 +973,8 @@
             document.getElementById('league_avg_away').innerText = '--';
             document.getElementById('league_avg_total').innerText = '--';
             document.getElementById('league_match_total').innerText = '--';
+            leagueAverages = { home: 1.5, away: 1.2 };
         }
-        // ----------------------------------------------
 
         function loadStatsIndependent() {
             const league = document.getElementById('league_select').value;
@@ -967,33 +987,22 @@
             document.getElementById('event_name').value = `${local} vs ${visita}`;
 
             const dbReversed = [...database].reverse();
-
             const homeMatches = dbReversed.filter(r => r.league === league && r.home === local).slice(0, 10);
             
-            // --- MEJORA: APLICAR INDICADOR VISUAL SI N != 10 ---
             const homeBadge = document.getElementById('home_sample');
             homeBadge.innerText = `N = ${homeMatches.length}`;
-            if(homeMatches.length !== 10) {
-                homeBadge.classList.add('patrol-alert');
-            } else {
-                homeBadge.classList.remove('patrol-alert');
-            }
+            if(homeMatches.length !== 10) homeBadge.classList.add('patrol-alert');
+            else homeBadge.classList.remove('patrol-alert');
 
             const awayMatches = dbReversed.filter(r => r.league === league && r.away === visita).slice(0, 10);
             
             const awayBadge = document.getElementById('away_sample');
             awayBadge.innerText = `N = ${awayMatches.length}`;
-            if(awayMatches.length !== 10) {
-                awayBadge.classList.add('patrol-alert');
-            } else {
-                awayBadge.classList.remove('patrol-alert');
-            }
-            // ------------------------------------------------
+            if(awayMatches.length !== 10) awayBadge.classList.add('patrol-alert');
+            else awayBadge.classList.remove('patrol-alert');
 
-            // NUEVO: Análisis de Rachas
             renderStreaks('streak-home', homeMatches, true);
             renderStreaks('streak-away', awayMatches, false);
-
             renderHistory('history-home', homeMatches, true);
             renderHistory('history-away', awayMatches, false);
 
@@ -1018,20 +1027,16 @@
             document.getElementById('a_gf').value = aData.fav;
             document.getElementById('a_gc').value = aData.con;
 
-            // Guardar datos temporales para IA
             window.lastHomeGoals = hData.goals;
             window.lastAwayGoals = aData.goals;
 
             calculate();
         }
 
-        // --- NUEVA FUNCIÓN DE RACHAS ---
         function renderStreaks(containerId, matches, isHome) {
             const container = document.getElementById(containerId);
             container.innerHTML = '';
             if(matches.length === 0) return;
-
-            // Procesar los últimos 5 para el visual de puntos
             const recent = matches.slice(0, 5);
             recent.forEach(m => {
                 let res = '';
@@ -1063,7 +1068,6 @@
                 } else {
                     winClass = m.gv > m.gl ? 'streak-win' : 'streak-loss';
                 }
-
                 container.innerHTML += `
                     <div class="history-item">
                         <span class="text-slate-500 truncate mr-2" style="max-width: 60px">${isHome ? m.away : m.home}</span>
@@ -1075,33 +1079,23 @@
         function factorial(n) { return n <= 1 ? 1 : n * factorial(n - 1); }
         function poisson(k, lambda) { return (Math.pow(lambda, k) * Math.exp(-lambda)) / factorial(k); }
 
-        /* --- NUEVO MOTOR IA BETAGS --- */
         function runAICore(h_gf, h_gc, a_gf, a_gc, matrix) {
             const loader = document.getElementById('ai_loader');
             const output = document.getElementById('ai_output');
             loader.classList.remove('hidden');
 
             setTimeout(() => {
-                // 1. Análisis de Tendencia (Recientes valen más)
                 let h_trend = 1.0, a_trend = 1.0;
                 if(window.lastHomeGoals && window.lastHomeGoals.length > 3) {
                     const recent = window.lastHomeGoals.slice(0,3).reduce((a,b)=>a+b,0)/3;
                     h_trend = recent > h_gf ? 1.05 : 0.95;
                 }
-                
-                // 2. Cálculo de Varianza (Consistencia)
-                const volatility = Math.random() * 0.1; // Simulación de factor de riesgo
-                
-                // 3. Score más probable (IA Cross-Check)
                 const topScore = matrix.sort((a,b) => b.p - a.p)[0];
                 const aiConfidence = (topScore.p * 100 * h_trend).toFixed(1);
-                
                 let recommendation = "NEUTRAL";
                 let color = "text-slate-400";
-                
                 if(aiConfidence > 15) { recommendation = "ALTA PROBABILIDAD"; color = "text-green-400"; }
                 else if(aiConfidence > 10) { recommendation = "MODERADO"; color = "text-yellow-400"; }
-
                 output.innerHTML = `
                     <div class="flex flex-col gap-1">
                         <span class="text-[12px] font-black text-white">${topScore.score}</span>
@@ -1116,7 +1110,7 @@
         }
 
         function calculate() {
-            updateStatus('loading', 'Calculando...');
+            updateStatus('loading', 'Calculando xG...');
             const h_gf = parseFloat(document.getElementById('h_gf').value) || 0;
             const h_gc = parseFloat(document.getElementById('h_gc').value) || 0;
             const a_gf = parseFloat(document.getElementById('a_gf').value) || 0;
@@ -1126,9 +1120,19 @@
                 updateStatus('active', 'Esperando datos...');
                 return;
             }
+
+            // --- CÁLCULO DE xG PROFESIONAL (Basado en Promedios de Liga) ---
+            const avgH = leagueAverages.home;
+            const avgA = leagueAverages.away;
+
+            const attackHome = h_gf / avgH;
+            const defenseHome = h_gc / avgA;
+            const attackAway = a_gf / avgA;
+            const defenseAway = a_gc / avgH;
+
+            const lambdaH = attackHome * defenseAway * avgH;
+            const lambdaA = attackAway * defenseHome * avgA;
             
-            const lambdaH = (h_gf + a_gc) / 2;
-            const lambdaA = (a_gf + h_gc) / 2;
             const probsH = Array.from({length: 7}, (_, i) => poisson(i, lambdaH));
             const probsA = Array.from({length: 7}, (_, i) => poisson(i, lambdaA));
             
@@ -1161,10 +1165,7 @@
 
             renderMatrix(matrixData);
             renderChart(probsH, probsA);
-            
-            // Llama a la IA
             runAICore(h_gf, h_gc, a_gf, a_gc, [...matrixData]);
-            
             updateStatus('active', 'Análisis Completo');
         }
 
@@ -1178,7 +1179,6 @@
                 a_gf: document.getElementById('a_gf').value,
                 a_gc: document.getElementById('a_gc').value
             };
-
             const encodedData = btoa(JSON.stringify(data));
             window.open(`profundo.html?d=${encodedData}`, '_blank');
         }
@@ -1194,7 +1194,6 @@
             markets.forEach((m, i) => {
                 const fair = (1/m.p).toFixed(2);
                 const targetOdd = (1/(m.p-0.05)).toFixed(2);
-
                 body.innerHTML += `<tr class="market-row" id="row_${i}">
                     <td class="p-4 font-bold text-slate-300">${m.name}</td>
                     <td class="p-4 text-cyan-400 font-mono">${(m.p*100).toFixed(1)}%</td>
@@ -1217,13 +1216,11 @@
             const oddHouse = parseFloat(input.value);
             const diffEl = document.getElementById(diffId);
             const rowEl = document.getElementById(rowId);
-            
             if(oddHouse > 1) {
                 const probHouse = 1 / oddHouse;
                 const diff = probPoisson - probHouse;
                 diffEl.innerText = (diff * 100).toFixed(1) + '%';
-                
-                if(diff > 0.05) { // Si hay más de 5% de Value
+                if(diff > 0.05) { 
                     diffEl.className = 'p-4 font-black text-green-400';
                     rowEl.classList.add('row-value-detected');
                 } else if(diff > 0) {
@@ -1246,12 +1243,10 @@
             const odd = parseFloat(document.getElementById(`odd_${index}`).value);
             const diffText = document.getElementById(`diff_${index}`).innerText;
             if(!odd || odd <= 1) return alert("⚠️ Cuota no válida.");
-            
             const newBet = { id: Date.now(), date: new Date().toISOString().split('T')[0], teams: `${league}: ${event}`, market: market, prob: prob, odd: odd, edge: diffText, stake: 1.0, status: 'pending', profit: 0 };
             let bets = JSON.parse(localStorage.getItem(STORAGE_KEY)) || [];
             bets.unshift(newBet);
             localStorage.setItem(STORAGE_KEY, JSON.stringify(bets));
-            
             const btn = document.querySelector(`#row_${index} button`);
             btn.innerHTML = '<i class="fa-solid fa-check"></i>';
             btn.classList.replace('bg-cyan-600', 'bg-green-500');
