@@ -49,6 +49,7 @@
 
         .market-row { border-bottom: 1px solid var(--sl-border); transition: background 0.3s; }
         .market-row:hover { background: rgba(255,255,255,0.02); }
+        .row-value-detected { background: rgba(0, 255, 136, 0.05) !important; border-left: 3px solid var(--sl-green) !important; }
 
         /* --- BOTONES REDISEÑADOS --- */
         .btn-primary {
@@ -481,21 +482,26 @@
             </div>
 
             <div class="lg:col-span-8 space-y-4">
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
                     <div class="scorelab-card p-4 border-l-2 border-cyan-500">
                         <p class="text-[9px] font-bold text-slate-500 uppercase">Over 0.5 HT</p>
-                        <h3 id="res_ht05" class="text-2xl font-black text-white">0.0%</h3>
+                        <h3 id="res_ht05" class="text-xl font-black text-white">0.0%</h3>
                         <div id="val_ht05" class="badge-value mt-1 w-fit">C. Justa: --</div>
                     </div>
                     <div class="scorelab-card p-4 border-l-2 border-green-500">
                         <p class="text-[9px] font-bold text-slate-500 uppercase">Over 2.5 FT</p>
-                        <h3 id="res_ft25" class="text-2xl font-black text-white">0.0%</h3>
+                        <h3 id="res_ft25" class="text-xl font-black text-white">0.0%</h3>
                         <div id="val_ft25" class="badge-value mt-1 w-fit">C. Justa: --</div>
                     </div>
                     <div class="scorelab-card p-4 border-l-2 border-yellow-500">
-                        <p class="text-[9px] font-bold text-slate-500 uppercase">BTTS (Ambos Anotan)</p>
-                        <h3 id="res_btts" class="text-2xl font-black text-white">0.0%</h3>
+                        <p class="text-[9px] font-bold text-slate-500 uppercase">BTTS YES</p>
+                        <h3 id="res_btts" class="text-xl font-black text-white">0.0%</h3>
                         <div id="val_btts" class="badge-value mt-1 w-fit">C. Justa: --</div>
+                    </div>
+                    <div class="scorelab-card p-4 border-l-2 border-white">
+                        <p class="text-[9px] font-bold text-slate-500 uppercase">Draw (Empate)</p>
+                        <h3 id="res_draw" class="text-xl font-black text-white">0.0%</h3>
+                        <div id="val_draw" class="badge-value mt-1 w-fit">C. Justa: --</div>
                     </div>
                 </div>
 
@@ -1067,12 +1073,13 @@
             const probsH = Array.from({length: 7}, (_, i) => poisson(i, lambdaH));
             const probsA = Array.from({length: 7}, (_, i) => poisson(i, lambdaA));
             
-            let over25 = 0, btts = 0, matrixData = [];
+            let over25 = 0, btts = 0, probDraw = 0, matrixData = [];
             for(let h=0; h<7; h++) {
                 for(let a=0; a<7; a++) {
                     let p = probsH[h] * probsA[a];
                     if (h + a > 2.5) over25 += p;
                     if (h > 0 && a > 0) btts += p;
+                    if (h === a) probDraw += p;
                     matrixData.push({ score: `${h}-${a}`, p: p });
                 }
             }
@@ -1082,13 +1089,15 @@
             updateMarketUI('res_ht05', 'val_ht05', over05HT);
             updateMarketUI('res_ft25', 'val_ft25', over25);
             updateMarketUI('res_btts', 'val_btts', btts);
+            updateMarketUI('res_draw', 'val_draw', probDraw);
             
             renderTable([
                 { name: 'OVER 0.5 HT', p: over05HT },
                 { name: 'OVER 2.5 FT', p: over25 },
                 { name: 'UNDER 2.5 FT', p: 1 - over25 },
                 { name: 'BTTS YES', p: btts },
-                { name: 'BTTS NO', p: 1 - btts }
+                { name: 'BTTS NO', p: 1 - btts },
+                { name: 'DRAW (X)', p: probDraw }
             ]);
 
             renderMatrix(matrixData);
@@ -1132,7 +1141,7 @@
                     <td class="p-4 text-cyan-400 font-mono">${(m.p*100).toFixed(1)}%</td>
                     <td class="p-4 text-slate-500 font-mono">${fair}</td>
                     <td class="p-4">
-                        <input type="number" step="0.01" class="w-16 bg-transparent border border-white/10 rounded text-center text-xs" oninput="calcProbDiff(this, ${m.p}, 'diff_${i}')" id="odd_${i}">
+                        <input type="number" step="0.01" class="w-16 bg-transparent border border-white/10 rounded text-center text-xs" oninput="calcProbDiff(this, ${m.p}, 'diff_${i}', 'row_${i}')" id="odd_${i}">
                         <span class="target-odd-badge">Objetivo (Value +5%): ${targetOdd}</span>
                     </td>
                     <td class="p-4 font-black" id="diff_${i}">--</td>
@@ -1145,17 +1154,30 @@
             });
         }
 
-        function calcProbDiff(input, probPoisson, diffId) {
+        function calcProbDiff(input, probPoisson, diffId, rowId) {
             const oddHouse = parseFloat(input.value);
             const diffEl = document.getElementById(diffId);
+            const rowEl = document.getElementById(rowId);
+            
             if(oddHouse > 1) {
                 const probHouse = 1 / oddHouse;
                 const diff = probPoisson - probHouse;
                 diffEl.innerText = (diff * 100).toFixed(1) + '%';
-                diffEl.className = `p-4 font-black ${diff > 0 ? 'text-green-400' : 'text-red-400'}`;
+                
+                if(diff > 0.05) { // Si hay más de 5% de Value
+                    diffEl.className = 'p-4 font-black text-green-400';
+                    rowEl.classList.add('row-value-detected');
+                } else if(diff > 0) {
+                    diffEl.className = 'p-4 font-black text-green-400';
+                    rowEl.classList.remove('row-value-detected');
+                } else {
+                    diffEl.className = 'p-4 font-black text-red-400';
+                    rowEl.classList.remove('row-value-detected');
+                }
             } else {
                 diffEl.innerText = '--';
                 diffEl.className = 'p-4 font-black text-slate-500';
+                rowEl.classList.remove('row-value-detected');
             }
         }
 
