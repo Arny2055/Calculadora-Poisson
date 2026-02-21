@@ -224,6 +224,13 @@
                     <div id="filter-container">
                         <div class="space-y-4 pt-6">
                             <div>
+                                <label class="text-[10px] text-slate-400 uppercase font-bold mb-2 block">Filtrar por Liga</label>
+                                <select id="f_league" class="w-full bg-slate-950 p-2.5 text-[11px] rounded-lg border border-slate-800 text-slate-200" onchange="updateStats()">
+                                    <option value="">Todas las Ligas</option>
+                                </select>
+                            </div>
+
+                            <div>
                                 <label class="text-[10px] text-slate-400 uppercase font-bold mb-2 block">Mercados (Multiselección)</label>
                                 <div class="market-checkbox-group" id="f_market_group">
                                     <label class="market-item"><input type="checkbox" value="OVER 2.5 FT" onchange="updateStats()"> <span>Over 2.5 Ft</span></label>
@@ -356,6 +363,29 @@
         let bets = JSON.parse(localStorage.getItem(STORAGE_KEY)) || [];
         let bChart;
 
+        // Función para poblar el select de ligas dinámicamente
+        function updateLeagueFilter() {
+            const leagueSelect = document.getElementById('f_league');
+            const currentValue = leagueSelect.value;
+            const leagues = new Set();
+            
+            bets.forEach(b => {
+                if (b.teams && b.teams.includes(':')) {
+                    leagues.add(b.teams.split(':')[0].trim());
+                }
+            });
+
+            // Reconstruir opciones
+            leagueSelect.innerHTML = '<option value="">Todas las Ligas</option>';
+            Array.from(leagues).sort().forEach(league => {
+                const opt = document.createElement('option');
+                opt.value = league;
+                opt.innerText = league;
+                if(league === currentValue) opt.selected = true;
+                leagueSelect.appendChild(opt);
+            });
+        }
+
         function getProfitableClusters() {
             const resolved = bets.filter(b => b.status === 'win' || b.status === 'loss');
             const leagueStats = {};
@@ -434,9 +464,11 @@
         }
 
         function updateStats() {
+            updateLeagueFilter();
             const selectedMarkets = Array.from(document.querySelectorAll('#f_market_group input:checked')).map(cb => cb.value.toUpperCase());
             const f_status = document.getElementById('f_status').value;
             const f_source = document.getElementById('f_source').value;
+            const f_league = document.getElementById('f_league').value;
             
             const pMin = parseFloat(document.getElementById('f_p_min').value) || -Infinity;
             const pMax = parseFloat(document.getElementById('f_p_max').value) || Infinity;
@@ -451,14 +483,15 @@
             const vMin = parseFloat(document.getElementById('f_v_min').value) || -Infinity;
             const vMax = parseFloat(document.getElementById('f_v_max').value) || Infinity;
 
-            const isFiltering = selectedMarkets.length > 0 || f_status || f_source || pMin !== -Infinity || pMax !== Infinity || fjMin !== -Infinity || fjMax !== Infinity || ocMin !== -Infinity || ocMax !== Infinity || eMin !== -Infinity || eMax !== Infinity || sMin !== -Infinity || sMax !== Infinity || vMin !== -Infinity || vMax !== Infinity;
+            const isFiltering = selectedMarkets.length > 0 || f_status || f_source || f_league || pMin !== -Infinity || pMax !== Infinity || fjMin !== -Infinity || fjMax !== Infinity || ocMin !== -Infinity || ocMax !== Infinity || eMin !== -Infinity || eMax !== Infinity || sMin !== -Infinity || sMax !== Infinity || vMin !== -Infinity || vMax !== Infinity;
             document.getElementById('active-indicator').style.display = isFiltering ? 'inline-block' : 'none';
 
-            // 1. Filtrar base según los filtros laterales
             let filtered = bets.filter(b => {
                 const matchM = selectedMarkets.length === 0 || (b.market && selectedMarkets.includes(b.market.toString().toUpperCase()));
                 const matchS = !f_status || (b.status === f_status);
                 const matchSource = !f_source || (b.teams && b.teams.toUpperCase().includes(f_source.toUpperCase()));
+                const matchLeague = !f_league || (b.teams && b.teams.startsWith(f_league));
+                
                 const probVal = (Number(b.prob) * 100) || 0;
                 const odd = Number(b.odd) || 0;
                 const houseProb = odd > 0 ? (1 / odd) * 100 : 0;
@@ -467,15 +500,12 @@
                 const edge = parseFloat(b.edge?.toString().replace('%','')) || 0;
                 const stake = Number(b.stake) || 0;
 
-                return matchM && matchS && matchSource && (probVal >= pMin && probVal <= pMax) && (fair >= fjMin && fair <= fjMax) && (odd >= ocMin && odd <= ocMax) && (edge >= eMin && edge <= eMax) && (stake >= sMin && stake <= sMax) && (valColumn >= vMin && vMax >= valColumn);
+                return matchM && matchS && matchSource && matchLeague && (probVal >= pMin && probVal <= pMax) && (fair >= fjMin && fair <= fjMax) && (odd >= ocMin && odd <= ocMax) && (edge >= eMin && edge <= eMax) && (stake >= sMin && stake <= sMax) && (valColumn >= vMin && vMax >= valColumn);
             });
 
             renderHistory(filtered);
 
-            // 2. Determinar si hay una selección manual por checkbox en la tabla
             const checkedIds = Array.from(document.querySelectorAll('.bet-item-checkbox:checked')).map(cb => cb.getAttribute('data-id'));
-            
-            // Mostrar/Ocultar botón de borrado masivo
             const btnDeleteBulk = document.getElementById('btn-delete-bulk');
             if(checkedIds.length > 0) {
                 btnDeleteBulk.classList.remove('hidden');
@@ -483,7 +513,6 @@
                 btnDeleteBulk.classList.add('hidden');
             }
 
-            // Si hay checkboxes marcados, usamos SOLAMENTE esos para las estadísticas de arriba
             let statsData = (checkedIds.length > 0) 
                 ? filtered.filter(b => checkedIds.includes(b.id.toString())) 
                 : filtered;
@@ -536,7 +565,6 @@
             calculateSelectedSummary();
         }
 
-        // --- Funciones de Selección ---
         function toggleSelectAll(master) {
             const checkboxes = document.querySelectorAll('.bet-item-checkbox');
             checkboxes.forEach(cb => cb.checked = master.checked);
@@ -568,10 +596,7 @@
             if (confirm(`¿Estás seguro de que quieres eliminar las ${checkboxes.length} apuestas seleccionadas?`)) {
                 const idsToDelete = Array.from(checkboxes).map(cb => cb.getAttribute('data-id'));
                 bets = bets.filter(b => !idsToDelete.includes(b.id.toString()));
-                
-                // Desmarcar master checkbox
                 document.getElementById('master-checkbox').checked = false;
-                
                 saveAndRefresh();
             }
         }
