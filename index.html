@@ -233,7 +233,8 @@
         /* Estilos nuevos para filtros de radar */
         .radar-filter-container {
             display: flex;
-            gap: 15px;
+            flex-wrap: wrap;
+            gap: 10px;
             align-items: center;
             background: rgba(0,0,0,0.2);
             padding: 8px 15px;
@@ -353,14 +354,26 @@
             <div class="radar-filter-container">
                 <div class="flex flex-col">
                     <label class="text-[8px] font-bold text-slate-500 uppercase">Min % Over 2.5</label>
-                    <input type="number" id="filter_min_over25" value="55" min="0" max="100" oninput="renderAutoMatches()" class="w-16 p-1 text-[10px] rounded">
+                    <input type="number" id="filter_min_over25" value="0" min="0" max="100" oninput="renderAutoMatches()" class="w-16 p-1 text-[10px] rounded">
                 </div>
                 <div class="flex flex-col">
-                    <label class="text-[8px] font-bold text-slate-500 uppercase">Min % BTTS</label>
-                    <input type="number" id="filter_min_btts" value="55" min="0" max="100" oninput="renderAutoMatches()" class="w-16 p-1 text-[10px] rounded">
+                    <label class="text-[8px] font-bold text-slate-500 uppercase">Max % Under 2.5</label>
+                    <input type="number" id="filter_max_under25" value="100" min="0" max="100" oninput="renderAutoMatches()" class="w-16 p-1 text-[10px] rounded">
+                </div>
+                <div class="flex flex-col">
+                    <label class="text-[8px] font-bold text-slate-500 uppercase">Min % BTTS Yes</label>
+                    <input type="number" id="filter_min_btts" value="0" min="0" max="100" oninput="renderAutoMatches()" class="w-16 p-1 text-[10px] rounded">
+                </div>
+                <div class="flex flex-col">
+                    <label class="text-[8px] font-bold text-slate-500 uppercase">Max % BTTS No</label>
+                    <input type="number" id="filter_max_bttsno" value="100" min="0" max="100" oninput="renderAutoMatches()" class="w-16 p-1 text-[10px] rounded">
+                </div>
+                <div class="flex flex-col">
+                    <label class="text-[8px] font-bold text-slate-500 uppercase">Min % Over 0.5 HT</label>
+                    <input type="number" id="filter_min_ht05" value="0" min="0" max="100" oninput="renderAutoMatches()" class="w-16 p-1 text-[10px] rounded">
                 </div>
                 <div class="ml-auto text-[8px] text-slate-400 italic">
-                    * El radar mostrará solo partidos que cumplan ambos criterios.
+                    * El radar filtrará los partidos que cumplan todos los rangos establecidos simultáneamente.
                 </div>
             </div>
 
@@ -644,10 +657,12 @@
                         marketSource: marketType 
                     };
                     
-                    // Calculamos todas las probabilidades para los filtros
                     const calculatedStats = getMatchProbabilities(matchData);
                     matchData.probOver25 = calculatedStats.over25;
+                    matchData.probUnder25 = 100 - calculatedStats.over25;
                     matchData.probBTTS = calculatedStats.btts;
+                    matchData.probBTTSNo = 100 - calculatedStats.btts;
+                    matchData.probHT05 = calculatedStats.ht05;
                     matchData.valueEdge = detectValue(matchData, marketType);
                     
                     return matchData;
@@ -663,11 +678,10 @@
             }
         }
 
-        // Función auxiliar para obtener probs de un partido del radar
         function getMatchProbabilities(match) {
             const hStats = getTeamStats(match.liga, match.home, true);
             const aStats = getTeamStats(match.liga, match.away, false);
-            if(hStats.count === 0 || aStats.count === 0) return { over25: 0, btts: 0 };
+            if(hStats.count === 0 || aStats.count === 0) return { over25: 0, btts: 0, ht05: 0 };
 
             const lH = (hStats.fav + aStats.con) / 2;
             const lA = (aStats.fav + hStats.con) / 2;
@@ -680,7 +694,10 @@
                     if (h > 0 && a > 0) bts += p;
                 }
             }
-            return { over25: o25 * 100, btts: bts * 100 };
+            const lHT = (lH + lA) * 0.44;
+            const ht05 = (1 - Math.exp(-lHT)) * 100;
+
+            return { over25: o25 * 100, btts: bts * 100, ht05: ht05 };
         }
 
         function detectValue(match, marketType) {
@@ -748,7 +765,10 @@
                         };
                         const calculatedStats = getMatchProbabilities(matchData);
                         matchData.probOver25 = calculatedStats.over25;
+                        matchData.probUnder25 = 100 - calculatedStats.over25;
                         matchData.probBTTS = calculatedStats.btts;
+                        matchData.probBTTSNo = 100 - calculatedStats.btts;
+                        matchData.probHT05 = calculatedStats.ht05;
                         matchData.valueEdge = detectValue(matchData, m);
                         return matchData;
                     }).filter(r => r.home);
@@ -763,21 +783,26 @@
         function renderAutoMatches() {
             const container = document.getElementById('auto_matches_list');
             const minOver25 = parseFloat(document.getElementById('filter_min_over25').value) || 0;
+            const maxUnder25 = parseFloat(document.getElementById('filter_max_under25').value) || 100;
             const minBTTS = parseFloat(document.getElementById('filter_min_btts').value) || 0;
+            const maxBTTSNo = parseFloat(document.getElementById('filter_max_bttsno').value) || 100;
+            const minHT05 = parseFloat(document.getElementById('filter_min_ht05').value) || 0;
             
             container.innerHTML = '';
             
             let filteredMatches = autoMatches;
 
-            // Filtro 1: Ligas seleccionadas
             if(selectedLeagues.length > 0) {
                 filteredMatches = filteredMatches.filter(m => selectedLeagues.includes(m.liga));
             }
 
-            // Filtro 2: Condicionales de Probabilidad (Requerimiento de Usuario)
+            // Aplicación de Filtros Condicionales Múltiples
             filteredMatches = filteredMatches.filter(m => 
                 m.probOver25 >= minOver25 && 
-                m.probBTTS >= minBTTS
+                m.probUnder25 <= maxUnder25 &&
+                m.probBTTS >= minBTTS &&
+                m.probBTTSNo <= maxBTTSNo &&
+                m.probHT05 >= minHT05
             );
 
             if(filteredMatches.length === 0) {
@@ -808,9 +833,11 @@
                     </div>
                     <div class="text-[11px] font-black text-white truncate">${m.home}</div>
                     <div class="text-[11px] font-black text-white truncate">${m.away}</div>
-                    <div class="flex gap-2 mt-2">
+                    <div class="grid grid-cols-2 gap-1 mt-2">
                          <div class="text-[7px] bg-black/40 px-1 rounded text-slate-400">O2.5: ${m.probOver25.toFixed(1)}%</div>
-                         <div class="text-[7px] bg-black/40 px-1 rounded text-slate-400">BTTS: ${m.probBTTS.toFixed(1)}%</div>
+                         <div class="text-[7px] bg-black/40 px-1 rounded text-slate-400">BTS: ${m.probBTTS.toFixed(1)}%</div>
+                         <div class="text-[7px] bg-black/40 px-1 rounded text-slate-400">HT0.5: ${m.probHT05.toFixed(1)}%</div>
+                         <div class="text-[7px] bg-black/40 px-1 rounded text-slate-400">U2.5: ${m.probUnder25.toFixed(1)}%</div>
                     </div>
                     <div class="text-[8px] text-slate-600 mt-1 font-mono">${m.fecha}</div>
                 `;
