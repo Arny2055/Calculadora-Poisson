@@ -223,10 +223,11 @@
                     <div id="filter-container">
                         <div class="space-y-4 pt-6">
                             <div class="pt-2">
-                                <label class="text-[10px] text-emerald-400 uppercase font-black mb-2 block">Google Sheet ID</label>
-                                <input type="text" id="sheet_id" placeholder="ID del archivo..." class="w-full bg-slate-950 p-2.5 text-[10px] rounded-lg border border-emerald-500/20 text-slate-200" value="1RDXTpM0E176UzP3l5SfuS6yBzkaskUYT">
+                                <label class="text-[10px] text-emerald-400 uppercase font-black mb-2 block">Sincronización de Resultados</label>
+                                <input type="text" id="sheet_id" placeholder="ID de la Hoja o URL del CSV..." class="w-full bg-slate-950 p-2.5 text-[10px] rounded-lg border border-emerald-500/20 text-slate-200" value="1RDXTpM0E176UzP3l5SfuS6yBzkaskUYT">
+                                <p class="text-[8px] text-slate-500 mt-1 italic">Pega el ID de tu Google Sheet (asegúrate de que esté publicado como CSV en Archivo > Compartir > Publicar en la web).</p>
                                 <button onclick="syncResults()" class="w-full mt-2 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-[9px] font-black rounded uppercase transition-all">
-                                    <i class="fa-solid fa-sync mr-1"></i> Sincronizar Resultados
+                                    <i class="fa-solid fa-sync mr-1"></i> Sincronizar desde CSV/Sheet
                                 </button>
                             </div>
 
@@ -370,63 +371,79 @@
         let bets = JSON.parse(localStorage.getItem(STORAGE_KEY)) || [];
         let bChart;
 
-        // --- NUEVA FUNCIONALIDAD DE SINCRONIZACIÓN ---
+        // --- SOLUCIÓN: SINCRONIZACIÓN MEJORADA PARA CSV/GOOGLE SHEETS ---
         async function syncResults() {
-            const sheetId = document.getElementById('sheet_id').value;
-            if(!sheetId) { alert("Ingresa un ID de Google Sheets válido"); return; }
+            let inputId = document.getElementById('sheet_id').value.trim();
+            if(!inputId) { alert("Ingresa un ID de Google Sheets o una URL de CSV"); return; }
             
             const btn = event.currentTarget;
             const originalText = btn.innerHTML;
-            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1"></i> Sincronizando...';
+            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1"></i> Procesando CSV...';
             btn.disabled = true;
 
             try {
-                // Generar URL del CSV público (debe estar publicado en la web como CSV)
-                const url = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&gid=0`;
+                // Si el usuario pega una URL completa de exportación de sheets, la usamos. 
+                // Si no, construimos la URL de exportación CSV estándar de Google Sheets.
+                let url = inputId.startsWith('http') ? inputId : `https://docs.google.com/spreadsheets/d/${inputId}/export?format=csv&gid=0`;
+                
                 const response = await fetch(url);
-                if(!response.ok) throw new Error("No se pudo acceder al archivo. Asegúrate que esté 'Publicado en la web' como CSV.");
+                if(!response.ok) throw new Error("No se pudo obtener el archivo. Si es un Google Sheet, asegúrate de que esté 'Publicado en la web' como CSV.");
                 
                 const csvData = await response.text();
-                const rows = csvData.split('\n').map(row => row.split(','));
+                // Dividimos filas y limpiamos caracteres raros de retorno de carro
+                const rows = csvData.split(/\r?\n/).map(row => row.split(','));
                 
-                // Mapeo: 0: Liga, 1: Local, 2: Visita, 3: Resultado FT (Ej: 3-1)
+                if(rows.length < 2) {
+                    throw new Error("El archivo CSV parece estar vacío o mal formateado.");
+                }
+
                 let updatedCount = 0;
 
                 bets.forEach(pick => {
                     if(pick.status === 'pending') {
                         const pickTeams = pick.teams ? pick.teams.toUpperCase() : "";
                         
-                        // Buscar coincidencia en las filas del CSV
+                        // Mapeo esperado en CSV: [0]: Liga, [1]: Local, [2]: Visita, [3]: Resultado FT (Ej: 2-1)
                         const match = rows.find(r => {
                             if(r.length < 4) return false;
-                            const csvLocal = r[1].trim().toUpperCase();
-                            const csvVisita = r[2].trim().toUpperCase();
-                            return pickTeams.includes(csvLocal) && pickTeams.includes(csvVisita);
+                            const csvLocal = r[1]?.trim().toUpperCase();
+                            const csvVisita = r[2]?.trim().toUpperCase();
+                            return csvLocal && csvVisita && pickTeams.includes(csvLocal) && pickTeams.includes(csvVisita);
                         });
 
                         if(match) {
-                            const score = match[3].trim(); // Ej: "3-1"
+                            const score = match[3]?.trim(); // Ej: "3-1"
                             if(score && score.includes('-')) {
-                                const [gL, gV] = score.split('-').map(Number);
-                                const totalGoles = gL + gV;
-                                const btts = (gL > 0 && gV > 0);
-                                const market = pick.market.toUpperCase();
+                                const parts = score.split('-');
+                                const gL = parseInt(parts[0]);
+                                const gV = parseInt(parts[1]);
                                 
-                                let isWin = false;
-                                if(market.includes("OVER 2.5")) isWin = (totalGoles > 2.5);
-                                else if(market.includes("UNDER 2.5")) isWin = (totalGoles < 2.5);
-                                else if(market.includes("BTTS YES")) isWin = btts;
-                                else if(market.includes("BTTS NO")) isWin = !btts;
-                                else if(market.includes("OVER 0.5 HT")) {
-                                    // HT no viene en el formato, se queda pendiente o se marca manual
-                                    return; 
-                                }
+                                if(!isNaN(gL) && !isNaN(gV)) {
+                                    const totalGoles = gL + gV;
+                                    const btts = (gL > 0 && gV > 0);
+                                    const market = pick.market.toUpperCase();
+                                    
+                                    let isWin = false;
+                                    let recognized = true;
 
-                                pick.status = isWin ? 'win' : 'loss';
-                                const odd = Number(pick.odd) || 0;
-                                const stake = Number(pick.stake) || 0;
-                                pick.profit = isWin ? stake * (odd - 1) : -stake;
-                                updatedCount++;
+                                    if(market.includes("OVER 2.5")) isWin = (totalGoles > 2.5);
+                                    else if(market.includes("UNDER 2.5")) isWin = (totalGoles < 2.5);
+                                    else if(market.includes("BTTS YES")) isWin = btts;
+                                    else if(market.includes("BTTS NO")) isWin = !btts;
+                                    else if(market.includes("OVER 0.5 HT")) {
+                                        recognized = false; // No se puede determinar con score FT
+                                    } else {
+                                        recognized = false;
+                                    }
+
+                                    if(recognized) {
+                                        pick.status = isWin ? 'win' : 'loss';
+                                        const odd = Number(pick.odd) || 0;
+                                        const stake = Number(pick.stake) || 0;
+                                        pick.profit = isWin ? stake * (odd - 1) : -stake;
+                                        updatedCount++;
+                                    }
+                                }
                             }
                         }
                     }
@@ -434,21 +451,21 @@
 
                 if(updatedCount > 0) {
                     saveAndRefresh();
-                    alert(`¡Sincronización exitosa! Se actualizaron ${updatedCount} partidos.`);
+                    alert(`¡Éxito! Se sincronizaron y resolvieron ${updatedCount} partidos desde el CSV.`);
                 } else {
-                    alert("Sincronización completada. No se encontraron nuevos resultados para tus partidos pendientes.");
+                    alert("Proceso terminado. No se encontraron coincidencias exactas para los partidos pendientes.");
                 }
 
             } catch (error) {
                 console.error(error);
-                alert("Error: " + error.message);
+                alert("Error de Sincronización: " + error.message);
             } finally {
                 btn.innerHTML = originalText;
                 btn.disabled = false;
             }
         }
 
-        // --- FUNCIONES ORIGINALES (PRESERVADAS) ---
+        // --- FUNCIONES ORIGINALES ---
         function updateLeagueFilter() {
             const leagueSelect = document.getElementById('f_league');
             const currentValue = leagueSelect.value;
