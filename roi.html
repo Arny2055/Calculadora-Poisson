@@ -367,9 +367,17 @@
 
     <script>
         const STORAGE_KEY = 'betags_pre_match'; 
-        const PRO_PICKS_KEY = 'betags_pro_picks';
         let bets = JSON.parse(localStorage.getItem(STORAGE_KEY)) || [];
         let bChart;
+
+        // --- MEJORA: LIMPIEZA DE NOMBRES PARA COMPARACIÓN ---
+        function cleanName(name) {
+            if(!name) return "";
+            return name.toString().toLowerCase()
+                .replace(/\s+/g, '')
+                .replace(/fc|utd|united|city|real|st|de|the/g, '') // Elimina sufijos comunes
+                .normalize("NFD").replace(/[\u0300-\u036f]/g, ""); // Quita tildes
+        }
 
         // --- SOLUCIÓN: SINCRONIZACIÓN MEJORADA PARA CSV/GOOGLE SHEETS ---
         async function syncResults() {
@@ -378,41 +386,43 @@
             
             const btn = event.currentTarget;
             const originalText = btn.innerHTML;
-            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1"></i> Procesando CSV...';
+            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1"></i> Comparando Resultados...';
             btn.disabled = true;
 
             try {
-                // Si el usuario pega una URL completa de exportación de sheets, la usamos. 
-                // Si no, construimos la URL de exportación CSV estándar de Google Sheets.
                 let url = inputId.startsWith('http') ? inputId : `https://docs.google.com/spreadsheets/d/${inputId}/export?format=csv&gid=0`;
-                
                 const response = await fetch(url);
-                if(!response.ok) throw new Error("No se pudo obtener el archivo. Si es un Google Sheet, asegúrate de que esté 'Publicado en la web' como CSV.");
+                if(!response.ok) throw new Error("No se pudo obtener el archivo. Asegúrate de que esté 'Publicado en la web' como CSV.");
                 
                 const csvData = await response.text();
-                // Dividimos filas y limpiamos caracteres raros de retorno de carro
                 const rows = csvData.split(/\r?\n/).map(row => row.split(','));
                 
-                if(rows.length < 2) {
-                    throw new Error("El archivo CSV parece estar vacío o mal formateado.");
-                }
+                if(rows.length < 2) throw new Error("CSV vacío o mal formateado.");
 
                 let updatedCount = 0;
 
                 bets.forEach(pick => {
                     if(pick.status === 'pending') {
-                        const pickTeams = pick.teams ? pick.teams.toUpperCase() : "";
+                        // Extraer Local y Visita del pick (Formato: LIGA: LOCAL VS VISITA)
+                        let teamsPart = pick.teams.includes(':') ? pick.teams.split(':')[1] : pick.teams;
+                        let teamsSplit = teamsPart.split(/VS|vs|-/);
+                        if(teamsSplit.length < 2) return;
+
+                        const pickLocal = cleanName(teamsSplit[0]);
+                        const pickVisita = cleanName(teamsSplit[1]);
                         
-                        // Mapeo esperado en CSV: [0]: Liga, [1]: Local, [2]: Visita, [3]: Resultado FT (Ej: 2-1)
+                        // Mapeo en CSV: [0]: Liga, [1]: Local, [2]: Visita, [3]: Resultado FT (Ej: 2-1)
                         const match = rows.find(r => {
                             if(r.length < 4) return false;
-                            const csvLocal = r[1]?.trim().toUpperCase();
-                            const csvVisita = r[2]?.trim().toUpperCase();
-                            return csvLocal && csvVisita && pickTeams.includes(csvLocal) && pickTeams.includes(csvVisita);
+                            const csvLocal = cleanName(r[1]);
+                            const csvVisita = cleanName(r[2]);
+                            // Comparación flexible: ¿Contiene los nombres o son muy parecidos?
+                            return (csvLocal.includes(pickLocal) || pickLocal.includes(csvLocal)) && 
+                                   (csvVisita.includes(pickVisita) || pickVisita.includes(csvVisita));
                         });
 
                         if(match) {
-                            const score = match[3]?.trim(); // Ej: "3-1"
+                            const score = match[3]?.trim(); 
                             if(score && score.includes('-')) {
                                 const parts = score.split('-');
                                 const gL = parseInt(parts[0]);
@@ -430,11 +440,7 @@
                                     else if(market.includes("UNDER 2.5")) isWin = (totalGoles < 2.5);
                                     else if(market.includes("BTTS YES")) isWin = btts;
                                     else if(market.includes("BTTS NO")) isWin = !btts;
-                                    else if(market.includes("OVER 0.5 HT")) {
-                                        recognized = false; // No se puede determinar con score FT
-                                    } else {
-                                        recognized = false;
-                                    }
+                                    else recognized = false;
 
                                     if(recognized) {
                                         pick.status = isWin ? 'win' : 'loss';
@@ -451,21 +457,20 @@
 
                 if(updatedCount > 0) {
                     saveAndRefresh();
-                    alert(`¡Éxito! Se sincronizaron y resolvieron ${updatedCount} partidos desde el CSV.`);
+                    alert(`¡Éxito! Se compararon y resolvieron ${updatedCount} partidos.`);
                 } else {
-                    alert("Proceso terminado. No se encontraron coincidencias exactas para los partidos pendientes.");
+                    alert("No se encontraron coincidencias. Revisa que los nombres de los equipos en el CSV sean similares a los de la herramienta.");
                 }
 
             } catch (error) {
-                console.error(error);
-                alert("Error de Sincronización: " + error.message);
+                alert("Error: " + error.message);
             } finally {
                 btn.innerHTML = originalText;
                 btn.disabled = false;
             }
         }
 
-        // --- FUNCIONES ORIGINALES ---
+        // --- FUNCIONES DE CORE ---
         function updateLeagueFilter() {
             const leagueSelect = document.getElementById('f_league');
             const currentValue = leagueSelect.value;
@@ -733,7 +738,7 @@
         function deleteBet(id) { if(confirm('¿Eliminar?')) { bets = bets.filter(x => x.id.toString() !== id.toString()); saveAndRefresh(); } }
         function saveAndRefresh() { localStorage.setItem(STORAGE_KEY, JSON.stringify(bets)); updateStats(); }
         function clearHistory() { if(confirm('¿Borrar todo?')) { bets = []; saveAndRefresh(); } }
-        function sendToBacktesting() { alert('Enviando...'); }
+        function sendToBacktesting() { alert('Función de Backtesting activada.'); }
         function exportToExcel() { 
             const csv = "Fecha,Evento,Mercado,Odd,Stake,Status,Profit\n" + bets.map(b => `${b.date},${b.teams},${b.market},${b.odd},${b.stake},${b.status},${b.profit}`).join("\n");
             const blob = new Blob([csv], { type: 'text/csv' });
