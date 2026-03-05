@@ -83,9 +83,12 @@
     <span class="subtitle">Análisis Predictivo xG / G-SoT / Poisson Integrado</span>
 
     <div class="card">
-        <div class="section-title"><span>📂</span> 1. CARGAR DATOS (xG, Goles, xG/T)</div>
-        <textarea id="homeTableInput" placeholder="Pega aquí la tabla avanzada..." oninput="saveToStorage()"></textarea>
+        <div class="section-title"><span>🏠</span> 1. TABLA LOCAL (HOME)</div>
+        <textarea id="homeTableInput" placeholder="Pega aquí la tabla avanzada de locales..." oninput="saveToStorage()"></textarea>
         
+        <div class="section-title" style="margin-top: 15px;"><span>🚀</span> 2. TABLA VISITANTE (AWAY)</div>
+        <textarea id="awayTableInput" placeholder="Pega aquí la tabla avanzada de visitantes..." oninput="saveToStorage()"></textarea>
+
         <div class="btn-group">
             <button class="btn" onclick="parseTables()">1. ANALIZAR PODERÍO OFENSIVO</button>
             <button class="btn btn-reset" onclick="clearData()">LIMPIAR</button>
@@ -93,7 +96,7 @@
     </div>
 
     <div id="selectionArea" class="card" style="display:none;">
-        <div class="section-title"><span>⚔️</span> 2. CONFIGURAR ENFRENTAMIENTO</div>
+        <div class="section-title"><span>⚔️</span> 3. CONFIGURAR ENFRENTAMIENTO</div>
         <div class="selector-grid">
             <div>
                 <label>EQUIPO LOCAL</label>
@@ -135,13 +138,13 @@
         
         <div class="xg-display-grid">
             <div class="xg-box">
-                <label id="nameL_label">EXPECTATIVA REAL</label>
+                <label id="nameL_label">EXPECTATIVA REAL (L)</label>
                 <div class="val" id="val_xgL">0.00</div>
                 <div id="deltaL_badge" class="delta-badge">ΔxG: 0.00</div>
                 <span id="effL" class="efficiency-tag"></span>
             </div>
             <div class="xg-box">
-                <label id="nameV_label">EXPECTATIVA REAL</label>
+                <label id="nameV_label">EXPECTATIVA REAL (V)</label>
                 <div class="val" id="val_xgV">0.00</div>
                 <div id="deltaV_badge" class="delta-badge">ΔxG: 0.00</div>
                 <span id="effV" class="efficiency-tag"></span>
@@ -174,18 +177,22 @@
 </div>
 
 <script>
-let masterData = [];
+let homeTeamsData = [], awayTeamsData = [];
 let chartInstance = null;
 let currentProbs = {};
 
 window.onload = function() {
-    if(localStorage.getItem('betags_data')) {
-        document.getElementById('homeTableInput').value = localStorage.getItem('betags_data');
+    if(localStorage.getItem('betags_home_data')) {
+        document.getElementById('homeTableInput').value = localStorage.getItem('betags_home_data');
+    }
+    if(localStorage.getItem('betags_away_data')) {
+        document.getElementById('awayTableInput').value = localStorage.getItem('betags_away_data');
     }
 };
 
 function saveToStorage() {
-    localStorage.setItem('betags_data', document.getElementById('homeTableInput').value);
+    localStorage.setItem('betags_home_data', document.getElementById('homeTableInput').value);
+    localStorage.setItem('betags_away_data', document.getElementById('awayTableInput').value);
 }
 
 function clearData() {
@@ -193,16 +200,12 @@ function clearData() {
     location.reload();
 }
 
-function parseTables() {
-    const input = document.getElementById('homeTableInput').value;
-    const lines = input.trim().split('\n');
-    masterData = [];
-
+function parseInputTable(text) {
+    const lines = text.trim().split('\n');
+    let results = [];
     lines.forEach(line => {
         const p = line.trim().split(/\t|\s\s+/);
         if (p.length >= 6) {
-            // Intentamos mapear las columnas según tu tabla:
-            // 0:Nombre, 1:xG, 2:Goles, 3:xGDif, 4:Tiros, 5:xG/T
             const name = p[0].replace(/^\d+\.\s*/, "").trim();
             const xG = parseFloat(p[1]);
             const goles = parseFloat(p[2]);
@@ -211,27 +214,36 @@ function parseTables() {
             const xGTiros = parseFloat(p[5]);
 
             if(!isNaN(xG)) {
-                masterData.push({
+                results.push({
                     name, xG, goles, xGDif, tiros, xGTiros,
-                    avgXG: xG / 19, // Asumiendo 19 partidos si no hay GP
+                    avgXG: xG / 19, 
                     avgG: goles / 19
                 });
             }
         }
     });
+    return results;
+}
 
-    if(masterData.length === 0) {
-        alert("Formato no reconocido. Asegúrate de copiar las columnas: Equipo, xG, Goles, xGDif, Tiros, xG/Tiros");
+function parseTables() {
+    saveToStorage();
+    const homeInput = document.getElementById('homeTableInput').value;
+    const awayInput = document.getElementById('awayTableInput').value;
+
+    homeTeamsData = parseInputTable(homeInput);
+    awayTeamsData = parseInputTable(awayInput);
+
+    if(homeTeamsData.length === 0 || awayTeamsData.length === 0) {
+        alert("Asegúrate de pegar ambas tablas (Local y Visitante) con las columnas correctas.");
         return;
     }
 
     const sH = document.getElementById('selectHome');
     const sV = document.getElementById('selectAway');
     sH.innerHTML = ""; sV.innerHTML = "";
-    masterData.sort((a,b) => a.name.localeCompare(b.name)).forEach(t => {
-        sH.add(new Option(t.name, t.name));
-        sV.add(new Option(t.name, t.name));
-    });
+    
+    homeTeamsData.sort((a,b) => a.name.localeCompare(b.name)).forEach(t => sH.add(new Option(t.name, t.name)));
+    awayTeamsData.sort((a,b) => a.name.localeCompare(b.name)).forEach(t => sV.add(new Option(t.name, t.name)));
 
     document.getElementById('selectionArea').style.display = 'block';
 }
@@ -240,35 +252,32 @@ function factorial(n) { return n <= 1 ? 1 : n * factorial(n - 1); }
 function poisson(k, l) { return (Math.exp(-l) * Math.pow(l, k)) / factorial(k); }
 
 function calculatePoisson() {
-    const home = masterData.find(t => t.name === document.getElementById('selectHome').value);
-    const away = masterData.find(t => t.name === document.getElementById('selectAway').value);
+    const home = homeTeamsData.find(t => t.name === document.getElementById('selectHome').value);
+    const away = awayTeamsData.find(t => t.name === document.getElementById('selectAway').value);
 
-    // LÓGICA BETA-GS PRO:
-    // 1. Lambda Base basada en xG (lo que genera el equipo realmente)
+    // LÓGICA BETA-GS PRO ASIMÉTRICA:
     let lambdaL = home.avgXG; 
     let lambdaV = away.avgXG;
 
-    // 2. Ajuste por Regresión a la Media (xGDif)
-    // Si un equipo tiene xGDif negativo ( Palace -14), sumamos el 10% de esa deuda al lambda
-    if(home.xGDif < 0) lambdaL += (Math.abs(home.xGDif) / 19) * 0.2;
-    if(away.xGDif < 0) lambdaV += (Math.abs(away.xGDif) / 19) * 0.2;
+    // 1. Ajuste por Regresión a la Media (xGDif)
+    if(home.xGDif < 0) lambdaL += (Math.abs(home.xGDif) / 19) * 0.22;
+    if(away.xGDif < 0) lambdaV += (Math.abs(away.xGDif) / 19) * 0.22;
 
-    // 3. Ajuste por Calidad de Tiro (xG/Tiros)
-    // El promedio es 0.11. Si es superior, multiplicamos el lambda por el ratio de calidad.
-    const qualityFactorL = home.xGTiros / 0.11;
-    const qualityFactorV = away.xGTiros / 0.11;
-    lambdaL *= (0.8 + (qualityFactorL * 0.2));
-    lambdaV *= (0.8 + (qualityFactorV * 0.2));
+    // 2. Ajuste por Calidad de Tiro (xG/Tiros) - Promedio Liga ~0.11
+    const qualityL = (home.xGTiros / 0.11);
+    const qualityV = (away.xGTiros / 0.11);
+    lambdaL *= (0.75 + (qualityL * 0.25));
+    lambdaV *= (0.75 + (qualityV * 0.25));
 
     // UI Updates
     document.getElementById('val_xgL').innerText = lambdaL.toFixed(2);
     document.getElementById('val_xgV').innerText = lambdaV.toFixed(2);
-    document.getElementById('deltaL_badge').innerText = `ΔxG: ${home.xGDif.toFixed(1)}`;
-    document.getElementById('deltaV_badge').innerText = `ΔxG: ${away.xGDif.toFixed(1)}`;
-    document.getElementById('effL').innerText = `Calidad: ${home.xGTiros}`;
-    document.getElementById('effV').innerText = `Calidad: ${away.xGTiros}`;
+    document.getElementById('deltaL_badge').innerText = `ΔxG L: ${home.xGDif.toFixed(1)}`;
+    document.getElementById('deltaV_badge').innerText = `ΔxG V: ${away.xGDif.toFixed(1)}`;
+    document.getElementById('effL').innerText = `Puntería L: ${home.xGTiros}`;
+    document.getElementById('effV').innerText = `Puntería V: ${away.xGTiros}`;
 
-    // Probabilidades
+    // Probabilidades Poisson
     let pL = 0, pV = 0, pX = 0, pO25 = 0, pBTTS = 0;
     let probL = [], probV = [];
     for(let i=0; i<=10; i++) {
@@ -294,15 +303,15 @@ function calculatePoisson() {
     document.getElementById('pU25').innerText = ((1-pO25)*100).toFixed(1) + "%";
     document.getElementById('pBTTS').innerText = (pBTTS*100).toFixed(1) + "%";
 
-    // Insights
-    let insight = `<b>Estrategia:</b> `;
-    if(home.xGDif < -5) insight += `El <b>${home.name}</b> tiene una deuda de goles masiva; el modelo predice que romperá su sequía. `;
-    if(home.xGTiros > 0.14) insight += `Ojo: <b>${home.name}</b> es quirúrgico (pocas llegadas, mucho peligro). `;
-    document.getElementById('deltaInsight').innerHTML = insight;
+    let insight = `<b>Análisis PRO:</b> `;
+    if(home.xGDif < -8) insight += `El Local <b>${home.name}</b> está muy infravalorado por los goles reales. `;
+    if(away.xGTiros > 0.15) insight += `Cuidado con <b>${away.name}</b>, es letal de visita. `;
+    document.getElementById('deltaInsight').innerHTML = insight || "Análisis de datos completado.";
 
     checkValue();
     document.getElementById('results').style.display = 'block';
     renderChart(probL.slice(0,6), probV.slice(0,6));
+    window.scrollTo({ top: document.getElementById('results').offsetTop, behavior: 'smooth' });
 }
 
 function checkValue() {
@@ -337,7 +346,7 @@ function renderChart(l, v) {
                 { label: 'Visita', data: v, backgroundColor: '#fcc419' }
             ]
         },
-        options: { responsive: true, maintainAspectRatio: false }
+        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { labels: { color: '#adb5bd' } } } }
     });
 }
 </script>
