@@ -170,18 +170,28 @@
     }
 
     function getSelectedData(type) {
-        const row = Array.from(document.querySelectorAll(`#body${type === 'local' ? 'Local' : 'Away'} tr`))
-                         .find(r => r.querySelector('input[type="radio"]').checked);
-        if (!row) return null;
-        const inputs = row.querySelectorAll('input');
+        const rows = document.querySelectorAll(`#body${type === 'local' ? 'Local' : 'Away'} tr`);
+        let selectedRow = null;
+        for (let row of rows) {
+            if (row.querySelector('input[type="radio"]').checked) {
+                selectedRow = row;
+                break;
+            }
+        }
+        
+        if (!selectedRow) return null;
+
+        const inputs = selectedRow.querySelectorAll('input[type="number"]');
+        const name = selectedRow.querySelector('.team-name').value;
+        
         return {
-            name: row.querySelector('.team-name').value,
-            eq: parseFloat(inputs[1].value),
-            tl: parseFloat(inputs[2].value),
-            il: parseFloat(inputs[3].value),
-            oeq: parseFloat(inputs[4].value),
-            otl: parseFloat(inputs[5].value),
-            oil: parseFloat(inputs[6].value)
+            name: name,
+            eq: parseFloat(inputs[0].value) || 0,
+            tl: parseFloat(inputs[1].value) || 0,
+            il: parseFloat(inputs[2].value) || 0,
+            oeq: parseFloat(inputs[3].value) || 0,
+            otl: parseFloat(inputs[4].value) || 0,
+            oil: parseFloat(inputs[5].value) || 0
         };
     }
 
@@ -192,19 +202,15 @@
 
         if (!home || !away) return;
 
-        // --- CORRECCIÓN DE CÁLCULO DE MARCADOR ---
-        // Potencia de ataque (basada en tomar ventaja y ampliarla)
-        // Vulnerabilidad defensa (basada en oponente tomando ventaja y ampliándola)
-        
+        // Cálculos de Proyección
         let homePower = (home.tl * 0.6) + (home.il * 0.4);
         let awayWeakness = (away.otl * 0.6) + (away.oil * 0.4);
-        let homeScoreRaw = (homePower + awayWeakness) / 65; // Divisor ajustado para escala Poisson real
+        let homeScoreRaw = (homePower + awayWeakness) / 65; 
         
         let awayPower = (away.tl * 0.6) + (away.il * 0.4);
         let homeWeakness = (home.otl * 0.6) + (home.oil * 0.4);
-        let awayScoreRaw = (awayPower + homeWeakness) / 75; // Visitante suele tener divisor más alto por dificultad
+        let awayScoreRaw = (awayPower + homeWeakness) / 75; 
 
-        // Ajustes por empate/resiliencia
         if (home.eq > 50) homeScoreRaw += 0.25;
         if (away.eq > 50) awayScoreRaw += 0.25;
 
@@ -212,24 +218,22 @@
         const finalAwayG = Math.round(awayScoreRaw);
 
         let tips = [];
-        // Lógica de Mercados Corregida
         const totalExpected = homeScoreRaw + awayScoreRaw;
 
         if (totalExpected >= 2.6) {
             tips.push('<div class="prediction-badge bg-success text-white">🔥 OVER 2.5: Alta expectativa de goles combinada.</div>');
         } else if (totalExpected < 1.8) {
-            tips.push('<div class="prediction-badge bg-secondary text-white">🧊 UNDER 2.5: Partido de pocos goles y mucho control.</div>');
+            tips.push('<div class="prediction-badge bg-secondary text-white">🧊 UNDER 2.5: Partido de pocos goles.</div>');
         }
 
-        // Ambos Anotan: solo si ambos tienen proyección > 0.7 y oponentes con Eq alto
         if (homeScoreRaw > 0.8 && awayScoreRaw > 0.8 && (home.oeq > 25 || away.oeq > 25)) {
-            tips.push('<div class="prediction-badge bg-info text-dark">🤝 AMBOS ANOTAN: Escenario probable de goles en ambas porterías.</div>');
+            tips.push('<div class="prediction-badge bg-info text-dark">🤝 AMBOS ANOTAN: Escenario probable.</div>');
         }
 
         if (home.tl > away.tl + 15) {
-            tips.push(`<div class="prediction-badge bg-primary text-white">🏠 1er GOL: ${home.name} (Local dominante al inicio).</div>`);
+            tips.push(`<div class="prediction-badge bg-primary text-white">🏠 1er GOL: ${home.name}</div>`);
         } else if (away.tl > home.tl + 15) {
-            tips.push(`<div class="prediction-badge bg-dark text-white">🚀 1er GOL: ${away.name} (Visitante letal a la contra).</div>`);
+            tips.push(`<div class="prediction-badge bg-dark text-white">🚀 1er GOL: ${away.name}</div>`);
         }
 
         container.innerHTML = `
@@ -248,39 +252,37 @@
             <div class="col-12 my-3">
                 <div class="market-header">PROYECCIÓN DE MARCADOR</div>
                 <div class="score-display shadow-sm">${finalHomeG} - ${finalAwayG}</div>
-                <p class="text-muted mt-2 small italic">Calculado mediante cruce de eficiencia ofensiva vs vulnerabilidad defensiva.</p>
             </div>
 
             <div class="col-12 mt-2">
                 <div class="market-header">MERCADOS RECOMENDADOS</div>
-                <div class="d-flex flex-wrap justify-content-center">${tips.join('') || '<p class="text-muted">Sin tendencias fuertes detectadas.</p>'}</div>
+                <div class="d-flex flex-wrap justify-content-center">${tips.join('') || '<p class="text-muted">Sin tendencias fuertes.</p>'}</div>
             </div>
         `;
     }
 
-    // Funciones de persistencia sin cambios para mantener tus ligas
     function saveLeague() {
         const name = document.getElementById('leagueName').value;
         if (!name) return alert("Ingresa un nombre para la liga");
 
         const extract = (id) => Array.from(document.querySelectorAll(`#${id} tr`)).map(row => {
-            const inputs = row.querySelectorAll('input');
+            const inputs = row.querySelectorAll('input[type="number"]');
             return {
                 name: row.querySelector('.team-name').value,
-                gp: row.cells[2].textContent,
-                eq: inputs[1].value,
-                tl: inputs[2].value,
-                il: inputs[3].value,
-                oeq: inputs[4].value,
-                otl: inputs[5].value,
-                oil: inputs[6].value
+                gp: row.cells[2].textContent.replace(row.querySelector('.team-name').value, ''),
+                eq: inputs[0].value,
+                tl: inputs[1].value,
+                il: inputs[2].value,
+                oeq: inputs[3].value,
+                otl: inputs[4].value,
+                oil: inputs[5].value
             };
         });
 
         currentLeagues[name] = { local: extract('bodyLocal'), away: extract('bodyAway') };
         localStorage.setItem('footballLeaguesH2H_v3', JSON.stringify(currentLeagues));
         updateLeaguesList();
-        alert("¡Datos de '" + name + "' guardados!");
+        alert("¡Datos guardados!");
     }
 
     function updateLeaguesList() {
@@ -301,11 +303,11 @@
         currentLeagues[name].local.forEach(t => addRow('local', t));
         currentLeagues[name].away.forEach(t => addRow('away', t));
         document.getElementById('leagueName').value = name;
-        document.getElementById('crossMatchup').innerHTML = '<div class="col-12 py-5 text-muted">Selecciona un equipo de cada tabla para analizar.</div>';
+        document.getElementById('crossMatchup').innerHTML = '<div class="col-12 py-5 text-muted">Selecciona un equipo de cada tabla.</div>';
     }
 
     function deleteLeague(name) {
-        if(confirm("¿Eliminar liga permanentemente?")) { 
+        if(confirm("¿Eliminar liga?")) { 
             delete currentLeagues[name]; 
             localStorage.setItem('footballLeaguesH2H_v3', JSON.stringify(currentLeagues)); 
             updateLeaguesList(); 
