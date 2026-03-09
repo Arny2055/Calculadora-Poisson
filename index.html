@@ -30,6 +30,10 @@
         .btn { width: 100%; padding: 15px; border-radius: 10px; border: none; font-weight: bold; cursor: pointer; text-transform: uppercase; transition: 0.3s; margin-top: 10px; }
         .btn-calc { background: var(--primary); color: white; }
         .btn-calc:hover { background: #339af0; }
+        .btn-save { background: var(--accent-yellow); color: #000; margin-top: 5px; font-size: 0.8rem; padding: 10px; }
+
+        .league-manager { margin-bottom: 15px; display: flex; gap: 10px; align-items: flex-end; }
+        .league-manager div { flex-grow: 1; }
 
         .stats-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; margin-top: 20px; }
         .stat-box { background: rgba(0,0,0,0.2); border: 1px solid var(--border); padding: 10px; border-radius: 8px; text-align: center; }
@@ -54,6 +58,17 @@
     <h1>BETA<span>GS</span> MINUTE LAB</h1>
     
     <div class="card">
+        <div class="league-manager">
+            <div>
+                <label style="font-size: 0.8rem; color: var(--primary);">NOMBRE DE LA LIGA / ARCHIVO</label>
+                <input type="text" id="leagueName" placeholder="Ej: Premier League 2024" style="width:100%; padding:10px; background:#0b0e14; border:1px solid var(--border); color:white; border-radius:8px; box-sizing:border-box;">
+            </div>
+            <div style="flex-grow: 0;">
+                <label style="font-size: 0.8rem; color: var(--primary);">LIGAS GUARDADAS</label>
+                <select id="savedLeagues" onchange="loadSelectedLeague()" style="padding:9px;"></select>
+            </div>
+        </div>
+
         <div class="grid-inputs">
             <div>
                 <label>DATOS LOCAL (15 MIN)</label>
@@ -65,6 +80,7 @@
             </div>
         </div>
         <button class="btn btn-calc" onclick="processTables()">PROCESAR DATOS POR MINUTOS</button>
+        <button class="btn btn-save" onclick="saveLeague()">💾 GUARDAR ESTA LIGA</button>
     </div>
 
     <div id="selectionArea" class="card" style="display:none;">
@@ -99,11 +115,16 @@
 let database = { home: {}, away: {} };
 let myChart = null;
 
+// Cargar lista de ligas al iniciar
+window.onload = function() {
+    updateLeagueList();
+};
+
 function parseMinuteData(text) {
+    if(!text) return {};
     const lines = text.trim().split('\n');
     const result = {};
     lines.forEach(line => {
-        // Regex para capturar Nombre y los 6 bloques de "G-R"
         const parts = line.split(/\t|\s{2,}/);
         if (parts.length >= 7) {
             const name = parts[0].trim();
@@ -118,22 +139,68 @@ function parseMinuteData(text) {
 }
 
 function processTables() {
-    database.home = parseMinuteData(document.getElementById('localData').value);
-    database.away = parseMinuteData(document.getElementById('visitaData').value);
+    const localRaw = document.getElementById('localData').value;
+    const visitaRaw = document.getElementById('visitaData').value;
+
+    database.home = parseMinuteData(localRaw);
+    database.away = parseMinuteData(visitaRaw);
 
     const sH = document.getElementById('selectHome');
     const sV = document.getElementById('selectAway');
     sH.innerHTML = ""; sV.innerHTML = "";
 
-    Object.keys(database.home).sort().forEach(n => sH.add(new Option(n, n)));
-    Object.keys(database.away).sort().forEach(n => sV.add(new Option(n, n)));
+    const homeTeams = Object.keys(database.home).sort();
+    const awayTeams = Object.keys(database.away).sort();
+
+    if(homeTeams.length === 0 || awayTeams.length === 0) {
+        alert("Asegúrate de pegar los datos correctamente.");
+        return;
+    }
+
+    homeTeams.forEach(n => sH.add(new Option(n, n)));
+    awayTeams.forEach(n => sV.add(new Option(n, n)));
 
     document.getElementById('selectionArea').style.display = 'block';
-    alert("Datos procesados correctamente.");
 }
 
-function getPoisson(lambda, k) {
-    return (Math.exp(-lambda) * Math.pow(lambda, k)) / factorial(k);
+function saveLeague() {
+    const name = document.getElementById('leagueName').value.trim();
+    if(!name) { alert("Ponle un nombre a la liga para guardar."); return; }
+
+    const leagueData = {
+        name: name,
+        localRaw: document.getElementById('localData').value,
+        visitaRaw: document.getElementById('visitaData').value
+    };
+
+    localStorage.setItem('league_' + name, JSON.stringify(leagueData));
+    updateLeagueList();
+    alert("Liga '" + name + "' guardada con éxito.");
+}
+
+function updateLeagueList() {
+    const selector = document.getElementById('savedLeagues');
+    selector.innerHTML = '<option value="">-- Seleccionar --</option>';
+    
+    for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key.startsWith('league_')) {
+            const name = key.replace('league_', '');
+            selector.add(new Option(name, key));
+        }
+    }
+}
+
+function loadSelectedLeague() {
+    const key = document.getElementById('savedLeagues').value;
+    if(!key) return;
+
+    const data = JSON.parse(localStorage.getItem(key));
+    document.getElementById('leagueName').value = data.name;
+    document.getElementById('localData').value = data.localRaw;
+    document.getElementById('visitaData').value = data.visitaRaw;
+    
+    processTables();
 }
 
 function factorial(n) {
@@ -160,8 +227,6 @@ function analyzeMatch() {
     heatMap.innerHTML = "";
 
     labels.forEach((label, i) => {
-        // Cálculo de Fuerza Cruzada por tramo
-        // xG Local en este tramo = (Goles Marcados Local + Goles Recibidos Visita) / 2
         const expL = (hStats[i].g + vStats[i].r) / 2;
         const expV = (vStats[i].g + hStats[i].r) / 2;
         const combinedXG = expL + expV;
@@ -169,24 +234,21 @@ function analyzeMatch() {
         totalXG += combinedXG;
         xG_Timeline.push(combinedXG.toFixed(2));
 
-        // Probabilidad de que NO haya goles en este tramo (Poisson k=0)
         const probNoGoal = Math.exp(-combinedXG);
         const probGoal = (1 - probNoGoal) * 100;
         prob_Timeline.push(probGoal.toFixed(1));
 
-        // Crear Celda de Calor
         const cell = document.createElement('div');
         cell.className = 'heat-cell';
         cell.innerHTML = `${label}<br>${probGoal.toFixed(0)}%`;
         
-        // Color basado en intensidad (rojo suave a verde intenso)
         const alpha = Math.min(probGoal / 100 + 0.2, 1);
         cell.style.background = `rgba(81, 207, 102, ${alpha})`;
         heatMap.appendChild(cell);
     });
 
     document.getElementById('matchTitle').innerText = `${homeName} vs ${awayName}`;
-    document.getElementById('finalXg').innerText = (totalXG/6).toFixed(2); // Promedio o suma según prefieras, aquí uso escala xG
+    document.getElementById('finalXg').innerText = (totalXG/6).toFixed(2);
     
     const maxIndex = prob_Timeline.indexOf(Math.max(...prob_Timeline).toFixed(1));
     document.getElementById('topTramo').innerText = `TRAMO MÁS PELIGROSO: ${labels[maxIndex]} con ${prob_Timeline[maxIndex]}% de prob. de gol.`;
@@ -227,6 +289,5 @@ function renderChart(labels, data) {
     });
 }
 </script>
-
 </body>
 </html>
