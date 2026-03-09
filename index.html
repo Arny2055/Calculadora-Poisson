@@ -3,21 +3,18 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Súper Calculadora Poisson Córners - Multi-Liga</title>
+    <title>Súper Calculadora Poisson Córners - Value Finder</title>
     <style>
-        :root { --primary: #27ae60; --secondary: #2c3e50; --bg: #f4f7f6; }
+        :root { --primary: #27ae60; --secondary: #2c3e50; --bg: #f4f7f6; --accent: #f39c12; }
         body { font-family: 'Segoe UI', sans-serif; background-color: var(--bg); color: #333; margin: 0; padding: 20px; }
         .container { max-width: 1100px; margin: auto; background: white; padding: 25px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
         h1, h2 { text-align: center; color: var(--secondary); }
         
-        /* Sección de Carga de Datos */
         .admin-section { background: #ebf5fb; padding: 20px; border-radius: 8px; margin-bottom: 30px; border: 1px solid #d4e6f1; }
         .grid-inputs { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-top: 10px; }
         textarea { width: 100%; height: 100px; padding: 10px; border-radius: 5px; border: 1px solid #ccc; resize: vertical; font-family: monospace; font-size: 12px; box-sizing: border-box; }
-        .full-width { grid-column: 1 / span 2; }
-        input[type="text"] { width: 100%; padding: 10px; margin-bottom: 10px; border-radius: 5px; border: 1px solid #ccc; box-sizing: border-box; }
+        input[type="text"], input[type="number"] { width: 100%; padding: 10px; margin-bottom: 10px; border-radius: 5px; border: 1px solid #ccc; box-sizing: border-box; }
         
-        /* Selectores */
         .selector-group { display: flex; gap: 20px; align-items: flex-end; margin-bottom: 20px; padding: 15px; background: #eee; border-radius: 8px; }
         .field { flex: 1; display: flex; flex-direction: column; }
         select { padding: 10px; border-radius: 5px; border: 1px solid #bdc3c7; font-size: 15px; cursor: pointer; }
@@ -27,22 +24,27 @@
         .btn-save { background-color: var(--secondary); }
         .btn-calc { font-size: 18px; margin-top: 10px; }
 
-        /* Resultados */
         .results-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 20px; }
         .card { background: white; padding: 15px; border-radius: 8px; border: 1px solid #ddd; }
         .over-under-card { grid-column: 1 / span 2; background: #fff; }
         
         table { width: 100%; border-collapse: collapse; text-align: center; }
-        th, td { padding: 8px; border-bottom: 1px solid #eee; }
+        th, td { padding: 10px; border-bottom: 1px solid #eee; }
         th { background: #f8f9fa; }
+        
+        /* Estilos de Valor */
         .highlight { color: var(--primary); font-weight: bold; }
-        .delete-link { color: #e74c3c; cursor: pointer; font-size: 12px; text-decoration: underline; margin-top: 5px; display: inline-block; }
+        .value-badge { padding: 4px 8px; border-radius: 4px; font-size: 11px; font-weight: bold; text-transform: uppercase; }
+        .has-value { background: #27ae60; color: white; }
+        .no-value { background: #e74c3c; color: white; }
+        .odd-input { width: 60px !important; padding: 5px !important; margin: 0 !important; text-align: center; font-size: 13px; }
+        .value-cell { display: flex; flex-direction: column; align-items: center; gap: 5px; }
     </style>
 </head>
 <body>
 
 <div class="container">
-    <h1>📊 Poisson Corners Manager</h1>
+    <h1>📊 Poisson Corners Manager & Value Finder</h1>
 
     <div class="admin-section">
         <h2>Configurar Nueva Liga</h2>
@@ -58,7 +60,6 @@
             </div>
         </div>
         <button class="btn-save" onclick="saveLeague()">💾 Guardar Liga</button>
-        <div id="leagueList"></div>
     </div>
 
     <div class="selector-group">
@@ -81,9 +82,14 @@
         <div class="results-grid">
             <div class="card over-under-card">
                 <h3>📈 Probabilidades Over / Under (Totales)</h3>
+                <p style="font-size: 12px; color: #666; margin-top: -10px;">Ingresa la cuota si el % es mayor a 60 para detectar Valor.</p>
                 <table id="ouTable">
                     <thead>
-                        <tr><th>Línea</th><th>Over (Más de)</th><th>Under (Menos de)</th></tr>
+                        <tr>
+                            <th>Línea</th>
+                            <th>Over (Más de)</th>
+                            <th>Under (Menos de)</th>
+                        </tr>
                     </thead>
                     <tbody></tbody>
                 </table>
@@ -111,15 +117,12 @@
 <script>
 let leagues = JSON.parse(localStorage.getItem('cornerLeagues')) || {};
 
-// Al iniciar, cargar ligas guardadas
 window.onload = () => { updateLeagueSelectors(); };
 
 function parseTable(text) {
     const lines = text.trim().split('\n');
     const data = {};
     lines.forEach(line => {
-        // Regex para capturar nombre de equipo y las 3 columnas numéricas (GP, For, Against)
-        // Se adapta a tabs o múltiples espacios
         const parts = line.split(/\t| {2,}/);
         if (parts.length >= 4) {
             const name = parts[0].trim();
@@ -135,30 +138,20 @@ function saveLeague() {
     const name = document.getElementById('leagueName').value;
     const homeRaw = document.getElementById('rawHome').value;
     const awayRaw = document.getElementById('rawAway').value;
-
     if (!name || !homeRaw || !awayRaw) return alert("Completa todos los campos");
-
     const homeData = parseTable(homeRaw);
     const awayData = parseTable(awayRaw);
-
-    if (Object.keys(homeData).length === 0) return alert("Error al leer la tabla local. Verifica el formato.");
-
+    if (Object.keys(homeData).length === 0) return alert("Error al leer la tabla local.");
     leagues[name] = { home: homeData, away: awayData };
     localStorage.setItem('cornerLeagues', JSON.stringify(leagues));
-    
-    alert("Liga guardada con éxito");
-    document.getElementById('leagueName').value = '';
-    document.getElementById('rawHome').value = '';
-    document.getElementById('rawAway').value = '';
+    alert("Liga guardada");
     updateLeagueSelectors();
 }
 
 function updateLeagueSelectors() {
     const select = document.getElementById('selectLeague');
     select.innerHTML = '<option value="">-- Selecciona Liga --</option>';
-    Object.keys(leagues).forEach(l => {
-        select.add(new Option(l, l));
-    });
+    Object.keys(leagues).forEach(l => { select.add(new Option(l, l)); });
 }
 
 function loadTeams() {
@@ -166,9 +159,7 @@ function loadTeams() {
     const hSelect = document.getElementById('homeTeam');
     const aSelect = document.getElementById('awayTeam');
     hSelect.innerHTML = ''; aSelect.innerHTML = '';
-    
     if (!leagueName) return;
-
     const teams = Object.keys(leagues[leagueName].home).sort();
     teams.forEach(t => {
         hSelect.add(new Option(t, t));
@@ -186,36 +177,44 @@ function poisson(k, lambda) {
     return (Math.pow(lambda, k) * Math.exp(-lambda)) / factorial(k);
 }
 
+function calculateValue(prob, odd, elementId) {
+    const badge = document.getElementById(elementId);
+    if (!odd || odd <= 1) {
+        badge.style.display = 'none';
+        return;
+    }
+    const realProb = prob / 100;
+    const ev = (realProb * odd); 
+    
+    badge.style.display = 'inline-block';
+    if (ev > 1.0) {
+        badge.innerText = 'Hay Valor';
+        badge.className = 'value-badge has-value';
+    } else {
+        badge.innerText = 'Sin Valor';
+        badge.className = 'value-badge no-value';
+    }
+}
+
 function calculate() {
     const leagueName = document.getElementById('selectLeague').value;
     const hName = document.getElementById('homeTeam').value;
     const aName = document.getElementById('awayTeam').value;
-
     if (!leagueName || !hName || !aName) return alert("Selecciona liga y equipos");
 
     const league = leagues[leagueName];
-    
-    // Calcular Promedios de esta liga específica
     let hForSum = 0, hAgSum = 0, aForSum = 0, aAgSum = 0;
     const teams = Object.keys(league.home);
     teams.forEach(t => {
-        hForSum += league.home[t].for;
-        hAgSum += league.home[t].ag;
-        aForSum += league.away[t].for;
-        aAgSum += league.away[t].ag;
+        hForSum += league.home[t].for; hAgSum += league.home[t].ag;
+        aForSum += league.away[t].for; aAgSum += league.away[t].ag;
     });
-    const avg = {
-        hFor: hForSum / teams.length,
-        hAg: hAgSum / teams.length,
-        aFor: aForSum / teams.length,
-        aAg: aAgSum / teams.length
-    };
+    const avg = { hFor: hForSum / teams.length, hAg: hAgSum / teams.length, aFor: aForSum / teams.length, aAg: aAgSum / teams.length };
 
-    // Calcular Lambdas (Expectativa)
-    const lambdaHome = (league.home[hName].for / avg.hFor) * (league.away[aName].ag / avg.aAg) * avg.hFor;
-    const lambdaAway = (league.away[aName].for / avg.aFor) * (league.home[hName].ag / avg.hAg) * avg.aFor;
+    const lH = (league.home[hName].for / avg.hFor) * (league.away[aName].ag / avg.aAg) * avg.hFor;
+    const lA = (league.away[aName].for / avg.aFor) * (league.home[hName].ag / avg.hAg) * avg.aFor;
 
-    renderTables(lambdaHome, lambdaAway, hName, aName);
+    renderTables(lH, lA, hName, aName);
 }
 
 function renderTables(lH, lA, hName, aName) {
@@ -227,54 +226,51 @@ function renderTables(lH, lA, hName, aName) {
     const aBody = document.querySelector('#awayProbTable tbody');
     hBody.innerHTML = ''; aBody.innerHTML = '';
 
-    let probsHome = [], probsAway = [];
-
-    for (let i = 0; i <= 30; i++) {
-        const p1 = poisson(i, lH);
-        const p2 = poisson(i, lA);
-        probsHome.push(p1);
-        probsAway.push(p2);
-
-        if (i <= 15) { // Mostrar solo hasta 15 en tabla individual para no saturar
-            hBody.innerHTML += `<tr><td>${i}</td><td>${(p1 * 100).toFixed(2)}%</td></tr>`;
-            aBody.innerHTML += `<tr><td>${i}</td><td>${(p2 * 100).toFixed(2)}%</td></tr>`;
-        }
+    for (let i = 0; i <= 15; i++) {
+        hBody.innerHTML += `<tr><td>${i}</td><td>${(poisson(i, lH) * 100).toFixed(2)}%</td></tr>`;
+        aBody.innerHTML += `<tr><td>${i}</td><td>${(poisson(i, lA) * 100).toFixed(2)}%</td></tr>`;
     }
 
-    // Calcular Over/Under Totales
-    // La suma de dos variables Poisson independientes es una Poisson con lambda = lH + lA
     const totalLambda = lH + lA;
     const ouBody = document.querySelector('#ouTable tbody');
     ouBody.innerHTML = '';
 
     const lines = [5.5, 6.5, 7.5, 8.5, 9.5, 10.5, 11.5];
-    lines.forEach(line => {
+    lines.forEach((line, idx) => {
         let probUnder = 0;
-        for (let i = 0; i < line; i++) {
-            probUnder += poisson(i, totalLambda);
-        }
+        for (let i = 0; i < line; i++) probUnder += poisson(i, totalLambda);
         let probOver = 1 - probUnder;
         
+        let pOverPct = (probOver * 100).toFixed(2);
+        let pUnderPct = (probUnder * 100).toFixed(2);
+
         ouBody.innerHTML += `
             <tr>
                 <td><strong>${line}</strong></td>
-                <td class="${probOver > 0.6 ? 'highlight' : ''}">${(probOver * 100).toFixed(2)}%</td>
-                <td class="${probUnder > 0.6 ? 'highlight' : ''}">${(probUnder * 100).toFixed(2)}%</td>
+                <td>
+                    <div class="value-cell">
+                        <span class="${pOverPct >= 60 ? 'highlight' : ''}">${pOverPct}%</span>
+                        ${pOverPct >= 60 ? `
+                            <input type="number" step="0.01" class="odd-input" placeholder="Cuota" 
+                                oninput="calculateValue(${pOverPct}, this.value, 'vOver${idx}')">
+                            <span id="vOver${idx}" class="value-badge" style="display:none"></span>
+                        ` : ''}
+                    </div>
+                </td>
+                <td>
+                    <div class="value-cell">
+                        <span class="${pUnderPct >= 60 ? 'highlight' : ''}">${pUnderPct}%</span>
+                        ${pUnderPct >= 60 ? `
+                            <input type="number" step="0.01" class="odd-input" placeholder="Cuota" 
+                                oninput="calculateValue(${pUnderPct}, this.value, 'vUnder${idx}')">
+                            <span id="vUnder${idx}" class="value-badge" style="display:none"></span>
+                        ` : ''}
+                    </div>
+                </td>
             </tr>
         `;
     });
 }
-
-function deleteLeague() {
-    // Función extra si quieres borrar datos
-    const leagueName = document.getElementById('selectLeague').value;
-    if (confirm(`¿Borrar ${leagueName}?`)) {
-        delete leagues[leagueName];
-        localStorage.setItem('cornerLeagues', JSON.stringify(leagues));
-        updateLeagueSelectors();
-    }
-}
 </script>
-
 </body>
 </html>
