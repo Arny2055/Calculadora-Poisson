@@ -60,14 +60,19 @@
         .result-panel { display: none; margin-top: 20px; }
         .chart-container { height: 250px; margin-top: 25px; }
         
-        .prediction-badge { background: linear-gradient(135deg, rgba(81, 207, 102, 0.1), rgba(77, 171, 247, 0.1)); border: 1px solid var(--border); padding: 20px; border-radius: 15px; text-align: center; margin-top: 20px; display: grid; grid-template-columns: 1fr 1fr; align-items: center; gap: 15px; }
+        .prediction-badge { background: linear-gradient(135deg, rgba(81, 207, 102, 0.1), rgba(77, 171, 247, 0.1)); border: 1px solid var(--border); padding: 20px; border-radius: 15px; text-align: center; margin-top: 20px; display: grid; grid-template-columns: 1fr 1fr 1fr; align-items: center; gap: 15px; }
         
         input[type="text"] { width:100%; padding:10px; background:#0b0e14; border:1px solid var(--border); color:white; border-radius:8px; box-sizing:border-box; }
-        .runin-tag { font-size: 0.7rem; color: var(--accent-yellow); font-style: italic; }
 
         .half-analysis { padding: 10px; border-left: 1px solid var(--border); text-align: left; }
         .half-label { font-size: 0.65rem; color: var(--primary); font-weight: bold; }
-        .half-val { font-size: 1.2rem; font-weight: 800; color: var(--accent-yellow); }
+        .half-val { font-size: 1.1rem; font-weight: 800; color: var(--accent-yellow); }
+
+        /* Estilos del Filtro HT */
+        .ht-filter-box { padding: 10px; border-left: 1px solid var(--border); text-align: center; }
+        .ht-status { font-size: 0.7rem; font-weight: 900; padding: 5px 10px; border-radius: 5px; display: inline-block; margin-top: 5px; }
+        .ht-yes { background: var(--accent-green); color: #000; }
+        .ht-no { background: rgba(255,255,255,0.1); color: var(--text-white); }
     </style>
 </head>
 <body>
@@ -155,14 +160,19 @@
 
             <div class="prediction-badge">
                 <div>
-                    <div style="font-size: 0.8rem; color: var(--accent-green); font-weight: bold;">xG FINAL AJUSTADO</div>
-                    <div id="finalXg" style="font-size: 3rem; font-weight: 900; color: #fff;">0.00</div>
-                    <div id="topTramo" style="font-size: 0.75rem; margin-top: 5px;"></div>
+                    <div style="font-size: 0.65rem; color: var(--accent-green); font-weight: bold;">xG TOTAL AJUSTADO</div>
+                    <div id="finalXg" style="font-size: 2.2rem; font-weight: 900; color: #fff;">0.00</div>
+                    <div id="topTramo" style="font-size: 0.6rem; margin-top: 5px;"></div>
                 </div>
                 <div class="half-analysis">
-                    <div class="half-label">DISTRIBUCIÓN POR TIEMPO</div>
-                    <div id="preferredHalf" class="half-val">ANALIZANDO...</div>
-                    <div style="font-size: 0.65rem; opacity: 0.8; margin-top: 4px;" id="halfDetails"></div>
+                    <div class="half-label">TIEMPO DOMINANTE</div>
+                    <div id="preferredHalf" class="half-val">...</div>
+                    <div style="font-size: 0.6rem; opacity: 0.8; margin-top: 4px;" id="halfDetails"></div>
+                </div>
+                <div class="ht-filter-box">
+                    <div class="half-label">FILTRO OVER 0.5 HT</div>
+                    <div id="htRecommendation" class="ht-status">...</div>
+                    <div id="htProb" style="font-size: 0.6rem; margin-top: 5px; color: var(--accent-green);">0% prob.</div>
                 </div>
             </div>
 
@@ -282,9 +292,6 @@ function analyzeMatch() {
     let fzaDefV = vT.avgGa / leagueAvg.awayGa;
 
     const runInAdjustment = (runH.diff - runV.diff) / 100;
-    
-    document.getElementById('runInAdj').innerText = (runInAdjustment * 100).toFixed(1) + "%";
-
     let lambdaL = (fzaAtkL * fzaDefV * leagueAvg.homeGf) * (1 + (runH.diff / 500)); 
     let lambdaV = (fzaAtkV * fzaDefL * leagueAvg.awayGf) * (1 + (runV.diff / 500));
 
@@ -292,6 +299,7 @@ function analyzeMatch() {
     document.getElementById('fzaDefL').innerText = fzaDefL.toFixed(2);
     document.getElementById('fzaAtkV').innerText = fzaAtkV.toFixed(2);
     document.getElementById('fzaDefV').innerText = fzaDefV.toFixed(2);
+    document.getElementById('runInAdj').innerText = (runInAdjustment * 100).toFixed(1) + "%";
 
     let scores = []; let pHome = 0, pDraw = 0, pAway = 0;
     for (let i = 0; i <= 5; i++) {
@@ -337,13 +345,24 @@ function analyzeMatch() {
         heatMap.appendChild(cell);
     });
 
-    // --- MEJORA: ANÁLISIS POR TIEMPOS (1T vs 2T) ---
+    // --- MEJORA: ANÁLISIS POR TIEMPOS Y FILTRO HT ---
     const xG_1T = parseFloat(xG_Timeline[0]) + parseFloat(xG_Timeline[1]) + parseFloat(xG_Timeline[2]);
     const xG_2T = parseFloat(xG_Timeline[3]) + parseFloat(xG_Timeline[4]) + parseFloat(xG_Timeline[5]);
     const total_xG = xG_1T + xG_2T;
     
-    const pct1T = ((xG_1T / total_xG) * 100).toFixed(1);
-    const pct2T = ((xG_2T / total_xG) * 100).toFixed(1);
+    // Probabilidad real Over 0.5 HT usando Poisson acumulado del 1T
+    const probHT = (1 - Math.exp(-xG_1T)) * 100;
+    const htRecEl = document.getElementById('htRecommendation');
+    
+    document.getElementById('htProb').innerText = probHT.toFixed(1) + "% prob.";
+    
+    if (probHT >= 70) {
+        htRecEl.innerText = "ENTRADA RECOMENDADA";
+        htRecEl.className = "ht-status ht-yes";
+    } else {
+        htRecEl.innerText = "SIN SEÑAL CLARA";
+        htRecEl.className = "ht-status ht-no";
+    }
 
     const preferredHalfEl = document.getElementById('preferredHalf');
     if (xG_1T > xG_2T) {
@@ -353,12 +372,12 @@ function analyzeMatch() {
         preferredHalfEl.innerText = "2do TIEMPO";
         preferredHalfEl.style.color = "var(--accent-yellow)";
     }
-    document.getElementById('halfDetails').innerText = `1T: ${pct1T}% vs 2T: ${pct2T}% de la carga xG`;
+    document.getElementById('halfDetails').innerText = `1T: ${((xG_1T/total_xG)*100).toFixed(1)}% vs 2T: ${((xG_2T/total_xG)*100).toFixed(1)}%`;
 
     document.getElementById('matchTitle').innerText = `${homeName} vs ${awayName}`;
     document.getElementById('finalXg').innerText = (lambdaL + lambdaV).toFixed(2);
     const maxIdx = prob_Timeline.indexOf(Math.max(...prob_Timeline.map(Number)).toFixed(1));
-    document.getElementById('topTramo').innerText = `PICO DE PRESIÓN: ${labels[maxIdx]} con un ${prob_Timeline[maxIdx]}% de probabilidad de gol`;
+    document.getElementById('topTramo').innerText = `PICO: ${labels[maxIdx]} (${prob_Timeline[maxIdx]}%)`;
 
     renderChart(labels, xG_Timeline);
     document.getElementById('results').style.display = 'block';
