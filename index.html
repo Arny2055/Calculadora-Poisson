@@ -91,7 +91,7 @@
 <body>
 
 <div class="container">
-    <h1>BETA<span>GS</span> POISSON LAB v4.1</h1>
+    <h1>BETA<span>GS</span> POISSON LAB v4.2</h1>
     
     <div class="card">
         <div class="league-manager">
@@ -211,7 +211,7 @@
             </div>
 
             <div class="live-simulator">
-                <div class="half-label" style="color: var(--accent-green); margin-bottom: 15px;">🔴 SIMULADOR DE MARCADOR EN VIVO (Métrica Corregida)</div>
+                <div class="half-label" style="color: var(--accent-green); margin-bottom: 15px;">🔴 SIMULADOR REACTIVO AL MARCADOR (Game State Engine)</div>
                 <div class="live-grid">
                     <div class="live-input-box">
                         <label>Minuto Actual</label>
@@ -226,9 +226,9 @@
                         <input type="number" id="liveGAway" value="0" min="0" oninput="simulateLive()">
                     </div>
                     <div class="live-result-display">
-                        <div class="half-label">PROB. GOL RESTANTE (+1.0)</div>
+                        <div class="half-label">PROB. +1 GOL (Dinamizada)</div>
                         <div class="live-prob-main" id="liveProb">0%</div>
-                        <div id="liveAdvice" style="font-size: 0.6rem; opacity: 0.8;">Esperando datos...</div>
+                        <div id="liveAdvice" style="font-size: 0.6rem; font-weight: bold; margin-top:5px;">Inicia el partido...</div>
                     </div>
                 </div>
             </div>
@@ -245,7 +245,7 @@
 <script>
 let database = { homeMin: {}, awayMin: {}, homeTable: {}, awayTable: {}, runIn: {} };
 let leagueAvg = { homeGf: 0, homeGa: 0, awayGf: 0, awayGa: 0 };
-let currentMatchData = { lambdaL: 0, lambdaV: 0, tramoXG: [] };
+let currentMatchData = { lambdaL: 0, lambdaV: 0, tramoXG: [], fav: 'none' };
 let myChart = null;
 
 window.onload = updateLeagueList;
@@ -352,13 +352,13 @@ function analyzeMatch() {
     let fzaAtkV = vT.avgGf / leagueAvg.awayGf;
     let fzaDefV = vT.avgGa / leagueAvg.awayGa;
 
-    // Normalización Run-in (Corregida quirúrgicamente para evitar distorsión)
     const runInAdjustment = (runH.diff - runV.diff) / 100;
     let lambdaL = (fzaAtkL * fzaDefV * leagueAvg.homeGf) * (1 + (runH.diff / 400)); 
     let lambdaV = (fzaAtkV * fzaDefL * leagueAvg.awayGf) * (1 + (runV.diff / 400));
     
     currentMatchData.lambdaL = lambdaL;
     currentMatchData.lambdaV = lambdaV;
+    currentMatchData.fav = lambdaL > lambdaV ? 'L' : 'V';
 
     document.getElementById('fzaAtkL').innerText = fzaAtkL.toFixed(2);
     document.getElementById('fzaDefL').innerText = fzaDefL.toFixed(2);
@@ -366,17 +366,13 @@ function analyzeMatch() {
     document.getElementById('fzaDefV').innerText = fzaDefV.toFixed(2);
     document.getElementById('runInAdj').innerText = (runInAdjustment * 100).toFixed(1) + "%";
 
-    // --- CÁLCULOS AVANZADOS ---
-    // Momentum: Frecuencia de goles en tramos finales vs global
     const totalG = hM.reduce((a,b)=>a+b.g,0) + vM.reduce((a,b)=>a+b.g,0);
     const momentum = totalG > 0 ? (((hM[4].g + hM[5].g + vM[4].g + vM[5].g) / totalG) * 100) : 33.3;
     document.getElementById('momentumIdx').innerText = momentum.toFixed(1) + "%";
     
-    // Efecto Espejo: Cruce de Ventajas (Cuantitativo)
     const mirror = (fzaAtkL * fzaDefV) + (fzaAtkV * fzaDefL);
     document.getElementById('mirrorEffect').innerText = mirror.toFixed(2) + " pts";
     
-    // Eficiencia de cierre: xG proyectado para el último tramo
     const closure = ((hM[5].g + vM[5].g) / 2).toFixed(2);
     document.getElementById('closureRatio').innerText = closure + " avg";
 
@@ -405,7 +401,7 @@ function analyzeMatch() {
     const labels = ["0-15'", "16-30'", "31-45'", "46-60'", "61-75'", "76-90'"];
     let tramoWeights = []; let totalHistoricalRaw = 0;
     labels.forEach((_, i) => {
-        const weight = (hM[i].g + hM[i].r + vM[i].g + vM[i].r) + 0.1; // Suavizado para evitar 0
+        const weight = (hM[i].g + hM[i].r + vM[i].g + vM[i].r) + 0.1;
         tramoWeights.push(weight); totalHistoricalRaw += weight;
     });
 
@@ -435,7 +431,6 @@ function analyzeMatch() {
     document.getElementById('bttsProb').innerText = probBTTS.toFixed(1) + "%";
     document.getElementById('bttsStatus').innerText = probBTTS > 52 ? "SÍ" : "NO";
 
-    // Doble Oportunidad
     const dc1X = (pHome + pDraw) * 100;
     const dcX2 = (pAway + pDraw) * 100;
     if(dc1X >= dcX2) {
@@ -446,7 +441,6 @@ function analyzeMatch() {
         document.getElementById('doubleChanceProb').innerText = dcX2.toFixed(1) + "%";
     }
 
-    // Over 1.5 FT
     const p0_FT = poisson(0, lambdaL + lambdaV);
     const p1_FT = poisson(1, lambdaL + lambdaV);
     const probOver15 = (1 - (p0_FT + p1_FT)) * 100;
@@ -459,35 +453,69 @@ function analyzeMatch() {
     simulateLive();
 }
 
+/** * SIMULADOR LIVE MEJORADO (DINÁMICA DE MARCADOR)
+ * El modelo ahora ajusta la probabilidad restante basada en el Game State actual.
+ */
 function simulateLive() {
     const min = Math.min(Math.max(parseInt(document.getElementById('liveMin').value) || 0, 0), 90);
+    const gH = parseInt(document.getElementById('liveGHome').value) || 0;
+    const gV = parseInt(document.getElementById('liveGAway').value) || 0;
+    
     if (!currentMatchData.tramoXG.length) return;
 
-    let remainingXG = 0;
+    let baseRemainingXG = 0;
     const tramoEnds = [15, 30, 45, 60, 75, 90];
     
+    // 1. Calcular xG base según tiempo restante histórico
     tramoEnds.forEach((tEnd, i) => {
         if (min < tEnd) {
             const tStart = tEnd - 15;
             const timeInsideTramo = tEnd - Math.max(min, tStart);
             const fraction = timeInsideTramo / 15;
-            remainingXG += currentMatchData.tramoXG[i] * fraction;
+            baseRemainingXG += currentMatchData.tramoXG[i] * fraction;
         }
     });
 
-    const probNext = (1 - Math.exp(-remainingXG)) * 100;
-    document.getElementById('liveProb').innerText = probNext.toFixed(1) + "%";
+    // 2. APLICAR FACTORES DINÁMICOS DE GAME STATE
+    let dynamicFactor = 1.0;
+    let gameStatusText = "Desarrollo Neutral";
+    let color = "var(--accent-yellow)";
+
+    // Escenario A: El No Favorito va ganando (Aumenta probabilidad de goles por desesperación del favorito)
+    if ((currentMatchData.fav === 'L' && gV > gH) || (currentMatchData.fav === 'V' && gH > gV)) {
+        dynamicFactor = 1.25; // +25% de probabilidad por apertura de espacios
+        gameStatusText = "🔥 UNDERDOG LIDERANDO: Urgencia Máxima del Favorito.";
+        color = "var(--accent-green)";
+    } 
+    // Escenario B: Empate en minutos finales (Fav busca la victoria)
+    else if (gH === gV && min > 65) {
+        dynamicFactor = 1.15;
+        gameStatusText = "⚖️ EMPATE TENSO: El favorito aumentará la presión.";
+        color = "var(--accent-yellow)";
+    }
+    // Escenario C: El Favorito ya está ganando cómodamente (Puede bajar el ritmo)
+    else if ((currentMatchData.fav === 'L' && gH > gV + 1) || (currentMatchData.fav === 'V' && gV > gH + 1)) {
+        dynamicFactor = 0.85; // Descenso del ritmo
+        gameStatusText = "🧊 PARTIDO CONTROLADO: Ritmo descendente.";
+        color = "var(--accent-red)";
+    }
+
+    const finalXG = baseRemainingXG * dynamicFactor;
+    const probNext = (1 - Math.exp(-finalXG)) * 100;
     
+    // UI Update
+    document.getElementById('liveProb').innerText = probNext.toFixed(1) + "%";
     const advice = document.getElementById('liveAdvice');
-    if(min > 80 && probNext < 15) {
-        advice.innerText = "🛑 MERCADO CERRADO: Poca probabilidad.";
-        advice.style.color = "var(--accent-red)";
-    } else if(probNext > 55) {
-        advice.innerText = "🔥 TENDENCIA AGRESIVA: Alta presión de gol.";
-        advice.style.color = "var(--accent-green)";
+    advice.innerText = gameStatusText;
+    advice.style.color = color;
+    
+    // Alertar si el marcador es propicio para el +1.0 gol
+    if (min > 10 && min < 85 && probNext > 60) {
+        document.getElementById('liveProb').style.color = "var(--accent-green)";
+    } else if (min > 85 && probNext < 15) {
+        document.getElementById('liveProb').style.color = "var(--accent-red)";
     } else {
-        advice.innerText = "⚖️ NEUTRAL: Desarrollo esperado.";
-        advice.style.color = "var(--accent-yellow)";
+        document.getElementById('liveProb').style.color = "var(--accent-green)";
     }
 }
 
