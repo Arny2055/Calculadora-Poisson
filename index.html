@@ -75,7 +75,7 @@
         
         .prediction-badge { background: linear-gradient(135deg, rgba(81, 207, 102, 0.1), rgba(77, 171, 247, 0.1)); border: 1px solid var(--border); padding: 20px; border-radius: 15px; text-align: center; margin-top: 20px; display: grid; grid-template-columns: repeat(4, 1fr); align-items: center; gap: 10px; }
         
-        input[type="text"] { width:100%; padding:10px; background:#0b0e14; border:1px solid var(--border); color:white; border-radius:8px; box-sizing:border-box; }
+        input[type="text"], input[type="number"] { width:100%; padding:10px; background:#0b0e14; border:1px solid var(--border); color:white; border-radius:8px; box-sizing:border-box; }
 
         .half-analysis { padding: 10px; border-left: 1px solid var(--border); text-align: left; }
         .half-label { font-size: 0.6rem; color: var(--primary); font-weight: bold; margin-bottom: 4px; }
@@ -86,12 +86,18 @@
         .status-yes { background: var(--accent-green); color: #000; }
         .status-no { background: rgba(255,255,255,0.1); color: var(--text-white); }
         .status-warn { background: var(--accent-yellow); color: #000; }
+
+        /* NUEVOS ESTILOS CUOTAS */
+        .odds-container { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 10px; }
+        .value-tag { font-size: 0.55rem; padding: 2px 4px; border-radius: 4px; margin-left: 5px; text-transform: uppercase; font-weight: bold; }
+        .tag-positive { background: var(--accent-green); color: #000; }
+        .tag-negative { background: var(--accent-red); color: #fff; }
     </style>
 </head>
 <body>
 
 <div class="container">
-    <h1>BETA<span>GS</span> POISSON LAB v4.2</h1>
+    <h1>BETA<span>GS</span> POISSON LAB v4.3</h1>
     
     <div class="card">
         <div class="league-manager">
@@ -136,6 +142,16 @@
             <div><label>LOCAL</label><select id="selectHome"></select></div>
             <div><label>VISITANTE</label><select id="selectAway"></select></div>
         </div>
+        
+        <div style="margin-top: 15px; border-top: 1px solid var(--border); padding-top: 15px;">
+            <label style="color: var(--accent-yellow);">CUOTAS DE LA CASA (Opcional para cálculo de Valor)</label>
+            <div class="odds-container">
+                <div><label>CUOTA (1)</label><input type="number" id="odds1" step="0.01" placeholder="Ej: 1.85"></div>
+                <div><label>CUOTA (X)</label><input type="number" id="oddsX" step="0.01" placeholder="Ej: 3.40"></div>
+                <div><label>CUOTA (2)</label><input type="number" id="odds2" step="0.01" placeholder="Ej: 4.20"></div>
+            </div>
+        </div>
+
         <button class="btn btn-calc" style="background: var(--accent-green);" onclick="analyzeMatch()">Ejecutar Análisis Poisson Corregido</button>
     </div>
 
@@ -171,17 +187,17 @@
 
             <div class="matrix-grid">
                 <div class="matrix-card">
-                    <h4>LOCAL (1)</h4>
+                    <h4>LOCAL (1) <span id="val1" class="value-tag"></span></h4>
                     <div class="prob-val" id="probHome">0%</div>
                     <div class="score-list" id="scoresHome"></div>
                 </div>
                 <div class="matrix-card">
-                    <h4>EMPATE (X)</h4>
+                    <h4>EMPATE (X) <span id="valX" class="value-tag"></span></h4>
                     <div class="prob-val" id="probDraw" style="color: var(--accent-yellow);">0%</div>
                     <div class="score-list" id="scoresDraw"></div>
                 </div>
                 <div class="matrix-card">
-                    <h4>VISITA (2)</h4>
+                    <h4>VISITA (2) <span id="val2" class="value-tag"></span></h4>
                     <div class="prob-val" id="probAway" style="color: var(--accent-red);">0%</div>
                     <div class="score-list" id="scoresAway"></div>
                 </div>
@@ -390,6 +406,9 @@ function analyzeMatch() {
     document.getElementById('probDraw').innerText = (pDraw * 100).toFixed(1) + "%";
     document.getElementById('probAway').innerText = (pAway * 100).toFixed(1) + "%";
 
+    // ANALIZAR VALOR DE CUOTAS
+    calculateValue(pHome, pDraw, pAway);
+
     const updateScores = (id, type) => {
         const filtered = scores.filter(s => s.type === type).sort((a, b) => b.prob - a.prob).slice(0, 3);
         document.getElementById(id).innerHTML = filtered.map(s => 
@@ -453,9 +472,41 @@ function analyzeMatch() {
     simulateLive();
 }
 
-/** * SIMULADOR LIVE MEJORADO (DINÁMICA DE MARCADOR)
- * El modelo ahora ajusta la probabilidad restante basada en el Game State actual.
+/** * CALCULAR VALOR DE MERCADO
+ * Compara tu probabilidad vs la cuota de la casa.
  */
+function calculateValue(p1, pX, p2) {
+    const o1 = parseFloat(document.getElementById('odds1').value) || 0;
+    const oX = parseFloat(document.getElementById('oddsX').value) || 0;
+    const o2 = parseFloat(document.getElementById('odds2').value) || 0;
+
+    const pairs = [
+        { cuota: o1, prob: p1, el: 'val1' },
+        { cuota: oX, prob: pX, el: 'valX' },
+        { cuota: o2, prob: p2, el: 'val2' }
+    ];
+
+    pairs.forEach(p => {
+        const el = document.getElementById(p.el);
+        if (p.cuota > 1) {
+            const probCasa = (1 / p.cuota);
+            const diff = (p.prob - probCasa) * 100;
+            if (diff > 5) { // Umbral de valor: 5% superior
+                el.innerText = "Value: +" + diff.toFixed(1) + "%";
+                el.className = "value-tag tag-positive";
+            } else if (diff < -5) {
+                el.innerText = "No Value: " + diff.toFixed(1) + "%";
+                el.className = "value-tag tag-negative";
+            } else {
+                el.innerText = "Fair Odds";
+                el.className = "value-tag";
+            }
+        } else {
+            el.innerText = "";
+        }
+    });
+}
+
 function simulateLive() {
     const min = Math.min(Math.max(parseInt(document.getElementById('liveMin').value) || 0, 0), 90);
     const gH = parseInt(document.getElementById('liveGHome').value) || 0;
@@ -466,7 +517,6 @@ function simulateLive() {
     let baseRemainingXG = 0;
     const tramoEnds = [15, 30, 45, 60, 75, 90];
     
-    // 1. Calcular xG base según tiempo restante histórico
     tramoEnds.forEach((tEnd, i) => {
         if (min < tEnd) {
             const tStart = tEnd - 15;
@@ -476,26 +526,22 @@ function simulateLive() {
         }
     });
 
-    // 2. APLICAR FACTORES DINÁMICOS DE GAME STATE
     let dynamicFactor = 1.0;
     let gameStatusText = "Desarrollo Neutral";
     let color = "var(--accent-yellow)";
 
-    // Escenario A: El No Favorito va ganando (Aumenta probabilidad de goles por desesperación del favorito)
     if ((currentMatchData.fav === 'L' && gV > gH) || (currentMatchData.fav === 'V' && gH > gV)) {
-        dynamicFactor = 1.25; // +25% de probabilidad por apertura de espacios
+        dynamicFactor = 1.25;
         gameStatusText = "🔥 UNDERDOG LIDERANDO: Urgencia Máxima del Favorito.";
         color = "var(--accent-green)";
     } 
-    // Escenario B: Empate en minutos finales (Fav busca la victoria)
     else if (gH === gV && min > 65) {
         dynamicFactor = 1.15;
         gameStatusText = "⚖️ EMPATE TENSO: El favorito aumentará la presión.";
         color = "var(--accent-yellow)";
     }
-    // Escenario C: El Favorito ya está ganando cómodamente (Puede bajar el ritmo)
     else if ((currentMatchData.fav === 'L' && gH > gV + 1) || (currentMatchData.fav === 'V' && gV > gH + 1)) {
-        dynamicFactor = 0.85; // Descenso del ritmo
+        dynamicFactor = 0.85;
         gameStatusText = "🧊 PARTIDO CONTROLADO: Ritmo descendente.";
         color = "var(--accent-red)";
     }
@@ -503,13 +549,11 @@ function simulateLive() {
     const finalXG = baseRemainingXG * dynamicFactor;
     const probNext = (1 - Math.exp(-finalXG)) * 100;
     
-    // UI Update
     document.getElementById('liveProb').innerText = probNext.toFixed(1) + "%";
     const advice = document.getElementById('liveAdvice');
     advice.innerText = gameStatusText;
     advice.style.color = color;
     
-    // Alertar si el marcador es propicio para el +1.0 gol
     if (min > 10 && min < 85 && probNext > 60) {
         document.getElementById('liveProb').style.color = "var(--accent-green)";
     } else if (min > 85 && probNext < 15) {
