@@ -17,9 +17,11 @@
         
         /* Marcador Estilo Live */
         .live-score-container { background: #1a1a1a; color: white; border-radius: 15px; padding: 25px; margin: 15px 0; border-bottom: 5px solid #0d6efd; }
-        .score-box { font-size: 4rem; font-weight: 800; color: #fff; background: #333; padding: 10px 25px; border-radius: 10px; min-width: 100px; display: inline-block; }
+        .score-box { font-size: 4rem; font-weight: 800; color: #fff; background: #333; padding: 10px 25px; border-radius: 10px; min-width: 100px; display: inline-block; border: 2px solid #444; }
         .score-separator { font-size: 3rem; color: #ffc107; margin: 0 20px; vertical-align: middle; }
         
+        .live-input-score { width: 80px; font-size: 1.5rem; text-align: center; background: #333; color: #ffc107; border: 1px solid #555; border-radius: 5px; }
+
         .prob-bar-container { height: 12px; background: #444; border-radius: 6px; overflow: hidden; margin: 15px 0; }
         .prob-bar-fill { height: 100%; transition: width 0.5s ease-in-out; }
         
@@ -34,7 +36,7 @@
 
 <nav class="navbar navbar-dark bg-dark mb-4 shadow-sm">
     <div class="container">
-        <span class="navbar-brand mb-0 h1">⚽ Predictor Pro Elite <span class="badge bg-danger ms-2" style="font-size: 0.6em;">LIVE MODE</span></span>
+        <span class="navbar-brand mb-0 h1">⚽ Predictor Pro Elite <span class="badge bg-danger ms-2" style="font-size: 0.6em;">LIVE MODE v4.0</span></span>
     </div>
 </nav>
 
@@ -66,6 +68,20 @@
         </div>
 
         <div class="col-lg-9">
+            <div class="card p-3 mb-3 bg-dark text-white shadow">
+                <div class="d-flex justify-content-center align-items-center gap-3">
+                    <div class="text-center">
+                        <small class="d-block mb-1 text-warning fw-bold">MARCADOR LOCAL</small>
+                        <input type="number" id="liveScoreHome" class="live-input-score" value="0" min="0" onchange="runH2HAnalysis()">
+                    </div>
+                    <div class="h2 mt-4 text-muted">-</div>
+                    <div class="text-center">
+                        <small class="d-block mb-1 text-primary fw-bold">MARCADOR VISITANTE</small>
+                        <input type="number" id="liveScoreAway" class="live-input-score" value="0" min="0" onchange="runH2HAnalysis()">
+                    </div>
+                </div>
+            </div>
+
             <div class="card p-3 shadow-sm">
                 <div class="d-flex justify-content-between align-items-center mb-2">
                     <h6 class="team-title text-warning">🏠 Tabla Local (Home)</h6>
@@ -103,7 +119,7 @@
             <div id="crossMatchup" class="card p-4 border-0 shadow-lg text-center">
                 <div class="py-5 text-muted">
                     <h5>Análisis en tiempo real</h5>
-                    <p>Selecciona un equipo de cada tabla para ver las probabilidades de **Próximo Gol**.</p>
+                    <p>Selecciona un equipo de cada tabla para activar el Live Betting.</p>
                 </div>
             </div>
         </div>
@@ -185,30 +201,46 @@
     function runH2HAnalysis() {
         const h = getSelectedData('local');
         const a = getSelectedData('away');
+        const scH = parseInt(document.getElementById('liveScoreHome').value) || 0;
+        const scA = parseInt(document.getElementById('liveScoreAway').value) || 0;
+        
         const container = document.getElementById('crossMatchup');
         if (!h || !a) return;
 
-        // LÓGICA DE PRÓXIMO GOL (LIVE BETTING)
-        // Probabilidades de marcar el siguiente basadas en TL (si van 0-0) o IL (si ya ganan)
-        let probH = (h.tl * 0.4) + (h.il * 0.3) + (a.otl * 0.3);
-        let probA = (a.tl * 0.4) + (a.il * 0.3) + (h.otl * 0.3);
+        // LÓGICA DINÁMICA SEGÚN MARCADOR ACTUAL
+        let probH = 0;
+        let probA = 0;
+
+        if (scH === scA) {
+            // Empate: Se usa TL (Take Lead) y OTL (Opponent Take Lead)
+            probH = (h.tl * 0.7) + (a.otl * 0.3);
+            probA = (a.tl * 0.7) + (h.otl * 0.3);
+        } else if (scH > scA) {
+            // Local ganando: Prob de IL (Aumentar ventaja) vs A.Eq (Empatar rival)
+            probH = (h.il * 0.7) + (a.oil * 0.3);
+            probA = (a.eq * 0.7) + (h.oeq * 0.3);
+        } else {
+            // Visitante ganando
+            probH = (h.eq * 0.7) + (a.oeq * 0.3);
+            probA = (a.il * 0.7) + (h.oil * 0.3);
+        }
         
-        // Ajuste por empate (resiliencia)
-        if (h.eq > a.eq) probH += 5; else probA += 5;
-        
-        const total = probH + probA;
+        const total = (probH + probA) || 1;
         const percH = Math.round((probH / total) * 100);
         const percA = 100 - percH;
 
-        // Marcador Final Probable (Escala Poisson ajustada)
-        const finalH = Math.round(((h.tl + h.il)/2 + (a.otl + a.oil)/2) / 45);
-        const finalA = Math.round(((a.tl + a.il)/2 + (h.otl + h.oil)/2) / 55);
+        // Proyección marcador final (Ajustada por marcador actual)
+        const finalH = scH + Math.round(((h.tl + h.il)/2) / 60);
+        const finalA = scA + Math.round(((a.tl + a.il)/2) / 70);
 
         let tips = [];
-        if (percH > 60) tips.push(`<div class="prediction-badge bg-warning text-dark">🎯 PRÓXIMO GOL: LOCAL (${h.name}) tiene el control.</div>`);
-        if (percA > 60) tips.push(`<div class="prediction-badge bg-primary text-white">🎯 PRÓXIMO GOL: VISITANTE (${a.name}) muy peligroso.</div>`);
-        if (h.eq > 35 && a.otl > 30) tips.push(`<div class="prediction-badge bg-info text-dark">🔄 LAY DRAW: Alta tendencia a que el marcador se mueva.</div>`);
-        if (h.il > 45 || a.oil > 45) tips.push(`<div class="prediction-badge bg-success text-white">🔥 BUSCAR OVER: Equipo local no deja de presionar.</div>`);
+        if (scH === scA && percH > 60) tips.push(`<div class="prediction-badge bg-warning text-dark">🎯 PRÓXIMO GOL: LOCAL (${h.name}) rompe el empate.</div>`);
+        if (scH === scA && percA > 60) tips.push(`<div class="prediction-badge bg-primary text-white">🎯 PRÓXIMO GOL: VISITANTE (${a.name}) rompe el empate.</div>`);
+        
+        if (scH > scA && percA > 55) tips.push(`<div class="prediction-badge bg-info text-dark">🔄 BUSCAR EMPATE: ${a.name} tiene alta resiliencia.</div>`);
+        if (scA > scH && percH > 55) tips.push(`<div class="prediction-badge bg-info text-dark">🔄 BUSCAR EMPATE: ${h.name} suele remontar en casa.</div>`);
+        
+        if (h.il > 40 || a.oil > 40) tips.push(`<div class="prediction-badge bg-success text-white">🔥 BUSCAR OVER: Tendencia a ampliar ventaja.</div>`);
 
         container.innerHTML = `
             <div class="row align-items-center">
@@ -233,19 +265,18 @@
             </div>
 
             <div class="live-score-container shadow">
-                <div class="market-header" style="color: #aaa; border-bottom-color: #444;">Proyección de Marcador Final</div>
+                <div class="market-header" style="color: #aaa; border-bottom-color: #444;">Proyección Marcador Final (Desde ${scH}-${scA})</div>
                 <div>
                     <span class="score-box">${finalH}</span>
                     <span class="score-separator">/</span>
                     <span class="score-box">${finalA}</span>
                 </div>
                 <p class="mt-3 mb-0 small text-info fw-bold">ESTRATEGIA RECOMENDADA:</p>
-                <div class="d-flex flex-wrap justify-content-center mt-2">${tips.join('') || 'Esperando tendencia clara...'}</div>
+                <div class="d-flex flex-wrap justify-content-center mt-2">${tips.join('') || 'Esperando tendencia...'}</div>
             </div>
         `;
     }
 
-    // Persistencia de Ligas
     function saveLeague() {
         const name = document.getElementById('leagueName').value;
         if (!name) return alert("Ingresa nombre");
@@ -282,7 +313,7 @@
         currentLeagues[name].local.forEach(t => addRow('local', t));
         currentLeagues[name].away.forEach(t => addRow('away', t));
         document.getElementById('leagueName').value = name;
-        document.getElementById('crossMatchup').innerHTML = '<div class="col-12 py-5 text-muted">Datos cargados. Selecciona equipos para el Live.</div>';
+        document.getElementById('crossMatchup').innerHTML = '<div class="col-12 py-5 text-muted">Datos cargados. Selecciona equipos.</div>';
     }
 
     function deleteLeague(name) {
