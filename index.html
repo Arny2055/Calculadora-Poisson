@@ -68,11 +68,11 @@
         .half-label { font-size: 0.6rem; color: var(--primary); font-weight: bold; margin-bottom: 4px; }
         .half-val { font-size: 1rem; font-weight: 800; color: var(--accent-yellow); }
 
-        /* Estilos de Filtros */
         .filter-box { padding: 10px; border-left: 1px solid var(--border); text-align: center; }
         .status-badge { font-size: 0.65rem; font-weight: 900; padding: 4px 8px; border-radius: 5px; display: inline-block; margin-top: 5px; line-height: 1.2; }
         .status-yes { background: var(--accent-green); color: #000; }
         .status-no { background: rgba(255,255,255,0.1); color: var(--text-white); }
+        .status-warn { background: var(--accent-yellow); color: #000; }
     </style>
 </head>
 <body>
@@ -156,18 +156,16 @@
                 </div>
             </div>
 
-            <div class="heat-map" id="heatMap"></div>
-
             <div class="prediction-badge">
                 <div>
-                    <div class="half-label" style="color: var(--accent-green);">xG TOTAL AJUSTADO</div>
-                    <div id="finalXg" style="font-size: 1.8rem; font-weight: 900; color: #fff;">0.00</div>
-                    <div id="topTramo" style="font-size: 0.55rem; margin-top: 5px;"></div>
+                    <div class="half-label" style="color: var(--accent-green);">AMBOS MARCAN</div>
+                    <div id="bttsProb" style="font-size: 1.5rem; font-weight: 900; color: #fff;">0%</div>
+                    <div id="bttsStatus" class="status-badge">...</div>
                 </div>
                 <div class="half-analysis">
-                    <div class="half-label">TIEMPO DOMINANTE</div>
-                    <div id="preferredHalf" class="half-val">...</div>
-                    <div style="font-size: 0.55rem; opacity: 0.8; margin-top: 4px;" id="halfDetails"></div>
+                    <div class="half-label">DOBLE OPORTUNIDAD</div>
+                    <div id="doubleChanceVal" class="half-val" style="font-size: 0.9rem;">...</div>
+                    <div id="doubleChanceProb" style="font-size: 0.6rem; opacity: 0.8;">0%</div>
                 </div>
                 <div class="filter-box">
                     <div class="half-label">OVER 0.5 HT</div>
@@ -180,6 +178,27 @@
                     <div id="ftProb" style="font-size: 0.55rem; margin-top: 5px; color: var(--accent-green);">0% prob.</div>
                 </div>
             </div>
+
+            <div class="prediction-badge" style="margin-top: 10px; background: rgba(0,0,0,0.2);">
+                <div>
+                    <div class="half-label">PORTERÍA A 0 (L)</div>
+                    <div id="csHome" style="color: var(--accent-yellow); font-weight: 800;">0%</div>
+                </div>
+                <div>
+                    <div class="half-label">PORTERÍA A 0 (V)</div>
+                    <div id="csAway" style="color: var(--accent-yellow); font-weight: 800;">0%</div>
+                </div>
+                <div class="half-analysis">
+                    <div class="half-label">ALERTA LATE GOAL</div>
+                    <div id="lateGoalStatus" style="font-size: 0.8rem; font-weight: bold;">---</div>
+                </div>
+                <div>
+                    <div class="half-label">xG TOTAL</div>
+                    <div id="finalXg" style="font-size: 1.2rem; font-weight: 900; color: #fff;">0.00</div>
+                </div>
+            </div>
+
+            <div class="heat-map" id="heatMap"></div>
 
             <div class="chart-container">
                 <canvas id="minuteChart"></canvas>
@@ -350,54 +369,62 @@ function analyzeMatch() {
         heatMap.appendChild(cell);
     });
 
-    // --- ANÁLISIS POR TIEMPOS Y FILTROS ---
+    // --- ANALISIS POR TIEMPOS Y FILTROS ---
     const totalLambda = lambdaL + lambdaV;
     const xG_1T = parseFloat(xG_Timeline[0]) + parseFloat(xG_Timeline[1]) + parseFloat(xG_Timeline[2]);
-    const xG_2T = parseFloat(xG_Timeline[3]) + parseFloat(xG_Timeline[4]) + parseFloat(xG_Timeline[5]);
     
-    // Probabilidad Over 0.5 HT
     const probHT = (1 - Math.exp(-xG_1T)) * 100;
     const htRecEl = document.getElementById('htRecommendation');
     document.getElementById('htProb').innerText = probHT.toFixed(1) + "% prob.";
+    htRecEl.innerText = probHT >= 70 ? "ALTA PROBAB." : "RIESGO";
+    htRecEl.className = "status-badge " + (probHT >= 70 ? "status-yes" : "status-no");
+
+    const p0_L = poisson(0, lambdaL);
+    const p0_V = poisson(0, lambdaV);
+    const p1_total = poisson(1, totalLambda);
     
-    if (probHT >= 70) {
-        htRecEl.innerText = "ALTA PROBAB.";
-        htRecEl.className = "status-badge status-yes";
+    // 1. Ambos Marcan (BTTS)
+    const probBTTS = (1 - p0_L) * (1 - p0_V) * 100;
+    document.getElementById('bttsProb').innerText = probBTTS.toFixed(1) + "%";
+    const bttsEl = document.getElementById('bttsStatus');
+    bttsEl.innerText = probBTTS >= 55 ? "SI" : "NO RECOM.";
+    bttsEl.className = "status-badge " + (probBTTS >= 55 ? "status-yes" : "status-no");
+
+    // 2. Doble Oportunidad
+    const dc1X = (pHome + pDraw) * 100;
+    const dcX2 = (pAway + pDraw) * 100;
+    if (dc1X >= dcX2) {
+        document.getElementById('doubleChanceVal').innerText = "1X (L/E)";
+        document.getElementById('doubleChanceProb').innerText = dc1X.toFixed(1) + "%";
     } else {
-        htRecEl.innerText = "RIESGO";
-        htRecEl.className = "status-badge status-no";
+        document.getElementById('doubleChanceVal').innerText = "X2 (E/V)";
+        document.getElementById('doubleChanceProb').innerText = dcX2.toFixed(1) + "%";
     }
 
-    // Probabilidad Over 1.5 FT (1 - (P0 + P1))
-    const p0 = poisson(0, totalLambda);
-    const p1 = poisson(1, totalLambda);
-    const probFT15 = (1 - (p0 + p1)) * 100;
+    // 3. Portería a Cero
+    document.getElementById('csHome').innerText = (p0_V * 100).toFixed(1) + "%";
+    document.getElementById('csAway').innerText = (p0_L * 100).toFixed(1) + "%";
+
+    // 4. Alerta Late Goal (76-90')
+    const probLate = parseFloat(prob_Timeline[5]);
+    const lateEl = document.getElementById('lateGoalStatus');
+    if (probLate >= 40) {
+        lateEl.innerText = "🔥 ALTA (Min 75+)";
+        lateEl.style.color = "var(--accent-red)";
+    } else {
+        lateEl.innerText = "Baja / Normal";
+        lateEl.style.color = "var(--text-white)";
+    }
+
+    const p0_FT = poisson(0, totalLambda);
+    const probFT15 = (1 - (p0_FT + p1_total)) * 100;
     const ftRecEl = document.getElementById('ftRecommendation');
     document.getElementById('ftProb').innerText = probFT15.toFixed(1) + "% prob.";
-
-    if (probFT15 >= 75) {
-        ftRecEl.innerText = "ENTRADA CLARA";
-        ftRecEl.className = "status-badge status-yes";
-    } else {
-        ftRecEl.innerText = "BAJA CARGA";
-        ftRecEl.className = "status-badge status-no";
-    }
-
-    const preferredHalfEl = document.getElementById('preferredHalf');
-    if (xG_1T > xG_2T) {
-        preferredHalfEl.innerText = "1er TIEMPO";
-        preferredHalfEl.style.color = "var(--primary)";
-    } else {
-        preferredHalfEl.innerText = "2do TIEMPO";
-        preferredHalfEl.style.color = "var(--accent-yellow)";
-    }
-    document.getElementById('halfDetails').innerText = `1T: ${((xG_1T/totalLambda)*100).toFixed(1)}% vs 2T: ${((xG_2T/totalLambda)*100).toFixed(1)}%`;
+    ftRecEl.innerText = probFT15 >= 75 ? "ENTRADA CLARA" : "BAJA CARGA";
+    ftRecEl.className = "status-badge " + (probFT15 >= 75 ? "status-yes" : "status-no");
 
     document.getElementById('matchTitle').innerText = `${homeName} vs ${awayName}`;
     document.getElementById('finalXg').innerText = totalLambda.toFixed(2);
-    const maxIdx = prob_Timeline.indexOf(Math.max(...prob_Timeline.map(Number)).toFixed(1));
-    document.getElementById('topTramo').innerText = `PICO: ${labels[maxIdx]} (${prob_Timeline[maxIdx]}%)`;
-
     renderChart(labels, xG_Timeline);
     document.getElementById('results').style.display = 'block';
 }
