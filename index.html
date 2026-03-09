@@ -26,7 +26,7 @@
 
 <nav class="navbar navbar-dark bg-dark mb-4 shadow-sm">
     <div class="container">
-        <span class="navbar-brand mb-0 h1">⚽ Predictor Pro Elite <span class="badge bg-primary ms-2" style="font-size: 0.6em;">v3.0</span></span>
+        <span class="navbar-brand mb-0 h1">⚽ Predictor Pro Elite <span class="badge bg-primary ms-2" style="font-size: 0.6em;">v3.1</span></span>
     </div>
 </nav>
 
@@ -176,12 +176,12 @@
         const inputs = row.querySelectorAll('input');
         return {
             name: row.querySelector('.team-name').value,
-            eq: parseFloat(inputs[2].value),
-            tl: parseFloat(inputs[3].value),
-            il: parseFloat(inputs[4].value),
-            oeq: parseFloat(inputs[5].value),
-            otl: parseFloat(inputs[6].value),
-            oil: parseFloat(inputs[7].value)
+            eq: parseFloat(inputs[1].value),
+            tl: parseFloat(inputs[2].value),
+            il: parseFloat(inputs[3].value),
+            oeq: parseFloat(inputs[4].value),
+            otl: parseFloat(inputs[5].value),
+            oil: parseFloat(inputs[6].value)
         };
     }
 
@@ -192,31 +192,44 @@
 
         if (!home || !away) return;
 
-        // CALCULO MARCADOR PROBABLE (Lógica Proporcional)
-        // Se basa en el promedio de eficacia del ataque vs debilidad de la defensa
-        let homeG = ((home.tl + home.il) / 2 + (away.otl + away.oil) / 2) / 40;
-        let awayG = ((away.tl + away.il) / 2 + (home.otl + home.oil) / 2) / 45;
+        // --- CORRECCIÓN DE CÁLCULO DE MARCADOR ---
+        // Potencia de ataque (basada en tomar ventaja y ampliarla)
+        // Vulnerabilidad defensa (basada en oponente tomando ventaja y ampliándola)
         
-        // Ajuste por Empate (Resiliencia)
-        if (home.eq > 40) homeG += 0.3;
-        if (away.eq > 40) awayG += 0.3;
+        let homePower = (home.tl * 0.6) + (home.il * 0.4);
+        let awayWeakness = (away.otl * 0.6) + (away.oil * 0.4);
+        let homeScoreRaw = (homePower + awayWeakness) / 65; // Divisor ajustado para escala Poisson real
+        
+        let awayPower = (away.tl * 0.6) + (away.il * 0.4);
+        let homeWeakness = (home.otl * 0.6) + (home.oil * 0.4);
+        let awayScoreRaw = (awayPower + homeWeakness) / 75; // Visitante suele tener divisor más alto por dificultad
 
-        const finalHomeG = Math.round(homeG);
-        const finalAwayG = Math.round(awayG);
+        // Ajustes por empate/resiliencia
+        if (home.eq > 50) homeScoreRaw += 0.25;
+        if (away.eq > 50) awayScoreRaw += 0.25;
+
+        const finalHomeG = Math.round(homeScoreRaw);
+        const finalAwayG = Math.round(awayScoreRaw);
 
         let tips = [];
-        // Lógica de Mercados
-        if ((home.il > 40 && away.oil > 40) || (away.il > 40 && home.oil > 40) || (finalHomeG + finalAwayG >= 3)) {
-            tips.push('<div class="prediction-badge bg-success text-white">🔥 OVER 2.5 GOLES: Alta probabilidad de festival de goles.</div>');
+        // Lógica de Mercados Corregida
+        const totalExpected = homeScoreRaw + awayScoreRaw;
+
+        if (totalExpected >= 2.6) {
+            tips.push('<div class="prediction-badge bg-success text-white">🔥 OVER 2.5: Alta expectativa de goles combinada.</div>');
+        } else if (totalExpected < 1.8) {
+            tips.push('<div class="prediction-badge bg-secondary text-white">🧊 UNDER 2.5: Partido de pocos goles y mucho control.</div>');
         }
-        if (home.oeq > 30 || away.oeq > 30 || (finalHomeG > 0 && finalAwayG > 0)) {
-            tips.push('<div class="prediction-badge bg-info text-dark">🤝 AMBOS ANOTAN: Las estadísticas sugieren que nadie se va en cero.</div>');
+
+        // Ambos Anotan: solo si ambos tienen proyección > 0.7 y oponentes con Eq alto
+        if (homeScoreRaw > 0.8 && awayScoreRaw > 0.8 && (home.oeq > 25 || away.oeq > 25)) {
+            tips.push('<div class="prediction-badge bg-info text-dark">🤝 AMBOS ANOTAN: Escenario probable de goles en ambas porterías.</div>');
         }
-        if (home.tl > 50 && away.otl > 45) {
-            tips.push(`<div class="prediction-badge bg-primary text-white">🏠 VENTAJAS LOCAL: ${home.name} tiende a dominar el inicio.</div>`);
-        }
-        if (finalHomeG + finalAwayG < 2) {
-            tips.push('<div class="prediction-badge bg-secondary text-white">🧊 UNDER 2.5: Juego táctico y cerrado previsto.</div>');
+
+        if (home.tl > away.tl + 15) {
+            tips.push(`<div class="prediction-badge bg-primary text-white">🏠 1er GOL: ${home.name} (Local dominante al inicio).</div>`);
+        } else if (away.tl > home.tl + 15) {
+            tips.push(`<div class="prediction-badge bg-dark text-white">🚀 1er GOL: ${away.name} (Visitante letal a la contra).</div>`);
         }
 
         container.innerHTML = `
@@ -235,7 +248,7 @@
             <div class="col-12 my-3">
                 <div class="market-header">PROYECCIÓN DE MARCADOR</div>
                 <div class="score-display shadow-sm">${finalHomeG} - ${finalAwayG}</div>
-                <p class="text-muted mt-2 small italic">Puntaje estimado basado en eficacia de ataque vs vulnerabilidad de defensa.</p>
+                <p class="text-muted mt-2 small italic">Calculado mediante cruce de eficiencia ofensiva vs vulnerabilidad defensiva.</p>
             </div>
 
             <div class="col-12 mt-2">
@@ -245,6 +258,7 @@
         `;
     }
 
+    // Funciones de persistencia sin cambios para mantener tus ligas
     function saveLeague() {
         const name = document.getElementById('leagueName').value;
         if (!name) return alert("Ingresa un nombre para la liga");
@@ -300,7 +314,7 @@
 
     function clearTable(type) {
         document.getElementById(type === 'local' ? 'bodyLocal' : 'bodyAway').innerHTML = '';
-        runH2HAnalysis();
+        document.getElementById('crossMatchup').innerHTML = '<div class="col-12 py-5 text-muted">Esperando selección...</div>';
     }
 </script>
 </body>
