@@ -294,8 +294,39 @@
         let bets = JSON.parse(localStorage.getItem(STORAGE_KEY)) || [];
         let bChart;
 
-        // --- SISTEMA DE RECEPCIÓN DE APUESTAS (NUEVO MEJORADO) ---
+        // --- SISTEMA DE RECEPCIÓN DE APUESTAS (CORREGIDO) ---
         function handleIncomingPicks() {
+            // 1. Verificar si viene por LOCAL STORAGE (Método Calculadora de Córners)
+            const rawData = localStorage.getItem('last_bet_sent');
+            if (rawData) {
+                try {
+                    const betData = JSON.parse(rawData);
+                    const alreadyExists = bets.some(b => b.timestamp === betData.timestamp);
+                    
+                    if (!alreadyExists) {
+                        const newPick = {
+                            id: Date.now(),
+                            teams: betData.teams,
+                            market: betData.market,
+                            prob: parseFloat(betData.prob) || 0,
+                            odd: parseFloat(betData.odd) || 0,
+                            fair_odd: (1 / betData.prob).toFixed(2),
+                            edge: betData.edge,
+                            confidence: betData.confidence || "⭐⭐⭐", 
+                            stake: parseFloat(betData.stake) || 1, 
+                            status: 'pending',
+                            profit: 0,
+                            date: new Date().toLocaleDateString(),
+                            timestamp: betData.timestamp
+                        };
+                        bets.push(newPick);
+                        localStorage.setItem(STORAGE_KEY, JSON.stringify(bets));
+                    }
+                    localStorage.removeItem('last_bet_sent'); // Limpiar para evitar duplicados al recargar
+                } catch(e) { console.error("Error al procesar LocalStorage", e); }
+            }
+
+            // 2. Verificar si viene por URL (Método Alternativo)
             const urlParams = new URLSearchParams(window.location.search);
             if (urlParams.has('evento')) {
                 const newPick = {
@@ -310,17 +341,15 @@
                     stake: parseFloat(urlParams.get('stake')) || 1,
                     status: 'pending',
                     profit: 0,
-                    date: new Date().toLocaleDateString()
+                    date: new Date().toLocaleDateString(),
+                    timestamp: Date.now() // Generar uno para evitar el filtro de duplicado arriba
                 };
                 
-                // Evitar duplicados si se recarga la página
                 const isDuplicate = bets.some(b => b.teams === newPick.teams && b.market === newPick.market && b.date === newPick.date);
                 if (!isDuplicate) {
                     bets.push(newPick);
                     localStorage.setItem(STORAGE_KEY, JSON.stringify(bets));
                 }
-                
-                // Limpiar la URL sin recargar para estética
                 window.history.replaceState({}, document.title, window.location.pathname);
             }
         }
@@ -348,7 +377,7 @@
             const fStars = document.getElementById('f_stars').value;
 
             let filtered = bets.filter(b => {
-                const matchesMarket = !selectedMarkets.length || selectedMarkets.includes(b.market?.toUpperCase());
+                const matchesMarket = !selectedMarkets.length || (b.market && selectedMarkets.includes(b.market.toUpperCase()));
                 const matchesLeague = !fLeague || extractLeagueName(b.teams) === fLeague;
                 const matchesStars = !fStars || b.confidence === fStars;
                 return matchesMarket && matchesLeague && matchesStars;
@@ -462,7 +491,7 @@
                     <td class="font-bold text-emerald-500">${b.market}</td>
                     <td>${(b.prob*100).toFixed(1)}%</td>
                     <td>${b.fair_odd}</td>
-                    <td class="font-black text-white">${b.odd.toFixed(2)}</td>
+                    <td class="font-black text-white">${parseFloat(b.odd).toFixed(2)}</td>
                     <td class="text-blue-400 font-bold">${(b.prob*100 - (1/b.odd*100)).toFixed(1)}%</td>
                     <td class="${edgeNum > 0 ? 'text-emerald-400' : 'text-slate-400'}">${b.edge}</td>
                     <td>${b.stake}u</td>
