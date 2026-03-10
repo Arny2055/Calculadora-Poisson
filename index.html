@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Súper Calculadora Poisson Córners - Value Finder</title>
     <style>
-        :root { --primary: #27ae60; --secondary: #2c3e50; --bg: #f4f7f6; --accent: #f39c12; --roi: #3498db; }
+        :root { --primary: #27ae60; --secondary: #2c3e50; --bg: #f4f7f6; --accent: #f39c12; --roi: #3498db; --race: #8e44ad; }
         body { font-family: 'Segoe UI', sans-serif; background-color: var(--bg); color: #333; margin: 0; padding: 20px; }
         .container { max-width: 1100px; margin: auto; background: white; padding: 25px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
         h1, h2 { text-align: center; color: var(--secondary); }
@@ -41,7 +41,7 @@
 
         .results-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 20px; }
         .card { background: white; padding: 15px; border-radius: 8px; border: 1px solid #ddd; }
-        .over-under-card { grid-column: 1 / span 2; background: #fff; }
+        .full-width-card { grid-column: 1 / span 2; background: #fff; }
         
         table { width: 100%; border-collapse: collapse; text-align: center; }
         th, td { padding: 10px; border-bottom: 1px solid #eee; }
@@ -54,6 +54,8 @@
         .no-value { background: #e74c3c; color: white; }
         .odd-input { width: 60px !important; padding: 5px !important; margin: 0 !important; text-align: center; font-size: 13px; }
         .value-cell { display: flex; flex-direction: column; align-items: center; gap: 5px; }
+        
+        .race-header { color: var(--race); border-bottom: 2px solid var(--race); margin-bottom: 10px; }
     </style>
 </head>
 <body>
@@ -95,7 +97,8 @@
 
     <div id="output" style="display:none;">
         <div class="results-grid">
-            <div class="card over-under-card">
+            
+            <div class="card full-width-card">
                 <h3>📈 Probabilidades Over / Under (Totales)</h3>
                 <p style="font-size: 12px; color: #666; margin-top: -10px;">Ingresa la cuota si el % es mayor a 55 para detectar Valor.</p>
                 <table id="ouTable">
@@ -104,6 +107,20 @@
                             <th>Línea</th>
                             <th>Over (Más de)</th>
                             <th>Under (Menos de)</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+
+            <div class="card full-width-card">
+                <h3 class="race-header">🏁 Carrera a Córners (Race to Corners)</h3>
+                <table id="raceTable">
+                    <thead>
+                        <tr>
+                            <th>Objetivo</th>
+                            <th>Local (Home)</th>
+                            <th>Visitante (Away)</th>
                         </tr>
                     </thead>
                     <tbody></tbody>
@@ -184,12 +201,40 @@ function loadTeams() {
 
 function factorial(n) {
     let res = 1;
+    if (n > 170) return Infinity; 
     for (let i = 2; i <= n; i++) res *= i;
     return res;
 }
 
 function poisson(k, lambda) {
     return (Math.pow(lambda, k) * Math.exp(-lambda)) / factorial(k);
+}
+
+// Función para calcular probabilidad de "Carrera a X"
+// Basado en que la probabilidad de que ocurra un evento de A antes que B es LambdaA / (LambdaA + LambdaB)
+// Elevado a la potencia del objetivo para una aproximación simplificada efectiva en mercados de córners
+function calculateRaceProb(target, lH, lA) {
+    const probH = lH / (lH + lA);
+    const probA = lA / (lH + lA);
+    
+    // Probabilidad de que el Local consiga 'target' córners antes que el visitante
+    // Usamos distribución binomial negativa acumulada para mayor precisión
+    let localWins = 0;
+    for (let k = 0; k < target; k++) {
+        localWins += combinations(target + k - 1, k) * Math.pow(probH, target) * Math.pow(probA, k);
+    }
+    return localWins * 100;
+}
+
+function combinations(n, k) {
+    if (k < 0 || k > n) return 0;
+    if (k === 0 || k === n) return 1;
+    if (k > n / 2) k = n - k;
+    let res = 1;
+    for (let i = 1; i <= k; i++) {
+        res = res * (n - i + 1) / i;
+    }
+    return res;
 }
 
 function calculateValue(prob, odd, elementId, btnId, line, market) {
@@ -213,8 +258,6 @@ function calculateValue(prob, odd, elementId, btnId, line, market) {
         badge.innerText = 'Hay Valor';
         badge.className = 'value-badge has-value';
         btn.style.display = 'inline-block';
-        
-        // Adjuntar datos al botón para envío
         btn.onclick = () => sendToRoi(line, market, prob, fairOdd, odd, ev.toFixed(3), edge);
     } else {
         badge.innerText = 'Sin Valor';
@@ -228,9 +271,8 @@ function sendToRoi(line, market, prob, fairOdd, bookieOdd, value, edge) {
     const home = document.getElementById('homeTeam').value;
     const away = document.getElementById('awayTeam').value;
     const event = `${home} vs ${away}`;
-    const fullMarket = `${market} ${line} Corners`;
+    const fullMarket = `${market} ${line}`;
     
-    // Construcción de URL con parámetros
     const params = new URLSearchParams({
         liga: league,
         evento: event,
@@ -272,25 +314,24 @@ function renderTables(lH, lA, hName, aName) {
     document.getElementById('labelHome').innerText = hName;
     document.getElementById('labelAway').innerText = aName;
 
+    // Tablas individuales
     const hBody = document.querySelector('#homeProbTable tbody');
     const aBody = document.querySelector('#awayProbTable tbody');
     hBody.innerHTML = ''; aBody.innerHTML = '';
-
     for (let i = 0; i <= 15; i++) {
         hBody.innerHTML += `<tr><td>${i}</td><td>${(poisson(i, lH) * 100).toFixed(2)}%</td></tr>`;
         aBody.innerHTML += `<tr><td>${i}</td><td>${(poisson(i, lA) * 100).toFixed(2)}%</td></tr>`;
     }
 
+    // Tabla Over/Under
     const totalLambda = lH + lA;
     const ouBody = document.querySelector('#ouTable tbody');
     ouBody.innerHTML = '';
-
     const lines = [5.5, 6.5, 7.5, 8.5, 9.5, 10.5, 11.5];
     lines.forEach((line, idx) => {
         let probUnder = 0;
         for (let i = 0; i < line; i++) probUnder += poisson(i, totalLambda);
         let probOver = 1 - probUnder;
-        
         let pOverPct = (probOver * 100).toFixed(2);
         let pUnderPct = (probUnder * 100).toFixed(2);
 
@@ -316,6 +357,46 @@ function renderTables(lH, lA, hName, aName) {
                                 oninput="calculateValue(${pUnderPct}, this.value, 'vUnder${idx}', 'btnUnder${idx}', ${line}, 'Under')">
                             <span id="vUnder${idx}" class="value-badge" style="display:none"></span>
                             <button id="btnUnder${idx}" class="btn-send-roi">🚀 ENVIAR APUESTA</button>
+                        ` : ''}
+                    </div>
+                </td>
+            </tr>
+        `;
+    });
+
+    // Tabla Carrera a Córners (NUEVO)
+    const raceBody = document.querySelector('#raceTable tbody');
+    raceBody.innerHTML = '';
+    const raceTargets = [3, 5, 7, 9];
+    raceTargets.forEach((target, idx) => {
+        const probHomeRace = calculateRaceProb(target, lH, lA);
+        const probAwayRace = 100 - probHomeRace;
+        
+        const pHracePct = probHomeRace.toFixed(2);
+        const pAracePct = probAwayRace.toFixed(2);
+
+        raceBody.innerHTML += `
+            <tr>
+                <td><strong>Carrera a ${target}</strong></td>
+                <td>
+                    <div class="value-cell">
+                        <span class="${pHracePct >= 55 ? 'highlight' : ''}">${pHracePct}%</span>
+                        ${pHracePct >= 55 ? `
+                            <input type="number" step="0.01" class="odd-input" placeholder="Cuota" 
+                                oninput="calculateValue(${pHracePct}, this.value, 'vRaceH${idx}', 'btnRaceH${idx}', 'Carrera a ${target}', 'Home')">
+                            <span id="vRaceH${idx}" class="value-badge" style="display:none"></span>
+                            <button id="btnRaceH${idx}" class="btn-send-roi">🚀 ENVIAR APUESTA</button>
+                        ` : ''}
+                    </div>
+                </td>
+                <td>
+                    <div class="value-cell">
+                        <span class="${pAracePct >= 55 ? 'highlight' : ''}">${pAracePct}%</span>
+                        ${pAracePct >= 55 ? `
+                            <input type="number" step="0.01" class="odd-input" placeholder="Cuota" 
+                                oninput="calculateValue(${pAracePct}, this.value, 'vRaceA${idx}', 'btnRaceA${idx}', 'Carrera a ${target}', 'Away')">
+                            <span id="vRaceA${idx}" class="value-badge" style="display:none"></span>
+                            <button id="btnRaceA${idx}" class="btn-send-roi">🚀 ENVIAR APUESTA</button>
                         ` : ''}
                     </div>
                 </td>
