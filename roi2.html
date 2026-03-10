@@ -124,7 +124,6 @@
             font-weight: 600;
         }
 
-        /* Estilo Exclusivo para Estrellas de Confianza */
         .conf-stars-display {
             font-size: 12px;
             letter-spacing: 1px;
@@ -295,37 +294,36 @@
         let bets = JSON.parse(localStorage.getItem(STORAGE_KEY)) || [];
         let bChart;
 
-        // --- SISTEMA DE RECEPCIÓN DE APUESTAS ---
-        (function checkIncomingBet() {
-            const rawData = localStorage.getItem('last_bet_sent');
-            if (rawData) {
-                try {
-                    const betData = JSON.parse(rawData);
-                    const alreadyExists = bets.some(b => b.timestamp === betData.timestamp);
-                    
-                    if (!alreadyExists) {
-                        const newPick = {
-                            id: Date.now(),
-                            teams: betData.teams,
-                            market: betData.market,
-                            prob: betData.prob,
-                            odd: parseFloat(betData.odd),
-                            fair_odd: (1 / betData.prob).toFixed(2),
-                            edge: betData.edge,
-                            confidence: betData.confidence || "⭐⭐⭐", 
-                            stake: 1, 
-                            status: 'pending',
-                            profit: 0,
-                            date: new Date().toLocaleDateString(),
-                            timestamp: betData.timestamp
-                        };
-                        bets.push(newPick);
-                        localStorage.setItem(STORAGE_KEY, JSON.stringify(bets));
-                    }
-                    localStorage.removeItem('last_bet_sent');
-                } catch(e) { console.error("Error al procesar", e); }
+        // --- SISTEMA DE RECEPCIÓN DE APUESTAS (NUEVO MEJORADO) ---
+        function handleIncomingPicks() {
+            const urlParams = new URLSearchParams(window.location.search);
+            if (urlParams.has('evento')) {
+                const newPick = {
+                    id: Date.now(),
+                    teams: `[${urlParams.get('liga')}] ${urlParams.get('evento')}`,
+                    market: urlParams.get('mercado'),
+                    prob: parseFloat(urlParams.get('probabilidad')) / 100,
+                    fair_odd: urlParams.get('cuotaJusta'),
+                    odd: parseFloat(urlParams.get('cuotaCasa')),
+                    edge: urlParams.get('edge'),
+                    confidence: "⭐⭐⭐", 
+                    stake: parseFloat(urlParams.get('stake')) || 1,
+                    status: 'pending',
+                    profit: 0,
+                    date: new Date().toLocaleDateString()
+                };
+                
+                // Evitar duplicados si se recarga la página
+                const isDuplicate = bets.some(b => b.teams === newPick.teams && b.market === newPick.market && b.date === newPick.date);
+                if (!isDuplicate) {
+                    bets.push(newPick);
+                    localStorage.setItem(STORAGE_KEY, JSON.stringify(bets));
+                }
+                
+                // Limpiar la URL sin recargar para estética
+                window.history.replaceState({}, document.title, window.location.pathname);
             }
-        })();
+        }
 
         // --- FUNCIONES DE UTILIDAD ---
         function extractLeagueName(teamsStr) {
@@ -347,12 +345,12 @@
             
             const selectedMarkets = Array.from(document.querySelectorAll('#f_market_group input:checked')).map(cb => cb.value.toUpperCase());
             const fLeague = document.getElementById('f_league').value;
-            const fStars = document.getElementById('f_stars').value; // Valor del nuevo filtro
+            const fStars = document.getElementById('f_stars').value;
 
             let filtered = bets.filter(b => {
                 const matchesMarket = !selectedMarkets.length || selectedMarkets.includes(b.market?.toUpperCase());
                 const matchesLeague = !fLeague || extractLeagueName(b.teams) === fLeague;
-                const matchesStars = !fStars || b.confidence === fStars; // Lógica de filtrado por estrellas
+                const matchesStars = !fStars || b.confidence === fStars;
                 return matchesMarket && matchesLeague && matchesStars;
             });
 
@@ -592,7 +590,10 @@
             if(confirm('¿Borrar todo?')) { bets = []; saveAndRefresh(); } 
         }
 
-        window.onload = updateStats;
+        window.onload = () => {
+            handleIncomingPicks();
+            updateStats();
+        };
     </script>
 </body>
 </html>
