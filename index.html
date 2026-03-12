@@ -59,6 +59,7 @@
         
         .race-header { color: var(--race); border-bottom: 2px solid var(--race); margin-bottom: 10px; }
         .first-header { color: var(--first); border-bottom: 2px solid var(--first); margin-bottom: 10px; }
+        .none-header { color: #7f8c8d; font-style: italic; }
     </style>
 </head>
 <body>
@@ -140,6 +141,7 @@
                         <tr>
                             <th>Objetivo</th>
                             <th>Local (Home)</th>
+                            <th class="none-header">Ninguno</th>
                             <th>Visitante (Away)</th>
                         </tr>
                     </thead>
@@ -224,7 +226,7 @@ function updateExistingLeague() {
     leagues[name] = { home: homeData, away: awayData };
     localStorage.setItem('cornerLeagues', JSON.stringify(leagues));
     alert("Estadísticas de '" + name + "' actualizadas correctamente.");
-    loadTeams(); // Recargar equipos si la liga estaba seleccionada
+    loadTeams(); 
 }
 
 function updateLeagueSelectors() {
@@ -257,15 +259,39 @@ function poisson(k, lambda) {
     return (Math.pow(lambda, k) * Math.exp(-lambda)) / factorial(k);
 }
 
+// MEJORA: Cálculo realista de Carrera a Córners (Race to)
 function calculateRaceProb(target, lH, lA) {
-    const probH = lH / (lH + lA);
-    const probA = lA / (lH + lA);
+    const totalLambda = lH + lA;
     
+    // Probabilidad de que el partido NO llegue al target (Opción "Ninguno")
+    let probNone = 0;
+    for (let i = 0; i < target; i++) {
+        probNone += poisson(i, totalLambda);
+    }
+    
+    // Probabilidad de que ALGUIEN gane
+    const probSomeoneWins = 1 - probNone;
+    
+    // Distribución relativa entre Local y Visitante basado en sus medias individuales
+    const relativeHome = lH / (lH + lA);
+    const relativeAway = lA / (lH + lA);
+    
+    // Calculamos las probabilidades finales
     let localWins = 0;
     for (let k = 0; k < target; k++) {
-        localWins += combinations(target + k - 1, k) * Math.pow(probH, target) * Math.pow(probA, k);
+        localWins += combinations(target + k - 1, k) * Math.pow(relativeHome, target) * Math.pow(relativeAway, k);
     }
-    return localWins * 100;
+    
+    // Escalamos el resultado para que sumen 100% junto con "Ninguno"
+    const finalLocal = localWins * probSomeoneWins * 100;
+    const finalNone = probNone * 100;
+    const finalAway = (100 - finalLocal - finalNone);
+    
+    return { 
+        local: finalLocal, 
+        none: finalNone, 
+        away: finalAway 
+    };
 }
 
 function combinations(n, k) {
@@ -439,15 +465,16 @@ function renderTables(lH, lA, hName, aName) {
         </tr>
     `;
 
+    // RENDER MEJORADO: Carrera a (Race to)
     const raceBody = document.querySelector('#raceTable tbody');
     raceBody.innerHTML = '';
     const raceTargets = [3, 5, 7, 9];
     raceTargets.forEach((target, idx) => {
-        const probHomeRace = calculateRaceProb(target, lH, lA);
-        const probAwayRace = 100 - probHomeRace;
+        const raceRes = calculateRaceProb(target, lH, lA);
         
-        const pHracePct = probHomeRace.toFixed(2);
-        const pAracePct = probAwayRace.toFixed(2);
+        const pHracePct = raceRes.local.toFixed(2);
+        const pNracePct = raceRes.none.toFixed(2);
+        const pAracePct = raceRes.away.toFixed(2);
 
         raceBody.innerHTML += `
             <tr>
@@ -463,6 +490,7 @@ function renderTables(lH, lA, hName, aName) {
                         ` : ''}
                     </div>
                 </td>
+                <td style="color: #95a5a6; font-size: 0.9em;">${pNracePct}%</td>
                 <td>
                     <div class="value-cell">
                         <span class="${pAracePct >= 55 ? 'highlight' : ''}">${pAracePct}%</span>
