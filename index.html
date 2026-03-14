@@ -37,6 +37,7 @@
             display: none;
         }
         .best-label { color: #d35400; font-size: 1.2em; display: block; }
+        .stake-badge { background: #2c3e50; color: #fff; padding: 2px 8px; border-radius: 5px; font-size: 14px; margin-left: 10px; }
 
         .btn-send-roi { 
             background-color: var(--roi); 
@@ -197,7 +198,7 @@
 
 <script>
 let leagues = JSON.parse(localStorage.getItem('cornerLeagues')) || {};
-let activeMarkets = {}; // Para rastrear el valor en tiempo real
+let activeMarkets = {};
 
 window.onload = () => { updateLeagueSelectors(); };
 
@@ -275,7 +276,14 @@ function poisson(k, lambda) {
     return (Math.pow(lambda, k) * Math.exp(-lambda)) / factorial(k);
 }
 
-// MEJORA: Lógica de indicador de mejor apuesta
+// Lógica de cálculo de Stake
+function getSuggestedStake(edge) {
+    if (edge > 10) return "1.5";
+    if (edge > 5) return "1.0";
+    if (edge > 0) return "0.5";
+    return "0";
+}
+
 function updateSmartAdvice() {
     const adviceDiv = document.getElementById('smartAdvice');
     let bestEdge = -Infinity;
@@ -289,10 +297,12 @@ function updateSmartAdvice() {
     }
 
     if (bestEdge > 0) {
+        const stake = getSuggestedStake(bestEdge);
         adviceDiv.style.display = 'block';
         adviceDiv.innerHTML = `<span class="best-label">⭐ MEJOR OPCIÓN DE APUESTA:</span> 
-                               Aposta a <strong>${bestMarket}</strong> <br> 
-                               (Tiene la mayor ventaja matemática: <strong>+${bestEdge}% Edge</strong>)`;
+                               Aposta a <strong>${bestMarket}</strong> 
+                               <span class="stake-badge">Stake Sugerido: ${stake}</span><br> 
+                               (Ventaja matemática: <strong>+${bestEdge}% Edge</strong>)`;
     } else {
         adviceDiv.style.display = 'none';
     }
@@ -317,6 +327,7 @@ function calculateValue(prob, odd, elementId, btnId, line, market) {
     const ev = (realProb * odd);
     const edge = parseFloat(((ev - 1) * 100).toFixed(2));
     const fairOdd = (1 / realProb).toFixed(2);
+    const stake = getSuggestedStake(edge);
     
     badge.style.display = 'inline-block';
     
@@ -332,9 +343,9 @@ function calculateValue(prob, odd, elementId, btnId, line, market) {
             badge.className = 'value-badge low-value';
         }
         
-        if(edgeLabel) edgeLabel.innerText = 'Edge: +' + edge + '%';
+        if(edgeLabel) edgeLabel.innerText = 'Edge: +' + edge + '% (Stake: ' + stake + ')';
         btn.style.display = 'inline-block';
-        btn.onclick = () => sendToRoi(line, market, prob, fairOdd, odd, ev.toFixed(3), edge);
+        btn.onclick = () => sendToRoi(line, market, prob, fairOdd, odd, ev.toFixed(3), edge, stake);
     } else {
         container.classList.remove('active-val');
         delete activeMarkets[elementId];
@@ -346,12 +357,12 @@ function calculateValue(prob, odd, elementId, btnId, line, market) {
     updateSmartAdvice();
 }
 
-function sendToRoi(line, market, prob, fairOdd, bookieOdd, value, edge) {
+function sendToRoi(line, market, prob, fairOdd, bookieOdd, value, edge, stake) {
     const league = document.getElementById('selectLeague').value;
     const event = `${document.getElementById('homeTeam').value} vs ${document.getElementById('awayTeam').value}`;
     const params = new URLSearchParams({
         liga: league, evento: event, mercado: `${market.toUpperCase()} ${line}`.trim(),
-        probabilidad: prob + '%', cuotaJusta: fairOdd, cuotaCasa: bookieOdd, valor: value, edge: edge + '%', stake: "1"
+        probabilidad: prob + '%', cuotaJusta: fairOdd, cuotaCasa: bookieOdd, valor: value, edge: edge + '%', stake: stake
     });
     window.open(`roi2.html?${params.toString()}`, '_blank');
 }
@@ -362,7 +373,7 @@ function calculate() {
     const aName = document.getElementById('awayTeam').value;
     if (!leagueName || !hName || !aName) return alert("Selecciona liga y equipos");
 
-    activeMarkets = {}; // Resetear al calcular nuevo partido
+    activeMarkets = {}; 
     document.getElementById('smartAdvice').style.display = 'none';
 
     const league = leagues[leagueName];
