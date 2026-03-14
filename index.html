@@ -3,9 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Súper Calculadora Poisson Córners - Value Finder</title>
+    <title>Súper Calculadora Poisson Córners - Value Finder Expert</title>
     <style>
-        :root { --primary: #27ae60; --secondary: #2c3e50; --bg: #f4f7f6; --accent: #f39c12; --roi: #3498db; --win1x2: #2980b9; --first: #e67e22; --race: #8e44ad; --update: #e67e22; }
+        :root { --primary: #27ae60; --secondary: #2c3e50; --bg: #f4f7f6; --accent: #f39c12; --roi: #3498db; --win1x2: #2980b9; --first: #e67e22; --race: #8e44ad; --update: #e67e22; --danger: #e74c3c; --warning: #f1c40f; }
         body { font-family: 'Segoe UI', sans-serif; background-color: var(--bg); color: #333; margin: 0; padding: 20px; }
         .container { max-width: 1100px; margin: auto; background: white; padding: 25px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
         h1, h2 { text-align: center; color: var(--secondary); }
@@ -53,11 +53,18 @@
         th { background: #f8f9fa; }
         
         .highlight { color: var(--primary); font-weight: bold; }
-        .value-badge { padding: 4px 8px; border-radius: 4px; font-size: 11px; font-weight: bold; text-transform: uppercase; }
-        .has-value { background: #27ae60; color: white; }
-        .no-value { background: #e74c3c; color: white; }
-        .odd-input { width: 60px !important; padding: 5px !important; margin: 0 !important; text-align: center; font-size: 13px; }
-        .value-cell { display: flex; flex-direction: column; align-items: center; gap: 5px; }
+        
+        /* MEJORA ESTRATEGIA: Estilos de Valor */
+        .value-badge { padding: 4px 8px; border-radius: 4px; font-size: 10px; font-weight: bold; text-transform: uppercase; display: block; margin-bottom: 2px; }
+        .has-value { background: var(--primary); color: white; }
+        .low-value { background: var(--warning); color: #333; }
+        .no-value { background: var(--danger); color: white; }
+        .edge-info { font-size: 11px; font-weight: bold; color: var(--secondary); display: block; }
+        .fair-odd { font-size: 9px; color: #777; font-style: italic; }
+        
+        .odd-input { width: 65px !important; padding: 5px !important; margin: 0 !important; text-align: center; font-size: 13px; border: 2px solid var(--roi) !important; }
+        .value-cell { display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 5px; border-radius: 6px; }
+        .value-cell.active-val { background: rgba(39, 174, 96, 0.1); border: 1px solid var(--primary); }
         
         .win1x2-header { color: var(--win1x2); border-bottom: 2px solid var(--win1x2); margin-bottom: 10px; }
         .first-header { color: var(--first); border-bottom: 2px solid var(--first); margin-bottom: 10px; }
@@ -108,11 +115,11 @@
             
             <div class="card full-width-card" style="text-align: center;">
                  <div class="x-corner-badge">Partido xCorner: <span id="totalXCorner"></span></div>
+                 <p style="font-size: 12px; color: #666; margin-top: 5px;">Aplica la estrategia: Busca <strong>Edge > 10%</strong> para mayor seguridad.</p>
             </div>
 
             <div class="card full-width-card">
                 <h3>📈 Probabilidades Over / Under (Totales)</h3>
-                <p style="font-size: 12px; color: #666; margin-top: -10px;">Ingresa la cuota si el % es mayor a 55 para detectar Valor.</p>
                 <table id="ouTable">
                     <thead>
                         <tr>
@@ -266,13 +273,18 @@ function poisson(k, lambda) {
     return (Math.pow(lambda, k) * Math.exp(-lambda)) / factorial(k);
 }
 
+// MEJORA ESTRATEGIA: Función de cálculo de valor refinada
 function calculateValue(prob, odd, elementId, btnId, line, market) {
+    const container = document.getElementById(elementId).parentElement;
     const badge = document.getElementById(elementId);
+    const edgeLabel = container.querySelector('.edge-info');
     const btn = document.getElementById(btnId);
     
     if (!odd || odd <= 1) {
         badge.style.display = 'none';
+        if(edgeLabel) edgeLabel.innerText = '';
         btn.style.display = 'none';
+        container.classList.remove('active-val');
         return;
     }
     
@@ -284,13 +296,24 @@ function calculateValue(prob, odd, elementId, btnId, line, market) {
     badge.style.display = 'inline-block';
     
     if (ev > 1.0) {
-        badge.innerText = 'Hay Valor';
-        badge.className = 'value-badge has-value';
+        container.classList.add('active-val');
+        // Si el edge es mayor a 10%, es una apuesta de alto valor (estrategia Spurs/Leeds)
+        if (edge > 10) {
+            badge.innerText = 'VALOR ALTO';
+            badge.className = 'value-badge has-value';
+        } else {
+            badge.innerText = 'VALOR AJUSTADO';
+            badge.className = 'value-badge low-value';
+        }
+        
+        if(edgeLabel) edgeLabel.innerText = 'Edge: +' + edge + '%';
         btn.style.display = 'inline-block';
         btn.onclick = () => sendToRoi(line, market, prob, fairOdd, odd, ev.toFixed(3), edge);
     } else {
-        badge.innerText = 'Sin Valor';
+        container.classList.remove('active-val');
+        badge.innerText = 'SIN VALOR';
         badge.className = 'value-badge no-value';
+        if(edgeLabel) edgeLabel.innerText = 'Edge: ' + edge + '%';
         btn.style.display = 'none';
     }
 }
@@ -339,6 +362,22 @@ function calculate() {
     renderTables(lH, lA, hName, aName);
 }
 
+// Función auxiliar para crear celdas de valor (mantiene el código limpio)
+function getValueCellHTML(prob, id, line, market) {
+    const p = parseFloat(prob).toFixed(2);
+    const fair = (100 / p).toFixed(2);
+    return `
+        <div class="value-cell">
+            <span class="${p >= 55 ? 'highlight' : ''}">${p}%</span>
+            <span class="fair-odd">Justa: ${fair}</span>
+            <input type="number" step="0.01" class="odd-input" placeholder="Cuota" oninput="calculateValue(${p}, this.value, '${id}', 'btn${id}', '${line}', '${market}')">
+            <span id="${id}" class="value-badge" style="display:none"></span>
+            <span class="edge-info"></span>
+            <button id="btn${id}" class="btn-send-roi">🚀 ENVIAR</button>
+        </div>
+    `;
+}
+
 function renderTables(lH, lA, hName, aName) {
     document.getElementById('output').style.display = 'block';
     document.getElementById('labelHome').innerText = hName;
@@ -379,7 +418,12 @@ function renderTables(lH, lA, hName, aName) {
     const pD = (probDraw * 100).toFixed(2);
     const pAW = (probAWin * 100).toFixed(2);
     
-    winBody.innerHTML = `<tr><td><strong>Probabilidades</strong></td><td><div class="value-cell"><span class="${pHW >= 55 ? 'highlight' : ''}">${pHW}%</span>${pHW >= 55 ? `<input type="number" step="0.01" class="odd-input" placeholder="Cuota" oninput="calculateValue(${pHW}, this.value, 'vWinH', 'btnWinH', '', 'GANA CÓRNERS HOME')"><span id="vWinH" class="value-badge" style="display:none"></span><button id="btnWinH" class="btn-send-roi">🚀 ENVIAR</button>` : ''}</div></td><td><div class="value-cell"><span class="${pD >= 55 ? 'highlight' : ''}">${pD}%</span>${pD >= 55 ? `<input type="number" step="0.01" class="odd-input" placeholder="Cuota" oninput="calculateValue(${pD}, this.value, 'vWinD', 'btnWinD', '', 'EMPATE CÓRNERS')"><span id="vWinD" class="value-badge" style="display:none"></span><button id="btnWinD" class="btn-send-roi">🚀 ENVIAR</button>` : ''}</div></td><td><div class="value-cell"><span class="${pAW >= 55 ? 'highlight' : ''}">${pAW}%</span>${pAW >= 55 ? `<input type="number" step="0.01" class="odd-input" placeholder="Cuota" oninput="calculateValue(${pAW}, this.value, 'vWinA', 'btnWinA', '', 'GANA CÓRNERS AWAY')"><span id="vWinA" class="value-badge" style="display:none"></span><button id="btnWinA" class="btn-send-roi">🚀 ENVIAR</button>` : ''}</div></td></tr>`;
+    winBody.innerHTML = `<tr>
+        <td><strong>Probabilidades</strong></td>
+        <td>${getValueCellHTML(pHW, 'vWinH', '', 'GANA CÓRNERS HOME')}</td>
+        <td>${getValueCellHTML(pD, 'vWinD', '', 'EMPATE CÓRNERS')}</td>
+        <td>${getValueCellHTML(pAW, 'vWinA', '', 'GANA CÓRNERS AWAY')}</td>
+    </tr>`;
 
     const totalLambda = lH + lA;
     const ouBody = document.querySelector('#ouTable tbody');
@@ -391,15 +435,21 @@ function renderTables(lH, lA, hName, aName) {
         let probOver = 1 - probUnder;
         let pOverPct = (probOver * 100).toFixed(2);
         let pUnderPct = (probUnder * 100).toFixed(2);
-        ouBody.innerHTML += `<tr><td><strong>${line}</strong></td><td><div class="value-cell"><span class="${pOverPct >= 55 ? 'highlight' : ''}">${pOverPct}%</span>${pOverPct >= 55 ? `<input type="number" step="0.01" class="odd-input" placeholder="Cuota" oninput="calculateValue(${pOverPct}, this.value, 'vOver${idx}', 'btnOver${idx}', ${line}, 'OVER CÓRNERS')"><span id="vOver${idx}" class="value-badge" style="display:none"></span><button id="btnOver${idx}" class="btn-send-roi">🚀 ENVIAR</button>` : ''}</div></td><td><div class="value-cell"><span class="${pUnderPct >= 55 ? 'highlight' : ''}">${pUnderPct}%</span>${pUnderPct >= 55 ? `<input type="number" step="0.01" class="odd-input" placeholder="Cuota" oninput="calculateValue(${pUnderPct}, this.value, 'vUnder${idx}', 'btnUnder${idx}', ${line}, 'UNDER CÓRNERS')"><span id="vUnder${idx}" class="value-badge" style="display:none"></span><button id="btnUnder${idx}" class="btn-send-roi">🚀 ENVIAR</button>` : ''}</div></td></tr>`;
+        ouBody.innerHTML += `<tr>
+            <td><strong>${line}</strong></td>
+            <td>${getValueCellHTML(pOverPct, 'vOver'+idx, line, 'OVER CÓRNERS')}</td>
+            <td>${getValueCellHTML(pUnderPct, 'vUnder'+idx, line, 'UNDER CÓRNERS')}</td>
+        </tr>`;
     });
 
     const firstBody = document.querySelector('#firstCornerTable tbody');
     const probHomeFirst = (lH / (lH + lA)) * 100;
     const probAwayFirst = 100 - probHomeFirst;
-    const pHFirstPct = probHomeFirst.toFixed(2);
-    const pAFirstPct = probAwayFirst.toFixed(2);
-    firstBody.innerHTML = `<tr><td><strong>Primer Córner</strong></td><td><div class="value-cell"><span class="${pHFirstPct >= 55 ? 'highlight' : ''}">${pHFirstPct}%</span>${pHFirstPct >= 55 ? `<input type="number" step="0.01" class="odd-input" placeholder="Cuota" oninput="calculateValue(${pHFirstPct}, this.value, 'vFirstH', 'btnFirstH', '', 'PRIMER CÓRNER HOME')"><span id="vFirstH" class="value-badge" style="display:none"></span><button id="btnFirstH" class="btn-send-roi">🚀 ENVIAR</button>` : ''}</div></td><td><div class="value-cell"><span class="${pAFirstPct >= 55 ? 'highlight' : ''}">${pAFirstPct}%</span>${pAFirstPct >= 55 ? `<input type="number" step="0.01" class="odd-input" placeholder="Cuota" oninput="calculateValue(${pAFirstPct}, this.value, 'vFirstA', 'btnFirstA', '', 'PRIMER CÓRNER AWAY')"><span id="vFirstA" class="value-badge" style="display:none"></span><button id="btnFirstA" class="btn-send-roi">🚀 ENVIAR</button>` : ''}</div></td></tr>`;
+    firstBody.innerHTML = `<tr>
+        <td><strong>Primer Córner</strong></td>
+        <td>${getValueCellHTML(probHomeFirst, 'vFirstH', '', 'PRIMER CÓRNER HOME')}</td>
+        <td>${getValueCellHTML(probAwayFirst, 'vFirstA', '', 'PRIMER CÓRNER AWAY')}</td>
+    </tr>`;
 }
 </script>
 </body>
