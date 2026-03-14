@@ -25,6 +25,19 @@
         .btn-update { background-color: var(--update); }
         .btn-calc { font-size: 18px; margin-top: 10px; }
         
+        /* Indicador de Mejor Apuesta */
+        #smartAdvice { 
+            background: #fff3cd; 
+            border: 2px dashed #856404; 
+            padding: 15px; 
+            border-radius: 8px; 
+            margin-bottom: 20px; 
+            text-align: center;
+            font-weight: bold;
+            display: none;
+        }
+        .best-label { color: #d35400; font-size: 1.2em; display: block; }
+
         .btn-send-roi { 
             background-color: var(--roi); 
             font-size: 11px; 
@@ -54,7 +67,6 @@
         
         .highlight { color: var(--primary); font-weight: bold; }
         
-        /* MEJORA ESTRATEGIA: Estilos de Valor */
         .value-badge { padding: 4px 8px; border-radius: 4px; font-size: 10px; font-weight: bold; text-transform: uppercase; display: block; margin-bottom: 2px; }
         .has-value { background: var(--primary); color: white; }
         .low-value { background: var(--warning); color: #333; }
@@ -111,6 +123,7 @@
     <button class="btn-calc" style="width:100%" onclick="calculate()">🚀 CALCULAR PRONÓSTICO</button>
 
     <div id="output" style="display:none;">
+        <div id="smartAdvice"></div>
         <div class="results-grid">
             
             <div class="card full-width-card" style="text-align: center;">
@@ -184,6 +197,7 @@
 
 <script>
 let leagues = JSON.parse(localStorage.getItem('cornerLeagues')) || {};
+let activeMarkets = {}; // Para rastrear el valor en tiempo real
 
 window.onload = () => { updateLeagueSelectors(); };
 
@@ -207,11 +221,7 @@ function saveLeague() {
     const homeRaw = document.getElementById('rawHome').value;
     const awayRaw = document.getElementById('rawAway').value;
     if (!name || !homeRaw || !awayRaw) return alert("Completa todos los campos");
-    
-    if (leagues[name]) {
-        if (!confirm("Esta liga ya existe. ¿Deseas sobrescribirla?")) return;
-    }
-
+    if (leagues[name]) { if (!confirm("Esta liga ya existe. ¿Deseas sobrescribirla?")) return; }
     const homeData = parseTable(homeRaw);
     const awayData = parseTable(awayRaw);
     if (Object.keys(homeData).length === 0) return alert("Error al leer la tabla local.");
@@ -225,21 +235,13 @@ function updateExistingLeague() {
     const name = document.getElementById('leagueName').value;
     const homeRaw = document.getElementById('rawHome').value;
     const awayRaw = document.getElementById('rawAway').value;
-
-    if (!name) return alert("Escribe el nombre de la liga que deseas actualizar");
-    if (!leagues[name]) return alert("La liga '" + name + "' no existe. Usa 'Guardar Nueva Liga' primero.");
-    if (!homeRaw || !awayRaw) return alert("Pega las nuevas tablas para actualizar.");
-
+    if (!name) return alert("Escribe el nombre de la liga");
+    if (!leagues[name]) return alert("La liga no existe.");
     const homeData = parseTable(homeRaw);
     const awayData = parseTable(awayRaw);
-    
-    if (Object.keys(homeData).length === 0 || Object.keys(awayData).length === 0) {
-        return alert("Error al procesar los datos de las tablas.");
-    }
-
     leagues[name] = { home: homeData, away: awayData };
     localStorage.setItem('cornerLeagues', JSON.stringify(leagues));
-    alert("Estadísticas de '" + name + "' actualizadas correctamente.");
+    alert("Estadísticas actualizadas.");
     loadTeams(); 
 }
 
@@ -273,7 +275,29 @@ function poisson(k, lambda) {
     return (Math.pow(lambda, k) * Math.exp(-lambda)) / factorial(k);
 }
 
-// MEJORA ESTRATEGIA: Función de cálculo de valor refinada
+// MEJORA: Lógica de indicador de mejor apuesta
+function updateSmartAdvice() {
+    const adviceDiv = document.getElementById('smartAdvice');
+    let bestEdge = -Infinity;
+    let bestMarket = "";
+
+    for (let key in activeMarkets) {
+        if (activeMarkets[key].edge > bestEdge) {
+            bestEdge = activeMarkets[key].edge;
+            bestMarket = activeMarkets[key].name;
+        }
+    }
+
+    if (bestEdge > 0) {
+        adviceDiv.style.display = 'block';
+        adviceDiv.innerHTML = `<span class="best-label">⭐ MEJOR OPCIÓN DE APUESTA:</span> 
+                               Aposta a <strong>${bestMarket}</strong> <br> 
+                               (Tiene la mayor ventaja matemática: <strong>+${bestEdge}% Edge</strong>)`;
+    } else {
+        adviceDiv.style.display = 'none';
+    }
+}
+
 function calculateValue(prob, odd, elementId, btnId, line, market) {
     const container = document.getElementById(elementId).parentElement;
     const badge = document.getElementById(elementId);
@@ -282,22 +306,24 @@ function calculateValue(prob, odd, elementId, btnId, line, market) {
     
     if (!odd || odd <= 1) {
         badge.style.display = 'none';
-        if(edgeLabel) edgeLabel.innerText = '';
         btn.style.display = 'none';
         container.classList.remove('active-val');
+        delete activeMarkets[elementId];
+        updateSmartAdvice();
         return;
     }
     
     const realProb = prob / 100;
     const ev = (realProb * odd);
-    const edge = ((ev - 1) * 100).toFixed(2);
+    const edge = parseFloat(((ev - 1) * 100).toFixed(2));
     const fairOdd = (1 / realProb).toFixed(2);
     
     badge.style.display = 'inline-block';
     
     if (ev > 1.0) {
         container.classList.add('active-val');
-        // Si el edge es mayor a 10%, es una apuesta de alto valor (estrategia Spurs/Leeds)
+        activeMarkets[elementId] = { edge: edge, name: market + " " + line };
+        
         if (edge > 10) {
             badge.innerText = 'VALOR ALTO';
             badge.className = 'value-badge has-value';
@@ -311,33 +337,22 @@ function calculateValue(prob, odd, elementId, btnId, line, market) {
         btn.onclick = () => sendToRoi(line, market, prob, fairOdd, odd, ev.toFixed(3), edge);
     } else {
         container.classList.remove('active-val');
+        delete activeMarkets[elementId];
         badge.innerText = 'SIN VALOR';
         badge.className = 'value-badge no-value';
         if(edgeLabel) edgeLabel.innerText = 'Edge: ' + edge + '%';
         btn.style.display = 'none';
     }
+    updateSmartAdvice();
 }
 
 function sendToRoi(line, market, prob, fairOdd, bookieOdd, value, edge) {
     const league = document.getElementById('selectLeague').value;
-    const home = document.getElementById('homeTeam').value;
-    const away = document.getElementById('awayTeam').value;
-    const event = `${home} vs ${away}`;
-    
-    const fullMarket = `${market.toUpperCase()} ${line}`.trim();
-    
+    const event = `${document.getElementById('homeTeam').value} vs ${document.getElementById('awayTeam').value}`;
     const params = new URLSearchParams({
-        liga: league,
-        evento: event,
-        mercado: fullMarket,
-        probabilidad: prob + '%',
-        cuotaJusta: fairOdd,
-        cuotaCasa: bookieOdd,
-        valor: value,
-        edge: edge + '%',
-        stake: "1"
+        liga: league, evento: event, mercado: `${market.toUpperCase()} ${line}`.trim(),
+        probabilidad: prob + '%', cuotaJusta: fairOdd, cuotaCasa: bookieOdd, valor: value, edge: edge + '%', stake: "1"
     });
-
     window.open(`roi2.html?${params.toString()}`, '_blank');
 }
 
@@ -347,6 +362,9 @@ function calculate() {
     const aName = document.getElementById('awayTeam').value;
     if (!leagueName || !hName || !aName) return alert("Selecciona liga y equipos");
 
+    activeMarkets = {}; // Resetear al calcular nuevo partido
+    document.getElementById('smartAdvice').style.display = 'none';
+
     const league = leagues[leagueName];
     let hForSum = 0, hAgSum = 0, aForSum = 0, aAgSum = 0;
     const teams = Object.keys(league.home);
@@ -355,100 +373,74 @@ function calculate() {
         aForSum += league.away[t].for; aAgSum += league.away[t].ag;
     });
     const avg = { hFor: hForSum / teams.length, hAg: hAgSum / teams.length, aFor: aForSum / teams.length, aAg: aAgSum / teams.length };
-
     const lH = (league.home[hName].for / avg.hFor) * (league.away[aName].ag / avg.aAg) * avg.hFor;
     const lA = (league.away[aName].for / avg.aFor) * (league.home[hName].ag / avg.hAg) * avg.aFor;
-
     renderTables(lH, lA, hName, aName);
 }
 
-// Función auxiliar para crear celdas de valor (mantiene el código limpio)
 function getValueCellHTML(prob, id, line, market) {
     const p = parseFloat(prob).toFixed(2);
-    const fair = (100 / p).toFixed(2);
-    return `
-        <div class="value-cell">
-            <span class="${p >= 55 ? 'highlight' : ''}">${p}%</span>
-            <span class="fair-odd">Justa: ${fair}</span>
-            <input type="number" step="0.01" class="odd-input" placeholder="Cuota" oninput="calculateValue(${p}, this.value, '${id}', 'btn${id}', '${line}', '${market}')">
-            <span id="${id}" class="value-badge" style="display:none"></span>
-            <span class="edge-info"></span>
-            <button id="btn${id}" class="btn-send-roi">🚀 ENVIAR</button>
-        </div>
-    `;
+    return `<div class="value-cell">
+        <span class="${p >= 55 ? 'highlight' : ''}">${p}%</span>
+        <span class="fair-odd">Justa: ${(100/p).toFixed(2)}</span>
+        <input type="number" step="0.01" class="odd-input" placeholder="Cuota" oninput="calculateValue(${p}, this.value, '${id}', 'btn${id}', '${line}', '${market}')">
+        <span id="${id}" class="value-badge" style="display:none"></span>
+        <span class="edge-info"></span>
+        <button id="btn${id}" class="btn-send-roi">🚀 ENVIAR</button>
+    </div>`;
 }
 
 function renderTables(lH, lA, hName, aName) {
     document.getElementById('output').style.display = 'block';
     document.getElementById('labelHome').innerText = hName;
     document.getElementById('labelAway').innerText = aName;
-    
     document.getElementById('homeXCorner').innerText = lH.toFixed(2);
     document.getElementById('awayXCorner').innerText = lA.toFixed(2);
     document.getElementById('totalXCorner').innerText = (lH + lA).toFixed(2);
 
-    const hProbs = [];
-    const aProbs = [];
+    const hProbs = [], aProbs = [];
     const hBody = document.querySelector('#homeProbTable tbody');
     const aBody = document.querySelector('#awayProbTable tbody');
     hBody.innerHTML = ''; aBody.innerHTML = '';
-    
     for (let i = 0; i <= 20; i++) {
-        const ph = poisson(i, lH);
-        const pa = poisson(i, lA);
-        hProbs.push(ph);
-        aProbs.push(pa);
+        const ph = poisson(i, lH), pa = poisson(i, lA);
+        hProbs.push(ph); aProbs.push(pa);
         if(i <= 15) {
             hBody.innerHTML += `<tr><td>${i}</td><td>${(ph * 100).toFixed(2)}%</td></tr>`;
             aBody.innerHTML += `<tr><td>${i}</td><td>${(pa * 100).toFixed(2)}%</td></tr>`;
         }
     }
 
-    let probHWin = 0, probDraw = 0, probAWin = 0;
+    let pHW = 0, pD = 0, pAW = 0;
     for (let i = 0; i < hProbs.length; i++) {
         for (let j = 0; j < aProbs.length; j++) {
-            if (i > j) probHWin += hProbs[i] * aProbs[j];
-            else if (i === j) probDraw += hProbs[i] * aProbs[j];
-            else probAWin += hProbs[i] * aProbs[j];
+            if (i > j) pHW += hProbs[i] * aProbs[j];
+            else if (i === j) pD += hProbs[i] * aProbs[j];
+            else pAW += hProbs[i] * aProbs[j];
         }
     }
 
-    const winBody = document.querySelector('#win1x2Table tbody');
-    const pHW = (probHWin * 100).toFixed(2);
-    const pD = (probDraw * 100).toFixed(2);
-    const pAW = (probAWin * 100).toFixed(2);
-    
-    winBody.innerHTML = `<tr>
+    document.querySelector('#win1x2Table tbody').innerHTML = `<tr>
         <td><strong>Probabilidades</strong></td>
-        <td>${getValueCellHTML(pHW, 'vWinH', '', 'GANA CÓRNERS HOME')}</td>
-        <td>${getValueCellHTML(pD, 'vWinD', '', 'EMPATE CÓRNERS')}</td>
-        <td>${getValueCellHTML(pAW, 'vWinA', '', 'GANA CÓRNERS AWAY')}</td>
+        <td>${getValueCellHTML(pHW*100, 'vWinH', '', 'GANA CÓRNERS HOME')}</td>
+        <td>${getValueCellHTML(pD*100, 'vWinD', '', 'EMPATE CÓRNERS')}</td>
+        <td>${getValueCellHTML(pAW*100, 'vWinA', '', 'GANA CÓRNERS AWAY')}</td>
     </tr>`;
 
-    const totalLambda = lH + lA;
-    const ouBody = document.querySelector('#ouTable tbody');
-    ouBody.innerHTML = '';
+    const ouBody = document.querySelector('#ouTable tbody'); ouBody.innerHTML = '';
     const lines = [5.5, 6.5, 7.5, 8.5, 9.5, 10.5, 11.5];
     lines.forEach((line, idx) => {
-        let probUnder = 0;
-        for (let i = 0; i < line; i++) probUnder += poisson(i, totalLambda);
-        let probOver = 1 - probUnder;
-        let pOverPct = (probOver * 100).toFixed(2);
-        let pUnderPct = (probUnder * 100).toFixed(2);
-        ouBody.innerHTML += `<tr>
-            <td><strong>${line}</strong></td>
-            <td>${getValueCellHTML(pOverPct, 'vOver'+idx, line, 'OVER CÓRNERS')}</td>
-            <td>${getValueCellHTML(pUnderPct, 'vUnder'+idx, line, 'UNDER CÓRNERS')}</td>
-        </tr>`;
+        let pU = 0; for (let i = 0; i < line; i++) pU += poisson(i, lH + lA);
+        ouBody.innerHTML += `<tr><td><strong>${line}</strong></td>
+            <td>${getValueCellHTML((1-pU)*100, 'vOver'+idx, line, 'OVER CÓRNERS')}</td>
+            <td>${getValueCellHTML(pU*100, 'vUnder'+idx, line, 'UNDER CÓRNERS')}</td></tr>`;
     });
 
-    const firstBody = document.querySelector('#firstCornerTable tbody');
     const probHomeFirst = (lH / (lH + lA)) * 100;
-    const probAwayFirst = 100 - probHomeFirst;
-    firstBody.innerHTML = `<tr>
+    document.querySelector('#firstCornerTable tbody').innerHTML = `<tr>
         <td><strong>Primer Córner</strong></td>
         <td>${getValueCellHTML(probHomeFirst, 'vFirstH', '', 'PRIMER CÓRNER HOME')}</td>
-        <td>${getValueCellHTML(probAwayFirst, 'vFirstA', '', 'PRIMER CÓRNER AWAY')}</td>
+        <td>${getValueCellHTML(100-probHomeFirst, 'vFirstA', '', 'PRIMER CÓRNER AWAY')}</td>
     </tr>`;
 }
 </script>
