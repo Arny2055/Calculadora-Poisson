@@ -5,12 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Súper Calculadora Poisson Córners - Value Finder Expert</title>
     <style>
-        :root { --primary: #27ae60; --secondary: #2c3e50; --bg: #f4f7f6; --accent: #f39c12; --roi: #3498db; --win1x2: #2980b9; --first: #e67e22; --race: #8e44ad; --update: #e67e22; --danger: #e74c3c; --warning: #f1c40f; }
+        :root { --primary: #27ae60; --secondary: #2c3e50; --bg: #f4f7f6; --accent: #f39c12; --roi: #3498db; --win1x2: #2980b9; --first: #e67e22; --race: #8e44ad; --update: #e67e22; --danger: #e74c3c; --warning: #f1c40f; --ai: #8e44ad; }
         body { font-family: 'Segoe UI', sans-serif; background-color: var(--bg); color: #333; margin: 0; padding: 20px; }
         .container { max-width: 1100px; margin: auto; background: white; padding: 25px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
         h1, h2 { text-align: center; color: var(--secondary); }
         
         .admin-section { background: #ebf5fb; padding: 20px; border-radius: 8px; margin-bottom: 30px; border: 1px solid #d4e6f1; }
+        .ai-section { background: #f4ecf7; padding: 15px; border-radius: 8px; margin-bottom: 20px; border: 1px solid #d2b4de; }
         .grid-inputs { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-top: 10px; }
         textarea { width: 100%; height: 100px; padding: 10px; border-radius: 5px; border: 1px solid #ccc; resize: vertical; font-family: monospace; font-size: 12px; box-sizing: border-box; }
         input[type="text"], input[type="number"] { width: 100%; padding: 10px; margin-bottom: 10px; border-radius: 5px; border: 1px solid #ccc; box-sizing: border-box; }
@@ -25,7 +26,6 @@
         .btn-update { background-color: var(--update); }
         .btn-calc { font-size: 18px; margin-top: 10px; }
         
-        /* Indicador de Mejor Apuesta */
         #smartAdvice { 
             background: #fff3cd; 
             border: 2px dashed #856404; 
@@ -61,6 +61,7 @@
         .full-width-card { grid-column: 1 / span 2; background: #fff; }
         
         .x-corner-badge { background: var(--secondary); color: white; padding: 5px 15px; border-radius: 20px; font-weight: bold; display: inline-block; margin-bottom: 10px; }
+        .ai-badge { background: var(--ai); color: white; padding: 2px 8px; border-radius: 10px; font-size: 10px; margin-left: 5px; }
 
         table { width: 100%; border-collapse: collapse; text-align: center; }
         th, td { padding: 10px; border-bottom: 1px solid #eee; }
@@ -105,6 +106,12 @@
             <button class="btn-save" style="flex:1" onclick="saveLeague()">💾 Guardar Nueva Liga</button>
             <button class="btn-update" style="flex:1" onclick="updateExistingLeague()">🔄 Actualizar Liga Existente</button>
         </div>
+    </div>
+
+    <div class="ai-section">
+        <h3>🧠 Ajuste de Contexto (IA)</h3>
+        <p style="font-size: 11px; color: #666; margin-top: -10px;">Pega aquí el resultado del análisis de la IA para ajustar las cuotas según bajas o contexto.</p>
+        <textarea id="aiContext" placeholder="AJUSTE_LOCAL: 0.5&#10;AJUSTE_VISITANTE: -0.2"></textarea>
     </div>
 
     <div class="selector-group">
@@ -176,7 +183,7 @@
             </div>
 
             <div class="card">
-                <h3>Casa: <span id="labelHome"></span></h3>
+                <h3>Casa: <span id="labelHome"></span> <span id="aiLabelHome" class="ai-badge" style="display:none">AI Adjusted</span></h3>
                 <div class="x-corner-badge">xCorner: <span id="homeXCorner"></span></div>
                 <table id="homeProbTable">
                     <thead><tr><th>Córners</th><th>%</th></tr></thead>
@@ -185,7 +192,7 @@
             </div>
 
             <div class="card">
-                <h3>Fuera: <span id="labelAway"></span></h3>
+                <h3>Fuera: <span id="labelAway"></span> <span id="aiLabelAway" class="ai-badge" style="display:none">AI Adjusted</span></h3>
                 <div class="x-corner-badge">xCorner: <span id="awayXCorner"></span></div>
                 <table id="awayProbTable">
                     <thead><tr><th>Córners</th><th>%</th></tr></thead>
@@ -276,7 +283,6 @@ function poisson(k, lambda) {
     return (Math.pow(lambda, k) * Math.exp(-lambda)) / factorial(k);
 }
 
-// Lógica de cálculo de Stake
 function getSuggestedStake(edge) {
     if (edge > 10) return "1.5";
     if (edge > 5) return "1.0";
@@ -367,6 +373,20 @@ function sendToRoi(line, market, prob, fairOdd, bookieOdd, value, edge, stake) {
     window.open(`roi2.html?${params.toString()}`, '_blank');
 }
 
+function getAIFactors() {
+    const text = document.getElementById('aiContext').value;
+    let localAdj = 0;
+    let awayAdj = 0;
+    
+    const localMatch = text.match(/AJUSTE_LOCAL:\s*(-?\d+(\.\d+)?)/);
+    const awayMatch = text.match(/AJUSTE_VISITANTE:\s*(-?\d+(\.\d+)?)/);
+    
+    if (localMatch) localAdj = parseFloat(localMatch[1]);
+    if (awayMatch) awayAdj = parseFloat(awayMatch[1]);
+    
+    return { local: localAdj, away: awayAdj };
+}
+
 function calculate() {
     const leagueName = document.getElementById('selectLeague').value;
     const hName = document.getElementById('homeTeam').value;
@@ -384,8 +404,20 @@ function calculate() {
         aForSum += league.away[t].for; aAgSum += league.away[t].ag;
     });
     const avg = { hFor: hForSum / teams.length, hAg: hAgSum / teams.length, aFor: aForSum / teams.length, aAg: aAgSum / teams.length };
-    const lH = (league.home[hName].for / avg.hFor) * (league.away[aName].ag / avg.aAg) * avg.hFor;
-    const lA = (league.away[aName].for / avg.aFor) * (league.home[hName].ag / avg.hAg) * avg.aFor;
+    
+    // Media base de Poisson
+    let lH = (league.home[hName].for / avg.hFor) * (league.away[aName].ag / avg.aAg) * avg.hFor;
+    let lA = (league.away[aName].for / avg.aFor) * (league.home[hName].ag / avg.hAg) * avg.aFor;
+
+    // Aplicar Ajustes de IA
+    const aiFactors = getAIFactors();
+    lH += aiFactors.local;
+    lA += aiFactors.away;
+
+    // Mostrar indicadores de ajuste
+    document.getElementById('aiLabelHome').style.display = aiFactors.local !== 0 ? 'inline' : 'none';
+    document.getElementById('aiLabelAway').style.display = aiFactors.away !== 0 ? 'inline' : 'none';
+
     renderTables(lH, lA, hName, aName);
 }
 
