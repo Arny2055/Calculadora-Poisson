@@ -12,6 +12,12 @@
         
         .admin-section { background: #ebf5fb; padding: 20px; border-radius: 8px; margin-bottom: 30px; border: 1px solid #d4e6f1; }
         .ai-section { background: #f4ecf7; padding: 15px; border-radius: 8px; margin-bottom: 20px; border: 1px solid #d2b4de; }
+        
+        /* Estilos para el Generador de Prompt */
+        .prompt-box { background: #fff; border: 1px solid #d2b4de; padding: 10px; border-radius: 5px; margin-bottom: 15px; font-size: 13px; color: #444; position: relative; }
+        .prompt-box strong { color: var(--ai); }
+        .btn-copy { position: absolute; top: 5px; right: 5px; font-size: 10px; padding: 4px 8px; background: var(--ai); color: white; border: none; border-radius: 3px; cursor: pointer; }
+
         .grid-inputs { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-top: 10px; }
         textarea { width: 100%; height: 100px; padding: 10px; border-radius: 5px; border: 1px solid #ccc; resize: vertical; font-family: monospace; font-size: 12px; box-sizing: border-box; }
         input[type="text"], input[type="number"] { width: 100%; padding: 10px; margin-bottom: 10px; border-radius: 5px; border: 1px solid #ccc; box-sizing: border-box; }
@@ -110,7 +116,14 @@
 
     <div class="ai-section">
         <h3>🧠 Ajuste de Contexto (IA)</h3>
-        <p style="font-size: 11px; color: #666; margin-top: -10px;">Pega aquí el resultado del análisis de la IA para ajustar las cuotas según bajas o contexto.</p>
+        
+        <div class="prompt-box" id="aiPromptContainer">
+            <button class="btn-copy" onclick="copyAIPrompt()">Copiar Prompt</button>
+            <strong>Prompt para la IA:</strong><br>
+            <span id="dynamicPromptText">Selecciona los equipos para generar el prompt...</span>
+        </div>
+
+        <p style="font-size: 11px; color: #666; margin-top: 5px;">Pega aquí el resultado del análisis de la IA para ajustar las cuotas.</p>
         <textarea id="aiContext" placeholder="AJUSTE_LOCAL: 0.5&#10;AJUSTE_VISITANTE: -0.2"></textarea>
     </div>
 
@@ -121,11 +134,11 @@
         </div>
         <div class="field">
             <label>Local:</label>
-            <select id="homeTeam"></select>
+            <select id="homeTeam" onchange="updateDynamicPrompt()"></select>
         </div>
         <div class="field">
             <label>Visitante:</label>
-            <select id="awayTeam"></select>
+            <select id="awayTeam" onchange="updateDynamicPrompt()"></select>
         </div>
     </div>
     <button class="btn-calc" style="width:100%" onclick="calculate()">🚀 CALCULAR PRONÓSTICO</button>
@@ -209,6 +222,25 @@ let activeMarkets = {};
 
 window.onload = () => { updateLeagueSelectors(); };
 
+// Función para actualizar el texto del Prompt automáticamente
+function updateDynamicPrompt() {
+    const home = document.getElementById('homeTeam').value;
+    const away = document.getElementById('awayTeam').value;
+    const promptDisplay = document.getElementById('dynamicPromptText');
+    
+    if (home && away) {
+        promptDisplay.innerText = `Actúa como un analista experto en apuestas deportivas. Analiza el próximo partido entre ${home} y ${away}. Evalúa factores que afecten a los CÓRNERS: bajas de extremos/laterales, estilo de juego y motivación. Al final, dame un 'Factor de Ajuste' numérico entre -2.0 y +2.0 para cada equipo (0 es neutral). Responde ÚNICAMENTE en este formato: AJUSTE_LOCAL: [número], AJUSTE_VISITANTE: [número]`;
+    } else {
+        promptDisplay.innerText = "Selecciona los equipos para generar el prompt...";
+    }
+}
+
+function copyAIPrompt() {
+    const text = document.getElementById('dynamicPromptText').innerText;
+    if (text.includes("Selecciona")) return alert("Primero selecciona los equipos.");
+    navigator.clipboard.writeText(text).then(() => alert("Prompt copiado al portapapeles."));
+}
+
 function parseTable(text) {
     const lines = text.trim().split('\n');
     const data = {};
@@ -270,6 +302,7 @@ function loadTeams() {
         hSelect.add(new Option(t, t));
         aSelect.add(new Option(t, t));
     });
+    updateDynamicPrompt();
 }
 
 function factorial(n) {
@@ -405,16 +438,13 @@ function calculate() {
     });
     const avg = { hFor: hForSum / teams.length, hAg: hAgSum / teams.length, aFor: aForSum / teams.length, aAg: aAgSum / teams.length };
     
-    // Media base de Poisson
     let lH = (league.home[hName].for / avg.hFor) * (league.away[aName].ag / avg.aAg) * avg.hFor;
     let lA = (league.away[aName].for / avg.aFor) * (league.home[hName].ag / avg.hAg) * avg.aFor;
 
-    // Aplicar Ajustes de IA
     const aiFactors = getAIFactors();
     lH += aiFactors.local;
     lA += aiFactors.away;
 
-    // Mostrar indicadores de ajuste
     document.getElementById('aiLabelHome').style.display = aiFactors.local !== 0 ? 'inline' : 'none';
     document.getElementById('aiLabelAway').style.display = aiFactors.away !== 0 ? 'inline' : 'none';
 
